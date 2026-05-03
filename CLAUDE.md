@@ -11,17 +11,20 @@
 
 **Database (`rghoynbaykeyjbhqmaff`):** 6 tables (`profiles`, `watchlist`, `signals`, `outcomes`, `scanner_runs`, `alerts`), `public_record` view, RLS, immutability + server-side hash triggers. `outcomes` is 1:1 with `signals` (UNIQUE constraint). All Supabase advisor security lints clean.
 
-**Frontend:** Vite + React + Tailwind v4 PWA. Built: `Login` (with email-confirmation flow), `Dashboard` (with explicit `user_id` filter, separate count query for stats), `SignalDetail` (with `maybeSingle`, formatted market cap, hash badge), `Rules`, `Settings` (with sign-out). Stubs: `LogSignal`, `Calendar`, `TrackRecord`. Plus `ErrorBoundary`, env-var guard in `supabase.js`, SHA-256 verifier (`utils/hash.js`) matching the DB triggers, timezone-safe `daysUntil` helper, service worker (production-only registration), iOS safe-area handling.
+**Frontend:** Vite + React + Tailwind v4 PWA. Built: `Login` (with email-confirmation flow), `Dashboard` (with explicit `user_id` filter, separate count query for stats), `SignalDetail` (with `maybeSingle`, formatted market cap, hash badge), `LogSignal` (4-step flow with checklist + Claude prefill), `Rules`, `Settings` (with sign-out). Stubs: `Calendar`, `TrackRecord`. Components: `AnalyzeFilingPanel`, `ErrorBoundary`. Plus env-var guard in `supabase.js`, SHA-256 verifier (`utils/hash.js`) matching the DB triggers, timezone-safe `daysUntil` helper, service worker (production-only registration), iOS safe-area handling.
+
+**Edge functions:** `analyze-signal` deployed (`verify_jwt=true`). Pure analysis endpoint — calls Claude Sonnet 4.6, returns structured JSON, never writes to `signals` (avoids IDOR via `signal_id`). Hardened: caller JWT verified, 200–50,000 char filing-text bounds, 50s timeout, `stop_reason` truncation check, robust JSON extraction. **Requires `ANTHROPIC_API_KEY` secret to actually serve traffic** — set via `supabase secrets set ANTHROPIC_API_KEY=… --project-ref rghoynbaykeyjbhqmaff`.
 
 **Still pending (design spec):**
 - PWA icon binaries (`public/icon-192.png`, `public/icon-512.png`)
-- Edge functions (`analyze-signal`, `send-alerts`, `kalshi-analysis`)
+- Edge functions: `send-alerts`, `kalshi-analysis`
 - Scraper (`scraper/`) and GitHub Actions workflows
 - `pharma-edge-public-record` GitHub repo for hash anchoring
-- Components from CLAUDE.md not yet built: `LogOutcomeModal`, `StopLossCheck`, `NotificationCenter`, `InstallPrompt`, `PaperTradingStatus`, `AnalyzeFilingPanel`, `StrikePriceCalculator`, `KalshiMarketPanel`, `CombinedPnlStats`
+- Components from CLAUDE.md not yet built: `LogOutcomeModal`, `StopLossCheck`, `NotificationCenter`, `InstallPrompt`, `PaperTradingStatus`, `StrikePriceCalculator`, `KalshiMarketPanel`, `CombinedPnlStats`
 - Pages from CLAUDE.md not yet built: `ScannerCandidates`, `OptionCalculator`, `PublicRecord`
 - `useStopLossMonitor` hook
-- Future tables: `scanner_candidates`, `kalshi_positions`, `combined_pnl` view (Week 3+)
+- Future tables: `scanner_candidates`, `kalshi_positions`, `combined_pnl` view (Week 4+)
+- Per-user rate limit on `analyze-signal` (auth-only is in place; `claude_calls` table TODO when multi-user)
 
 Treat file paths and component names from the unimplemented sections as the build contract, not as things you can import.
 
@@ -541,4 +544,4 @@ Questions about business logic, trading rules, or strategy decisions go to Camer
 ---
 
 *Last updated: 2026-05-03*
-*Status: Week 1 schema + Week 2 frontend foundation deployed; edge functions, scraper, and Week 2.5 components pending*
+*Status: Week 1 schema + Week 2 frontend + Week 3 analyze-signal edge function deployed; send-alerts/kalshi-analysis edge functions, scraper, and Week 2.5 components pending*
