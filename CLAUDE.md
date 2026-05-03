@@ -5,6 +5,12 @@
 
 ---
 
+## Status
+
+**Design spec — implementation pending.** As of 2026-05-03 the repo contains only this file, and the Supabase project `pharma-edge` (`rghoynbaykeyjbhqmaff`) has 0 tables, 0 edge functions, and 0 migrations. Everything below describes the target system, not the current state. Treat file paths, table names, and trigger names as the contract to build against, not as things you can import or query yet.
+
+---
+
 ## What This Project Is
 
 **Pharma Edge** is a biotech catalyst signal scanner and immutable trade thesis tracker built by Cameron Wiley.
@@ -110,7 +116,8 @@ pharma-edge/
     ├── main.py                      ← Scanner entry point
     ├── send_alerts.py               ← Catalyst alert checker
     ├── anchor_signals.py            ← GitHub hash anchoring
-    └── requirements.txt
+    ├── requirements.txt
+    └── .env.example                 ← Template for scraper .env
 ```
 
 ---
@@ -124,13 +131,13 @@ pharma-edge/
 | Auth | Supabase Auth | Email/password only |
 | Database | Supabase PostgreSQL | RLS on all tables |
 | Edge Functions | Supabase Edge Functions (Deno) | Claude API, Kalshi API, Resend |
-| AI Analysis | Anthropic Claude Sonnet | `claude-sonnet-4-20250514` |
-| Email | Resend | Free tier — `onboarding@resend.dev` sender |
+| AI Analysis | Anthropic Claude Sonnet | `claude-sonnet-4-6` (current Sonnet 4.x) |
+| Email | Resend | Production requires a verified custom domain. `onboarding@resend.dev` only delivers to the Resend account owner's verified address — never use it for end-user alerts. |
 | Scanner | Python 3.11 + GitHub Actions | Cron at 7am ET daily |
 | Options Execution | Tastytrade API | Paper trading first |
 | Prediction Markets | Kalshi REST API | CFTC regulated — NOT Polymarket |
 | Hash Anchoring | GitHub public repo | `pharma-edge-public-record` |
-| Hosting | Vercel | Auto-deploy from main branch |
+| Hosting | Vercel | Auto-deploys from the repo's default branch. Confirm `main` is the default in GitHub repo settings before relying on this — it isn't always. |
 
 ---
 
@@ -149,8 +156,6 @@ ANTHROPIC_API_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 RESEND_API_KEY=
 KALSHI_API_KEY=
-KALSHI_EMAIL=
-KALSHI_PASSWORD=
 ```
 
 **GitHub Actions Secrets** (repo Settings → Secrets → Actions):
@@ -161,10 +166,10 @@ ANTHROPIC_API_KEY=
 RESEND_API_KEY=
 ALERT_EMAIL=
 KALSHI_API_KEY=
-KALSHI_EMAIL=
-KALSHI_PASSWORD=
 GH_PAT=
 ```
+
+> Kalshi auth uses the API key only. Do not store `KALSHI_EMAIL`/`KALSHI_PASSWORD` as secrets — storing user credentials when an API key works is unnecessary blast radius.
 
 **Rules:**
 - Never log any of these values anywhere
@@ -262,7 +267,7 @@ Understanding this flow is mandatory before editing any signal-related code:
 ## Claude API Usage
 
 ### Model
-Always use `claude-sonnet-4-20250514`. Do not use Haiku for signal analysis — the quality difference matters for medical/regulatory interpretation.
+Always use `claude-sonnet-4-6` (current Sonnet 4.x). Do not use Haiku for signal analysis — the quality difference matters for medical/regulatory interpretation. When a newer Sonnet ships, bump deliberately and re-run the prompt regression set; do not auto-upgrade.
 
 ### Edge Functions Only
 Claude API calls happen exclusively in Supabase Edge Functions. Never call the Anthropic API from the React frontend — the API key would be exposed.
@@ -319,7 +324,7 @@ These rules are not suggestions — they are encoded in the pre-trade checklist 
 - Sell into IV spike, not after announcement
 
 **Strike Calculator Rules:**
-- Never pay more than 50% of spread width in premium
+- Never pay more than 40% of spread width in premium (caps R/R at 1:1.5; pay ≤33% for the 1:2 target)
 - Minimum 1:1.5 risk/reward — target 1:2
 - Always buy expiry 30–45 days PAST the catalyst date
 
@@ -443,20 +448,23 @@ This repo is the immutability proof layer. Every signal hash is committed here. 
 
 ### Deploying Edge Functions
 ```bash
-supabase functions deploy analyze-signal
-supabase functions deploy send-alerts
-supabase functions deploy kalshi-analysis
+supabase functions deploy analyze-signal --project-ref rghoynbaykeyjbhqmaff
+supabase functions deploy send-alerts     --project-ref rghoynbaykeyjbhqmaff
+supabase functions deploy kalshi-analysis --project-ref rghoynbaykeyjbhqmaff
 ```
 Always deploy to staging first if available. Edge Function errors are silent to the user — check Supabase logs after deploy.
 
 ### Running the scraper locally
 ```bash
 cd scraper
-pip install -r requirements.txt --break-system-packages
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 cp .env.example .env
 # Fill in .env values
 python main.py
 ```
+Use a virtualenv. Never pass `--break-system-packages` to pip — it bypasses PEP 668 and pollutes the system Python.
 
 ---
 
@@ -480,5 +488,5 @@ Questions about business logic, trading rules, or strategy decisions go to Camer
 
 ---
 
-*Last updated: April 2026*
-*Stack version: 12 weeks complete*
+*Last updated: 2026-05-03*
+*Status: design spec — implementation pending*
