@@ -1,0 +1,31 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0a0a0f;
+  --color-card: #111118;
+  --color-card-hover: #1a1a24;
+  --color-border: #1e1e2e;
+  --color-border-hover: #2a2a3e;
+  --color-fg: #e8e8f0;
+  --color-subtle: #6b6b8a;
+  --color-muted: #3a3a5c;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@layer utilities {
+  .pt-safe {
+    padding-top: env(safe-area-inset-top);
+  }
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
