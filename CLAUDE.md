@@ -7,14 +7,21 @@
 
 ## Status
 
-**Week 1 schema deployed (2026-05-03).** The Supabase project `pharma-edge` (`rghoynbaykeyjbhqmaff`) has 6 tables (`profiles`, `watchlist`, `signals`, `outcomes`, `scanner_runs`, `alerts`), the `public_record` view, RLS, and the immutability + server-side hash triggers. All Supabase advisor security lints (ERROR + WARN) and `auth_rls_initplan` perf lints are clean.
+**Week 1 schema + Week 2 frontend foundation deployed (2026-05-03).**
+
+**Database (`rghoynbaykeyjbhqmaff`):** 6 tables (`profiles`, `watchlist`, `signals`, `outcomes`, `scanner_runs`, `alerts`), `public_record` view, RLS, immutability + server-side hash triggers. `outcomes` is 1:1 with `signals` (UNIQUE constraint). All Supabase advisor security lints clean.
+
+**Frontend:** Vite + React + Tailwind v4 PWA. Built: `Login` (with email-confirmation flow), `Dashboard` (with explicit `user_id` filter, separate count query for stats), `SignalDetail` (with `maybeSingle`, formatted market cap, hash badge), `Rules`, `Settings` (with sign-out). Stubs: `LogSignal`, `Calendar`, `TrackRecord`. Plus `ErrorBoundary`, env-var guard in `supabase.js`, SHA-256 verifier (`utils/hash.js`) matching the DB triggers, timezone-safe `daysUntil` helper, service worker (production-only registration), iOS safe-area handling.
 
 **Still pending (design spec):**
-- Frontend (React/Vite/Tailwind) — `src/`, `public/`, `package.json` etc. don't exist yet
+- PWA icon binaries (`public/icon-192.png`, `public/icon-512.png`)
 - Edge functions (`analyze-signal`, `send-alerts`, `kalshi-analysis`)
 - Scraper (`scraper/`) and GitHub Actions workflows
 - `pharma-edge-public-record` GitHub repo for hash anchoring
-- Future tables: `scanner_candidates`, `kalshi_positions`, `combined_pnl` view (Week 2+)
+- Components from CLAUDE.md not yet built: `LogOutcomeModal`, `StopLossCheck`, `NotificationCenter`, `InstallPrompt`, `PaperTradingStatus`, `AnalyzeFilingPanel`, `StrikePriceCalculator`, `KalshiMarketPanel`, `CombinedPnlStats`
+- Pages from CLAUDE.md not yet built: `ScannerCandidates`, `OptionCalculator`, `PublicRecord`
+- `useStopLossMonitor` hook
+- Future tables: `scanner_candidates`, `kalshi_positions`, `combined_pnl` view (Week 3+)
 
 Treat file paths and component names from the unimplemented sections as the build contract, not as things you can import.
 
@@ -99,7 +106,8 @@ pharma-edge/
 ├── supabase/
 │   ├── migrations/                  ← Versioned SQL migrations (deployed)
 │   │   ├── 20260503000001_init_schema.sql
-│   │   └── 20260503000002_harden_security_and_perf.sql
+│   │   ├── 20260503000002_harden_security_and_perf.sql
+│   │   └── 20260503000003_week2_constraints.sql
 │   └── functions/                   ← (pending)
 │       ├── analyze-signal/          ← Claude API analysis edge function
 │       │   └── index.ts
@@ -469,6 +477,14 @@ This repo is the immutability proof layer. Every signal hash is committed here. 
 4. Add trigger logic in `send_alerts.py`
 5. Add icon mapping in `NotificationCenter.jsx`
 
+### Running the frontend locally
+```bash
+cp .env.local.example .env.local   # then fill in Supabase URL + anon key
+npm install
+npm run dev                        # http://localhost:5173
+```
+The service worker only registers in production builds (`npm run build && npm run preview`) so dev hot-reload isn't fighting cached assets.
+
 ### Applying database migrations
 Migrations live in `supabase/migrations/` named `<YYYYMMDDHHmmss>_<name>.sql`. Apply via the Supabase CLI:
 ```bash
@@ -525,4 +541,4 @@ Questions about business logic, trading rules, or strategy decisions go to Camer
 ---
 
 *Last updated: 2026-05-03*
-*Status: Week 1 schema deployed; frontend, edge functions, and scraper pending*
+*Status: Week 1 schema + Week 2 frontend foundation deployed; edge functions, scraper, and Week 2.5 components pending*
