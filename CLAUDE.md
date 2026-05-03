@@ -7,7 +7,16 @@
 
 ## Status
 
-**Design spec — implementation pending.** As of 2026-05-03 the repo contains only this file, and the Supabase project `pharma-edge` (`rghoynbaykeyjbhqmaff`) has 0 tables, 0 edge functions, and 0 migrations. Everything below describes the target system, not the current state. Treat file paths, table names, and trigger names as the contract to build against, not as things you can import or query yet.
+**Week 1 schema deployed (2026-05-03).** The Supabase project `pharma-edge` (`rghoynbaykeyjbhqmaff`) has 6 tables (`profiles`, `watchlist`, `signals`, `outcomes`, `scanner_runs`, `alerts`), the `public_record` view, RLS, and the immutability + server-side hash triggers. All Supabase advisor security lints (ERROR + WARN) and `auth_rls_initplan` perf lints are clean.
+
+**Still pending (design spec):**
+- Frontend (React/Vite/Tailwind) — `src/`, `public/`, `package.json` etc. don't exist yet
+- Edge functions (`analyze-signal`, `send-alerts`, `kalshi-analysis`)
+- Scraper (`scraper/`) and GitHub Actions workflows
+- `pharma-edge-public-record` GitHub repo for hash anchoring
+- Future tables: `scanner_candidates`, `kalshi_positions`, `combined_pnl` view (Week 2+)
+
+Treat file paths and component names from the unimplemented sections as the build contract, not as things you can import.
 
 ---
 
@@ -88,7 +97,10 @@ pharma-edge/
 │       └── PublicRecord.jsx         ← /r/[slug] — no auth required
 │
 ├── supabase/
-│   └── functions/
+│   ├── migrations/                  ← Versioned SQL migrations (deployed)
+│   │   ├── 20260503000001_init_schema.sql
+│   │   └── 20260503000002_harden_security_and_perf.sql
+│   └── functions/                   ← (pending)
 │       ├── analyze-signal/          ← Claude API analysis edge function
 │       │   └── index.ts
 │       ├── send-alerts/             ← Resend email alerts edge function
@@ -190,26 +202,35 @@ GH_PAT=
 ### The Immutability Constraint
 **This is the most important database rule in the entire project.**
 
-The `signals` table has a trigger `enforce_signal_immutability` that prevents editing `thesis`, `direction`, `catalyst_date`, and `logged_at` after a signal is created. This is intentional and permanent. Do not remove it. Do not work around it. The entire credibility of the track record depends on this constraint.
+The `signals` table has a trigger `enforce_signal_immutability` that prevents editing `thesis`, `direction`, `catalyst_date`, `logged_at`, `signal_hash`, and `user_id` after a signal is created. This is intentional and permanent. Do not remove it. Do not work around it. The entire credibility of the track record depends on this constraint.
 
-If you need to correct a signal, the only valid action is to set `status = 'dismissed'` and log a new signal. Never directly edit core thesis fields.
+Additionally, RLS does **not** grant DELETE on `signals` or `outcomes` — they are write-once. To retract a signal, set `status = 'dismissed'`. Never edit core thesis fields, never delete a signal.
+
+### Server-Side Hashing
+The canonical SHA-256 hash for signals and outcomes is computed by Postgres triggers (`signals_compute_hash`, `outcomes_compute_hash`) using `pgcrypto`. The frontend hash function in `src/utils/hash.js` is a verification tool — it must produce the same hash as the DB given identical inputs (same key order in `json_build_object` / `JSON.stringify`, same `logged_at` value, dates as `YYYY-MM-DD`). When the two diverge, the DB wins.
 
 ### Tables Overview
+
+**Deployed (Week 1):**
 ```
 profiles          ← extends auth.users, stores account_size + public settings
 watchlist         ← companies under observation before signal confirmed
 signals           ← core table, IMMUTABLE thesis fields after insert
 outcomes          ← logged after catalyst resolves, also hashed
 scanner_runs      ← audit log of every automated scan
-scanner_candidates ← scanner queue awaiting human review
 alerts            ← notification history
-kalshi_positions  ← Kalshi prediction market positions
-public_record     ← VIEW — read-only, filters is_public=true
-combined_pnl      ← VIEW — joins signals + outcomes + kalshi_positions
+public_record     ← VIEW (security_invoker=true) — anon-readable curated subset
+```
+
+**Pending (Week 2+):**
+```
+scanner_candidates ← scanner queue awaiting human review
+kalshi_positions   ← Kalshi prediction market positions
+combined_pnl       ← VIEW — joins signals + outcomes + kalshi_positions
 ```
 
 ### RLS Policy
-Every table uses `auth.uid() = user_id` for all operations. The `public_record` view is readable by anon (no auth required). Do not add policies that bypass user isolation.
+Every authenticated policy uses `(select auth.uid()) = user_id` (cached form — required, see Supabase `auth_rls_initplan` lint). The `public_record` view runs as `security_invoker=true`; anon reads are governed by `*_select_public` policies on `profiles`/`signals`/`outcomes` plus column-level `GRANT SELECT (...) TO anon` that limits anon's column visibility to public-safe fields. Do not add policies that bypass user isolation. Do not GRANT additional columns to anon without auditing first.
 
 ---
 
@@ -378,10 +399,12 @@ textMuted:    '#3a3a5c'
 - Service worker (`public/sw.js`) — test PWA install on device after changes
 
 ### ❌ Do not touch without explicit instruction
-- `enforce_signal_immutability` database trigger
-- `generateSignalHash` in `src/utils/hash.js`
+- `enforce_signal_immutability` database trigger (and its function `enforce_signal_immutability_fn`)
+- `compute_signal_hash` / `compute_outcome_hash` triggers (server-side hashing)
+- `generateSignalHash` in `src/utils/hash.js` (frontend verifier — must match DB hash exactly)
 - `generateOutcomeHash` in `LogOutcomeModal.jsx`
-- RLS policies on any table
+- RLS policies on any table — including the `*_select_public` anon policies
+- Column-level `GRANT SELECT (...) TO anon` on `profiles`/`signals`/`outcomes`
 - The `public_record` view definition
 - Pre-trade checklist items or count (10 required)
 - Stop loss threshold (-50%)
@@ -446,6 +469,19 @@ This repo is the immutability proof layer. Every signal hash is committed here. 
 4. Add trigger logic in `send_alerts.py`
 5. Add icon mapping in `NotificationCenter.jsx`
 
+### Applying database migrations
+Migrations live in `supabase/migrations/` named `<YYYYMMDDHHmmss>_<name>.sql`. Apply via the Supabase CLI:
+```bash
+supabase db push --project-ref rghoynbaykeyjbhqmaff
+```
+Or via the MCP server (`apply_migration`) — pass the SQL as `query` and a snake_case `name`. After every schema change, run advisors and resolve any ERROR/WARN before merging:
+```bash
+# via CLI
+supabase inspect db --project-ref rghoynbaykeyjbhqmaff
+# or via MCP: get_advisors(type='security'), get_advisors(type='performance')
+```
+Never edit a migration that has already been applied to production. Add a new migration that supersedes it.
+
 ### Deploying Edge Functions
 ```bash
 supabase functions deploy analyze-signal --project-ref rghoynbaykeyjbhqmaff
@@ -489,4 +525,4 @@ Questions about business logic, trading rules, or strategy decisions go to Camer
 ---
 
 *Last updated: 2026-05-03*
-*Status: design spec — implementation pending*
+*Status: Week 1 schema deployed; frontend, edge functions, and scraper pending*
