@@ -12,6 +12,7 @@ import {
 } from '../lib/design'
 import LogOutcomeModal from '../components/LogOutcomeModal'
 import StopLossCheck from '../components/StopLossCheck'
+import StrikePriceCalculator from '../components/StrikePriceCalculator'
 import clsx from 'clsx'
 
 const SIGNAL_TYPES = [
@@ -25,7 +26,7 @@ const SIGNAL_TYPES = [
 export default function SignalDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
   const [signal, setSignal] = useState(null)
   const [loading, setLoading] = useState(true)
   const [logOpen, setLogOpen] = useState(false)
@@ -200,6 +201,15 @@ export default function SignalDetail() {
           />
         </div>
       </div>
+
+      {signal.status === 'active' && signal.direction !== 'watch' && (
+        <StrikePriceCalculator
+          direction={signal.direction}
+          accountSize={profile?.account_size}
+          initialStockPrice={signal.stock_price_at_signal}
+          catalystDate={signal.catalyst_date}
+        />
+      )}
 
       {signal.source_urls?.length > 0 && (
         <div className="bg-card border border-border rounded-xl p-4 mb-4">
