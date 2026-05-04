@@ -1,5 +1,7 @@
+import { Suspense } from 'react'
 import { Outlet, NavLink } from 'react-router-dom'
 import { Home, Calendar, BarChart2, BookOpen, Settings } from 'lucide-react'
+import InstallPrompt from './InstallPrompt'
 import clsx from 'clsx'
 
 const nav = [
@@ -17,8 +19,12 @@ export default function Layout() {
         className="flex-1 overflow-y-auto pt-safe"
         style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))' }}
       >
-        <Outlet />
+        <Suspense fallback={<PageLoader />}>
+          <Outlet />
+        </Suspense>
       </main>
+
+      <InstallPrompt />
 
       <nav
         className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md
@@ -45,6 +51,14 @@ export default function Layout() {
           ))}
         </div>
       </nav>
+    </div>
+  )
+}
+
+function PageLoader() {
+  return (
+    <div className="min-h-[40vh] flex items-center justify-center">
+      <div className="w-6 h-6 border-2 border-red-500 border-t-transparent rounded-full animate-spin" />
     </div>
   )
 }

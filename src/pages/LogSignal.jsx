@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Check } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
@@ -30,28 +30,33 @@ const today = () => new Date().toISOString().slice(0, 10)
 export default function LogSignal() {
   const { user } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+  const prefill = location.state?.prefill || {}
+  const candidateId = location.state?.candidate_id || null
+
   const [step, setStep] = useState(1)
   const [loading, setLoading] = useState(false)
   const [submitError, setSubmitError] = useState('')
   const [analysis, setAnalysis] = useState(null)
 
   const [form, setForm] = useState(() => ({
-    ticker: '',
-    company_name: '',
-    drug_name: '',
-    indication: '',
-    catalyst_type: 'pdufa',
-    catalyst_date: '',
-    direction: 'long_put',
+    ticker: (prefill.ticker || '').toUpperCase(),
+    company_name: prefill.company_name || '',
+    drug_name: prefill.drug_name || '',
+    indication: prefill.indication || '',
+    catalyst_type: prefill.catalyst_type || 'pdufa',
+    catalyst_date: prefill.catalyst_date || '',
+    direction: prefill.direction || 'long_put',
     trade_type: 'paper',
-    structure: 'bear_put_spread',
+    structure:
+      DEFAULT_STRUCTURE[prefill.direction] || DEFAULT_STRUCTURE.long_put,
     entry_price: '',
     expiry_date: '',
     market_cap: '',
     stock_price_at_signal: '',
     your_probability: '',
     market_implied_probability: '',
-    thesis: '',
+    thesis: prefill.thesis || '',
     source_urls: '',
     confidence_score: 7,
     ...Object.fromEntries(CHECKLIST_ITEMS.map((i) => [i.key, false])),
@@ -149,12 +154,22 @@ export default function LogSignal() {
       .select()
       .single()
 
-    setLoading(false)
-
     if (error) {
+      setLoading(false)
       setSubmitError(error.message)
       return
     }
+
+    // If this signal was promoted from a scanner candidate, link them so the
+    // queue's audit trail (`promoted_to_signal`) reflects the new row.
+    if (candidateId) {
+      await supabase
+        .from('scanner_candidates')
+        .update({ promoted_to_signal: data.id })
+        .eq('id', candidateId)
+    }
+
+    setLoading(false)
     navigate(`/signal/${data.id}`)
   }
 
