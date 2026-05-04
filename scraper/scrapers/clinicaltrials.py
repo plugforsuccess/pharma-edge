@@ -24,17 +24,21 @@ def fetch_upcoming_readouts(days_ahead: int = 120) -> list[dict[str, Any]]:
     end_date = (datetime.utcnow() + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
     today = datetime.utcnow().strftime("%Y-%m-%d")
 
+    # CT.gov v2 changes vs the legacy spec:
+    #   * No `AREA[Phase](...)` syntax — use aggFilters=phase:2,3 instead.
+    #   * Fields must match the v2 schema. `Sponsor`, `OrgFullName`,
+    #     `StudyFirstSubmitDate` are not valid; they 400 the entire
+    #     request. Stick to fields we actually use in score_trial().
     params: dict[str, Any] = {
-        "query.term": "AREA[Phase](PHASE2 OR PHASE3)",
+        "aggFilters": "phase:2,3",
         "filter.overallStatus": "ACTIVE_NOT_RECRUITING,RECRUITING",
         "filter.primaryCompletionDate": f"{today},{end_date}",
         "fields": (
             "NCTId,BriefTitle,OfficialTitle,Phase,OverallStatus,"
-            "PrimaryCompletionDate,StudyFirstSubmitDate,"
-            "Condition,InterventionName,Sponsor,OrgFullName,"
-            "EnrollmentCount,EnrollmentType,"
+            "PrimaryCompletionDate,Condition,InterventionName,"
+            "LeadSponsorName,EnrollmentCount,"
             "PrimaryOutcomeMeasure,SecondaryOutcomeMeasure,"
-            "LastUpdatePostDate,StatusVerifiedDate"
+            "LastUpdatePostDate"
         ),
         "pageSize": 100,
         "format": "json",
