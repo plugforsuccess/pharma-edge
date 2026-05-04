@@ -20,6 +20,7 @@ export default function TrackRecord() {
   const [stats, setStats] = useState(null)
   const [filter, setFilter] = useState('all')
   const [loading, setLoading] = useState(true)
+  const [shareFlash, setShareFlash] = useState('')
 
   useEffect(() => {
     if (!user) return
@@ -41,6 +42,35 @@ export default function TrackRecord() {
     setLoading(false)
   }
 
+  async function shareRecord() {
+    if (!profile?.public_slug) {
+      setShareFlash('Set a public slug in Settings first.')
+      setTimeout(() => setShareFlash(''), 2500)
+      return
+    }
+    const url = `${window.location.origin}/r/${profile.public_slug}`
+    const text =
+      stats?.total > 0
+        ? `My verified biotech signal track record — ${stats.winRate}% win rate on ${stats.resolved} resolved signals.`
+        : 'My verified biotech signal track record.'
+
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: 'My Pharma Edge Signal Record', text, url })
+        return
+      } catch {
+        // user cancelled or share failed; fall through to clipboard
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(url)
+      setShareFlash('Link copied')
+    } catch {
+      setShareFlash(url)
+    }
+    setTimeout(() => setShareFlash(''), 2500)
+  }
+
   const filtered = outcomes.filter((o) => {
     if (filter === 'wins') return o.thesis_correct === true
     if (filter === 'losses') return o.thesis_correct === false
@@ -51,19 +81,25 @@ export default function TrackRecord() {
 
   return (
     <div className="px-4 pt-6 pb-4">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-2">
         <h1 className="text-white text-xl font-bold">Track Record</h1>
         {profile?.is_public && profile?.public_slug && (
           <button
             type="button"
+            onClick={shareRecord}
             className="flex items-center gap-1 text-subtle text-xs hover:text-white transition-colors"
             title="Share your public track record"
           >
             <Share2 size={12} />
-            Public Link
+            Share Record
           </button>
         )}
       </div>
+      {shareFlash && (
+        <p className="text-green-400 text-xs mb-4" role="status">
+          {shareFlash}
+        </p>
+      )}
 
       {loading ? (
         <LoadingSkeleton />

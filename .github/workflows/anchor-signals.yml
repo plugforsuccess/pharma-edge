@@ -1,0 +1,71 @@
+name: Anchor Signal Hashes
+
+on:
+  schedule:
+    # 12:30 UTC = 7:30am ET in standard time, 8:30am ET during DST.
+    # Runs after daily-scan.yml (12:00) and send-catalyst-alerts.yml (13:00).
+    - cron: '30 12 * * *'
+  workflow_dispatch:
+
+jobs:
+  anchor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PUBLIC_RECORD_REPO: ${{ vars.PUBLIC_RECORD_REPO }}
+
+    steps:
+      - name: Checkout main repo
+        uses: actions/checkout@v4
+
+      - name: Checkout public-record repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.PUBLIC_RECORD_REPO }}
+          token: ${{ secrets.GH_PAT }}
+          path: public-record
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: scraper/requirements.txt
+
+      - name: Install dependencies
+        working-directory: scraper
+        run: pip install -r requirements.txt
+
+      - name: Write anchor JSON for unanchored signals
+        working-directory: scraper
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          PUBLIC_RECORD_DIR: ${{ github.workspace }}/public-record
+        run: python anchor_signals.py
+
+      - name: Commit + push to public-record
+        id: push
+        working-directory: public-record
+        run: |
+          git config user.email "pharma-edge-bot@users.noreply.github.com"
+          git config user.name "Pharma Edge Bot"
+          git add anchors/
+          if git diff --staged --quiet; then
+            echo "No anchor changes to commit"
+            echo "sha=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git commit -m "Signal anchors $(date -u +%Y-%m-%d)"
+          git push
+          sha=$(git rev-parse HEAD)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Stamp signals with commit SHA
+        if: steps.push.outputs.sha != ''
+        working-directory: scraper
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ANCHOR_COMMIT_SHA: ${{ steps.push.outputs.sha }}
+        run: python update_anchor_shas.py
