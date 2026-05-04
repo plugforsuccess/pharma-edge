@@ -13,6 +13,7 @@ import {
 import LogOutcomeModal from '../components/LogOutcomeModal'
 import StopLossCheck from '../components/StopLossCheck'
 import StrikePriceCalculator from '../components/StrikePriceCalculator'
+import PlaceOrderPanel from '../components/PlaceOrderPanel'
 import clsx from 'clsx'
 
 const SIGNAL_TYPES = [
@@ -30,6 +31,7 @@ export default function SignalDetail() {
   const [signal, setSignal] = useState(null)
   const [loading, setLoading] = useState(true)
   const [logOpen, setLogOpen] = useState(false)
+  const [tradeCalc, setTradeCalc] = useState(null)
 
   useEffect(() => {
     if (!user) return
@@ -203,12 +205,22 @@ export default function SignalDetail() {
       </div>
 
       {signal.status === 'active' && signal.direction !== 'watch' && (
-        <StrikePriceCalculator
-          direction={signal.direction}
-          accountSize={profile?.account_size}
-          initialStockPrice={signal.stock_price_at_signal}
-          catalystDate={signal.catalyst_date}
-        />
+        <>
+          <StrikePriceCalculator
+            direction={signal.direction}
+            accountSize={profile?.account_size}
+            initialStockPrice={signal.stock_price_at_signal}
+            catalystDate={signal.catalyst_date}
+            onCalculationComplete={(calc) => setTradeCalc(calc)}
+          />
+          <PlaceOrderPanel
+            signal={signal}
+            calculation={tradeCalc}
+            onOrderPlaced={(result) => {
+              if (result?.success) fetchSignal()
+            }}
+          />
+        </>
       )}
 
       {signal.source_urls?.length > 0 && (
