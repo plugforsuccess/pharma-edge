@@ -24,21 +24,18 @@ def fetch_upcoming_readouts(days_ahead: int = 120) -> list[dict[str, Any]]:
     end_date = (datetime.utcnow() + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
     today = datetime.utcnow().strftime("%Y-%m-%d")
 
-    # CT.gov v2 changes vs the legacy spec:
-    #   * No `AREA[Phase](...)` syntax — use aggFilters=phase:2,3 instead.
-    #   * Fields must match the v2 schema. `Sponsor`, `OrgFullName`,
-    #     `StudyFirstSubmitDate` are not valid; they 400 the entire
-    #     request. Stick to fields we actually use in score_trial().
+    # CT.gov v2 is strict: a single unrecognised field name 400s the
+    # whole request, and aggFilters value formats vary across builds.
+    # Strategy: fetch with the absolute-minimum field list that v2 has
+    # always honoured, no phase filter at the API level, and filter
+    # for Phase 2/3 in score_trial() against the returned `phases`
+    # array. We over-fetch slightly but the request actually succeeds.
     params: dict[str, Any] = {
-        "aggFilters": "phase:2,3",
         "filter.overallStatus": "ACTIVE_NOT_RECRUITING,RECRUITING",
         "filter.primaryCompletionDate": f"{today},{end_date}",
         "fields": (
-            "NCTId,BriefTitle,OfficialTitle,Phase,OverallStatus,"
-            "PrimaryCompletionDate,Condition,InterventionName,"
-            "LeadSponsorName,EnrollmentCount,"
-            "PrimaryOutcomeMeasure,SecondaryOutcomeMeasure,"
-            "LastUpdatePostDate"
+            "NCTId,BriefTitle,OverallStatus,Phase,"
+            "PrimaryCompletionDate,LeadSponsorName,EnrollmentCount"
         ),
         "pageSize": 100,
         "format": "json",

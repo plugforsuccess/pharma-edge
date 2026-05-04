@@ -83,11 +83,15 @@ def _scan_ctgov(item: dict[str, Any]) -> list[dict[str, Any]]:
         'query.term': company,
         'filter.overallStatus': 'ACTIVE_NOT_RECRUITING,RECRUITING,COMPLETED,TERMINATED',
         'filter.primaryCompletionDate': f'{past},{end}',
-        # Stick to fields we actually use; v2 rejects the whole request
-        # if any field name is invalid.
+        # Minimum-field set — CT.gov v2 400s the whole request on a
+        # single unrecognised field. WhyStopped lives at
+        # protocolSection.statusModule.whyStopped; some v2 builds
+        # accept it as a top-level shorthand and some don't, so we
+        # read it back from the protocol path instead of requesting
+        # it as its own field.
         'fields': (
-            'NCTId,BriefTitle,Phase,OverallStatus,PrimaryCompletionDate,'
-            'EnrollmentCount,LeadSponsorName,WhyStopped'
+            'NCTId,BriefTitle,Phase,OverallStatus,'
+            'PrimaryCompletionDate,EnrollmentCount,LeadSponsorName'
         ),
         'pageSize': 25,
         'format': 'json',
