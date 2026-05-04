@@ -4,6 +4,7 @@ import { ArrowLeft, Check } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import AnalyzeFilingPanel from '../components/AnalyzeFilingPanel'
+import StrikePriceCalculator from '../components/StrikePriceCalculator'
 import clsx from 'clsx'
 
 const CHECKLIST_ITEMS = [
@@ -28,7 +29,7 @@ const DEFAULT_STRUCTURE = {
 const today = () => new Date().toISOString().slice(0, 10)
 
 export default function LogSignal() {
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const prefill = location.state?.prefill || {}
@@ -340,6 +341,28 @@ export default function LogSignal() {
             catalystDate={form.catalyst_date}
             onAnalysisComplete={handleAnalysisComplete}
           />
+
+          {form.catalyst_date && form.direction !== 'watch' && (
+            <StrikePriceCalculator
+              direction={form.direction}
+              accountSize={profile?.account_size}
+              initialStockPrice={form.stock_price_at_signal}
+              catalystDate={form.catalyst_date}
+              onCalculationComplete={(calc) => {
+                if (
+                  !form.entry_price &&
+                  calc?.contracts &&
+                  calc?.totalCost
+                ) {
+                  const perShare =
+                    Number(calc.totalCost) / calc.contracts / 100
+                  if (Number.isFinite(perShare) && perShare > 0) {
+                    update('entry_price', perShare.toFixed(2))
+                  }
+                }
+              }}
+            />
+          )}
 
           <div>
             <label className="text-muted text-xs uppercase tracking-wider block mb-1">

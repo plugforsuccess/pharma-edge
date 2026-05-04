@@ -1,12 +1,20 @@
 import { Suspense } from 'react'
 import { Outlet, NavLink } from 'react-router-dom'
-import { Home, Calendar, BarChart2, BookOpen, Settings } from 'lucide-react'
+import {
+  BarChart2,
+  BookOpen,
+  Calculator,
+  Calendar,
+  Home,
+  Settings,
+} from 'lucide-react'
 import InstallPrompt from './InstallPrompt'
 import clsx from 'clsx'
 
 const nav = [
   { to: '/', icon: Home, label: 'Home' },
   { to: '/calendar', icon: Calendar, label: 'Calendar' },
+  { to: '/calculator', icon: Calculator, label: 'Calc' },
   { to: '/record', icon: BarChart2, label: 'Record' },
   { to: '/rules', icon: BookOpen, label: 'Rules' },
   { to: '/settings', icon: Settings, label: 'Settings' },
@@ -40,7 +48,7 @@ export default function Layout() {
               end={to === '/'}
               className={({ isActive }) =>
                 clsx(
-                  'flex flex-col items-center gap-1 px-3 py-1 rounded-lg transition-colors min-w-11',
+                  'flex flex-col items-center gap-1 px-2 py-1 rounded-lg transition-colors min-w-11',
                   isActive ? 'text-red-400' : 'text-zinc-600 hover:text-zinc-400'
                 )
               }

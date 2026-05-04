@@ -14,6 +14,7 @@ const TrackRecord = lazy(() => import('./pages/TrackRecord'))
 const Rules = lazy(() => import('./pages/Rules'))
 const Settings = lazy(() => import('./pages/Settings'))
 const ScannerCandidates = lazy(() => import('./pages/ScannerCandidates'))
+const OptionCalculator = lazy(() => import('./pages/OptionCalculator'))
 const PublicRecord = lazy(() => import('./pages/PublicRecord'))
 
 function ProtectedRoute({ children }) {
@@ -69,6 +70,7 @@ export default function App() {
             <Route path="rules" element={<Rules />} />
             <Route path="settings" element={<Settings />} />
             <Route path="scanner" element={<ScannerCandidates />} />
+            <Route path="calculator" element={<OptionCalculator />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
