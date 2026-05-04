@@ -43,41 +43,60 @@ export default function PaperTradingStatus({ stats }) {
   return (
     <div
       className={clsx(
-        'border rounded-xl p-4 mb-4',
-        readyForReal ? 'bg-green-950/20 border-green-900/40' : 'bg-card border-border',
+        'surface rounded-2xl p-4 mb-5 relative overflow-hidden',
+        readyForReal && 'border-green-500/30',
       )}
     >
-      <div className="flex items-center justify-between mb-3">
+      {readyForReal && (
+        <div
+          aria-hidden
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            background:
+              'radial-gradient(closest-side at 90% 0%, rgba(34,197,94,0.10), transparent 60%)',
+          }}
+        />
+      )}
+
+      <div className="flex items-center justify-between mb-3 relative">
         <div>
-          <p className="text-subtle text-xs font-semibold uppercase tracking-wider">
-            {readyForReal ? '✓ Paper Trading Complete' : 'Paper Trading Period'}
+          <p className="eyebrow">
+            {readyForReal ? '✓ Phase Complete' : 'Paper Trading Period'}
           </p>
-          <p className="text-white text-sm font-bold mt-0.5">
+          <p className="font-display text-[17px] text-fg mt-1 leading-tight">
             {readyForReal ? 'Ready for real capital' : `Day ${daysElapsed} of ${TARGET_DAYS}`}
           </p>
         </div>
         <div className="text-right">
           <p
             className={clsx(
-              'text-2xl font-bold',
-              readyForReal ? 'text-green-400' : 'text-white',
+              'font-display text-3xl leading-none num-tab',
+              readyForReal ? 'text-green-400' : 'text-fg',
             )}
           >
             {daysRemaining}
           </p>
-          <p className="text-muted text-[10px]">
-            {daysRemaining > 0 ? 'days left' : 'days ago ✓'}
+          <p className="eyebrow text-[9px] mt-1">
+            {daysRemaining > 0 ? 'days left' : 'cleared'}
           </p>
         </div>
       </div>
 
-      <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden mb-3">
+      <div
+        className="h-[3px] rounded-full overflow-hidden mb-4 relative"
+        style={{ background: 'rgba(255,255,255,0.05)' }}
+      >
         <div
-          className={clsx(
-            'h-full rounded-full transition-all',
-            readyForReal ? 'bg-green-500' : 'bg-red-500',
-          )}
-          style={{ width: `${progress}%` }}
+          className="h-full rounded-full transition-all"
+          style={{
+            width: `${progress}%`,
+            background: readyForReal
+              ? 'linear-gradient(90deg, #16a34a, #4ade80)'
+              : 'linear-gradient(90deg, #b88830, #e8b558, #f4cf8e)',
+            boxShadow: readyForReal
+              ? '0 0 12px rgba(74,222,128,0.5)'
+              : '0 0 12px rgba(232,181,88,0.45)',
+          }}
         />
       </div>
 
@@ -100,8 +119,8 @@ export default function PaperTradingStatus({ stats }) {
       </div>
 
       {readyForReal && (
-        <p className="text-green-400 text-xs text-center mt-3 font-semibold">
-          All requirements met — proceed with real capital at your discretion
+        <p className="text-green-400 text-[11px] text-center mt-3 font-semibold tracking-wide">
+          All gates cleared — proceed at your discretion
         </p>
       )}
     </div>
@@ -149,16 +168,23 @@ async function resolveStartDate(userId, profile, fetchProfile) {
 
 function Requirement({ label, met, value }) {
   return (
-    <div className={clsx('rounded-lg p-2', met ? 'bg-green-950/30' : 'bg-zinc-900/50')}>
+    <div
+      className={clsx(
+        'rounded-xl py-2 border transition-colors',
+        met
+          ? 'border-green-500/30 bg-green-500/5'
+          : 'border-border bg-white/[0.015]',
+      )}
+    >
       <p
         className={clsx(
-          'text-sm font-bold',
-          met ? 'text-green-400' : 'text-zinc-400',
+          'font-display text-base num-tab leading-none',
+          met ? 'text-green-400' : 'text-fg',
         )}
       >
         {met ? '✓' : value}
       </p>
-      <p className="text-muted text-[10px] mt-0.5">{label}</p>
+      <p className="eyebrow text-[8px] mt-1.5">{label}</p>
     </div>
   )
 }

@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronRight, Cpu, Eye, Plus } from 'lucide-react'
+import { ChevronRight, Cpu, Eye, Plus, TrendingUp } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { daysUntil } from '../utils/dates'
-import { signalColor, catalystLabel, directionLabel } from '../lib/design'
+import { catalystLabel, directionLabel } from '../lib/design'
 import NotificationCenter from '../components/NotificationCenter'
 import PaperTradingStatus from '../components/PaperTradingStatus'
 import clsx from 'clsx'
@@ -74,119 +74,107 @@ export default function Dashboard() {
     setLoading(false)
   }
 
+  const today = new Date()
+  const dateStr = today.toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  })
+
   return (
-    <div className="px-4 pt-6 pb-4">
-      <div className="flex items-center justify-between mb-6">
+    <div className="px-5 pt-7 pb-6">
+      {/* Editorial header */}
+      <header className="flex items-start justify-between mb-7">
         <div>
-          <h1 className="text-white text-xl font-bold tracking-tight">Pharma Edge</h1>
-          <p className="text-subtle text-xs mt-0.5">
-            {new Date().toLocaleDateString('en-US', {
-              weekday: 'long',
-              month: 'long',
-              day: 'numeric',
-            })}
-          </p>
+          <p className="eyebrow">{dateStr} · Session Open</p>
+          <h1 className="font-display text-[2rem] leading-[1.05] mt-1.5">
+            <span className="brand-text">Pharma</span>{' '}
+            <span className="text-fg italic">Edge</span>
+          </h1>
         </div>
         <NotificationCenter />
-      </div>
+      </header>
 
-      <div className="grid grid-cols-4 gap-2 mb-6">
-        {[
-          { label: 'Open', value: stats.open, color: 'text-white' },
-          { label: 'Wins', value: stats.wins, color: 'text-green-400' },
-          { label: 'Losses', value: stats.losses, color: 'text-red-400' },
-          {
-            label: 'Win %',
-            value: `${stats.winRate}%`,
-            color: stats.winRate >= 55 ? 'text-green-400' : 'text-yellow-400',
-          },
-        ].map(({ label, value, color }) => (
-          <div
-            key={label}
-            className="bg-card border border-border rounded-xl p-3 text-center"
-          >
-            <p className={clsx('text-lg font-bold', color)}>{value}</p>
-            <p className="text-muted text-[10px] mt-0.5">{label}</p>
-          </div>
-        ))}
-      </div>
+      {/* Stat strip — editorial, no boxes */}
+      <section className="surface rounded-2xl px-2 py-3 mb-5">
+        <div className="grid grid-cols-4">
+          <Stat label="Open" value={stats.open} />
+          <Stat label="Wins" value={stats.wins} tone="green" divider />
+          <Stat label="Losses" value={stats.losses} tone="red" divider />
+          <Stat
+            label="Win Rate"
+            value={`${stats.winRate}%`}
+            tone={stats.winRate >= 55 ? 'green' : stats.winRate > 0 ? 'amber' : 'neutral'}
+            divider
+          />
+        </div>
+      </section>
 
       <PaperTradingStatus stats={stats} />
 
-      {watchlistCandidates > 0 && (
-        <button
-          type="button"
-          onClick={() => navigate('/scanner')}
-          className="w-full flex items-center justify-between bg-card border border-yellow-900/40 rounded-xl px-4 py-3 mb-2 hover:border-yellow-500 transition-colors"
-        >
-          <div className="flex items-center gap-2">
-            <Eye size={14} className="text-yellow-400" />
-            <div className="text-left">
-              <p className="text-white text-sm font-medium">Watchlist Activity</p>
-              <p className="text-muted text-[10px]">New filings on your tracked tickers</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="bg-yellow-500 text-black text-xs font-bold px-2 py-0.5 rounded-full">
-              {watchlistCandidates}
-            </span>
-            <ChevronRight size={14} className="text-subtle" />
-          </div>
-        </button>
-      )}
+      {/* Queue cards */}
+      <div className="space-y-2 mb-5">
+        {watchlistCandidates > 0 && (
+          <QueueCard
+            icon={Eye}
+            tone="amber"
+            title="Watchlist Activity"
+            sub="New filings on your tracked tickers"
+            count={watchlistCandidates}
+            onClick={() => navigate('/scanner')}
+          />
+        )}
+        {pendingCandidates > 0 && (
+          <QueueCard
+            icon={Cpu}
+            tone="crimson"
+            title="Scanner Candidates"
+            sub="Top broad-scan picks from this morning"
+            count={pendingCandidates}
+            onClick={() => navigate('/scanner')}
+          />
+        )}
+      </div>
 
-      {pendingCandidates > 0 && (
-        <button
-          type="button"
-          onClick={() => navigate('/scanner')}
-          className="w-full flex items-center justify-between bg-card border border-red-900/30 rounded-xl px-4 py-3 mb-4 hover:border-red-500 transition-colors"
-        >
-          <div className="flex items-center gap-2">
-            <Cpu size={14} className="text-red-400" />
-            <div className="text-left">
-              <p className="text-white text-sm font-medium">Scanner Candidates</p>
-              <p className="text-muted text-[10px]">Top broad-scan picks</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="bg-red-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">
-              {pendingCandidates}
-            </span>
-            <ChevronRight size={14} className="text-subtle" />
-          </div>
-        </button>
-      )}
-
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-white text-sm font-semibold">Active Signals</h2>
+      {/* Signals header */}
+      <div className="flex items-end justify-between mb-3">
+        <div>
+          <p className="eyebrow">Live Theses</p>
+          <h2 className="font-display text-xl text-fg mt-0.5">Active Signals</h2>
+        </div>
         <button
           onClick={() => navigate('/log')}
-          className="flex items-center gap-1 bg-red-600 hover:bg-red-500
-                     text-white text-xs font-medium px-3 py-1.5 rounded-lg
-                     transition-colors"
+          className="btn-primary inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-lg"
         >
-          <Plus size={12} />
+          <Plus size={13} strokeWidth={2.5} />
           Log Signal
         </button>
       </div>
 
-      <div className="space-y-3">
+      <div className="space-y-2.5">
         {loading ? (
           Array(3)
             .fill(0)
             .map((_, i) => (
               <div
                 key={i}
-                className="bg-card border border-border rounded-xl p-4 animate-pulse"
+                className="surface rounded-2xl p-4 animate-pulse"
               >
-                <div className="h-4 bg-zinc-800 rounded w-1/3 mb-2" />
-                <div className="h-3 bg-zinc-800 rounded w-2/3" />
+                <div className="h-4 bg-white/5 rounded w-1/3 mb-2" />
+                <div className="h-3 bg-white/5 rounded w-2/3" />
               </div>
             ))
         ) : signals.length === 0 ? (
-          <div className="bg-card border border-border rounded-xl p-8 text-center">
-            <p className="text-subtle text-sm">No active signals</p>
-            <p className="text-muted text-xs mt-1">Tap Log Signal to add your first</p>
+          <div className="surface rounded-2xl p-10 text-center">
+            <TrendingUp
+              size={28}
+              strokeWidth={1.5}
+              className="mx-auto mb-3 text-muted"
+            />
+            <p className="font-display text-lg text-fg">No active signals</p>
+            <p className="text-subtle text-xs mt-1">
+              Log your first thesis to start the public record.
+            </p>
           </div>
         ) : (
           signals.map((signal) => (
@@ -203,82 +191,165 @@ export default function Dashboard() {
   )
 }
 
+function Stat({ label, value, tone = 'neutral', divider }) {
+  const toneClass = {
+    neutral: 'text-fg',
+    green: 'text-green-400',
+    red: 'text-[#f25068]',
+    amber: 'text-[#f4cf8e]',
+  }[tone]
+
+  return (
+    <div
+      className={clsx(
+        'flex flex-col items-center justify-center py-1.5',
+        divider && 'border-l border-border/70',
+      )}
+    >
+      <span className={clsx('font-display text-2xl leading-none num-tab', toneClass)}>
+        {value}
+      </span>
+      <span className="eyebrow mt-1.5 text-[9px]">{label}</span>
+    </div>
+  )
+}
+
+function QueueCard({ icon: Icon, tone, title, sub, count, onClick }) {
+  const palette =
+    tone === 'amber'
+      ? {
+          icon: '#f4cf8e',
+          ring: 'rgba(232,181,88,0.25)',
+          badge:
+            'bg-[#e8b558] text-[#1a1208] shadow-[0_0_18px_-4px_rgba(232,181,88,0.6)]',
+        }
+      : {
+          icon: '#f25068',
+          ring: 'rgba(224,52,76,0.25)',
+          badge:
+            'bg-[#e0344c] text-white shadow-[0_0_18px_-4px_rgba(224,52,76,0.55)]',
+        }
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="group surface surface-hover w-full flex items-center justify-between rounded-2xl px-4 py-3.5 text-left"
+      style={{ borderColor: palette.ring }}
+    >
+      <div className="flex items-center gap-3">
+        <div
+          className="w-9 h-9 rounded-xl flex items-center justify-center"
+          style={{ background: 'rgba(255,255,255,0.03)' }}
+        >
+          <Icon size={16} style={{ color: palette.icon }} strokeWidth={2} />
+        </div>
+        <div>
+          <p className="text-fg text-sm font-semibold tracking-tight">{title}</p>
+          <p className="text-muted text-[11px] mt-0.5">{sub}</p>
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <span
+          className={clsx(
+            'text-[11px] font-bold px-2 py-0.5 rounded-full num-tab',
+            palette.badge,
+          )}
+        >
+          {count}
+        </span>
+        <ChevronRight
+          size={15}
+          className="text-muted group-hover:text-subtle transition-colors"
+        />
+      </div>
+    </button>
+  )
+}
+
 function SignalCard({ signal, daysTo, onClick }) {
-  const urgency =
-    daysTo <= 7
-      ? 'border-red-900 bg-red-950/20'
-      : daysTo <= 14
-        ? 'border-yellow-900 bg-yellow-950/10'
-        : 'border-border bg-card'
+  const isUrgent = daysTo <= 7
+  const isSoon = daysTo > 7 && daysTo <= 14
+
+  const accent = isUrgent
+    ? { color: '#f25068', glow: 'rgba(224,52,76,0.18)' }
+    : isSoon
+      ? { color: '#f4cf8e', glow: 'rgba(232,181,88,0.14)' }
+      : { color: '#8b8ba6', glow: 'transparent' }
+
+  const isPut = signal.direction === 'long_put'
+  const dirPill = isPut
+    ? 'text-[#f25068] bg-[#e0344c]/10 border-[#e0344c]/35'
+    : signal.direction === 'long_call'
+      ? 'text-green-400 bg-green-500/10 border-green-500/35'
+      : 'text-subtle bg-white/[0.03] border-border'
 
   const confidence = signal.confidence_score ?? 0
 
   return (
     <button
       onClick={onClick}
-      className={clsx(
-        'w-full text-left border rounded-xl p-4 transition-all active:scale-[0.98]',
-        urgency
-      )}
+      className="group relative surface surface-hover w-full text-left rounded-2xl p-4 active:scale-[0.99] transition-transform overflow-hidden"
+      style={{
+        boxShadow: `inset 0 1px 0 rgba(255,255,255,0.03), 0 0 0 1px transparent, 0 8px 30px -16px ${accent.glow}`,
+      }}
     >
+      {/* Left accent rail */}
+      <span
+        aria-hidden
+        className="absolute left-0 top-3 bottom-3 w-[2px] rounded-r-full"
+        style={{
+          background: `linear-gradient(180deg, transparent, ${accent.color}, transparent)`,
+          opacity: 0.7,
+        }}
+      />
+
       <div className="flex items-start justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <span className="text-white font-bold text-sm">{signal.ticker}</span>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-mono-tab text-fg font-semibold text-[15px] tracking-tight">
+            {signal.ticker}
+          </span>
           <span
             className={clsx(
-              'text-[10px] font-semibold px-2 py-0.5 rounded-full border',
-              signalColor(signal.direction)
+              'text-[10px] font-bold tracking-wider px-1.5 py-0.5 rounded-md border',
+              dirPill,
             )}
           >
             {directionLabel(signal.direction)}
           </span>
-          <span className="text-[10px] text-subtle border border-zinc-800 px-1.5 py-0.5 rounded-full">
-            {signal.trade_type === 'paper' ? 'PAPER' : 'REAL'}
+          <span className="text-[9px] tracking-[0.16em] text-muted border border-border/70 px-1.5 py-0.5 rounded-md uppercase">
+            {signal.trade_type === 'paper' ? 'Paper' : 'Real'}
           </span>
         </div>
-        <div className="text-right">
+        <div className="text-right shrink-0 ml-2">
           <p
-            className={clsx(
-              'text-xs font-semibold',
-              daysTo <= 7
-                ? 'text-red-400'
-                : daysTo <= 14
-                  ? 'text-yellow-400'
-                  : 'text-zinc-400'
-            )}
+            className="font-display num-tab text-lg leading-none"
+            style={{ color: accent.color }}
           >
-            {daysTo}d
+            {daysTo}
+            <span className="text-[10px] font-sans ml-0.5 opacity-70">d</span>
           </p>
-          <p className="text-[10px] text-muted">to catalyst</p>
+          <p className="eyebrow text-[8px] mt-1">to catalyst</p>
         </div>
       </div>
 
-      <p className="text-subtle text-xs mb-2 truncate">
-        {signal.drug_name} — {signal.indication}
+      <p className="text-subtle text-[12px] mb-2.5 truncate">
+        <span className="text-fg/90 font-medium">{signal.drug_name}</span>
+        <span className="text-muted"> · </span>
+        {signal.indication}
       </p>
 
-      <div className="flex items-center justify-between">
-        <p className="text-zinc-400 text-xs truncate flex-1 mr-4">
-          {signal.thesis?.slice(0, 80)}…
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-subtle text-[12px] line-clamp-1 flex-1 italic font-display">
+          {signal.thesis?.slice(0, 90)}…
         </p>
-        <div className="flex gap-0.5">
-          {Array(10)
-            .fill(0)
-            .map((_, i) => (
-              <div
-                key={i}
-                className={clsx(
-                  'w-1 h-3 rounded-sm',
-                  i < confidence ? 'bg-red-500' : 'bg-zinc-800'
-                )}
-              />
-            ))}
-        </div>
+        <ConfidenceMeter level={confidence} />
       </div>
 
-      <div className="mt-2 pt-2 border-t border-zinc-900 flex items-center justify-between">
-        <span className="text-[10px] text-muted">{catalystLabel(signal.catalyst_type)}</span>
-        <span className="text-[10px] text-muted">
+      <div className="hairline mt-3 mb-2.5 opacity-60" />
+      <div className="flex items-center justify-between">
+        <span className="eyebrow text-[9px]">{catalystLabel(signal.catalyst_type)}</span>
+        <span className="font-mono-tab text-[10px] text-muted">
           {new Date(signal.catalyst_date).toLocaleDateString('en-US', {
             month: 'short',
             day: 'numeric',
@@ -287,5 +358,31 @@ function SignalCard({ signal, daysTo, onClick }) {
         </span>
       </div>
     </button>
+  )
+}
+
+function ConfidenceMeter({ level }) {
+  return (
+    <div className="flex gap-[2px] items-end shrink-0" aria-label={`Confidence ${level}/10`}>
+      {Array.from({ length: 10 }).map((_, i) => {
+        const filled = i < level
+        const heightClass = i < 3 ? 'h-2' : i < 6 ? 'h-2.5' : i < 8 ? 'h-3' : 'h-3.5'
+        return (
+          <div
+            key={i}
+            className={clsx('w-[3px] rounded-sm transition-colors', heightClass)}
+            style={{
+              background: filled
+                ? i < 4
+                  ? '#b88830'
+                  : i < 7
+                    ? '#e8b558'
+                    : '#f4cf8e'
+                : 'rgba(255,255,255,0.06)',
+            }}
+          />
+        )
+      })}
+    </div>
   )
 }
