@@ -2,22 +2,24 @@
 //
 // Service-role-only endpoint. Called by send-catalyst-alerts.yml (cron) to
 // fan out catalyst-approaching reminders and post-catalyst outcome
-// reminders. Daily digest stays in scraper/main.py (Week 5) — there's no
-// daily_digest case here on purpose.
+// reminders. Daily digest stays in scraper/main.py (Week 5).
 //
-// Security: verify_jwt=true at the platform level validates signature and
-// expiry; we additionally require the JWT's `role` claim to be
-// `service_role` so a regular logged-in user cannot fan out emails to
-// arbitrary user_ids on someone else's Resend budget.
+// Each invocation: send the email via Resend, fan out web-push to every
+// active push_subscriptions row for the user, then log the alert.
+// Push failures don't fail the request; 404/410 subs are deleted.
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import webpush from 'npm:web-push@3.6.7'
 
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
 const APP_URL = Deno.env.get('APP_URL') || 'https://APP_URL_NOT_SET.example'
 const FROM_ADDRESS = Deno.env.get('RESEND_FROM') || 'onboarding@resend.dev'
+const VAPID_PUBLIC_KEY = Deno.env.get('VAPID_PUBLIC_KEY')
+const VAPID_PRIVATE_KEY = Deno.env.get('VAPID_PRIVATE_KEY')
+const VAPID_SUBJECT = Deno.env.get('VAPID_SUBJECT') || 'mailto:noreply@example.com'
 
 const ALLOWED_TYPES = new Set([
   'catalyst_approaching_14d',
@@ -43,13 +45,67 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
   try {
     const [, payload] = token.split('.')
     if (!payload) return null
-    // base64url -> base64
     const b64 = payload.replace(/-/g, '+').replace(/_/g, '/')
     const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4)
     return JSON.parse(atob(padded))
   } catch {
     return null
   }
+}
+
+let vapidConfigured = false
+function ensureVapidConfigured(): boolean {
+  if (vapidConfigured) return true
+  if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) return false
+  webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY)
+  vapidConfigured = true
+  return true
+}
+
+async function fanOutPush(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  payload: { title: string; body: string; url: string; type: string },
+): Promise<{ sent: number; pruned: number; errors: number }> {
+  if (!ensureVapidConfigured()) {
+    return { sent: 0, pruned: 0, errors: 0 }
+  }
+  const { data: subs } = await supabase
+    .from('push_subscriptions')
+    .select('id, endpoint, p256dh, auth')
+    .eq('user_id', userId)
+
+  let sent = 0
+  let pruned = 0
+  let errors = 0
+
+  for (const sub of subs ?? []) {
+    try {
+      await webpush.sendNotification(
+        {
+          endpoint: sub.endpoint,
+          keys: { p256dh: sub.p256dh, auth: sub.auth },
+        },
+        JSON.stringify(payload),
+        { TTL: 60 * 60 * 24 },
+      )
+      sent += 1
+      await supabase
+        .from('push_subscriptions')
+        .update({ last_used_at: new Date().toISOString() })
+        .eq('id', sub.id)
+    } catch (err) {
+      const status = (err as { statusCode?: number })?.statusCode
+      if (status === 404 || status === 410) {
+        await supabase.from('push_subscriptions').delete().eq('id', sub.id)
+        pruned += 1
+      } else {
+        console.warn('push send failed', status, (err as Error).message)
+        errors += 1
+      }
+    }
+  }
+  return { sent, pruned, errors }
 }
 
 serve(async (req) => {
@@ -113,10 +169,12 @@ serve(async (req) => {
 
   let subject = ''
   let htmlBody = ''
+  let pushBody = ''
 
   if (alertType === 'outcome_reminder') {
     subject = `Log outcome for ${signal.ticker} — catalyst was yesterday`
     htmlBody = outcomeReminderHtml(signal)
+    pushBody = `Catalyst was yesterday. Log the outcome to keep your record clean.`
   } else {
     const days = alertType === 'catalyst_approaching_14d'
       ? 14
@@ -130,8 +188,10 @@ serve(async (req) => {
     })
     subject = `${signal.ticker} catalyst in ${days} day${days > 1 ? 's' : ''} — ${niceDate}`
     htmlBody = catalystReminderHtml(signal, days)
+    pushBody = `${signal.ticker}: catalyst in ${days} day${days > 1 ? 's' : ''} (${niceDate}).`
   }
 
+  // Email via Resend
   const resendResp = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
@@ -156,19 +216,32 @@ serve(async (req) => {
 
   const emailData = await resendResp.json().catch(() => ({}))
 
+  // Web-push fan-out
+  const pushStats = await fanOutPush(supabase, userId, {
+    title: 'Pharma Edge',
+    body: pushBody,
+    url: `${APP_URL}/signal/${signal.id}`,
+    type: alertType,
+  })
+
+  const sentVia = pushStats.sent > 0 ? 'push' : 'email'
   const { error: insertError } = await supabase.from('alerts').insert({
     user_id: userId,
     signal_id: signalId,
     alert_type: alertType,
     message: subject,
-    sent_via: 'email',
+    sent_via: sentVia,
   })
   if (insertError) {
-    // Email already went out; surface but don't fail loudly.
-    return json({ success: true, email_id: emailData.id, alert_log_error: insertError.message })
+    return json({
+      success: true,
+      email_id: emailData.id,
+      push: pushStats,
+      alert_log_error: insertError.message,
+    })
   }
 
-  return json({ success: true, email_id: emailData.id })
+  return json({ success: true, email_id: emailData.id, push: pushStats })
 })
 
 function escapeHtml(s: string): string {
