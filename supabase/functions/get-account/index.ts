@@ -18,6 +18,10 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
 
+const TASTYTRADE_BASE_URL =
+  Deno.env.get('TASTYTRADE_BASE_URL') || 'https://api.cert.tastyworks.com'
+const IS_SANDBOX = TASTYTRADE_BASE_URL.includes('cert.tastyworks.com')
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
@@ -90,10 +94,17 @@ serve(async (req) => {
       } catch {
         balance = null
       }
+      // Sandbox (cert) is itself a paper environment — everything in it is
+      // simulated. Tastytrade's is-test-drive flag describes paper
+      // subaccounts within the LIVE system, so it's false on sandbox even
+      // though no real money is at risk. Treat all sandbox accounts as
+      // paper for UX-warning purposes.
+      const isPaper = IS_SANDBOX || Boolean(acc['is-test-drive'])
       return {
         account_number: number,
         account_type: acc['account-type-name'] ?? null,
-        is_paper: Boolean(acc['is-test-drive']),
+        is_paper: isPaper,
+        is_sandbox: IS_SANDBOX,
         net_liquidating_value: balance?.['net-liquidating-value'] ?? null,
         cash_balance: balance?.['cash-balance'] ?? null,
         buying_power: balance?.['derivative-buying-power'] ?? null,
