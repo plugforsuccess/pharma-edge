@@ -38,6 +38,7 @@ from scrapers.fda_calendar import (
     fetch_pdufa_dates,
 )
 from scrapers.sec_edgar import fetch_biotech_8k, fetch_shelf_offerings
+from scrapers.watchlist import scan_watchlist
 
 
 REQUIRED_ENVS = (
@@ -245,6 +246,22 @@ def main() -> None:
             )
         except Exception as exc:
             errors.append(f"claude analysis / candidate insert: {exc}")
+
+    # ─── Watchlist sweep ────────────────────────────────────────────
+    print("Scanning user watchlists...")
+    try:
+        wl_counts = scan_watchlist(supabase)
+        total_wl = sum(wl_counts.values())
+        print(
+            f"  watchlist new: ct={wl_counts['clinicaltrials']} "
+            f"sec={wl_counts['sec_edgar']} fda={wl_counts['fda_calendar']} "
+            f"(total {total_wl})"
+        )
+        scan_log["results"]["watchlist"] = wl_counts
+    except Exception as exc:
+        msg = f"Watchlist sweep failed: {exc}"
+        print(f"  {msg}")
+        errors.append(msg)
 
     # ─── Daily digest ───────────────────────────────────────────────
     print("Generating daily digest...")

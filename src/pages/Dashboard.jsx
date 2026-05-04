@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronRight, Cpu, Plus } from 'lucide-react'
+import { ChevronRight, Cpu, Eye, Plus } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { daysUntil } from '../utils/dates'
@@ -15,6 +15,7 @@ export default function Dashboard() {
   const [signals, setSignals] = useState([])
   const [stats, setStats] = useState({ wins: 0, losses: 0, open: 0, winRate: 0, total: 0 })
   const [pendingCandidates, setPendingCandidates] = useState(0)
+  const [watchlistCandidates, setWatchlistCandidates] = useState(0)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -25,26 +26,34 @@ export default function Dashboard() {
 
   async function fetchDashboardData() {
     setLoading(true)
-    const [signalRes, openCountRes, outcomeRes, candidateCountRes] = await Promise.all([
-      supabase
-        .from('signals')
-        .select('*, outcomes(*)')
-        .eq('user_id', user.id)
-        .eq('status', 'active')
-        .order('logged_at', { ascending: false })
-        .limit(10),
-      supabase
-        .from('signals')
-        .select('id', { count: 'exact', head: true })
-        .eq('user_id', user.id)
-        .eq('status', 'active'),
-      supabase.from('outcomes').select('thesis_correct').eq('user_id', user.id),
-      supabase
-        .from('scanner_candidates')
-        .select('id', { count: 'exact', head: true })
-        .eq('reviewed', false)
-        .eq('dismissed', false),
-    ])
+    const [signalRes, openCountRes, outcomeRes, candidateCountRes, watchlistCountRes] =
+      await Promise.all([
+        supabase
+          .from('signals')
+          .select('*, outcomes(*)')
+          .eq('user_id', user.id)
+          .eq('status', 'active')
+          .order('logged_at', { ascending: false })
+          .limit(10),
+        supabase
+          .from('signals')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', user.id)
+          .eq('status', 'active'),
+        supabase.from('outcomes').select('thesis_correct').eq('user_id', user.id),
+        supabase
+          .from('scanner_candidates')
+          .select('id', { count: 'exact', head: true })
+          .is('requested_by', null)
+          .eq('reviewed', false)
+          .eq('dismissed', false),
+        supabase
+          .from('scanner_candidates')
+          .select('id', { count: 'exact', head: true })
+          .eq('requested_by', user.id)
+          .eq('reviewed', false)
+          .eq('dismissed', false),
+      ])
 
     setSignals(signalRes.data ?? [])
 
@@ -60,6 +69,7 @@ export default function Dashboard() {
       total,
     })
     setPendingCandidates(candidateCountRes.count ?? 0)
+    setWatchlistCandidates(watchlistCountRes.count ?? 0)
 
     setLoading(false)
   }
@@ -103,6 +113,28 @@ export default function Dashboard() {
 
       <PaperTradingStatus stats={stats} />
 
+      {watchlistCandidates > 0 && (
+        <button
+          type="button"
+          onClick={() => navigate('/scanner')}
+          className="w-full flex items-center justify-between bg-card border border-yellow-900/40 rounded-xl px-4 py-3 mb-2 hover:border-yellow-500 transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <Eye size={14} className="text-yellow-400" />
+            <div className="text-left">
+              <p className="text-white text-sm font-medium">Watchlist Activity</p>
+              <p className="text-muted text-[10px]">New filings on your tracked tickers</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="bg-yellow-500 text-black text-xs font-bold px-2 py-0.5 rounded-full">
+              {watchlistCandidates}
+            </span>
+            <ChevronRight size={14} className="text-subtle" />
+          </div>
+        </button>
+      )}
+
       {pendingCandidates > 0 && (
         <button
           type="button"
@@ -111,7 +143,10 @@ export default function Dashboard() {
         >
           <div className="flex items-center gap-2">
             <Cpu size={14} className="text-red-400" />
-            <p className="text-white text-sm font-medium">Scanner Candidates</p>
+            <div className="text-left">
+              <p className="text-white text-sm font-medium">Scanner Candidates</p>
+              <p className="text-muted text-[10px]">Top broad-scan picks</p>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <span className="bg-red-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">
