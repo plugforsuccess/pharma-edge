@@ -140,6 +140,22 @@ export default function ScannerCandidates() {
 // material to the parent's price.
 const MEGA_CAP_THRESHOLD = 10_000_000_000
 
+const CATALYST_LABEL = {
+  pdufa: 'PDUFA Date',
+  adcomm: 'Advisory Committee Meeting',
+  phase2_readout: 'Phase 2 Readout',
+  phase3_readout: 'Phase 3 Readout',
+  enrollment_end: 'Enrollment Completion',
+  patent_expiry: 'Patent Expiry',
+  earnings: 'Earnings',
+  other: 'Other Catalyst',
+}
+
+function prettyCatalyst(type) {
+  if (!type) return 'Catalyst'
+  return CATALYST_LABEL[type] || type.replace(/_/g, ' ')
+}
+
 function formatMarketCap(cap) {
   if (!cap) return null
   if (cap >= 1e12) return `$${(cap / 1e12).toFixed(1)}T`
@@ -212,7 +228,7 @@ function CandidateCard({ candidate, expanded, busy, onToggle, onDismiss, onPromo
         </div>
 
         <p className="text-subtle text-xs truncate">
-          {candidate.company_name} · {candidate.catalyst_type?.replace(/_/g, ' ')}
+          {candidate.company_name} · {prettyCatalyst(candidate.catalyst_type)}
         </p>
 
         {flags[0] && (
@@ -222,20 +238,27 @@ function CandidateCard({ candidate, expanded, busy, onToggle, onDismiss, onPromo
 
       {expanded && (
         <div className="px-4 pb-4 border-t border-border">
-          {candidate.catalyst_date && (
-            <div className="mt-3 mb-3">
-              <p className="text-muted text-[10px] uppercase tracking-wider">
-                Catalyst Date
-              </p>
-              <p className="text-white text-sm font-medium">
+          <div className="mt-3 mb-3">
+            <p className="text-muted text-[10px] uppercase tracking-wider">
+              Catalyst
+            </p>
+            <p className="text-white text-sm font-medium">
+              {prettyCatalyst(candidate.catalyst_type)}
+            </p>
+            {candidate.catalyst_date ? (
+              <p className="text-subtle text-xs mt-0.5">
                 {new Date(candidate.catalyst_date).toLocaleDateString('en-US', {
                   month: 'long',
                   day: 'numeric',
                   year: 'numeric',
                 })}
               </p>
-            </div>
-          )}
+            ) : (
+              <p className="text-muted text-xs mt-0.5 italic">
+                Date not parsed — review filing
+              </p>
+            )}
+          </div>
 
           {flags.length > 0 && (
             <div className="mb-3">

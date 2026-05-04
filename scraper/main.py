@@ -153,6 +153,30 @@ def main() -> None:
                 errors.append(f"trial scoring: {exc}")
 
         scored.sort(key=lambda x: x["score"], reverse=True)
+        # Market-cap-weighted re-scoring: the strategy is micro-cap
+        # biotech, but big sponsors run more+bigger trials and so
+        # disproportionately trip signals like "31 sites terminated".
+        # Bias smaller sponsors up, mega-caps down. Only enrich the
+        # top 30 by raw score to cap the yfinance load.
+        for sd in scored[:30]:
+            tk = sd.get("ticker") or resolve_ticker(sd.get("sponsor", ""), ticker_map)
+            sd["ticker"] = tk
+            cap = market_cap_for(tk) if tk else None
+            sd["market_cap"] = cap
+            if cap is None:
+                continue
+            if cap < 2_000_000_000:
+                sd["score"] = min(10, sd["score"] + 2)
+                sd.setdefault("flags", []).append("Micro-cap — catalyst is material to parent")
+            elif cap < 10_000_000_000:
+                pass  # baseline; small/mid-cap is the sweet spot too
+            elif cap < 100_000_000_000:
+                sd["score"] = max(0, sd["score"] - 2)
+            else:
+                sd["score"] = max(0, sd["score"] - 4)
+        scored.sort(key=lambda x: x["score"], reverse=True)
+        # Only keep candidates that survived the cap-weighting at >= 5.
+        scored = [sd for sd in scored if sd["score"] >= 5]
         all_candidates.extend(scored[:10])
 
         log_scanner_run(
@@ -238,14 +262,17 @@ def main() -> None:
         errors.append(msg)
 
     # ─── Claude analysis of top candidates ──────────────────────────
-    print(f"Analyzing top {min(5, len(all_candidates))} candidates with Claude...")
+    print(f"Analyzing top {min(10, len(all_candidates))} candidates with Claude...")
     analyzed: list[dict[str, Any]] = []
-    for candidate in all_candidates[:5]:
+    for candidate in all_candidates[:10]:
         try:
             sponsor = candidate.get("sponsor", "")
+            # ticker + market_cap should already be set by the cap-weighted
+            # scoring loop above; only resolve as fallback.
             ticker = candidate.get("ticker") or resolve_ticker(sponsor, ticker_map)
-            candidate["ticker"] = ticker  # so the analyzer + raw_data echo it
-            candidate["market_cap"] = market_cap_for(ticker)
+            candidate["ticker"] = ticker
+            if "market_cap" not in candidate:
+                candidate["market_cap"] = market_cap_for(ticker)
 
             analysis = analyze_scanner_candidate(candidate)
             candidate["claude_analysis"] = analysis
