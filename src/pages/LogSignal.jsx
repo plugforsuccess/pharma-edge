@@ -203,9 +203,8 @@ export default function LogSignal() {
         ))}
       </div>
 
-      {step === 1 && (
-        <div className="space-y-4">
-          <h2 className="text-white font-semibold">Company &amp; Catalyst</h2>
+      <div className={clsx('space-y-4', step !== 1 && 'hidden')}>
+        <h2 className="text-white font-semibold">Company &amp; Catalyst</h2>
           <Input
             label="Ticker"
             value={form.ticker}
@@ -321,12 +320,10 @@ export default function LogSignal() {
           >
             Next: Analyze Filing
           </button>
-        </div>
-      )}
+      </div>
 
-      {step === 2 && (
-        <div className="space-y-4">
-          <h2 className="text-white font-semibold">Filing Analysis</h2>
+      <div className={clsx('space-y-4', step !== 2 && 'hidden')}>
+        <h2 className="text-white font-semibold">Filing Analysis</h2>
           <p className="text-subtle text-xs">
             Paste public filing text for Claude to analyze, or write your thesis manually. Analysis
             results will fill in your thesis only if it's empty.
@@ -409,11 +406,9 @@ export default function LogSignal() {
               Next: Checklist
             </button>
           </div>
-        </div>
-      )}
+      </div>
 
-      {step === 3 && (
-        <div className="space-y-4">
+      <div className={clsx('space-y-4', step !== 3 && 'hidden')}>
           <div>
             <h2 className="text-white font-semibold">Pre-Trade Checklist</h2>
             <p className="text-subtle text-xs mt-1">All 10 must be checked to proceed</p>
@@ -468,12 +463,10 @@ export default function LogSignal() {
               Next: Confirm
             </button>
           </div>
-        </div>
-      )}
+      </div>
 
-      {step === 4 && (
-        <div className="space-y-4">
-          <h2 className="text-white font-semibold">Confirm Signal</h2>
+      <div className={clsx('space-y-4', step !== 4 && 'hidden')}>
+        <h2 className="text-white font-semibold">Confirm Signal</h2>
 
           <div className="bg-card border border-border rounded-xl p-4 space-y-3">
             <Row label="Ticker" value={form.ticker} />
@@ -526,8 +519,7 @@ export default function LogSignal() {
               {loading ? 'Logging…' : '🔒 Lock & Log Signal'}
             </button>
           </div>
-        </div>
-      )}
+      </div>
     </div>
   )
 }
