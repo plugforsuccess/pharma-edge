@@ -24,15 +24,19 @@ def fetch_upcoming_readouts(days_ahead: int = 120) -> list[dict[str, Any]]:
     end_date = (datetime.utcnow() + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
     today = datetime.utcnow().strftime("%Y-%m-%d")
 
-    # CT.gov v2 is strict: a single unrecognised field name 400s the
-    # whole request, and aggFilters value formats vary across builds.
-    # Strategy: fetch with the absolute-minimum field list that v2 has
-    # always honoured, no phase filter at the API level, and filter
-    # for Phase 2/3 in score_trial() against the returned `phases`
-    # array. We over-fetch slightly but the request actually succeeds.
+    # CT.gov v2 only exposes a small fixed set of `filter.*` params:
+    # overallStatus, geo, ids, advanced, synonyms. There is no
+    # `filter.primaryCompletionDate` — date ranges go through
+    # `filter.advanced` using Essie syntax. Phase is also expressed
+    # there rather than at the API top level. We still re-check phase
+    # in score_trial() against the returned `phases` array.
+    advanced = (
+        f"AREA[PrimaryCompletionDate]RANGE[{today},{end_date}]"
+        " AND AREA[Phase](PHASE2 OR PHASE3)"
+    )
     params: dict[str, Any] = {
         "filter.overallStatus": "ACTIVE_NOT_RECRUITING,RECRUITING",
-        "filter.primaryCompletionDate": f"{today},{end_date}",
+        "filter.advanced": advanced,
         "fields": (
             "NCTId,BriefTitle,OverallStatus,Phase,"
             "PrimaryCompletionDate,LeadSponsorName,EnrollmentCount"
