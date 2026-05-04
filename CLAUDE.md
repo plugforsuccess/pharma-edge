@@ -7,22 +7,29 @@
 
 ## Status
 
-**Week 1 schema + Week 2 frontend + Week 3 analyze-signal edge function + Week 4 outcome logging & track record + Week 5 scraper deployed (2026-05-03).**
+**Week 1 schema + Week 2 frontend + Week 3 analyze-signal edge function + Week 4 outcome logging & track record + Week 5 scraper + Week 6 alerts deployed (2026-05-03).**
 
 **Database (`rghoynbaykeyjbhqmaff`):** 7 tables (`profiles`, `watchlist`, `signals`, `outcomes`, `scanner_runs`, `alerts`, `scanner_candidates`), `public_record` view, RLS, immutability + server-side hash triggers. `outcomes` is 1:1 with `signals` (UNIQUE constraint). `scanner_candidates` is a shared review queue: scraper inserts via service role; authenticated users SELECT all and UPDATE only candidates that are unclaimed or that they previously claimed. All Supabase advisor security lints clean.
 
 **Frontend:** Vite + React + Tailwind v4 PWA. Built: `Login` (with email-confirmation flow), `Dashboard` (with explicit `user_id` filter, separate count query for stats), `SignalDetail` (with `maybeSingle`, formatted market cap, hash badge, `LogOutcomeModal` + `StopLossCheck` wired in), `LogSignal` (4-step flow with checklist + Claude prefill), `TrackRecord` (win-rate stats, signal-type performance, rules-discipline view, filter tabs), `Rules` (account-size calculator + 6 sections), `Settings` (with sign-out). Stub: `Calendar`. Components: `AnalyzeFilingPanel`, `LogOutcomeModal` (3-step, no client hash, surfaces unique-violation), `StopLossCheck` (manual decision tool; persists as `alerts` row with `alert_type='stop_loss_triggered'`), `ErrorBoundary`. Plus env-var guard in `supabase.js`, SHA-256 verifier (`utils/hash.js`) matching the DB triggers, timezone-safe `daysUntil` helper, service worker (production-only registration), iOS safe-area handling.
 
-**Edge functions:** `analyze-signal` deployed (`verify_jwt=true`). Pure analysis endpoint — calls Claude Sonnet 4.6, returns structured JSON, never writes to `signals` (avoids IDOR via `signal_id`). Hardened: caller JWT verified, 200–50,000 char filing-text bounds, 50s timeout, `stop_reason` truncation check, robust JSON extraction. **Requires `ANTHROPIC_API_KEY` secret to actually serve traffic** — set via `supabase secrets set ANTHROPIC_API_KEY=… --project-ref rghoynbaykeyjbhqmaff`.
+**Edge functions:**
+- `analyze-signal` (`verify_jwt=true`). Pure analysis endpoint — calls Claude Sonnet 4.6, returns structured JSON, never writes to `signals` (avoids IDOR via `signal_id`). Hardened: caller JWT verified, 200–50,000 char filing-text bounds, 50s timeout, `stop_reason` truncation check, robust JSON extraction. **Requires `ANTHROPIC_API_KEY`** — `supabase secrets set ANTHROPIC_API_KEY=… --project-ref rghoynbaykeyjbhqmaff`.
+- `send-alerts` (`verify_jwt=true`, **service-role-only**). Decodes the JWT and rejects anything that isn't `role: service_role`, so a logged-in user can't fan out emails to arbitrary `user_id` on your Resend budget. Handles `catalyst_approaching_14d` / `catalyst_approaching_7d` / `catalyst_tomorrow` / `outcome_reminder`. **Daily digest is NOT here** — it stays in `scraper/main.py`. **Requires `RESEND_API_KEY`, `APP_URL`** (and optional `RESEND_FROM` to override `onboarding@resend.dev`).
 
-**Scraper:** Python 3.11 in `scraper/`. ClinicalTrials.gov v2 API (Phase 2/3 readouts in next 120 days), FDA press-release RSS, SEC EDGAR full-text search (8-K + S-3). Scores trials 0–10 on phase, enrollment size, endpoint count, site terminations, protocol amendments. Top 5 scored candidates pass through Claude Sonnet 4.6 for preliminary thesis + flags, then land in `scanner_candidates`. Daily Resend digest to `ALERT_EMAIL`. Triggered by `.github/workflows/daily-scan.yml` on `0 12 * * *` cron (= 7am ET in standard time, **8am ET during DST**) plus `workflow_dispatch`. Required GitHub Actions secrets: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `ANTHROPIC_API_KEY`, `RESEND_API_KEY`, `ALERT_EMAIL`, `SEC_USER_AGENT`. Best-effort caveats (won't crash, just return empty): FDA PDUFA / AdComm scrapers depend on FDA page structure; CT.gov v2 has no public protocol-history endpoint so `check_protocol_amendments` is a stub.
+**Scraper:** Python 3.11 in `scraper/`. ClinicalTrials.gov v2 API (Phase 2/3 readouts in next 120 days), FDA press-release RSS, SEC EDGAR full-text search (8-K + S-3). Scores trials 0–10 on phase, enrollment size, endpoint count, site terminations, protocol amendments. Top 5 scored candidates pass through Claude Sonnet 4.6 for preliminary thesis + flags, then land in `scanner_candidates`. Daily Resend digest to `ALERT_EMAIL`. Triggered by `.github/workflows/daily-scan.yml` on `0 12 * * *` cron (= 7am ET standard, **8am ET during DST**) plus `workflow_dispatch`. Required GitHub Actions secrets: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `ANTHROPIC_API_KEY`, `RESEND_API_KEY`, `ALERT_EMAIL`, `SEC_USER_AGENT`. Best-effort caveats (won't crash, just return empty): FDA PDUFA / AdComm scrapers depend on FDA page structure; CT.gov v2 has no public protocol-history endpoint so `check_protocol_amendments` is a stub.
+
+**Catalyst alert worker:** `scraper/send_alerts.py` invoked by `.github/workflows/send-catalyst-alerts.yml` on `0 13 * * *` (= 8am ET standard, 9am ET DST). For each active signal it computes `(catalyst_date - today)` and calls the `send-alerts` edge function with the right `alert_type` (14d / 7d / 1d / outcome reminder day-after). Idempotent: skips if `(signal_id, alert_type)` already in `alerts`. Required secrets: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`.
+
+**In-app notifications:** `NotificationCenter` in the dashboard header subscribes to `alerts` realtime (per-user channel `alerts:${user.id}`), shows a 20-row dropdown with unread badge, marks read on open. PWA service worker has `push` + `notificationclick` handlers wired but **server-side push delivery is not built** — `push_subscriptions` table + `web-push` + VAPID private key remain TODO. `subscribeToPush` in `src/utils/pwa.js` will succeed in the browser but the subscription is never persisted, so no push will arrive until that backlog is shipped.
 
 **Still pending (design spec):**
 - PWA icon binaries (`public/icon-192.png`, `public/icon-512.png`)
-- Edge functions: `send-alerts`, `kalshi-analysis`
+- Edge function: `kalshi-analysis`
 - `pharma-edge-public-record` GitHub repo for hash anchoring (Week 7)
-- `anchor-signals.yml` and `send-catalyst-alerts.yml` workflows (only `daily-scan.yml` shipped)
-- Components from CLAUDE.md not yet built: `NotificationCenter`, `InstallPrompt`, `PaperTradingStatus`, `StrikePriceCalculator`, `KalshiMarketPanel`, `CombinedPnlStats`
+- `anchor-signals.yml` workflow (Week 7)
+- Server-side push delivery: `push_subscriptions` table + `web-push` library + VAPID private key wired into `send-alerts`
+- Components from CLAUDE.md not yet built: `InstallPrompt`, `PaperTradingStatus`, `StrikePriceCalculator`, `KalshiMarketPanel`, `CombinedPnlStats`
 - Pages from CLAUDE.md not yet built: `ScannerCandidates` (the queue exists in DB; the review UI doesn't yet), `OptionCalculator`, `PublicRecord`
 - `useStopLossMonitor` hook (`StopLossCheck` is currently a manual tool — auto-trigger needs live option price data)
 - Future tables: `kalshi_positions`, `combined_pnl` view (Week 7+)
@@ -549,4 +556,4 @@ Questions about business logic, trading rules, or strategy decisions go to Camer
 ---
 
 *Last updated: 2026-05-03*
-*Status: Weeks 1–5 deployed (schema, frontend, analyze-signal, outcome logging, track record, scraper); send-alerts/kalshi-analysis edge functions, ScannerCandidates UI, and Week 6+ components pending*
+*Status: Weeks 1–6 deployed (schema, frontend, analyze-signal, outcome logging, track record, scraper, send-alerts + catalyst-alert worker + NotificationCenter); kalshi-analysis edge function, ScannerCandidates UI, server-side push delivery, and Week 7+ components pending*

@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Bell, Plus } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { daysUntil } from '../utils/dates'
 import { signalColor, catalystLabel, directionLabel } from '../lib/design'
+import NotificationCenter from '../components/NotificationCenter'
 import clsx from 'clsx'
 
 export default function Dashboard() {
@@ -67,14 +68,7 @@ export default function Dashboard() {
             })}
           </p>
         </div>
-        <button
-          aria-label="Notifications"
-          className="w-9 h-9 bg-card border border-border rounded-xl
-                     flex items-center justify-center text-zinc-400 hover:text-white
-                     transition-colors"
-        >
-          <Bell size={16} />
-        </button>
+        <NotificationCenter />
       </div>
 
       <div className="grid grid-cols-4 gap-2 mb-6">
