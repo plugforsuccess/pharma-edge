@@ -7,24 +7,29 @@
 
 ## Status
 
-**Week 1 schema + Week 2 frontend + Week 3 analyze-signal edge function + Week 4 outcome logging & track record deployed (2026-05-03).**
+**Week 1 schema + Week 2 frontend + Week 3 analyze-signal edge function + Week 4 outcome logging & track record + Week 5 scraper deployed (2026-05-03).**
 
-**Database (`rghoynbaykeyjbhqmaff`):** 6 tables (`profiles`, `watchlist`, `signals`, `outcomes`, `scanner_runs`, `alerts`), `public_record` view, RLS, immutability + server-side hash triggers. `outcomes` is 1:1 with `signals` (UNIQUE constraint). All Supabase advisor security lints clean.
+**Database (`rghoynbaykeyjbhqmaff`):** 7 tables (`profiles`, `watchlist`, `signals`, `outcomes`, `scanner_runs`, `alerts`, `scanner_candidates`), `public_record` view, RLS, immutability + server-side hash triggers. `outcomes` is 1:1 with `signals` (UNIQUE constraint). `scanner_candidates` is a shared review queue: scraper inserts via service role; authenticated users SELECT all and UPDATE only candidates that are unclaimed or that they previously claimed. All Supabase advisor security lints clean.
 
 **Frontend:** Vite + React + Tailwind v4 PWA. Built: `Login` (with email-confirmation flow), `Dashboard` (with explicit `user_id` filter, separate count query for stats), `SignalDetail` (with `maybeSingle`, formatted market cap, hash badge, `LogOutcomeModal` + `StopLossCheck` wired in), `LogSignal` (4-step flow with checklist + Claude prefill), `TrackRecord` (win-rate stats, signal-type performance, rules-discipline view, filter tabs), `Rules` (account-size calculator + 6 sections), `Settings` (with sign-out). Stub: `Calendar`. Components: `AnalyzeFilingPanel`, `LogOutcomeModal` (3-step, no client hash, surfaces unique-violation), `StopLossCheck` (manual decision tool; persists as `alerts` row with `alert_type='stop_loss_triggered'`), `ErrorBoundary`. Plus env-var guard in `supabase.js`, SHA-256 verifier (`utils/hash.js`) matching the DB triggers, timezone-safe `daysUntil` helper, service worker (production-only registration), iOS safe-area handling.
 
 **Edge functions:** `analyze-signal` deployed (`verify_jwt=true`). Pure analysis endpoint — calls Claude Sonnet 4.6, returns structured JSON, never writes to `signals` (avoids IDOR via `signal_id`). Hardened: caller JWT verified, 200–50,000 char filing-text bounds, 50s timeout, `stop_reason` truncation check, robust JSON extraction. **Requires `ANTHROPIC_API_KEY` secret to actually serve traffic** — set via `supabase secrets set ANTHROPIC_API_KEY=… --project-ref rghoynbaykeyjbhqmaff`.
 
+**Scraper:** Python 3.11 in `scraper/`. ClinicalTrials.gov v2 API (Phase 2/3 readouts in next 120 days), FDA press-release RSS, SEC EDGAR full-text search (8-K + S-3). Scores trials 0–10 on phase, enrollment size, endpoint count, site terminations, protocol amendments. Top 5 scored candidates pass through Claude Sonnet 4.6 for preliminary thesis + flags, then land in `scanner_candidates`. Daily Resend digest to `ALERT_EMAIL`. Triggered by `.github/workflows/daily-scan.yml` on `0 12 * * *` cron (= 7am ET in standard time, **8am ET during DST**) plus `workflow_dispatch`. Required GitHub Actions secrets: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `ANTHROPIC_API_KEY`, `RESEND_API_KEY`, `ALERT_EMAIL`, `SEC_USER_AGENT`. Best-effort caveats (won't crash, just return empty): FDA PDUFA / AdComm scrapers depend on FDA page structure; CT.gov v2 has no public protocol-history endpoint so `check_protocol_amendments` is a stub.
+
 **Still pending (design spec):**
 - PWA icon binaries (`public/icon-192.png`, `public/icon-512.png`)
 - Edge functions: `send-alerts`, `kalshi-analysis`
-- Scraper (`scraper/`) and GitHub Actions workflows
-- `pharma-edge-public-record` GitHub repo for hash anchoring
+- `pharma-edge-public-record` GitHub repo for hash anchoring (Week 7)
+- `anchor-signals.yml` and `send-catalyst-alerts.yml` workflows (only `daily-scan.yml` shipped)
 - Components from CLAUDE.md not yet built: `NotificationCenter`, `InstallPrompt`, `PaperTradingStatus`, `StrikePriceCalculator`, `KalshiMarketPanel`, `CombinedPnlStats`
-- Pages from CLAUDE.md not yet built: `ScannerCandidates`, `OptionCalculator`, `PublicRecord`
+- Pages from CLAUDE.md not yet built: `ScannerCandidates` (the queue exists in DB; the review UI doesn't yet), `OptionCalculator`, `PublicRecord`
 - `useStopLossMonitor` hook (`StopLossCheck` is currently a manual tool — auto-trigger needs live option price data)
-- Future tables: `scanner_candidates`, `kalshi_positions`, `combined_pnl` view (Week 5+)
+- Future tables: `kalshi_positions`, `combined_pnl` view (Week 7+)
 - Per-user rate limit on `analyze-signal` (auth-only is in place; `claude_calls` table TODO when multi-user)
+- FDA PDUFA / AdComm scrapers are best-effort against FDA page structure; replace with a structured data source when available
+- CT.gov v2 protocol-history fetcher is a stub (no public endpoint)
+- Resend `onboarding@resend.dev` sender works only for the Resend account owner — switch to a verified custom domain before opening signups
 
 Treat file paths and component names from the unimplemented sections as the build contract, not as things you can import.
 
@@ -544,4 +549,4 @@ Questions about business logic, trading rules, or strategy decisions go to Camer
 ---
 
 *Last updated: 2026-05-03*
-*Status: Weeks 1–4 deployed (schema, frontend, analyze-signal, outcome logging, track record); send-alerts/kalshi-analysis edge functions, scraper, and Week 5+ components pending*
+*Status: Weeks 1–5 deployed (schema, frontend, analyze-signal, outcome logging, track record, scraper); send-alerts/kalshi-analysis edge functions, ScannerCandidates UI, and Week 6+ components pending*
