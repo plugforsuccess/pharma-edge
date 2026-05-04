@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Bell, BellOff, Check, Copy, ExternalLink, LogOut } from 'lucide-react'
+import { Bell, BellOff, Check, Copy, ExternalLink, Link2, LogOut } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import {
@@ -164,6 +164,8 @@ export default function Settings() {
       </Section>
 
       <PushSection userId={user?.id} />
+
+      <BrokerSection />
 
       <Section title="Risk Management">
         <Input
@@ -403,6 +405,105 @@ function PushSection({ userId }) {
         )}
       </div>
       {feedback && <p className="text-subtle text-xs">{feedback}</p>}
+    </Section>
+  )
+}
+
+function BrokerSection() {
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState(null)
+  const [error, setError] = useState('')
+
+  async function testConnection() {
+    setBusy(true)
+    setError('')
+    setResult(null)
+    try {
+      const { data, error: fnError } = await supabase.functions.invoke('get-account')
+      if (fnError) throw fnError
+      if (!data?.success) {
+        setError(data?.error || 'Connection failed')
+      } else {
+        setResult(data)
+      }
+    } catch (e) {
+      setError(e.message || 'Request failed')
+    }
+    setBusy(false)
+  }
+
+  return (
+    <Section title="Broker Connection (Tastytrade)">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1">
+          <p className="text-white text-sm font-medium">Test connection</p>
+          <p className="text-subtle text-xs mt-0.5">
+            Calls <span className="font-mono">get-account</span>. Lists accounts the bot's
+            credentials can see. Sandbox base URL by default — switch only after 90 days of
+            paper.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={testConnection}
+          disabled={busy}
+          className="flex items-center gap-2 bg-red-600 hover:bg-red-500 disabled:bg-red-950
+                     text-white text-sm font-semibold rounded-xl px-3 py-2 transition-colors"
+        >
+          <Link2 size={14} />
+          {busy ? 'Testing…' : 'Test'}
+        </button>
+      </div>
+
+      {error && (
+        <div className="bg-red-950/30 border border-red-900/50 rounded-lg p-3">
+          <p className="text-red-400 text-xs break-all" role="alert">
+            {error}
+          </p>
+        </div>
+      )}
+
+      {result && (
+        <div className="bg-bg border border-border rounded-xl p-3">
+          <p className="text-muted text-[10px] uppercase tracking-wider mb-2">
+            Accounts ({result.accounts?.length ?? 0})
+          </p>
+          {(!result.accounts || result.accounts.length === 0) && (
+            <p className="text-subtle text-xs">
+              No accounts returned. Add a customer profile in the Tastytrade sandbox
+              dashboard (developer.tastytrade.com/sandbox) before this returns data.
+            </p>
+          )}
+          <div className="space-y-2">
+            {(result.accounts ?? []).map((acc) => (
+              <div
+                key={acc.account_number}
+                className="flex items-center justify-between text-xs font-mono"
+              >
+                <div>
+                  <p className="text-white">{acc.account_number}</p>
+                  <p className="text-muted text-[10px]">{acc.account_type ?? 'account'}</p>
+                </div>
+                <div className="text-right">
+                  <p
+                    className={
+                      acc.is_paper ? 'text-yellow-400 text-[10px]' : 'text-red-400 text-[10px]'
+                    }
+                  >
+                    {acc.is_paper ? 'PAPER' : 'LIVE'}
+                  </p>
+                  <p className="text-zinc-400">
+                    NL ${Number(acc.net_liquidating_value || 0).toLocaleString()}
+                  </p>
+                  <p className="text-muted text-[10px]">
+                    BP ${Number(acc.buying_power || 0).toLocaleString()}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </Section>
   )
 }
