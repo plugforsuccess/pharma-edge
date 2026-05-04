@@ -161,12 +161,18 @@ export default function LogSignal() {
       return
     }
 
-    // If this signal was promoted from a scanner candidate, link them so the
-    // queue's audit trail (`promoted_to_signal`) reflects the new row.
+    // If this signal was promoted from a scanner candidate, link + claim
+    // it now (only after the signal actually inserted — pre-claiming on
+    // navigate meant a back-out silently lost the candidate from the queue).
     if (candidateId) {
       await supabase
         .from('scanner_candidates')
-        .update({ promoted_to_signal: data.id })
+        .update({
+          promoted_to_signal: data.id,
+          reviewed: true,
+          reviewed_by: user.id,
+          reviewed_at: new Date().toISOString(),
+        })
         .eq('id', candidateId)
     }
 
