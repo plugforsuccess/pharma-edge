@@ -73,12 +73,18 @@ def _scan_ctgov(item: dict[str, Any]) -> list[dict[str, Any]]:
     company = (item.get('company_name') or '').strip()
     if not company:
         return []
+    # Watchlist context: user explicitly cares about this ticker, so
+    # surface anything recent including completed/terminated trials
+    # where a readout may be the catalyst itself.
     today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
     end = (datetime.now(timezone.utc) + timedelta(days=CT_LOOKBACK_DAYS)).strftime('%Y-%m-%d')
+    past = (datetime.now(timezone.utc) - timedelta(days=180)).strftime('%Y-%m-%d')
     params = {
         'query.term': company,
-        'filter.overallStatus': 'ACTIVE_NOT_RECRUITING,RECRUITING',
-        'filter.primaryCompletionDate': f'{today},{end}',
+        'filter.overallStatus': 'ACTIVE_NOT_RECRUITING,RECRUITING,COMPLETED,TERMINATED',
+        'filter.primaryCompletionDate': f'{past},{end}',
+        # Stick to fields we actually use; v2 rejects the whole request
+        # if any field name is invalid.
         'fields': (
             'NCTId,BriefTitle,Phase,OverallStatus,PrimaryCompletionDate,'
             'EnrollmentCount,LeadSponsorName,WhyStopped'
@@ -158,10 +164,18 @@ def _scan_sec(item: dict[str, Any]) -> list[dict[str, Any]]:
         return []
 
     hits: list[dict[str, Any]] = []
-    for hit in body.get('hits', {}).get('hits', [])[:5]:
+    company_lower = (company or '').lower()
+    for hit in body.get('hits', {}).get('hits', [])[:10]:
         src = hit.get('_source') or {}
-        tickers = src.get('tickers') or []
-        if ticker not in [t.upper() for t in tickers]:
+        tickers = [t.upper() for t in (src.get('tickers') or [])]
+        entity_name = str(src.get('entity_name') or '').lower()
+        # Match if SEC returned the ticker explicitly OR the entity
+        # name contains the company we're tracking. SEC FTS sometimes
+        # omits the tickers array entirely; without this fallback we'd
+        # silently miss every filing.
+        ticker_match = ticker in tickers
+        company_match = bool(company_lower) and company_lower in entity_name
+        if not ticker_match and not company_match:
             continue
         file_path = src.get('file_path', '')
         if not file_path:
