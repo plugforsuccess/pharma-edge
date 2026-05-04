@@ -37,6 +37,7 @@ from scrapers.fda_calendar import (
     fetch_fda_press_releases,
     fetch_pdufa_dates,
 )
+from scrapers.market_cap import market_cap_for
 from scrapers.pdufa_8k import fetch_pdufa_8k
 from scrapers.sec_edgar import (
     fetch_biotech_8k,
@@ -53,6 +54,14 @@ REQUIRED_ENVS = (
     "ANTHROPIC_API_KEY",
     "SEC_USER_AGENT",
 )
+
+
+def _is_dedup_violation(exc: Exception) -> bool:
+    """Postgres unique-violation (23505). The dedup partial indexes fire
+    on every cron run when prior runs' candidates re-appear; surfacing
+    those as `errors` in the scan log is misleading."""
+    msg = str(exc)
+    return "23505" in msg or "duplicate key" in msg.lower()
 
 
 def preflight() -> None:
@@ -236,6 +245,7 @@ def main() -> None:
             sponsor = candidate.get("sponsor", "")
             ticker = candidate.get("ticker") or resolve_ticker(sponsor, ticker_map)
             candidate["ticker"] = ticker  # so the analyzer + raw_data echo it
+            candidate["market_cap"] = market_cap_for(ticker)
 
             analysis = analyze_scanner_candidate(candidate)
             candidate["claude_analysis"] = analysis
@@ -258,11 +268,15 @@ def main() -> None:
                     "claude_analysis": analysis,  # JSONB — pass dict, not string
                     "source": "clinicaltrials",
                     "nct_id": candidate.get("nct_id", ""),
+                    "market_cap": candidate["market_cap"],
                     "raw_data": candidate,        # JSONB — pass dict, not string
                 },
             )
         except Exception as exc:
-            errors.append(f"claude analysis / candidate insert: {exc}")
+            if _is_dedup_violation(exc):
+                print(f"  dedup skip (ct.gov nct={candidate.get('nct_id')})")
+            else:
+                errors.append(f"claude analysis / candidate insert: {exc}")
 
     # ─── PDUFA from 8-Ks ────────────────────────────────────────────
     # Free replacement for the dead FDA Step-4 PDUFA tracker. Companies
@@ -277,8 +291,9 @@ def main() -> None:
         for hit in pdufa_hits[:5]:
             try:
                 hit_ticker = hit["ticker"] or resolve_ticker(
-                    hit["company_name"], ticker_map
+                    hit["company_name"], ticker_map, cik=hit.get("cik", "")
                 )
+                cap = market_cap_for(hit_ticker)
                 base = {
                     "ticker": hit_ticker,
                     "company_name": hit["company_name"],
@@ -286,6 +301,7 @@ def main() -> None:
                     "catalyst_date": hit["pdufa_date"],
                     "source": "sec_edgar",
                     "flags": hit["flags"],
+                    "market_cap": cap,
                     "raw_data": {
                         "filing_url": hit["filing_url"],
                         "file_date": hit["file_date"],
@@ -306,7 +322,10 @@ def main() -> None:
                 )
                 pdufa_candidates += 1
             except Exception as exc:
-                errors.append(f"pdufa 8-k insert: {exc}")
+                if _is_dedup_violation(exc):
+                    print(f"  dedup skip (pdufa {hit.get('filing_url')})")
+                else:
+                    errors.append(f"pdufa 8-k insert: {exc}")
 
         log_scanner_run(
             supabase,
@@ -335,10 +354,15 @@ def main() -> None:
         for filing in filings_8k:
             t = (filing.get("ticker") or "").upper()
             if not t:
-                t = resolve_ticker(filing.get("company", ""), ticker_map)
+                t = resolve_ticker(
+                    filing.get("company", ""),
+                    ticker_map,
+                    cik=str(filing.get("cik", "")),
+                )
             if not t:
                 continue
             enriched.append({**filing, "ticker": t})
+        print(f"  {len(enriched)} of {len(filings_8k)} 8-K filings have a resolvable ticker")
 
         eight_k_candidates = 0
         for filing in enriched[:5]:
@@ -350,6 +374,7 @@ def main() -> None:
                     "catalyst_date": filing.get("filed_at", ""),
                     "source": "sec_edgar",
                     "flags": [f"Recent {filing.get('form_type', '8-K')} filing"],
+                    "market_cap": market_cap_for(filing["ticker"]),
                     "raw_data": {
                         "filing_url": filing.get("filing_url", ""),
                         "file_date": filing.get("filed_at", ""),
@@ -370,7 +395,10 @@ def main() -> None:
                 )
                 eight_k_candidates += 1
             except Exception as exc:
-                errors.append(f"8-K candidate insert: {exc}")
+                if _is_dedup_violation(exc):
+                    print(f"  dedup skip (8-k {filing.get('filing_url')})")
+                else:
+                    errors.append(f"8-K candidate insert: {exc}")
         print(f"  inserted {eight_k_candidates} 8-K candidates")
         scan_log["results"]["sec"]["candidates"] = eight_k_candidates
     except Exception as exc:

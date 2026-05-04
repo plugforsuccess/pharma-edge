@@ -39,15 +39,17 @@ def _headers() -> dict[str, str]:
 
 
 def fetch_pdufa_8k(days_back: int = 14) -> list[dict[str, Any]]:
-    """Return [{ticker, company_name, pdufa_date, filing_url, file_date,
+    """Return [{ticker, company_name, cik, pdufa_date, filing_url, file_date,
     excerpt, flags}] for every 8-K in the window that mentions a PDUFA
     action/goal/target date. `pdufa_date` may be None if the filing
     references PDUFA but our regex couldn't lock onto a date — in that
     case the candidate still goes through with a 'review filing' flag
     so the user gets a pointer instead of a silent miss."""
     since = (datetime.utcnow() - timedelta(days=days_back)).strftime("%Y-%m-%d")
+    # Single broad term is more reliable than OR-of-quoted-phrases against
+    # EDGAR FTS — the body-level regex below filters non-matches anyway.
     params = {
-        "q": '"PDUFA action date" OR "PDUFA goal date" OR "PDUFA target date"',
+        "q": "PDUFA",
         "dateRange": "custom",
         "startdt": since,
         "forms": "8-K",
@@ -60,8 +62,11 @@ def fetch_pdufa_8k(days_back: int = 14) -> list[dict[str, Any]]:
         print(f"  fetch_pdufa_8k: {exc}")
         return []
 
+    raw_hits = body.get("hits", {}).get("hits", []) or []
+    print(f"  fetch_pdufa_8k: {len(raw_hits)} raw 8-K hits before regex")
+
     out: list[dict[str, Any]] = []
-    for hit in body.get("hits", {}).get("hits", [])[:30]:
+    for hit in raw_hits[:30]:
         src = hit.get("_source") or {}
         file_path = src.get("file_path", "")
         if not file_path:
@@ -69,6 +74,7 @@ def fetch_pdufa_8k(days_back: int = 14) -> list[dict[str, Any]]:
         tickers = src.get("tickers") or []
         ticker = tickers[0].upper() if tickers else ""
         company = src.get("entity_name", "") or ""
+        cik = str(src.get("entity_id", "") or "")
         filing_url = f"https://www.sec.gov/Archives/edgar/{file_path}"
         pdufa_date, excerpt = _extract_pdufa_date(filing_url)
 
@@ -82,6 +88,7 @@ def fetch_pdufa_8k(days_back: int = 14) -> list[dict[str, Any]]:
             {
                 "ticker": ticker,
                 "company_name": company,
+                "cik": cik,
                 "pdufa_date": pdufa_date,
                 "filing_url": filing_url,
                 "file_date": src.get("file_date", ""),

@@ -46,44 +46,70 @@ def _headers() -> dict[str, str]:
     return {"User-Agent": ua, "Accept-Encoding": "gzip, deflate"}
 
 
-def load_ticker_map() -> dict[str, str]:
-    """Fetch SEC's company_tickers.json once and build a normalized
-    company-name → ticker map. Returns {} on failure (caller should
-    fall back to leaving ticker empty)."""
+def load_ticker_map() -> dict[str, dict]:
+    """Fetch SEC's company_tickers.json once and build two lookup tables:
+      - by_cik:  int CIK → ticker (authoritative when we have CIK)
+      - by_name: normalized title → ticker (fallback for sponsor names
+                 that don't carry a CIK, e.g. CT.gov data)
+    Returns {'by_cik': {}, 'by_name': {}} on failure."""
     try:
         resp = requests.get(EDGAR_TICKERS, headers=_headers(), timeout=30)
         resp.raise_for_status()
         data = resp.json()
     except Exception as exc:
         print(f"  load_ticker_map: {exc}")
-        return {}
+        return {"by_cik": {}, "by_name": {}}
 
-    out: dict[str, str] = {}
+    by_cik: dict[int, str] = {}
+    by_name: dict[str, str] = {}
     for row in data.values():
         title = row.get("title", "")
         ticker = row.get("ticker", "")
+        cik_str = row.get("cik_str")
         if not title or not ticker:
             continue
+        ticker_u = ticker.upper()
+        try:
+            by_cik[int(cik_str)] = ticker_u
+        except (TypeError, ValueError):
+            pass
         key = _normalize_company(title)
-        if key and key not in out:
-            out[key] = ticker.upper()
-    return out
+        if key and key not in by_name:
+            by_name[key] = ticker_u
+    return {"by_cik": by_cik, "by_name": by_name}
 
 
-def resolve_ticker(company_name: str, ticker_map: dict[str, str]) -> str:
-    """Best-effort sponsor → ticker. Tries exact normalized match, then
-    a prefix match (for cases like 'Acme Therapeutics, Inc.' → SEC's
-    'Acme Therapeutics Inc')."""
-    if not company_name or not ticker_map:
+def resolve_ticker(
+    company_name: str,
+    ticker_map: dict,
+    cik: str = "",
+) -> str:
+    """Best-effort filer → ticker. Tries CIK first (authoritative when
+    available), then exact normalized name, then a unique prefix match.
+    Returns "" if nothing matches confidently."""
+    if not ticker_map:
+        return ""
+    by_cik = ticker_map.get("by_cik") or {}
+    by_name = ticker_map.get("by_name") or {}
+
+    if cik:
+        try:
+            cik_int = int(cik)
+        except (TypeError, ValueError):
+            cik_int = None
+        if cik_int is not None and cik_int in by_cik:
+            return by_cik[cik_int]
+
+    if not company_name:
         return ""
     key = _normalize_company(company_name)
     if not key:
         return ""
-    if key in ticker_map:
-        return ticker_map[key]
-    # Prefix fallback — only accept if exactly one candidate matches,
-    # otherwise we'd be guessing between e.g. multiple "BIO*" tickers.
-    matches = [t for k, t in ticker_map.items() if k.startswith(key) or key.startswith(k)]
+    if key in by_name:
+        return by_name[key]
+    # Prefix fallback — only accept a single candidate, otherwise we'd be
+    # guessing between e.g. multiple "BIO*" tickers.
+    matches = [t for k, t in by_name.items() if k.startswith(key) or key.startswith(k)]
     if len(matches) == 1:
         return matches[0]
     return ""

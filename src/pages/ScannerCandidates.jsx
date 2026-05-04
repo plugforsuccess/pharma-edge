@@ -135,12 +135,28 @@ export default function ScannerCandidates() {
   )
 }
 
+// Strategy is micro-cap biotech; anything above $10B is generally not
+// actionable on a single Phase 2/3 readout because the catalyst isn't
+// material to the parent's price.
+const MEGA_CAP_THRESHOLD = 10_000_000_000
+
+function formatMarketCap(cap) {
+  if (!cap) return null
+  if (cap >= 1e12) return `$${(cap / 1e12).toFixed(1)}T`
+  if (cap >= 1e9) return `$${(cap / 1e9).toFixed(1)}B`
+  if (cap >= 1e6) return `$${(cap / 1e6).toFixed(0)}M`
+  return `$${cap}`
+}
+
 function CandidateCard({ candidate, expanded, busy, onToggle, onDismiss, onPromote }) {
   const analysis = candidate.claude_analysis ?? null
   const score = candidate.score ?? 0
   const flags = Array.isArray(candidate.flags) ? candidate.flags : []
   const dataGaps = Array.isArray(analysis?.data_gaps) ? analysis.data_gaps : []
   const isWatchlist = candidate.requested_by != null
+  const marketCap = candidate.market_cap ? Number(candidate.market_cap) : null
+  const isMegaCap = marketCap != null && marketCap >= MEGA_CAP_THRESHOLD
+  const marketCapLabel = formatMarketCap(marketCap)
   const scoreClass =
     score >= 8
       ? 'text-red-400 bg-red-950 border-red-800'
@@ -172,6 +188,19 @@ function CandidateCard({ candidate, expanded, busy, onToggle, onDismiss, onPromo
             {isWatchlist && (
               <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border border-yellow-700 bg-yellow-950 text-yellow-400">
                 ⭐ Watchlist
+              </span>
+            )}
+            {isMegaCap && (
+              <span
+                className="text-[10px] font-bold px-2 py-0.5 rounded-full border border-zinc-600 bg-zinc-900 text-zinc-300"
+                title="Mega-cap — single Phase 2/3 readout rarely material to parent stock"
+              >
+                {marketCapLabel} · Mega-cap
+              </span>
+            )}
+            {!isMegaCap && marketCapLabel && (
+              <span className="text-[10px] font-medium px-2 py-0.5 rounded-full border border-border bg-bg text-subtle">
+                {marketCapLabel}
               </span>
             )}
           </div>

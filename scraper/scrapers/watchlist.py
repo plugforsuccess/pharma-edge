@@ -20,6 +20,8 @@ import feedparser
 import requests
 from supabase import Client
 
+from .market_cap import market_cap_for
+
 CTGOV = 'https://clinicaltrials.gov/api/v2/studies'
 EDGAR_FTS = 'https://efts.sec.gov/LATEST/search-index'
 FDA_RSS = (
@@ -310,6 +312,7 @@ def _insert(supabase: Client, user_id: str, hit: dict[str, Any]) -> None:
         'flags': flags,
         'source': hit['source'],
         'nct_id': hit.get('nct_id'),
+        'market_cap': market_cap_for(hit['ticker']),
         'raw_data': hit['raw_data'],
         'requested_by': user_id,
     }
