@@ -1,5 +1,11 @@
 import { useState } from 'react'
-import { Sparkles, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react'
+import {
+  AlertCircle,
+  ChevronDown,
+  ChevronUp,
+  Download,
+  Sparkles,
+} from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import clsx from 'clsx'
 
@@ -20,6 +26,46 @@ export default function AnalyzeFilingPanel({
   const [analysis, setAnalysis] = useState(null)
   const [error, setError] = useState('')
   const [expanded, setExpanded] = useState(true)
+  const [fetching, setFetching] = useState(false)
+  const [fetchInfo, setFetchInfo] = useState('')
+
+  async function fetchFilings() {
+    if (!ticker?.trim()) {
+      setError('Enter a ticker first')
+      return
+    }
+    setFetching(true)
+    setError('')
+    setFetchInfo('')
+    try {
+      const { data, error: fnError } = await supabase.functions.invoke('fetch-filings', {
+        body: { ticker, company_name: companyName },
+      })
+      if (fnError) {
+        let body = null
+        try {
+          body = await fnError.context?.json?.()
+        } catch {
+          /* ignore */
+        }
+        throw new Error(body?.error || fnError.message || 'fetch failed')
+      }
+      if (!data?.success) throw new Error(data?.error || 'fetch failed')
+
+      // Append to existing text rather than clobbering — user may have
+      // typed a manual snippet first.
+      setFilingText((cur) => (cur ? `${cur}\n\n${data.text}` : data.text))
+
+      const c = data.counts || {}
+      const errs = (data.errors || []).join('; ')
+      setFetchInfo(
+        `Pulled ${c.sec ?? 0} SEC · ${c.ctgov ?? 0} CT.gov · ${c.fda ?? 0} FDA${errs ? ` (errors: ${errs})` : ''}`,
+      )
+    } catch (e) {
+      setError(e.message || 'fetch failed')
+    }
+    setFetching(false)
+  }
 
   async function runAnalysis() {
     if (!filingText.trim()) {
@@ -84,9 +130,37 @@ export default function AnalyzeFilingPanel({
           {!analysis ? (
             <>
               <p className="text-subtle text-xs mb-3">
-                Paste text from ClinicalTrials.gov, SEC filings, FDA documents, or any public source.
-                Claude will analyze and score the signal.
+                Auto-fetch a snapshot from CT.gov, SEC EDGAR, and FDA, or paste text from any
+                public source. Edit before analysis. Claude scores the signal.
               </p>
+
+              <div className="flex items-center justify-between mb-3 gap-2">
+                <button
+                  type="button"
+                  onClick={fetchFilings}
+                  disabled={fetching || !ticker?.trim()}
+                  className="flex items-center gap-2 bg-card border border-border hover:border-red-500
+                             disabled:opacity-50 text-white text-xs font-semibold rounded-lg
+                             px-3 py-2 transition-colors"
+                >
+                  {fetching ? (
+                    <>
+                      <div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" />
+                      Fetching…
+                    </>
+                  ) : (
+                    <>
+                      <Download size={12} />
+                      Fetch filings for {ticker || '—'}
+                    </>
+                  )}
+                </button>
+                {fetchInfo && (
+                  <p className="text-subtle text-[10px] text-right flex-1 truncate">
+                    {fetchInfo}
+                  </p>
+                )}
+              </div>
 
               <textarea
                 value={filingText}

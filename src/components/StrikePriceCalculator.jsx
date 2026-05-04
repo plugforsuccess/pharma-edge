@@ -131,6 +131,14 @@ export default function StrikePriceCalculator({
     const calc = {
       structure,
       direction: config.direction,
+      // Inputs surfaced so PlaceOrderPanel can pass them to the order
+      // edge function. Server expects positive numbers; we round to 2
+      // decimal places to match standard option strike granularity.
+      buyStrike: buy.toFixed(2),
+      sellStrike: sell.toFixed(2),
+      premium: prem.toFixed(2),
+      expiry,
+      stockPrice: price.toFixed(2),
       spreadWidth: spreadWidth.toFixed(2),
       maxGainPerContract: maxGainPerContract.toFixed(2),
       maxLossPerContract: maxLossPerContract.toFixed(2),
