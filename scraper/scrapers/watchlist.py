@@ -76,13 +76,15 @@ def _scan_ctgov(item: dict[str, Any]) -> list[dict[str, Any]]:
     # Watchlist context: user explicitly cares about this ticker, so
     # surface anything recent including completed/terminated trials
     # where a readout may be the catalyst itself.
-    today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
     end = (datetime.now(timezone.utc) + timedelta(days=CT_LOOKBACK_DAYS)).strftime('%Y-%m-%d')
     past = (datetime.now(timezone.utc) - timedelta(days=180)).strftime('%Y-%m-%d')
+    # CT.gov v2 has no `filter.primaryCompletionDate` — date ranges
+    # only go through `filter.advanced` using Essie syntax.
+    advanced = f'AREA[PrimaryCompletionDate]RANGE[{past},{end}]'
     params = {
         'query.term': company,
         'filter.overallStatus': 'ACTIVE_NOT_RECRUITING,RECRUITING,COMPLETED,TERMINATED',
-        'filter.primaryCompletionDate': f'{past},{end}',
+        'filter.advanced': advanced,
         # Minimum-field set — CT.gov v2 400s the whole request on a
         # single unrecognised field. WhyStopped lives at
         # protocolSection.statusModule.whyStopped; some v2 builds
