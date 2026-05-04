@@ -67,10 +67,39 @@ export default function PlaceOrderPanel({ signal, calculation, onOrderPlaced }) 
           action_type: 'open',
         },
       })
-      if (error) throw error
-      setOrderResult(data)
-      setStep('submitted')
-      if (data?.success) onOrderPlaced?.(data)
+      if (error) {
+        // FunctionsHttpError exposes the original Response on .context.
+        // Read the body so the user sees the actual broker-side reason
+        // instead of supabase-js's generic 'non-2xx status code' string.
+        let body = null
+        try {
+          body = await error.context?.json?.()
+        } catch {
+          /* ignore */
+        }
+        if (!body) {
+          try {
+            const text = await error.context?.text?.()
+            if (text) body = { error: text }
+          } catch {
+            /* ignore */
+          }
+        }
+        const detail =
+          body?.detail && typeof body.detail === 'object'
+            ? JSON.stringify(body.detail).slice(0, 500)
+            : body?.detail
+        setOrderResult({
+          success: false,
+          error: body?.error || error.message || 'order failed',
+          detail,
+        })
+        setStep('submitted')
+      } else {
+        setOrderResult(data)
+        setStep('submitted')
+        if (data?.success) onOrderPlaced?.(data)
+      }
     } catch (e) {
       setOrderResult({ success: false, error: e.message || 'order failed' })
       setStep('submitted')
@@ -345,6 +374,11 @@ export default function PlaceOrderPanel({ signal, calculation, onOrderPlaced }) 
               <>
                 <p className="text-red-400 font-bold text-sm mb-2">Order Failed</p>
                 <p className="text-zinc-400 text-xs break-all">{orderResult.error}</p>
+                {orderResult.detail && (
+                  <pre className="text-muted text-[10px] mt-2 whitespace-pre-wrap break-all font-mono">
+                    {orderResult.detail}
+                  </pre>
+                )}
                 <button
                   type="button"
                   onClick={() => setStep('idle')}
