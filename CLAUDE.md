@@ -7,11 +7,11 @@
 
 ## Status
 
-**Week 1 schema + Week 2 frontend + Week 3 analyze-signal edge function + Week 4 outcome logging & track record + Week 5 scraper + Week 6 alerts + Week 7 public record + hash anchoring deployed (2026-05-03).**
+**Weeks 1–8 deployed (2026-05-03). App is feature-complete; paper trading clock starts on first Dashboard render.**
 
 **Database (`rghoynbaykeyjbhqmaff`):** 7 tables (`profiles`, `watchlist`, `signals`, `outcomes`, `scanner_runs`, `alerts`, `scanner_candidates`), `public_record` view, RLS, immutability + server-side hash triggers. `outcomes` is 1:1 with `signals` (UNIQUE constraint). `scanner_candidates` is a shared review queue: scraper inserts via service role; authenticated users SELECT all and UPDATE only candidates that are unclaimed or that they previously claimed. All Supabase advisor security lints clean.
 
-**Frontend:** Vite + React + Tailwind v4 PWA. Built: `Login` (with email-confirmation flow), `Dashboard` (with explicit `user_id` filter, separate count query for stats), `SignalDetail` (with `maybeSingle`, formatted market cap, hash badge, `LogOutcomeModal` + `StopLossCheck` wired in), `LogSignal` (4-step flow with checklist + Claude prefill), `TrackRecord` (win-rate stats, signal-type performance, rules-discipline view, filter tabs, Web Share + clipboard fallback), `Rules` (account-size calculator + 6 sections), `Settings` (display name + public_slug + is_public toggle + risk-management editing + sign-out), `PublicRecord` (no-auth `/r/:slug` page reading the `public_record` view). Stub: `Calendar`. Components: `AnalyzeFilingPanel`, `LogOutcomeModal` (3-step, no client hash, surfaces unique-violation), `StopLossCheck` (manual decision tool; persists as `alerts` row with `alert_type='stop_loss_triggered'`), `NotificationCenter`, `ErrorBoundary`. Plus env-var guard in `supabase.js`, SHA-256 verifier (`utils/hash.js`) matching the DB triggers, timezone-safe `daysUntil` helper, service worker (production-only registration), iOS safe-area handling.
+**Frontend:** Vite + React + Tailwind v4 PWA. Pages: `Login` (email-confirmation flow), `Dashboard` (per-user filter, separate count queries, scanner-queue link card, paper-trading widget), `SignalDetail` (`maybeSingle`, formatted market cap, hash badge, `LogOutcomeModal` + `StopLossCheck` wired in), `LogSignal` (4-step flow, accepts route-state prefill from `ScannerCandidates`, writes back `promoted_to_signal`), `Calendar` (month grid + upcoming list, urgency coding, `daysUntil` helper, explicit user_id filter), `TrackRecord` (win-rate stats, signal-type performance, rules-discipline, filter tabs, Web Share + clipboard fallback), `Rules` (account-size calculator + 6 sections), `Settings` (display name + slug + public toggle + risk fields + sign-out), `ScannerCandidates` (review queue with claim-on-promote/dismiss), `PublicRecord` (no-auth `/r/:slug`). Components: `AnalyzeFilingPanel`, `LogOutcomeModal`, `StopLossCheck`, `NotificationCenter`, `InstallPrompt` (Chromium only — iOS uses native Add-to-Home-Screen), `PaperTradingStatus`, `ErrorBoundary`. Hook: `useDteMonitor` runs once per day per session, idempotent on `alerts(signal_id, alert_type='stop_loss_triggered', sent_at::date)`, fires when DTE < 21 on active real-money signals (auto -50% trigger still gated on a live option price feed). Lazy loading: `TrackRecord`, `Rules`, `Settings`, `ScannerCandidates`, `PublicRecord` are code-split, with `Suspense` wrapping the layout `<Outlet />`. Plus env-var guard in `supabase.js`, SHA-256 verifier (`utils/hash.js`) matching the DB triggers, timezone-safe `daysUntil` helper, service worker (production-only registration), iOS safe-area handling.
 
 **Hash anchoring:** Two scripts in `scraper/` driven by `.github/workflows/anchor-signals.yml` on `0 12:30 * * *` cron (= 7:30am ET standard, 8:30am ET DST). `anchor_signals.py` reads the canonical `signal_hash` (DB-trigger computed) from any signal where `github_commit_sha IS NULL`, writes a `<YYYY-MM-DD>.json` file into the public-record repo, and persists the anchored signal IDs to `_anchored_ids.json`. The workflow then commits + pushes the public-record repo, captures `git rev-parse HEAD`, and runs `update_anchor_shas.py` which UPDATEs `signals.github_commit_sha` + `hash_anchored_at`. **Prerequisites you must do once:** create a public GitHub repo (e.g. `plugforsuccess/pharma-edge-public-record`); add a `GH_PAT` secret with write access to that repo only; set the `PUBLIC_RECORD_REPO` Actions variable to its full name (e.g. `plugforsuccess/pharma-edge-public-record`); and set `VITE_PUBLIC_RECORD_REPO` in the Vercel env so the public page can link to commits.
 
@@ -25,19 +25,18 @@
 
 **In-app notifications:** `NotificationCenter` in the dashboard header subscribes to `alerts` realtime (per-user channel `alerts:${user.id}`), shows a 20-row dropdown with unread badge, marks read on open. PWA service worker has `push` + `notificationclick` handlers wired but **server-side push delivery is not built** — `push_subscriptions` table + `web-push` + VAPID private key remain TODO. `subscribeToPush` in `src/utils/pwa.js` will succeed in the browser but the subscription is never persisted, so no push will arrive until that backlog is shipped.
 
-**Still pending (design spec):**
+**Still pending (post-MVP):**
 - PWA icon binaries (`public/icon-192.png`, `public/icon-512.png`)
-- Edge function: `kalshi-analysis`
+- Edge function: `kalshi-analysis` (+ `kalshi_positions` table + `combined_pnl` view)
+- Components from the original spec not built (Kalshi-flow only): `StrikePriceCalculator`, `KalshiMarketPanel`, `CombinedPnlStats`, `OptionCalculator` page
 - `pharma-edge-public-record` GitHub repo (must be created manually) — anchor workflow will fail until it exists and `GH_PAT` + `PUBLIC_RECORD_REPO` are set
-- Server-side push delivery: `push_subscriptions` table + `web-push` library + VAPID private key wired into `send-alerts`
-- Components from CLAUDE.md not yet built: `InstallPrompt`, `PaperTradingStatus`, `StrikePriceCalculator`, `KalshiMarketPanel`, `CombinedPnlStats`
-- Pages from CLAUDE.md not yet built: `ScannerCandidates` (the queue exists in DB; the review UI doesn't yet), `OptionCalculator`
-- `useStopLossMonitor` hook (`StopLossCheck` is currently a manual tool — auto-trigger needs live option price data)
-- Future tables: `kalshi_positions`, `combined_pnl` view (Week 8+)
+- Server-side push delivery: `push_subscriptions` table + `web-push` library + VAPID private key wired into `send-alerts`. SW push handler is wired client-side; nothing will arrive until the backend is built.
+- Auto -50% stop-loss trigger needs a live option price feed; `useDteMonitor` only covers DTE < 21 today
 - Per-user rate limit on `analyze-signal` (auth-only is in place; `claude_calls` table TODO when multi-user)
 - FDA PDUFA / AdComm scrapers are best-effort against FDA page structure; replace with a structured data source when available
 - CT.gov v2 protocol-history fetcher is a stub (no public endpoint)
 - Resend `onboarding@resend.dev` sender works only for the Resend account owner — switch to a verified custom domain before opening signups
+- Paper-trading start date lives in `localStorage` (per-device); migrate to `profiles.paper_trading_started_at` for cross-device sync
 
 Treat file paths and component names from the unimplemented sections as the build contract, not as things you can import.
 
@@ -557,4 +556,4 @@ Questions about business logic, trading rules, or strategy decisions go to Camer
 ---
 
 *Last updated: 2026-05-03*
-*Status: Weeks 1–7 deployed (schema, frontend, analyze-signal, outcome logging, track record, scraper, send-alerts + catalyst worker + NotificationCenter, public record + hash anchoring); kalshi-analysis edge function, ScannerCandidates UI, server-side push delivery, and Week 8+ components pending*
+*Status: Weeks 1–8 deployed — app feature-complete. Paper trading clock starts on first Dashboard render. Outstanding: PWA icon binaries, Kalshi flow (`kalshi-analysis` edge function + Kalshi UI), server-side push delivery, auto-trigger of the -50% stop loss.*

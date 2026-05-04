@@ -1,18 +1,20 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus } from 'lucide-react'
+import { ChevronRight, Cpu, Plus } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { daysUntil } from '../utils/dates'
 import { signalColor, catalystLabel, directionLabel } from '../lib/design'
 import NotificationCenter from '../components/NotificationCenter'
+import PaperTradingStatus from '../components/PaperTradingStatus'
 import clsx from 'clsx'
 
 export default function Dashboard() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const [signals, setSignals] = useState([])
-  const [stats, setStats] = useState({ wins: 0, losses: 0, open: 0, winRate: 0 })
+  const [stats, setStats] = useState({ wins: 0, losses: 0, open: 0, winRate: 0, total: 0 })
+  const [pendingCandidates, setPendingCandidates] = useState(0)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -23,7 +25,7 @@ export default function Dashboard() {
 
   async function fetchDashboardData() {
     setLoading(true)
-    const [signalRes, openCountRes, outcomeRes] = await Promise.all([
+    const [signalRes, openCountRes, outcomeRes, candidateCountRes] = await Promise.all([
       supabase
         .from('signals')
         .select('*, outcomes(*)')
@@ -37,6 +39,11 @@ export default function Dashboard() {
         .eq('user_id', user.id)
         .eq('status', 'active'),
       supabase.from('outcomes').select('thesis_correct').eq('user_id', user.id),
+      supabase
+        .from('scanner_candidates')
+        .select('id', { count: 'exact', head: true })
+        .eq('reviewed', false)
+        .eq('dismissed', false),
     ])
 
     setSignals(signalRes.data ?? [])
@@ -50,7 +57,9 @@ export default function Dashboard() {
       losses,
       open: openCountRes.count ?? 0,
       winRate: total > 0 ? Math.round((wins / total) * 100) : 0,
+      total,
     })
+    setPendingCandidates(candidateCountRes.count ?? 0)
 
     setLoading(false)
   }
@@ -91,6 +100,27 @@ export default function Dashboard() {
           </div>
         ))}
       </div>
+
+      <PaperTradingStatus stats={stats} />
+
+      {pendingCandidates > 0 && (
+        <button
+          type="button"
+          onClick={() => navigate('/scanner')}
+          className="w-full flex items-center justify-between bg-card border border-red-900/30 rounded-xl px-4 py-3 mb-4 hover:border-red-500 transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <Cpu size={14} className="text-red-400" />
+            <p className="text-white text-sm font-medium">Scanner Candidates</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="bg-red-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+              {pendingCandidates}
+            </span>
+            <ChevronRight size={14} className="text-subtle" />
+          </div>
+        </button>
+      )}
 
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-white text-sm font-semibold">Active Signals</h2>
