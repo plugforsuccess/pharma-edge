@@ -8,6 +8,7 @@ import Calendar from './pages/Calendar'
 import TrackRecord from './pages/TrackRecord'
 import Rules from './pages/Rules'
 import Settings from './pages/Settings'
+import PublicRecord from './pages/PublicRecord'
 import Layout from './components/Layout'
 
 function ProtectedRoute({ children }) {
@@ -31,6 +32,7 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/r/:slug" element={<PublicRecord />} />
           <Route
             path="/"
             element={

@@ -7,11 +7,13 @@
 
 ## Status
 
-**Week 1 schema + Week 2 frontend + Week 3 analyze-signal edge function + Week 4 outcome logging & track record + Week 5 scraper + Week 6 alerts deployed (2026-05-03).**
+**Week 1 schema + Week 2 frontend + Week 3 analyze-signal edge function + Week 4 outcome logging & track record + Week 5 scraper + Week 6 alerts + Week 7 public record + hash anchoring deployed (2026-05-03).**
 
 **Database (`rghoynbaykeyjbhqmaff`):** 7 tables (`profiles`, `watchlist`, `signals`, `outcomes`, `scanner_runs`, `alerts`, `scanner_candidates`), `public_record` view, RLS, immutability + server-side hash triggers. `outcomes` is 1:1 with `signals` (UNIQUE constraint). `scanner_candidates` is a shared review queue: scraper inserts via service role; authenticated users SELECT all and UPDATE only candidates that are unclaimed or that they previously claimed. All Supabase advisor security lints clean.
 
-**Frontend:** Vite + React + Tailwind v4 PWA. Built: `Login` (with email-confirmation flow), `Dashboard` (with explicit `user_id` filter, separate count query for stats), `SignalDetail` (with `maybeSingle`, formatted market cap, hash badge, `LogOutcomeModal` + `StopLossCheck` wired in), `LogSignal` (4-step flow with checklist + Claude prefill), `TrackRecord` (win-rate stats, signal-type performance, rules-discipline view, filter tabs), `Rules` (account-size calculator + 6 sections), `Settings` (with sign-out). Stub: `Calendar`. Components: `AnalyzeFilingPanel`, `LogOutcomeModal` (3-step, no client hash, surfaces unique-violation), `StopLossCheck` (manual decision tool; persists as `alerts` row with `alert_type='stop_loss_triggered'`), `ErrorBoundary`. Plus env-var guard in `supabase.js`, SHA-256 verifier (`utils/hash.js`) matching the DB triggers, timezone-safe `daysUntil` helper, service worker (production-only registration), iOS safe-area handling.
+**Frontend:** Vite + React + Tailwind v4 PWA. Built: `Login` (with email-confirmation flow), `Dashboard` (with explicit `user_id` filter, separate count query for stats), `SignalDetail` (with `maybeSingle`, formatted market cap, hash badge, `LogOutcomeModal` + `StopLossCheck` wired in), `LogSignal` (4-step flow with checklist + Claude prefill), `TrackRecord` (win-rate stats, signal-type performance, rules-discipline view, filter tabs, Web Share + clipboard fallback), `Rules` (account-size calculator + 6 sections), `Settings` (display name + public_slug + is_public toggle + risk-management editing + sign-out), `PublicRecord` (no-auth `/r/:slug` page reading the `public_record` view). Stub: `Calendar`. Components: `AnalyzeFilingPanel`, `LogOutcomeModal` (3-step, no client hash, surfaces unique-violation), `StopLossCheck` (manual decision tool; persists as `alerts` row with `alert_type='stop_loss_triggered'`), `NotificationCenter`, `ErrorBoundary`. Plus env-var guard in `supabase.js`, SHA-256 verifier (`utils/hash.js`) matching the DB triggers, timezone-safe `daysUntil` helper, service worker (production-only registration), iOS safe-area handling.
+
+**Hash anchoring:** Two scripts in `scraper/` driven by `.github/workflows/anchor-signals.yml` on `0 12:30 * * *` cron (= 7:30am ET standard, 8:30am ET DST). `anchor_signals.py` reads the canonical `signal_hash` (DB-trigger computed) from any signal where `github_commit_sha IS NULL`, writes a `<YYYY-MM-DD>.json` file into the public-record repo, and persists the anchored signal IDs to `_anchored_ids.json`. The workflow then commits + pushes the public-record repo, captures `git rev-parse HEAD`, and runs `update_anchor_shas.py` which UPDATEs `signals.github_commit_sha` + `hash_anchored_at`. **Prerequisites you must do once:** create a public GitHub repo (e.g. `plugforsuccess/pharma-edge-public-record`); add a `GH_PAT` secret with write access to that repo only; set the `PUBLIC_RECORD_REPO` Actions variable to its full name (e.g. `plugforsuccess/pharma-edge-public-record`); and set `VITE_PUBLIC_RECORD_REPO` in the Vercel env so the public page can link to commits.
 
 **Edge functions:**
 - `analyze-signal` (`verify_jwt=true`). Pure analysis endpoint — calls Claude Sonnet 4.6, returns structured JSON, never writes to `signals` (avoids IDOR via `signal_id`). Hardened: caller JWT verified, 200–50,000 char filing-text bounds, 50s timeout, `stop_reason` truncation check, robust JSON extraction. **Requires `ANTHROPIC_API_KEY`** — `supabase secrets set ANTHROPIC_API_KEY=… --project-ref rghoynbaykeyjbhqmaff`.
@@ -26,13 +28,12 @@
 **Still pending (design spec):**
 - PWA icon binaries (`public/icon-192.png`, `public/icon-512.png`)
 - Edge function: `kalshi-analysis`
-- `pharma-edge-public-record` GitHub repo for hash anchoring (Week 7)
-- `anchor-signals.yml` workflow (Week 7)
+- `pharma-edge-public-record` GitHub repo (must be created manually) — anchor workflow will fail until it exists and `GH_PAT` + `PUBLIC_RECORD_REPO` are set
 - Server-side push delivery: `push_subscriptions` table + `web-push` library + VAPID private key wired into `send-alerts`
 - Components from CLAUDE.md not yet built: `InstallPrompt`, `PaperTradingStatus`, `StrikePriceCalculator`, `KalshiMarketPanel`, `CombinedPnlStats`
-- Pages from CLAUDE.md not yet built: `ScannerCandidates` (the queue exists in DB; the review UI doesn't yet), `OptionCalculator`, `PublicRecord`
+- Pages from CLAUDE.md not yet built: `ScannerCandidates` (the queue exists in DB; the review UI doesn't yet), `OptionCalculator`
 - `useStopLossMonitor` hook (`StopLossCheck` is currently a manual tool — auto-trigger needs live option price data)
-- Future tables: `kalshi_positions`, `combined_pnl` view (Week 7+)
+- Future tables: `kalshi_positions`, `combined_pnl` view (Week 8+)
 - Per-user rate limit on `analyze-signal` (auth-only is in place; `claude_calls` table TODO when multi-user)
 - FDA PDUFA / AdComm scrapers are best-effort against FDA page structure; replace with a structured data source when available
 - CT.gov v2 protocol-history fetcher is a stub (no public endpoint)
@@ -556,4 +557,4 @@ Questions about business logic, trading rules, or strategy decisions go to Camer
 ---
 
 *Last updated: 2026-05-03*
-*Status: Weeks 1–6 deployed (schema, frontend, analyze-signal, outcome logging, track record, scraper, send-alerts + catalyst-alert worker + NotificationCenter); kalshi-analysis edge function, ScannerCandidates UI, server-side push delivery, and Week 7+ components pending*
+*Status: Weeks 1–7 deployed (schema, frontend, analyze-signal, outcome logging, track record, scraper, send-alerts + catalyst worker + NotificationCenter, public record + hash anchoring); kalshi-analysis edge function, ScannerCandidates UI, server-side push delivery, and Week 8+ components pending*
