@@ -10,6 +10,8 @@ import {
   directionLabelLong,
   formatMarketCap,
 } from '../lib/design'
+import LogOutcomeModal from '../components/LogOutcomeModal'
+import StopLossCheck from '../components/StopLossCheck'
 import clsx from 'clsx'
 
 const SIGNAL_TYPES = [
@@ -26,6 +28,7 @@ export default function SignalDetail() {
   const { user } = useAuth()
   const [signal, setSignal] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [logOpen, setLogOpen] = useState(false)
 
   useEffect(() => {
     if (!user) return
@@ -255,18 +258,33 @@ export default function SignalDetail() {
         </div>
       )}
 
+      {signal.status === 'active' && signal.direction !== 'watch' && (
+        <StopLossCheck signal={signal} />
+      )}
+
       {!outcome && signal.status === 'active' && (
         <button
-          disabled
-          className="w-full bg-card border border-border text-subtle
-                     font-semibold rounded-xl py-3 text-sm cursor-not-allowed"
-          title="Outcome logging arrives in Week 3"
+          type="button"
+          onClick={() => setLogOpen(true)}
+          className="w-full bg-red-600 hover:bg-red-500 text-white
+                     font-semibold rounded-xl py-3 text-sm transition-colors"
         >
-          Log Outcome (Week 3)
+          Log Outcome
         </button>
       )}
 
       {outcome && <OutcomeResult outcome={outcome} />}
+
+      {logOpen && (
+        <LogOutcomeModal
+          signal={signal}
+          onClose={() => setLogOpen(false)}
+          onComplete={() => {
+            setLogOpen(false)
+            fetchSignal()
+          }}
+        />
+      )}
     </div>
   )
 }
