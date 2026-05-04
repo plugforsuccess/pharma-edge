@@ -1,0 +1,423 @@
+import { useEffect, useState } from 'react'
+import { X } from 'lucide-react'
+import { supabase } from '../lib/supabase'
+import { useAuth } from '../context/AuthContext'
+import clsx from 'clsx'
+
+const CATALYST_RESULTS = [
+  { value: 'approved', label: 'FDA Approved', positive: true },
+  { value: 'rejected', label: 'FDA Rejected', positive: false },
+  { value: 'complete_response_letter', label: 'Complete Response Letter', positive: false },
+  { value: 'positive_data', label: 'Positive Trial Data', positive: true },
+  { value: 'negative_data', label: 'Negative Trial Data', positive: false },
+  { value: 'mixed_data', label: 'Mixed Data', positive: null },
+  { value: 'delayed', label: 'Decision Delayed', positive: null },
+  { value: 'withdrawn', label: 'Drug Withdrawn', positive: false },
+  { value: 'other', label: 'Other', positive: null },
+]
+
+const EXIT_REASONS = [
+  { value: 'catalyst_resolved', label: 'Catalyst resolved — natural exit' },
+  { value: 'stop_loss_50pct', label: 'Stop loss triggered (-50%)' },
+  { value: 'thesis_invalidated', label: 'Thesis invalidated by new data' },
+  { value: 'profit_100pct', label: 'Profit target hit (+100%)' },
+  { value: 'profit_200pct', label: 'Profit target hit (+200%)' },
+  { value: 'pre_catalyst_exit', label: 'Pre-catalyst exit (day before)' },
+  { value: 'dte_expired', label: 'DTE expired' },
+  { value: 'manual', label: 'Manual exit' },
+]
+
+export default function LogOutcomeModal({ signal, onClose, onComplete }) {
+  const { user } = useAuth()
+  const [loading, setLoading] = useState(false)
+  const [step, setStep] = useState(1)
+  const [error, setError] = useState('')
+
+  const [form, setForm] = useState({
+    catalyst_result: '',
+    stock_price_at_outcome: '',
+    option_price_at_outcome: '',
+    exit_price: '',
+    pnl_dollars: '',
+    pnl_percent: '',
+    thesis_correct: null,
+    exit_reason: '',
+    rules_followed: true,
+    rules_broken: '',
+    post_trade_notes: '',
+  })
+
+  // Lock body scroll + add Escape-to-close while open.
+  useEffect(() => {
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    function onKey(e) {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.body.style.overflow = prev
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [onClose])
+
+  function update(key, value) {
+    setForm((prev) => ({ ...prev, [key]: value }))
+  }
+
+  function selectCatalystResult(result) {
+    setForm((prev) => {
+      let thesisCorrect = null
+      if (result.positive !== null) {
+        if (signal.direction === 'long_put') thesisCorrect = result.positive === false
+        else if (signal.direction === 'long_call') thesisCorrect = result.positive === true
+      }
+      return { ...prev, catalyst_result: result.value, thesis_correct: thesisCorrect }
+    })
+  }
+
+  async function submitOutcome() {
+    setError('')
+    setLoading(true)
+
+    const num = (v) => (v === '' || v == null ? null : Number(v))
+    const outcomeData = {
+      signal_id: signal.id,
+      user_id: user.id,
+      catalyst_result: form.catalyst_result,
+      stock_price_at_outcome: num(form.stock_price_at_outcome),
+      option_price_at_outcome: num(form.option_price_at_outcome),
+      exit_price: num(form.exit_price),
+      pnl_dollars: num(form.pnl_dollars),
+      pnl_percent: num(form.pnl_percent),
+      thesis_correct: form.thesis_correct ?? false,
+      exit_reason: form.exit_reason || null,
+      rules_followed: form.rules_followed,
+      rules_broken: form.rules_followed ? null : form.rules_broken || null,
+      post_trade_notes: form.post_trade_notes || null,
+      // outcome_hash and recorded_at intentionally omitted: DB trigger
+      // computes the canonical hash and recorded_at defaults to NOW().
+    }
+
+    const { error: insertError } = await supabase.from('outcomes').insert(outcomeData)
+    if (insertError) {
+      setLoading(false)
+      // Postgres unique_violation = 23505 (outcomes_signal_unique).
+      if (insertError.code === '23505') {
+        setError('This signal already has an outcome logged. Outcomes are write-once.')
+      } else {
+        setError(insertError.message)
+      }
+      return
+    }
+
+    const { error: updateError } = await supabase
+      .from('signals')
+      .update({ status: 'closed' })
+      .eq('id', signal.id)
+      .eq('user_id', user.id)
+
+    setLoading(false)
+    if (updateError) {
+      setError(`Outcome saved, but failed to close signal: ${updateError.message}`)
+      return
+    }
+    onComplete?.()
+  }
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/80 z-[60] flex items-end justify-center"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Log outcome"
+    >
+      <div
+        className="bg-bg border-t border-border rounded-t-2xl w-full max-w-md max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="w-10 h-1 bg-zinc-700 rounded-full mx-auto mt-3 mb-4" aria-hidden="true" />
+
+        <div className="px-4 pb-8" style={{ paddingBottom: 'calc(2rem + env(safe-area-inset-bottom))' }}>
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h2 className="text-white font-bold">Log Outcome</h2>
+              <p className="text-subtle text-xs">
+                {signal.ticker} — {signal.direction.replace('_', ' ').toUpperCase()}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              className="text-subtle hover:text-white"
+            >
+              <X size={18} />
+            </button>
+          </div>
+
+          <div className="flex gap-1 mb-6" aria-hidden="true">
+            {[1, 2, 3].map((s) => (
+              <div
+                key={s}
+                className={clsx(
+                  'h-1 flex-1 rounded-full',
+                  s <= step ? 'bg-red-500' : 'bg-zinc-800',
+                )}
+              />
+            ))}
+          </div>
+
+          {step === 1 && (
+            <div className="space-y-4">
+              <h3 className="text-white text-sm font-semibold">What happened?</h3>
+
+              <div className="space-y-2">
+                {CATALYST_RESULTS.map((result) => (
+                  <button
+                    key={result.value}
+                    type="button"
+                    onClick={() => selectCatalystResult(result)}
+                    className={clsx(
+                      'w-full text-left px-4 py-3 rounded-xl border text-sm transition-colors',
+                      form.catalyst_result === result.value
+                        ? 'border-red-500 bg-red-950/30 text-white'
+                        : 'border-border bg-card text-zinc-400',
+                    )}
+                  >
+                    {result.label}
+                  </button>
+                ))}
+              </div>
+
+              {form.catalyst_result && form.thesis_correct !== null && (
+                <div
+                  className={clsx(
+                    'rounded-xl p-3 border',
+                    form.thesis_correct
+                      ? 'bg-green-950/20 border-green-900/40'
+                      : 'bg-red-950/20 border-red-900/40',
+                  )}
+                >
+                  <p
+                    className={clsx(
+                      'text-sm font-semibold',
+                      form.thesis_correct ? 'text-green-400' : 'text-red-400',
+                    )}
+                  >
+                    {form.thesis_correct ? '✓ Thesis Correct' : '✗ Thesis Wrong'}
+                  </p>
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setStep(2)}
+                disabled={!form.catalyst_result}
+                className="w-full bg-red-600 hover:bg-red-500 disabled:bg-red-950 disabled:text-red-900 text-white font-semibold rounded-xl py-3 text-sm transition-colors"
+              >
+                Next: P&amp;L Details
+              </button>
+            </div>
+          )}
+
+          {step === 2 && (
+            <div className="space-y-4">
+              <h3 className="text-white text-sm font-semibold">P&amp;L Details</h3>
+
+              <NumberInput
+                label="Stock Price at Outcome"
+                value={form.stock_price_at_outcome}
+                onChange={(v) => update('stock_price_at_outcome', v)}
+                prefix="$"
+              />
+              <NumberInput
+                label="Option Price at Outcome"
+                value={form.option_price_at_outcome}
+                onChange={(v) => update('option_price_at_outcome', v)}
+                prefix="$"
+              />
+              <NumberInput
+                label="Your Exit Price"
+                value={form.exit_price}
+                onChange={(v) => update('exit_price', v)}
+                prefix="$"
+              />
+              <NumberInput
+                label="P&L ($)"
+                value={form.pnl_dollars}
+                onChange={(v) => update('pnl_dollars', v)}
+                prefix="$"
+              />
+              <NumberInput
+                label="P&L (%)"
+                value={form.pnl_percent}
+                onChange={(v) => update('pnl_percent', v)}
+                suffix="%"
+              />
+
+              <div>
+                <label className="text-muted text-xs uppercase tracking-wider block mb-1">
+                  Exit Reason
+                </label>
+                <select
+                  value={form.exit_reason}
+                  onChange={(e) => update('exit_reason', e.target.value)}
+                  className="w-full bg-card border border-border text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-red-500"
+                >
+                  <option value="">Select exit reason</option>
+                  {EXIT_REASONS.map((r) => (
+                    <option key={r.value} value={r.value}>
+                      {r.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setStep(1)}
+                  className="flex-1 bg-card border border-border text-zinc-400 font-semibold rounded-xl py-3 text-sm"
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStep(3)}
+                  className="flex-1 bg-red-600 hover:bg-red-500 text-white font-semibold rounded-xl py-3 text-sm transition-colors"
+                >
+                  Next: Rules
+                </button>
+              </div>
+            </div>
+          )}
+
+          {step === 3 && (
+            <div className="space-y-4">
+              <h3 className="text-white text-sm font-semibold">Did you follow your rules?</h3>
+              <p className="text-subtle text-xs">
+                Permanently recorded. Be honest — the data only helps you if it's accurate.
+              </p>
+
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    update('rules_followed', true)
+                    update('rules_broken', '')
+                  }}
+                  className={clsx(
+                    'py-4 rounded-xl border font-semibold text-sm transition-colors',
+                    form.rules_followed === true
+                      ? 'border-green-500 bg-green-950/30 text-green-400'
+                      : 'border-border bg-card text-subtle',
+                  )}
+                >
+                  ✓ Yes, followed rules
+                </button>
+                <button
+                  type="button"
+                  onClick={() => update('rules_followed', false)}
+                  className={clsx(
+                    'py-4 rounded-xl border font-semibold text-sm transition-colors',
+                    form.rules_followed === false
+                      ? 'border-red-500 bg-red-950/30 text-red-400'
+                      : 'border-border bg-card text-subtle',
+                  )}
+                >
+                  ✗ Broke a rule
+                </button>
+              </div>
+
+              {form.rules_followed === false && (
+                <div>
+                  <label className="text-muted text-xs uppercase tracking-wider block mb-1">
+                    Which rule did you break?
+                  </label>
+                  <textarea
+                    value={form.rules_broken}
+                    onChange={(e) => update('rules_broken', e.target.value)}
+                    placeholder="Be specific. What rule did you break and why?"
+                    rows={3}
+                    className="w-full bg-card border border-red-900 text-white placeholder-zinc-700 rounded-xl px-4 py-3 text-sm focus:outline-none resize-none"
+                  />
+                </div>
+              )}
+
+              <div>
+                <label className="text-muted text-xs uppercase tracking-wider block mb-1">
+                  Post-Trade Notes (optional)
+                </label>
+                <textarea
+                  value={form.post_trade_notes}
+                  onChange={(e) => update('post_trade_notes', e.target.value)}
+                  placeholder="What did you learn? What would you do differently?"
+                  rows={3}
+                  className="w-full bg-card border border-border text-white placeholder-zinc-700 rounded-xl px-4 py-3 text-sm focus:outline-none resize-none"
+                />
+              </div>
+
+              {error && (
+                <div className="bg-red-950/30 border border-red-900/50 rounded-lg p-3">
+                  <p className="text-red-400 text-xs" role="alert">
+                    {error}
+                  </p>
+                </div>
+              )}
+
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setStep(2)}
+                  className="flex-1 bg-card border border-border text-zinc-400 font-semibold rounded-xl py-3 text-sm"
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  onClick={submitOutcome}
+                  disabled={loading || (form.rules_followed === false && !form.rules_broken.trim())}
+                  className="flex-1 bg-red-600 hover:bg-red-500 disabled:bg-red-950 disabled:text-red-900 text-white font-semibold rounded-xl py-3 text-sm transition-colors"
+                >
+                  {loading ? 'Saving…' : '🔒 Lock Outcome'}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function NumberInput({ label, value, onChange, prefix, suffix }) {
+  return (
+    <div>
+      <label className="text-muted text-xs uppercase tracking-wider block mb-1">{label}</label>
+      <div className="relative">
+        {prefix && (
+          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-subtle text-sm">
+            {prefix}
+          </span>
+        )}
+        <input
+          type="number"
+          step="any"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className={clsx(
+            'w-full bg-card border border-border text-white rounded-xl py-3 text-sm focus:outline-none focus:border-red-500',
+            prefix ? 'pl-8 pr-4' : suffix ? 'pl-4 pr-8' : 'px-4',
+          )}
+        />
+        {suffix && (
+          <span className="absolute right-4 top-1/2 -translate-y-1/2 text-subtle text-sm">
+            {suffix}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
