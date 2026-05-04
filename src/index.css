@@ -1,14 +1,32 @@
 @import "tailwindcss";
 
 @theme {
-  --color-bg: #0a0a0f;
-  --color-card: #111118;
-  --color-card-hover: #1a1a24;
-  --color-border: #1e1e2e;
-  --color-border-hover: #2a2a3e;
-  --color-fg: #e8e8f0;
-  --color-subtle: #6b6b8a;
-  --color-muted: #3a3a5c;
+  /* Surfaces — deeper, more sophisticated than generic dark */
+  --color-bg: #06060a;
+  --color-bg-elev: #0b0b13;
+  --color-card: #0d0d16;
+  --color-card-hover: #14141f;
+  --color-border: #1a1a26;
+  --color-border-hover: #2a2a3a;
+  --color-hairline: #11111b;
+
+  /* Type */
+  --color-fg: #ecedf2;
+  --color-subtle: #8b8ba6;
+  --color-muted: #4a4a64;
+  --color-faint: #2a2a3c;
+
+  /* Brand — biotech edge: amber-gold paired with deep crimson for puts */
+  --color-brand: #e8b558;
+  --color-brand-hi: #f4cf8e;
+  --color-brand-lo: #b88830;
+  --color-crimson: #e0344c;
+  --color-crimson-hi: #f25068;
+
+  /* Fonts */
+  --font-sans: "Inter Tight", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Fraunces", "Inter Tight", ui-serif, Georgia, serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
 }
 
 html,
@@ -17,8 +35,28 @@ body,
   min-height: 100%;
   background: var(--color-bg);
   color: var(--color-fg);
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01", "ss02", "cv11";
+  letter-spacing: -0.005em;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   -webkit-tap-highlight-color: transparent;
+}
+
+/* Ambient page texture — subtle radial vignette + grain */
+body {
+  background-image:
+    radial-gradient(
+      1200px 800px at 50% -10%,
+      rgba(232, 181, 88, 0.06),
+      transparent 60%
+    ),
+    radial-gradient(
+      900px 600px at 100% 110%,
+      rgba(224, 52, 76, 0.05),
+      transparent 65%
+    );
+  background-attachment: fixed;
 }
 
 @layer utilities {
@@ -28,4 +66,171 @@ body,
   .pb-safe {
     padding-bottom: env(safe-area-inset-bottom);
   }
+
+  .font-display {
+    font-family: var(--font-display);
+    font-feature-settings: "ss01", "ss02";
+    letter-spacing: -0.02em;
+  }
+  .font-mono-tab {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+  .num-tab {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Editorial card — subtle gradient inset, hairline border, faint glow */
+  .surface {
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.022), rgba(255, 255, 255, 0)) ,
+      var(--color-card);
+    border: 1px solid var(--color-border);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.03),
+      0 1px 0 rgba(0, 0, 0, 0.4);
+  }
+  .surface-hover {
+    transition:
+      border-color 200ms ease,
+      background-color 200ms ease,
+      transform 200ms ease;
+  }
+  .surface-hover:hover {
+    border-color: var(--color-border-hover);
+    background-color: var(--color-card-hover);
+  }
+
+  /* Hairline divider */
+  .hairline {
+    background: linear-gradient(
+      90deg,
+      transparent,
+      var(--color-border-hover) 20%,
+      var(--color-border-hover) 80%,
+      transparent
+    );
+    height: 1px;
+  }
+
+  /* Brand wordmark gradient */
+  .brand-text {
+    background: linear-gradient(
+      180deg,
+      var(--color-brand-hi) 0%,
+      var(--color-brand) 55%,
+      var(--color-brand-lo) 100%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
+
+  /* Brand pill / mark */
+  .brand-mark {
+    background:
+      radial-gradient(
+        120% 120% at 0% 0%,
+        rgba(244, 207, 142, 0.95),
+        rgba(184, 136, 48, 0.9) 55%,
+        rgba(120, 80, 20, 0.95) 100%
+      );
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.35),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.35),
+      0 6px 24px -6px rgba(232, 181, 88, 0.5);
+  }
+
+  /* Primary CTA — crimson with inset highlight */
+  .btn-primary {
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0)) ,
+      linear-gradient(180deg, #e0344c, #b8233a);
+    color: #fff;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.25),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.25),
+      0 6px 22px -8px rgba(224, 52, 76, 0.6);
+    transition: filter 150ms ease, transform 150ms ease;
+  }
+  .btn-primary:hover {
+    filter: brightness(1.08);
+  }
+  .btn-primary:active {
+    transform: translateY(0.5px);
+  }
+  .btn-primary:disabled {
+    filter: grayscale(0.4) brightness(0.55);
+    cursor: not-allowed;
+  }
+
+  /* Subtle bordered ghost button */
+  .btn-ghost {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--color-border);
+    color: var(--color-fg);
+    transition: border-color 150ms ease, background-color 150ms ease;
+  }
+  .btn-ghost:hover {
+    border-color: var(--color-border-hover);
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  /* Premium input */
+  .input-premium {
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid var(--color-border);
+    color: var(--color-fg);
+    transition: border-color 150ms ease, background-color 150ms ease,
+      box-shadow 150ms ease;
+  }
+  .input-premium::placeholder {
+    color: var(--color-muted);
+  }
+  .input-premium:focus {
+    outline: none;
+    border-color: rgba(232, 181, 88, 0.55);
+    background: rgba(255, 255, 255, 0.04);
+    box-shadow: 0 0 0 3px rgba(232, 181, 88, 0.1);
+  }
+
+  /* Frosted top bar */
+  .glass {
+    background: color-mix(in srgb, var(--color-bg) 75%, transparent);
+    backdrop-filter: blur(14px) saturate(140%);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+  }
+
+  /* Tape-style ticker / micro caps */
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--color-subtle);
+  }
+}
+
+/* Selection */
+::selection {
+  background: rgba(232, 181, 88, 0.3);
+  color: #fff;
+}
+
+/* Scrollbar — slim and dark */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-hover);
 }
