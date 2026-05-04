@@ -20,11 +20,15 @@ export default function ScannerCandidates() {
 
   async function fetchCandidates() {
     setLoading(true)
+    // RLS already filters to candidates this user can see (broad +
+    // own-watchlist). We sort watchlist hits to the top because they're
+    // the more personally relevant ones.
     const { data } = await supabase
       .from('scanner_candidates')
       .select('*')
       .eq('reviewed', false)
       .eq('dismissed', false)
+      .order('requested_by', { ascending: false, nullsFirst: false })
       .order('detected_at', { ascending: false })
       .limit(20)
     setCandidates(data ?? [])
@@ -147,6 +151,7 @@ function CandidateCard({ candidate, expanded, busy, onToggle, onDismiss, onPromo
   const score = candidate.score ?? 0
   const flags = Array.isArray(candidate.flags) ? candidate.flags : []
   const dataGaps = Array.isArray(analysis?.data_gaps) ? analysis.data_gaps : []
+  const isWatchlist = candidate.requested_by != null
   const scoreClass =
     score >= 8
       ? 'text-red-400 bg-red-950 border-red-800'
@@ -175,6 +180,11 @@ function CandidateCard({ candidate, expanded, busy, onToggle, onDismiss, onPromo
             >
               Score: {score}/10
             </span>
+            {isWatchlist && (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border border-yellow-700 bg-yellow-950 text-yellow-400">
+                ⭐ Watchlist
+              </span>
+            )}
           </div>
           {expanded ? (
             <ChevronUp size={14} className="text-subtle" />

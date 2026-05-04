@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
-import { Bell, BellOff, Check, Copy, ExternalLink, Link2, LogOut } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { Bell, BellOff, Check, Copy, ExternalLink, Link2, LogOut, Plus, Trash2 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import {
@@ -164,6 +165,8 @@ export default function Settings() {
       </Section>
 
       <PushSection userId={user?.id} />
+
+      <WatchlistSection userId={user?.id} />
 
       <BrokerSection />
 
@@ -405,6 +408,153 @@ function PushSection({ userId }) {
         )}
       </div>
       {feedback && <p className="text-subtle text-xs">{feedback}</p>}
+    </Section>
+  )
+}
+
+function WatchlistSection({ userId }) {
+  const navigate = useNavigate()
+  const [items, setItems] = useState([])
+  const [ticker, setTicker] = useState('')
+  const [companyName, setCompanyName] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const load = useCallback(async () => {
+    if (!userId) return
+    const { data } = await supabase
+      .from('watchlist')
+      .select('id, ticker, company_name, drug_name, added_at')
+      .eq('user_id', userId)
+      .order('added_at', { ascending: false })
+    setItems(data ?? [])
+  }, [userId])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  async function add(e) {
+    e?.preventDefault?.()
+    if (!userId) return
+    const t = ticker.trim().toUpperCase()
+    const c = companyName.trim()
+    if (!t || !c) {
+      setError('Ticker and company name are both required')
+      return
+    }
+    setBusy(true)
+    setError('')
+    const { error: insertError } = await supabase.from('watchlist').insert({
+      user_id: userId,
+      ticker: t,
+      company_name: c,
+    })
+    setBusy(false)
+    if (insertError) {
+      setError(insertError.message)
+      return
+    }
+    setTicker('')
+    setCompanyName('')
+    load()
+  }
+
+  async function remove(id) {
+    if (!userId) return
+    setBusy(true)
+    await supabase.from('watchlist').delete().eq('id', id).eq('user_id', userId)
+    setBusy(false)
+    load()
+  }
+
+  function openLogForTicker(item) {
+    navigate('/log', {
+      state: {
+        prefill: {
+          ticker: item.ticker,
+          company_name: item.company_name,
+          drug_name: item.drug_name || '',
+        },
+      },
+    })
+  }
+
+  return (
+    <Section title="My Tickers (Watchlist)">
+      <p className="text-subtle text-xs">
+        Tickers here get scraped daily at 7am ET — any new SEC filing, CT.gov trial, or FDA
+        press release shows up as a personal candidate in the scanner queue. Tap a row to open
+        a pre-filled signal log.
+      </p>
+
+      <form onSubmit={add} className="grid grid-cols-2 gap-2">
+        <input
+          type="text"
+          value={ticker}
+          onChange={(e) => setTicker(e.target.value.toUpperCase())}
+          placeholder="ALDX"
+          maxLength={10}
+          className="bg-bg border border-border text-white placeholder-zinc-700 rounded-xl
+                     px-3 py-2 text-sm focus:outline-none focus:border-red-500 font-mono"
+        />
+        <input
+          type="text"
+          value={companyName}
+          onChange={(e) => setCompanyName(e.target.value)}
+          placeholder="Aldeyra Therapeutics"
+          className="bg-bg border border-border text-white placeholder-zinc-700 rounded-xl
+                     px-3 py-2 text-sm focus:outline-none focus:border-red-500"
+        />
+        <button
+          type="submit"
+          disabled={busy || !ticker || !companyName}
+          className="col-span-2 flex items-center justify-center gap-2 bg-red-600 hover:bg-red-500
+                     disabled:bg-red-950 disabled:text-red-900 text-white font-semibold
+                     rounded-xl py-2 text-sm transition-colors"
+        >
+          <Plus size={14} />
+          Add to Watchlist
+        </button>
+      </form>
+
+      {error && (
+        <p className="text-red-400 text-xs" role="alert">
+          {error}
+        </p>
+      )}
+
+      {items.length === 0 ? (
+        <p className="text-muted text-xs italic">No tickers yet. Add one above.</p>
+      ) : (
+        <div className="space-y-1">
+          {items.map((item) => (
+            <div
+              key={item.id}
+              className="flex items-center gap-2 bg-bg border border-border rounded-lg px-3 py-2"
+            >
+              <button
+                type="button"
+                onClick={() => openLogForTicker(item)}
+                className="flex-1 text-left"
+                aria-label={`Log signal for ${item.ticker}`}
+              >
+                <p className="text-white font-mono text-sm">{item.ticker}</p>
+                <p className="text-subtle text-[10px] truncate">{item.company_name}</p>
+              </button>
+              <button
+                type="button"
+                onClick={() => remove(item.id)}
+                disabled={busy}
+                aria-label={`Remove ${item.ticker} from watchlist`}
+                className="text-muted hover:text-red-400 transition-colors p-1"
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </Section>
   )
 }
