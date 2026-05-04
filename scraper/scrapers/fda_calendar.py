@@ -72,7 +72,15 @@ def fetch_adcomm_meetings() -> list[dict[str, Any]]:
     return out
 
 
-def fetch_fda_press_releases(days_back: int = 3) -> list[dict[str, Any]]:
+_DRUG_KEYWORDS = (
+    "drug", "approval", "approve", "approved", "approves", "clinical",
+    "biologic", "treatment", "therapy", "therapeutic", "pdufa", "ind",
+    "nda", "bla", "vaccine", "warning letter", "complete response",
+    "recall", "adverse", "ema", "indication",
+)
+
+
+def fetch_fda_press_releases(days_back: int = 7) -> list[dict[str, Any]]:
     feed_url = (
         "https://www.fda.gov/about-fda/contact-fda/stay-informed/"
         "rss-feeds/press-releases/rss.xml"
@@ -91,6 +99,12 @@ def fetch_fda_press_releases(days_back: int = 3) -> list[dict[str, Any]]:
             continue
         published = datetime(*published_parsed[:6])
         if published <= since:
+            continue
+        # FDA's press feed covers the whole agency (food, tobacco, devices,
+        # cosmetics). Only keep entries that look drug/biologic-related so
+        # the digest + scanner queue don't drown in non-actionable noise.
+        haystack = f"{entry.get('title', '')} {entry.get('summary', '')}".lower()
+        if not any(kw in haystack for kw in _DRUG_KEYWORDS):
             continue
         out.append(
             {

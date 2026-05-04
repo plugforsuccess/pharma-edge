@@ -9,6 +9,7 @@ address in the repo.
 from __future__ import annotations
 
 import os
+import re
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -16,6 +17,23 @@ import requests
 
 EDGAR_BASE = "https://data.sec.gov"
 EDGAR_FTS = "https://efts.sec.gov/LATEST/search-index"
+EDGAR_TICKERS = "https://www.sec.gov/files/company_tickers.json"
+
+# Suffixes that show up on CT.gov sponsor names but not in SEC's title.
+_COMPANY_SUFFIX_RX = re.compile(
+    r"\b(inc|incorporated|corp|corporation|co|company|llc|ltd|limited|"
+    r"plc|holdings|holding|group|sa|nv|ag|ab|gmbh|the)\b\.?",
+    re.IGNORECASE,
+)
+
+
+def _normalize_company(name: str) -> str:
+    """Normalize a company name for fuzzy matching against SEC's ticker map.
+    Lowercases, drops corporate-form suffixes, strips non-alphanumerics."""
+    if not name:
+        return ""
+    n = _COMPANY_SUFFIX_RX.sub("", name.lower())
+    return re.sub(r"[^a-z0-9]", "", n)
 
 
 def _headers() -> dict[str, str]:
@@ -26,6 +44,49 @@ def _headers() -> dict[str, str]:
             "the User-Agent header. Example: 'PharmaEdge you@example.com'."
         )
     return {"User-Agent": ua, "Accept-Encoding": "gzip, deflate"}
+
+
+def load_ticker_map() -> dict[str, str]:
+    """Fetch SEC's company_tickers.json once and build a normalized
+    company-name → ticker map. Returns {} on failure (caller should
+    fall back to leaving ticker empty)."""
+    try:
+        resp = requests.get(EDGAR_TICKERS, headers=_headers(), timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as exc:
+        print(f"  load_ticker_map: {exc}")
+        return {}
+
+    out: dict[str, str] = {}
+    for row in data.values():
+        title = row.get("title", "")
+        ticker = row.get("ticker", "")
+        if not title or not ticker:
+            continue
+        key = _normalize_company(title)
+        if key and key not in out:
+            out[key] = ticker.upper()
+    return out
+
+
+def resolve_ticker(company_name: str, ticker_map: dict[str, str]) -> str:
+    """Best-effort sponsor → ticker. Tries exact normalized match, then
+    a prefix match (for cases like 'Acme Therapeutics, Inc.' → SEC's
+    'Acme Therapeutics Inc')."""
+    if not company_name or not ticker_map:
+        return ""
+    key = _normalize_company(company_name)
+    if not key:
+        return ""
+    if key in ticker_map:
+        return ticker_map[key]
+    # Prefix fallback — only accept if exactly one candidate matches,
+    # otherwise we'd be guessing between e.g. multiple "BIO*" tickers.
+    matches = [t for k, t in ticker_map.items() if k.startswith(key) or key.startswith(k)]
+    if len(matches) == 1:
+        return matches[0]
+    return ""
 
 
 def fetch_biotech_8k(days_back: int = 1) -> list[dict[str, Any]]:

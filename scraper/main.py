@@ -37,7 +37,13 @@ from scrapers.fda_calendar import (
     fetch_fda_press_releases,
     fetch_pdufa_dates,
 )
-from scrapers.sec_edgar import fetch_biotech_8k, fetch_shelf_offerings
+from scrapers.pdufa_8k import fetch_pdufa_8k
+from scrapers.sec_edgar import (
+    fetch_biotech_8k,
+    fetch_shelf_offerings,
+    load_ticker_map,
+    resolve_ticker,
+)
 from scrapers.watchlist import scan_watchlist
 
 
@@ -109,6 +115,12 @@ def main() -> None:
     all_candidates: list[dict[str, Any]] = []
     errors: list[str] = []
 
+    # SEC's company_tickers.json gives us a sponsor → ticker resolver,
+    # used to backfill the empty `ticker` field on CT.gov candidates so
+    # promote → trade flow has something to work with.
+    ticker_map = load_ticker_map()
+    print(f"  ticker map: {len(ticker_map)} entries")
+
     # ─── ClinicalTrials.gov ─────────────────────────────────────────
     print("Scanning ClinicalTrials.gov...")
     try:
@@ -163,7 +175,7 @@ def main() -> None:
     try:
         pdufa = fetch_pdufa_dates()
         adcomm = fetch_adcomm_meetings()
-        press = fetch_fda_press_releases(days_back=1)
+        press = fetch_fda_press_releases(days_back=7)
         fda_events = pdufa + adcomm + press
         print(f"  PDUFA={len(pdufa)} adcomm={len(adcomm)} press={len(press)}")
 
@@ -192,8 +204,9 @@ def main() -> None:
     # ─── SEC EDGAR ───────────────────────────────────────────────────
     print("Scanning SEC EDGAR...")
     sec_events: list[dict[str, Any]] = []
+    filings_8k: list[dict[str, Any]] = []
     try:
-        filings_8k = fetch_biotech_8k(days_back=1)
+        filings_8k = fetch_biotech_8k(days_back=2)
         shelf = fetch_shelf_offerings(days_back=7)
         sec_events = filings_8k + shelf
         print(f"  8-K={len(filings_8k)} shelf={len(shelf)}")
@@ -220,6 +233,10 @@ def main() -> None:
     analyzed: list[dict[str, Any]] = []
     for candidate in all_candidates[:5]:
         try:
+            sponsor = candidate.get("sponsor", "")
+            ticker = candidate.get("ticker") or resolve_ticker(sponsor, ticker_map)
+            candidate["ticker"] = ticker  # so the analyzer + raw_data echo it
+
             analysis = analyze_scanner_candidate(candidate)
             candidate["claude_analysis"] = analysis
             analyzed.append(candidate)
@@ -232,8 +249,8 @@ def main() -> None:
             insert_scanner_candidate(
                 supabase,
                 {
-                    "ticker": candidate.get("ticker", ""),
-                    "company_name": candidate.get("sponsor", ""),
+                    "ticker": ticker,
+                    "company_name": sponsor,
                     "catalyst_type": catalyst_type,
                     "catalyst_date": candidate.get("primary_completion", ""),
                     "score": candidate.get("score", 0),
@@ -246,6 +263,120 @@ def main() -> None:
             )
         except Exception as exc:
             errors.append(f"claude analysis / candidate insert: {exc}")
+
+    # ─── PDUFA from 8-Ks ────────────────────────────────────────────
+    # Free replacement for the dead FDA Step-4 PDUFA tracker. Companies
+    # disclose newly-assigned PDUFA action dates via 8-K within 4 business
+    # days; we full-text search EDGAR for those filings and parse the date.
+    print("Scanning 8-Ks for PDUFA dates...")
+    try:
+        pdufa_hits = fetch_pdufa_8k(days_back=14)
+        print(f"  {len(pdufa_hits)} 8-K filings mention PDUFA")
+
+        pdufa_candidates = 0
+        for hit in pdufa_hits[:5]:
+            try:
+                hit_ticker = hit["ticker"] or resolve_ticker(
+                    hit["company_name"], ticker_map
+                )
+                base = {
+                    "ticker": hit_ticker,
+                    "company_name": hit["company_name"],
+                    "catalyst_type": "pdufa",
+                    "catalyst_date": hit["pdufa_date"],
+                    "source": "sec_edgar",
+                    "flags": hit["flags"],
+                    "raw_data": {
+                        "filing_url": hit["filing_url"],
+                        "file_date": hit["file_date"],
+                        "excerpt": hit["excerpt"],
+                        "form_type": "8-K",
+                        "scan_type": "pdufa_8k",
+                    },
+                }
+                analysis = analyze_scanner_candidate(base)
+                insert_scanner_candidate(
+                    supabase,
+                    {
+                        **base,
+                        "score": 8 if hit["pdufa_date"] else 5,
+                        "claude_analysis": analysis,
+                        "nct_id": None,
+                    },
+                )
+                pdufa_candidates += 1
+            except Exception as exc:
+                errors.append(f"pdufa 8-k insert: {exc}")
+
+        log_scanner_run(
+            supabase,
+            "sec_edgar",
+            len(pdufa_hits),
+            pdufa_candidates,
+            {"scan_type": "pdufa_8k", "hits": pdufa_hits[:5]},
+            "success",
+        )
+        scan_log["results"]["pdufa_8k"] = {
+            "scanned": len(pdufa_hits),
+            "candidates": pdufa_candidates,
+        }
+    except Exception as exc:
+        msg = f"PDUFA 8-K scan failed: {exc}"
+        print(f"  {msg}")
+        errors.append(msg)
+
+    # ─── Surface biotech 8-K filings as candidates ──────────────────
+    # Previously these only fed the daily digest email; now they enter
+    # the review queue via Claude analyzer. We require a resolvable
+    # ticker — otherwise the filing isn't actionable from the queue.
+    print("Surfacing 8-K filings as scanner candidates...")
+    try:
+        enriched: list[dict[str, Any]] = []
+        for filing in filings_8k:
+            t = (filing.get("ticker") or "").upper()
+            if not t:
+                t = resolve_ticker(filing.get("company", ""), ticker_map)
+            if not t:
+                continue
+            enriched.append({**filing, "ticker": t})
+
+        eight_k_candidates = 0
+        for filing in enriched[:5]:
+            try:
+                base = {
+                    "ticker": filing["ticker"],
+                    "company_name": filing.get("company", ""),
+                    "catalyst_type": "other",
+                    "catalyst_date": filing.get("filed_at", ""),
+                    "source": "sec_edgar",
+                    "flags": [f"Recent {filing.get('form_type', '8-K')} filing"],
+                    "raw_data": {
+                        "filing_url": filing.get("filing_url", ""),
+                        "file_date": filing.get("filed_at", ""),
+                        "form_type": filing.get("form_type", "8-K"),
+                        "description": filing.get("description", ""),
+                        "scan_type": "biotech_8k",
+                    },
+                }
+                analysis = analyze_scanner_candidate(base)
+                insert_scanner_candidate(
+                    supabase,
+                    {
+                        **base,
+                        "score": 6,
+                        "claude_analysis": analysis,
+                        "nct_id": None,
+                    },
+                )
+                eight_k_candidates += 1
+            except Exception as exc:
+                errors.append(f"8-K candidate insert: {exc}")
+        print(f"  inserted {eight_k_candidates} 8-K candidates")
+        scan_log["results"]["sec"]["candidates"] = eight_k_candidates
+    except Exception as exc:
+        msg = f"8-K candidate surfacing failed: {exc}"
+        print(f"  {msg}")
+        errors.append(msg)
 
     # ─── Watchlist sweep ────────────────────────────────────────────
     print("Scanning user watchlists...")
