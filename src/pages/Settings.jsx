@@ -1,7 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Check, Copy, ExternalLink, LogOut } from 'lucide-react'
+import { Bell, BellOff, Check, Copy, ExternalLink, LogOut } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import {
+  disablePushNotifications,
+  enablePushNotifications,
+  pushPermissionStatus,
+} from '../utils/pwa'
 import clsx from 'clsx'
 
 function slugify(value) {
@@ -158,6 +163,8 @@ export default function Settings() {
         </div>
       </Section>
 
+      <PushSection userId={user?.id} />
+
       <Section title="Risk Management">
         <Input
           label="Account Size"
@@ -309,6 +316,94 @@ function Toggle({ value, onChange, label }) {
         )}
       />
     </button>
+  )
+}
+
+function PushSection({ userId }) {
+  const [permission, setPermission] = useState('default')
+  const [busy, setBusy] = useState(false)
+  const [feedback, setFeedback] = useState('')
+
+  useEffect(() => {
+    setPermission(pushPermissionStatus())
+  }, [])
+
+  if (permission === 'unsupported') {
+    return (
+      <Section title="Push Notifications">
+        <p className="text-subtle text-xs">
+          This browser doesn't support push notifications. iOS users can still install the
+          app to the home screen for native badging.
+        </p>
+      </Section>
+    )
+  }
+
+  async function enable() {
+    setBusy(true)
+    setFeedback('')
+    const result = await enablePushNotifications(userId)
+    setBusy(false)
+    setPermission(pushPermissionStatus())
+    setFeedback(
+      {
+        enabled: 'Push notifications enabled.',
+        denied: 'Permission denied. Re-enable in browser settings.',
+        'no-vapid': 'VAPID public key not configured for this deploy.',
+        'no-sw': 'Service worker not yet registered. Reload and try again.',
+        unsupported: 'Browser does not support push.',
+        failed: 'Could not enable push. See console.',
+      }[result] || result,
+    )
+  }
+
+  async function disable() {
+    setBusy(true)
+    setFeedback('')
+    await disablePushNotifications()
+    setBusy(false)
+    setFeedback('Push notifications disabled.')
+  }
+
+  const isEnabled = permission === 'granted'
+
+  return (
+    <Section title="Push Notifications">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1">
+          <p className="text-white text-sm font-medium">
+            {isEnabled ? 'Enabled' : 'Off'}
+          </p>
+          <p className="text-subtle text-xs mt-0.5">
+            Catalyst reminders + outcome reminders sent to this device alongside email.
+          </p>
+        </div>
+        {isEnabled ? (
+          <button
+            type="button"
+            onClick={disable}
+            disabled={busy}
+            className="flex items-center gap-2 bg-card border border-border hover:border-red-500
+                       text-white text-sm font-semibold rounded-xl px-3 py-2 transition-colors disabled:opacity-50"
+          >
+            <BellOff size={14} />
+            Disable
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={enable}
+            disabled={busy}
+            className="flex items-center gap-2 bg-red-600 hover:bg-red-500 disabled:bg-red-950
+                       text-white text-sm font-semibold rounded-xl px-3 py-2 transition-colors"
+          >
+            <Bell size={14} />
+            Enable
+          </button>
+        )}
+      </div>
+      {feedback && <p className="text-subtle text-xs">{feedback}</p>}
+    </Section>
   )
 }
 

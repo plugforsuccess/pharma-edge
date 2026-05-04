@@ -238,6 +238,45 @@ function AnalysisResult({ analysis, onReset }) {
         </div>
       )}
 
+      {analysis.strike_suggestion && (
+        <div className="bg-bg border border-border rounded-lg p-3">
+          <p className="text-muted text-[10px] uppercase tracking-wider mb-2">
+            Strike Suggestion
+          </p>
+          <div className="grid grid-cols-3 gap-2 text-center mb-2">
+            {analysis.strike_suggestion.buy_strike_pct_otm != null && (
+              <div>
+                <p className="text-white text-sm font-bold">
+                  {analysis.strike_suggestion.buy_strike_pct_otm}%
+                </p>
+                <p className="text-muted text-[10px]">Buy OTM</p>
+              </div>
+            )}
+            {analysis.strike_suggestion.sell_strike_pct_otm != null && (
+              <div>
+                <p className="text-white text-sm font-bold">
+                  {analysis.strike_suggestion.sell_strike_pct_otm}%
+                </p>
+                <p className="text-muted text-[10px]">Sell OTM</p>
+              </div>
+            )}
+            {analysis.strike_suggestion.expected_move_pct != null && (
+              <div>
+                <p className="text-red-400 text-sm font-bold">
+                  {analysis.strike_suggestion.expected_move_pct}%
+                </p>
+                <p className="text-muted text-[10px]">Expected Move</p>
+              </div>
+            )}
+          </div>
+          {analysis.strike_suggestion.rationale && (
+            <p className="text-zinc-400 text-[11px] leading-relaxed">
+              {analysis.strike_suggestion.rationale}
+            </p>
+          )}
+        </div>
+      )}
+
       {analysis.flags?.length > 0 && (
         <div>
           <p className="text-muted text-[10px] uppercase tracking-wider mb-2">Red Flags</p>

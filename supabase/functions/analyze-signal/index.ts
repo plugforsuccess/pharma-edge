@@ -7,10 +7,9 @@
 // authenticated user could pass a foreign signal_id and have it
 // overwritten via the service role.
 //
-// TODO(rate-limit): no per-user cap yet. Auth requirement closes the
-// anon-spam vector but a logged-in attacker could still burn Claude
-// budget. Add a `claude_calls` table with (user_id, called_at) when
-// multi-user.
+// Per-user rate limit: claude_calls table. Each successful Claude call
+// inserts a row keyed by user_id; new requests are rejected with 429
+// once the rolling-1h count crosses RATE_LIMIT_PER_HOUR.
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
@@ -18,11 +17,13 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY')
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
 
 const CLAUDE_MODEL = 'claude-sonnet-4-6'
 const MAX_FILING_CHARS = 50_000
 const CLAUDE_TIMEOUT_MS = 50_000
 const MAX_TOKENS = 4096
+const RATE_LIMIT_PER_HOUR = Number(Deno.env.get('CLAUDE_RATE_LIMIT_PER_HOUR') ?? '30')
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -92,19 +93,22 @@ Return a JSON object with EXACTLY this structure:
   "bear_case": "What the data suggests about why this could fail",
   "data_quality": "high" | "medium" | "low",
   "data_quality_reason": "Why you rated data quality as you did",
-  "suggested_structure": "bear_put_spread" | "bull_call_spread" | "naked_put" | "naked_call" | "watch",
+  "suggested_structure": "bear_put_spread" | "bull_call_spread" | "watch",
   "suggested_dte_days": <integer, recommended days to expiration past catalyst>,
-  "flags": ["any specific red flags found in the text"]
+  "flags": ["any specific red flags found in the text"],
+  "strike_suggestion": {
+    "buy_strike_pct_otm": <integer % out of the money for the BUY strike — for puts the buy strike is below stock price, for calls it is above>,
+    "sell_strike_pct_otm": <integer % out of the money for the SELL strike — should be further OTM than the buy strike>,
+    "expected_move_pct": <integer expected stock % move on catalyst, absolute value>,
+    "max_premium_pct_of_spread": <integer 0-40 — never recommend paying more than 40% of spread width in premium>,
+    "rationale": "Why these strikes make sense given the expected move on this catalyst"
+  }
 }`
 }
 
 serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
-  }
-  if (req.method !== 'POST') {
-    return json({ success: false, error: 'method not allowed' }, 405)
-  }
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
+  if (req.method !== 'POST') return json({ success: false, error: 'method not allowed' }, 405)
 
   if (!ANTHROPIC_API_KEY) {
     return json(
@@ -112,13 +116,11 @@ serve(async (req) => {
       500,
     )
   }
-  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SUPABASE_SERVICE_ROLE_KEY) {
     return json({ success: false, error: 'edge function misconfigured: missing SUPABASE env' }, 500)
   }
 
-  // Auth: require a real user JWT. We pass the caller's Authorization through
-  // to a Supabase client so auth.getUser() validates the token server-side
-  // and returns a trustworthy user_id (never trust client-provided ids).
+  // Auth: require a real user JWT.
   const authHeader = req.headers.get('Authorization')
   if (!authHeader?.startsWith('Bearer ')) {
     return json({ success: false, error: 'unauthorized' }, 401)
@@ -129,6 +131,28 @@ serve(async (req) => {
   const { data: { user }, error: authError } = await userClient.auth.getUser()
   if (authError || !user) {
     return json({ success: false, error: 'unauthorized' }, 401)
+  }
+
+  const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+
+  // Per-user rate limit (rolling 1h).
+  const sinceIso = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+  const { count: recentCalls, error: rateError } = await adminClient
+    .from('claude_calls')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', user.id)
+    .gte('called_at', sinceIso)
+  if (rateError) {
+    return json({ success: false, error: `rate-limit lookup failed: ${rateError.message}` }, 500)
+  }
+  if ((recentCalls ?? 0) >= RATE_LIMIT_PER_HOUR) {
+    return json(
+      {
+        success: false,
+        error: `rate limited: ${RATE_LIMIT_PER_HOUR} analyses per hour cap reached. Try again later.`,
+      },
+      429,
+    )
   }
 
   let body: Record<string, unknown>
@@ -217,8 +241,6 @@ serve(async (req) => {
     return json({ success: false, error: 'no text content in claude response' }, 502)
   }
 
-  // Robust JSON extraction: strip any markdown fences, then take the
-  // outermost {...} block in case Claude wrapped it in prose.
   const stripped = rawText.replace(/```json|```/g, '').trim()
   const first = stripped.indexOf('{')
   const last = stripped.lastIndexOf('}')
@@ -237,11 +259,15 @@ serve(async (req) => {
     )
   }
 
-  // Defensive: ensure signal_scores is at least an object so the client
-  // can `.signal_scores.enrollment_signal ?? 0` without crashing.
   if (!analysis.signal_scores || typeof analysis.signal_scores !== 'object') {
     analysis.signal_scores = {}
   }
+  // strike_suggestion is optional in the response — UI degrades gracefully
+  // to its hardcoded defaults when absent.
+
+  // Log the successful call AFTER Claude returns so failed calls don't
+  // count against the user's quota.
+  await adminClient.from('claude_calls').insert({ user_id: user.id })
 
   return json({ success: true, analysis })
 })

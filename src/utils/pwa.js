@@ -1,11 +1,20 @@
 // PWA + push notification helpers.
 //
-// SW registration lives in main.jsx (production-only). These helpers are
-// for the push-notification permission/subscription flow once delivery is
-// wired up. NOTE: there is no server-side push delivery yet — see CLAUDE.md
-// for the push_subscriptions + web-push backlog item. Calling
-// `subscribeToPush` succeeds in the browser but the resulting subscription
-// is never persisted, so no push will ever arrive until that's built.
+// SW registration is performed in main.jsx (production-only). These helpers
+// drive the push-notification subscribe / unsubscribe flow. Server-side
+// delivery lives in supabase/functions/send-alerts (web-push + VAPID
+// secrets). The browser side is responsible for:
+//
+//   1. asking for permission
+//   2. creating a PushSubscription via pushManager
+//   3. upserting the (endpoint, keys) into the `push_subscriptions` table
+//      using the user's JWT — RLS guarantees ownership
+//
+// VITE_VAPID_PUBLIC_KEY must match the public half of the keypair set as
+// VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY in Supabase secrets. Generate with
+// `npx web-push generate-vapid-keys`.
+
+import { supabase } from '../lib/supabase'
 
 export async function getServiceWorkerRegistration() {
   if (!('serviceWorker' in navigator)) return null
@@ -20,27 +29,83 @@ export async function requestPushPermission() {
   return result === 'granted'
 }
 
-export async function subscribeToPush() {
-  const registration = await getServiceWorkerRegistration()
-  if (!registration) return null
+// Returns one of: 'enabled', 'denied', 'unsupported', 'no-vapid', 'no-sw',
+// or 'failed' (with a console-logged error). On 'enabled', the
+// subscription is persisted in push_subscriptions for the current user.
+export async function enablePushNotifications(userId) {
+  if (!userId) return 'failed'
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return 'unsupported'
 
   const vapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY
-  if (!vapidKey) {
-    console.warn('VITE_VAPID_PUBLIC_KEY not set — push subscription disabled')
-    return null
+  if (!vapidKey) return 'no-vapid'
+
+  const granted = await requestPushPermission()
+  if (!granted) return 'denied'
+
+  const registration = await getServiceWorkerRegistration()
+  if (!registration) return 'no-sw'
+
+  let subscription
+  try {
+    subscription = await registration.pushManager.getSubscription()
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(vapidKey),
+      })
+    }
+  } catch (err) {
+    console.error('pushManager.subscribe failed:', err)
+    return 'failed'
   }
 
-  try {
-    const existing = await registration.pushManager.getSubscription()
-    if (existing) return existing
-    return await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(vapidKey),
-    })
-  } catch (err) {
-    console.error('subscribeToPush failed:', err)
-    return null
+  const json = subscription.toJSON()
+  const endpoint = json.endpoint
+  const p256dh = json.keys?.p256dh
+  const auth = json.keys?.auth
+  if (!endpoint || !p256dh || !auth) {
+    console.error('subscription missing required fields')
+    return 'failed'
   }
+
+  const { error } = await supabase
+    .from('push_subscriptions')
+    .upsert(
+      {
+        user_id: userId,
+        endpoint,
+        p256dh,
+        auth,
+        user_agent: navigator.userAgent || null,
+      },
+      { onConflict: 'endpoint' },
+    )
+  if (error) {
+    console.error('push_subscriptions upsert failed:', error)
+    return 'failed'
+  }
+  return 'enabled'
+}
+
+export async function disablePushNotifications() {
+  const registration = await getServiceWorkerRegistration()
+  if (!registration) return false
+  const subscription = await registration.pushManager.getSubscription()
+  if (!subscription) return true
+
+  const endpoint = subscription.endpoint
+  await supabase.from('push_subscriptions').delete().eq('endpoint', endpoint)
+  try {
+    await subscription.unsubscribe()
+  } catch (err) {
+    console.warn('subscription.unsubscribe failed:', err)
+  }
+  return true
+}
+
+export function pushPermissionStatus() {
+  if (!('Notification' in window)) return 'unsupported'
+  return Notification.permission // 'granted' | 'denied' | 'default'
 }
 
 function urlBase64ToUint8Array(base64) {

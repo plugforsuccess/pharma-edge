@@ -348,6 +348,8 @@ export default function LogSignal() {
               accountSize={profile?.account_size}
               initialStockPrice={form.stock_price_at_signal}
               catalystDate={form.catalyst_date}
+              buyStrikeOtmPct={analysis?.strike_suggestion?.buy_strike_pct_otm}
+              sellStrikeOtmPct={analysis?.strike_suggestion?.sell_strike_pct_otm}
               onCalculationComplete={(calc) => {
                 if (
                   !form.entry_price &&

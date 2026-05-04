@@ -48,6 +48,8 @@ export default function StrikePriceCalculator({
   accountSize,
   initialStockPrice,
   catalystDate,
+  buyStrikeOtmPct,
+  sellStrikeOtmPct,
   onCalculationComplete,
 }) {
   const [structure, setStructure] = useState(
@@ -70,12 +72,16 @@ export default function StrikePriceCalculator({
 
   // Auto-populate strikes + suggest expiry when stock price, structure, or
   // catalyst date change. Only writes empty fields so we don't clobber
-  // user-typed values.
+  // user-typed values. If Claude supplied OTM% suggestions for this trade,
+  // use them in place of the structure defaults; otherwise fall back to
+  // STRUCTURE_CONFIG.
   useEffect(() => {
     const price = toNumOrNull(stockPrice)
     if (price == null || price <= 0) return
-    setBuyStrike((cur) => cur || config.buyDefault(price))
-    setSellStrike((cur) => cur || config.sellDefault(price))
+    const buy = computeStrike(price, structure, 'buy', buyStrikeOtmPct, config)
+    const sell = computeStrike(price, structure, 'sell', sellStrikeOtmPct, config)
+    setBuyStrike((cur) => cur || buy)
+    setSellStrike((cur) => cur || sell)
     if (catalystDate) {
       const target = new Date(`${catalystDate}T00:00:00Z`)
       target.setUTCDate(target.getUTCDate() + 32)
@@ -86,7 +92,7 @@ export default function StrikePriceCalculator({
       setExpiry((cur) => cur || iso)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stockPrice, structure, catalystDate])
+  }, [stockPrice, structure, catalystDate, buyStrikeOtmPct, sellStrikeOtmPct])
 
   const inputsReady =
     toNumOrNull(stockPrice) != null &&
@@ -553,6 +559,17 @@ function toNumOrNull(value) {
   if (value === '' || value === null || value === undefined) return null
   const n = Number(value)
   return Number.isFinite(n) ? n : null
+}
+
+function computeStrike(price, structure, side, suggestedOtmPct, config) {
+  const otm = toNumOrNull(suggestedOtmPct)
+  if (otm != null && otm > 0) {
+    // For puts: buy below stock (lower price), sell further below.
+    // For calls: buy above stock (higher price), sell further above.
+    const direction = structure === 'bear_put_spread' ? -1 : 1
+    return (price * (1 + (direction * otm) / 100)).toFixed(2)
+  }
+  return side === 'buy' ? config.buyDefault(price) : config.sellDefault(price)
 }
 
 function liveSpreadWidth(structure, buy, sell) {
