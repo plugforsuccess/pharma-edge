@@ -53,22 +53,11 @@ export default function ScannerCandidates() {
     }
   }
 
-  async function promote(candidate) {
+  function promote(candidate) {
     if (!user) return
-    setWorking(candidate.id)
-    // Claim the candidate first; LogSignal will write back promoted_to_signal
-    // after the new signal is inserted.
-    const { error } = await supabase
-      .from('scanner_candidates')
-      .update({
-        reviewed: true,
-        reviewed_by: user.id,
-        reviewed_at: new Date().toISOString(),
-      })
-      .eq('id', candidate.id)
-    setWorking(null)
-    if (error) return
-
+    // Don't pre-claim — LogSignal marks the candidate reviewed only
+    // after a successful signal insert. Pre-claiming meant the candidate
+    // silently disappeared from the queue if the user backed out.
     const analysis = candidate.claude_analysis ?? null
     navigate('/log', {
       state: {
