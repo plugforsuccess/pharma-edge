@@ -138,7 +138,7 @@ export default function AnalyzeFilingPanel({
             <>
               <p className="text-subtle text-xs mb-3">
                 Auto-fetch a snapshot from CT.gov, SEC EDGAR, and FDA, or paste text from any
-                public source. Edit before analysis. Claude scores the signal.
+                public source. Edit before analysis. AI scores the signal.
               </p>
 
               <div className="flex items-center justify-between mb-3 gap-2">
@@ -313,7 +313,7 @@ function AnalysisResult({ analysis, onReset }) {
             </div>
             <div>
               <p className="text-white font-bold text-sm">{yourProb}%</p>
-              <p className="text-muted text-[10px]">Claude Read</p>
+              <p className="text-muted text-[10px]">AI Read</p>
             </div>
           </div>
         </div>

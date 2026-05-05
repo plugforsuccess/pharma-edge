@@ -465,8 +465,8 @@ export default function LogSignal() {
       <div className={clsx('space-y-4', step !== 2 && 'hidden')}>
         <h2 className="text-white font-semibold">Filing Analysis</h2>
           <p className="text-subtle text-xs">
-            Paste public filing text for Claude to analyze, or write your thesis manually. Analysis
-            results will fill in your thesis only if it's empty.
+            Paste public filing text for the AI analyst to score, or write your thesis manually.
+            Analysis results will fill in your thesis only if it's empty.
           </p>
 
           <AnalyzeFilingPanel
