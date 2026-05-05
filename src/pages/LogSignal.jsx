@@ -29,6 +29,56 @@ const DEFAULT_STRUCTURE = {
 
 const today = () => new Date().toISOString().slice(0, 10)
 
+// localStorage-backed draft persistence keyed by candidate_id, so leaving
+// LogSignal and re-promoting the same candidate restores the rich
+// AnalyzeFilingPanel result instead of the user having to re-run Claude.
+// 7-day TTL prunes stale drafts. Solo-user / per-device by design.
+const DRAFT_TTL_MS = 7 * 24 * 60 * 60 * 1000
+
+function draftKey(candidateId) {
+  return candidateId ? `pe_draft_analysis_${candidateId}` : null
+}
+
+function loadDraftAnalysis(candidateId) {
+  const key = draftKey(candidateId)
+  if (!key || typeof window === 'undefined') return null
+  try {
+    const raw = window.localStorage.getItem(key)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (!parsed?.savedAt || Date.now() - parsed.savedAt > DRAFT_TTL_MS) {
+      window.localStorage.removeItem(key)
+      return null
+    }
+    return parsed.analysis ?? null
+  } catch {
+    return null
+  }
+}
+
+function saveDraftAnalysis(candidateId, analysis) {
+  const key = draftKey(candidateId)
+  if (!key || typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(
+      key,
+      JSON.stringify({ savedAt: Date.now(), analysis }),
+    )
+  } catch {
+    /* quota / private mode — silent */
+  }
+}
+
+function clearDraftAnalysis(candidateId) {
+  const key = draftKey(candidateId)
+  if (!key || typeof window === 'undefined') return
+  try {
+    window.localStorage.removeItem(key)
+  } catch {
+    /* ignore */
+  }
+}
+
 export default function LogSignal() {
   const { user, profile } = useAuth()
   const navigate = useNavigate()
@@ -39,7 +89,8 @@ export default function LogSignal() {
   const [step, setStep] = useState(1)
   const [loading, setLoading] = useState(false)
   const [submitError, setSubmitError] = useState('')
-  const [analysis, setAnalysis] = useState(null)
+  // Hydrate from localStorage so back-out → re-promote restores the draft.
+  const [analysis, setAnalysis] = useState(() => loadDraftAnalysis(candidateId))
 
   const [form, setForm] = useState(() => ({
     ticker: (prefill.ticker || '').toUpperCase(),
@@ -81,12 +132,11 @@ export default function LogSignal() {
   }
 
   function handleAnalysisComplete(result) {
-    // Result already includes _market_metrics (added by AnalyzeFilingPanel).
-    // Storing the full object here means the panel stays in result-mode
-    // across step navigation and a future submit can persist the rich
-    // structured analysis (red flags, bull/bear, IV) once we add the
-    // schema column for it.
+    // Persist the draft to localStorage so a full nav-away (back to
+    // /scanner) → re-promote restores the rich analysis instead of the
+    // user having to re-spend a Claude call.
     setAnalysis(result)
+    saveDraftAnalysis(candidateId, result)
     setForm((prev) => ({
       ...prev,
       // Only fill thesis if the user hasn't typed their own.
@@ -167,6 +217,10 @@ export default function LogSignal() {
       setSubmitError(error.message)
       return
     }
+
+    // Signal locked successfully — clear the localStorage draft so a
+    // future promote of the same candidate (rare) doesn't restore stale.
+    clearDraftAnalysis(candidateId)
 
     // If this signal was promoted from a scanner candidate, link + claim
     // it now (only after the signal actually inserted — pre-claiming on
@@ -351,7 +405,10 @@ export default function LogSignal() {
             catalystDate={form.catalyst_date}
             analysis={analysis}
             onAnalysisComplete={handleAnalysisComplete}
-            onAnalysisReset={() => setAnalysis(null)}
+            onAnalysisReset={() => {
+              setAnalysis(null)
+              clearDraftAnalysis(candidateId)
+            }}
           />
 
           {form.catalyst_date && form.direction !== 'watch' && (
