@@ -375,10 +375,15 @@ serve(async (req) => {
     },
   })
 
+  // text/plain instead of text/event-stream — iOS Safari has known
+  // fetch+streaming bugs with text/event-stream content-type
+  // (response.body sometimes never arrives, or the connection drops
+  // mid-stream). We're parsing the SSE format manually on the client,
+  // so the browser doesn't need to interpret the content-type.
   return new Response(stream, {
     headers: {
       ...corsHeaders,
-      'Content-Type': 'text/event-stream',
+      'Content-Type': 'text/plain; charset=utf-8',
       'Cache-Control': 'no-cache, no-transform',
       'Connection': 'keep-alive',
       'X-Accel-Buffering': 'no',
