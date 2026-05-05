@@ -22,10 +22,18 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
 
 const CLAUDE_MODEL = 'claude-sonnet-4-6'
 const MAX_FILING_CHARS = 50_000
-const CLAUDE_TIMEOUT_MS = 90_000   // bumped from 50s — web_search adds latency
-const MAX_TOKENS = 8192             // bumped from 4096 — multi-search + JSON
+// Supabase free tier severs the client connection at ~60s wall clock.
+// Cap our internal Claude timeout below that so we return a clean
+// 'analysis timed out' error before Supabase cuts us off (which
+// otherwise surfaces as the misleading 'Failed to send a request to
+// the Edge Function' on the client).
+const CLAUDE_TIMEOUT_MS = 50_000
+const MAX_TOKENS = 8192
 const RATE_LIMIT_PER_HOUR = Number(Deno.env.get('CLAUDE_RATE_LIMIT_PER_HOUR') ?? '30')
-const WEB_SEARCH_MAX_USES = Number(Deno.env.get('WEB_SEARCH_MAX_USES') ?? '5')
+// 3 searches typically covers gap-spotting + precedent + recent press
+// in ~15-20s. Bumped back up to 5 if/when we move past the free tier
+// 60s wall-clock limit (Supabase Pro = 150s).
+const WEB_SEARCH_MAX_USES = Number(Deno.env.get('WEB_SEARCH_MAX_USES') ?? '3')
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
