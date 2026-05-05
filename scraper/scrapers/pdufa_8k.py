@@ -46,40 +46,35 @@ def fetch_pdufa_8k(days_back: int = 14) -> list[dict[str, Any]]:
     case the candidate still goes through with a 'review filing' flag
     so the user gets a pointer instead of a silent miss."""
     since = (datetime.utcnow() - timedelta(days=days_back)).strftime("%Y-%m-%d")
-    # EDGAR FTS appears to drop bare single-word queries. Phrase-quoted
-    # queries are reliable but only match exact wording; we issue three
-    # narrow phrase queries and merge by file_path so we still cover
-    # the action / goal / target wording variants.
-    phrase_queries = [
-        '"PDUFA action date"',
-        '"PDUFA goal date"',
-        '"PDUFA target date"',
-    ]
-    seen_paths: set[str] = set()
-    raw_hits: list[dict[str, Any]] = []
-    for q in phrase_queries:
-        params = {
-            "q": q,
-            "dateRange": "custom",
-            "startdt": since,
-            "forms": "8-K",
-        }
-        try:
-            resp = requests.get(EDGAR_FTS, params=params, headers=_headers(), timeout=30)
-            resp.raise_for_status()
-            body = resp.json()
-        except Exception as exc:
-            print(f"  fetch_pdufa_8k {q}: {exc}")
-            continue
-        sub = body.get("hits", {}).get("hits", []) or []
-        print(f"  fetch_pdufa_8k {q}: {len(sub)} hits")
-        for h in sub:
-            fp = (h.get("_source") or {}).get("file_path", "")
-            if fp and fp not in seen_paths:
-                seen_paths.add(fp)
-                raw_hits.append(h)
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    # Same parens-AND-OR shape as the proven `fetch_biotech_8k` query.
+    # Bare-word and quoted-phrase queries both came back empty against
+    # this endpoint; this matches the working pattern. enddt is required
+    # alongside startdt or SEC FTS silently ignores the date range.
+    params = {
+        "q": "(PDUFA AND (action OR goal OR target) AND date)",
+        "dateRange": "custom",
+        "startdt": since,
+        "enddt": today,
+        "forms": "8-K",
+    }
+    try:
+        resp = requests.get(EDGAR_FTS, params=params, headers=_headers(), timeout=30)
+        resp.raise_for_status()
+        body = resp.json()
+    except Exception as exc:
+        print(f"  fetch_pdufa_8k: {exc}")
+        return []
 
-    print(f"  fetch_pdufa_8k: {len(raw_hits)} unique 8-K hits across phrase variants")
+    # Diagnostic: log SEC's reported total + the keys we got back so we
+    # can spot future query-shape regressions without having to print
+    # the full body to scan_log.
+    total = (body.get("hits") or {}).get("total")
+    raw_hits = body.get("hits", {}).get("hits", []) or []
+    print(
+        f"  fetch_pdufa_8k: total={total} raw_hits={len(raw_hits)} "
+        f"keys={list(body.keys())}"
+    )
 
     out: list[dict[str, Any]] = []
     for hit in raw_hits[:30]:

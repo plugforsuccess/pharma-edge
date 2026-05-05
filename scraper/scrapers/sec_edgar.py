@@ -117,10 +117,15 @@ def resolve_ticker(
 
 def fetch_biotech_8k(days_back: int = 1) -> list[dict[str, Any]]:
     since = (datetime.utcnow() - timedelta(days=days_back)).strftime("%Y-%m-%d")
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    # SEC FTS `dateRange=custom` silently ignores startdt when enddt is
+    # not also provided — so without enddt the query returns hits from
+    # the entire EDGAR history. Pin both ends explicitly.
     params = {
         "q": "(clinical trial OR FDA OR PDUFA OR phase 3 OR phase 2)",
         "dateRange": "custom",
         "startdt": since,
+        "enddt": today,
         "forms": "8-K",
     }
     try:
@@ -201,9 +206,11 @@ def fetch_insider_transactions(ticker: str, cik: str) -> dict[str, Any]:
 
 def fetch_shelf_offerings(days_back: int = 30) -> list[dict[str, Any]]:
     since = (datetime.utcnow() - timedelta(days=days_back)).strftime("%Y-%m-%d")
+    today = datetime.utcnow().strftime("%Y-%m-%d")
     params = {
         "dateRange": "custom",
         "startdt": since,
+        "enddt": today,
         "forms": "S-3",
     }
     try:

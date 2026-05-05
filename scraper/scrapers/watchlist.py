@@ -156,11 +156,13 @@ def _scan_sec(item: dict[str, Any]) -> list[dict[str, Any]]:
     ticker = item['ticker']
     company = item.get('company_name', '').strip()
     since = (datetime.now(timezone.utc) - timedelta(days=EDGAR_LOOKBACK_DAYS)).strftime('%Y-%m-%d')
+    today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
     q = f'"{ticker}" OR "{company}"' if company else f'"{ticker}"'
     params = {
         'q': q,
         'dateRange': 'custom',
         'startdt': since,
+        'enddt': today,
         'forms': '8-K,S-3,10-K,10-Q',
     }
     try:

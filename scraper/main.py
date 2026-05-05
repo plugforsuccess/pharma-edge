@@ -401,11 +401,20 @@ def main() -> None:
                 )
             if not t:
                 continue
+            # Fall back to ticker_map title when SEC FTS shipped the
+            # filing without entity_name (happens occasionally).
+            if not company:
+                # ticker_map.by_name is normalized → ticker; we don't
+                # have a reverse, so we re-walk it. ~13K entries, cheap.
+                for k, v in (ticker_map.get("by_name") or {}).items():
+                    if v == t:
+                        company = k.upper()
+                        break
             cap = market_cap_for(t)
             if cap is not None and cap >= 10_000_000_000:
                 # Mega/large cap that slipped past the name list: drop.
                 continue
-            enriched.append({**filing, "ticker": t, "market_cap": cap})
+            enriched.append({**filing, "ticker": t, "company": company, "market_cap": cap})
         print(f"  {len(enriched)} of {len(filings_8k)} 8-K filings made it past the cap+ticker filter")
 
         eight_k_candidates = 0
