@@ -182,7 +182,12 @@ export default function AnalyzeFilingPanel({
         _web_searches_used: final.web_searches_used ?? 0,
       })
     } catch (e) {
-      setError(e.message || 'Analysis failed. Check your filing text and try again.')
+      // Log the full error to the console so we can DevTools-inspect
+      // even when the UI fallback text is generic.
+      // eslint-disable-next-line no-console
+      console.error('[analyze-signal] failed', e)
+      const msg = e?.message || String(e) || 'Analysis failed. Check your filing text and try again.'
+      setError(msg)
     }
     setLoading(false)
     setProgressText('')
