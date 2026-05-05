@@ -296,6 +296,21 @@ serve(async (req) => {
                 searchCount++
                 const input = cb.input as Record<string, unknown> | undefined
                 send('search', { query: input?.query ?? '(unknown query)' })
+              } else if (cb?.type === 'web_search_tool_result') {
+                // Extract URLs from the actual search results so we
+                // capture sources Claude *saw* even when it didn't
+                // inline-cite them. content is an array of
+                // { type: 'web_search_result', url, title, page_age }.
+                const results = (cb.content as Array<Record<string, unknown>> | undefined) || []
+                for (const r of results) {
+                  if (r?.type === 'web_search_result' && r.url) {
+                    citations.push({
+                      url: String(r.url),
+                      title: r.title ? String(r.title) : String(r.url),
+                      page_age: r.page_age ?? null,
+                    })
+                  }
+                }
               }
             } else if (t === 'content_block_delta') {
               const delta = evt.delta as Record<string, unknown> | undefined
