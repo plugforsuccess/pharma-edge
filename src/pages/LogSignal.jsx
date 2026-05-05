@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Check } from 'lucide-react'
 import { supabase } from '../lib/supabase'
@@ -79,6 +79,41 @@ function clearDraftAnalysis(candidateId) {
   }
 }
 
+// ─── DB-backed cross-device draft persistence ────────────────────
+// localStorage above is the fast cache (synchronous on mount). The
+// candidate_drafts table is the canonical store so a draft started
+// on phone shows up on desktop. RLS scopes to own rows.
+
+async function fetchRemoteDraft(supabaseClient, candidateId) {
+  if (!candidateId) return null
+  const { data } = await supabaseClient
+    .from('candidate_drafts')
+    .select('analysis')
+    .eq('candidate_id', candidateId)
+    .maybeSingle()
+  return data?.analysis ?? null
+}
+
+async function upsertRemoteDraft(supabaseClient, userId, candidateId, analysis) {
+  if (!candidateId || !userId) return
+  await supabaseClient
+    .from('candidate_drafts')
+    .upsert(
+      {
+        user_id: userId,
+        candidate_id: candidateId,
+        analysis,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'user_id,candidate_id' },
+    )
+}
+
+async function deleteRemoteDraft(supabaseClient, candidateId) {
+  if (!candidateId) return
+  await supabaseClient.from('candidate_drafts').delete().eq('candidate_id', candidateId)
+}
+
 export default function LogSignal() {
   const { user, profile } = useAuth()
   const navigate = useNavigate()
@@ -89,8 +124,24 @@ export default function LogSignal() {
   const [step, setStep] = useState(1)
   const [loading, setLoading] = useState(false)
   const [submitError, setSubmitError] = useState('')
-  // Hydrate from localStorage so back-out → re-promote restores the draft.
+  // Synchronous hydrate from localStorage so first paint is instant.
+  // The DB fetch below overrides if a newer cross-device draft exists.
   const [analysis, setAnalysis] = useState(() => loadDraftAnalysis(candidateId))
+
+  useEffect(() => {
+    if (!candidateId) return
+    let cancelled = false
+    fetchRemoteDraft(supabase, candidateId).then((remote) => {
+      if (cancelled || !remote) return
+      // Override local cache when DB has a draft (DB is canonical).
+      // If localStorage already had this analysis, no visible change.
+      setAnalysis(remote)
+      saveDraftAnalysis(candidateId, remote)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [candidateId])
 
   const [form, setForm] = useState(() => ({
     ticker: (prefill.ticker || '').toUpperCase(),
@@ -132,11 +183,14 @@ export default function LogSignal() {
   }
 
   function handleAnalysisComplete(result) {
-    // Persist the draft to localStorage so a full nav-away (back to
-    // /scanner) → re-promote restores the rich analysis instead of the
-    // user having to re-spend a Claude call.
+    // localStorage write is synchronous (fast cache); the DB upsert is
+    // fire-and-forget so the UI doesn't wait. Both happen so a draft
+    // started on phone shows up on desktop and vice versa.
     setAnalysis(result)
     saveDraftAnalysis(candidateId, result)
+    if (user?.id) {
+      upsertRemoteDraft(supabase, user.id, candidateId, result).catch(() => {})
+    }
     setForm((prev) => ({
       ...prev,
       // Only fill thesis if the user hasn't typed their own.
@@ -218,9 +272,12 @@ export default function LogSignal() {
       return
     }
 
-    // Signal locked successfully — clear the localStorage draft so a
+    // Signal locked successfully — clear local + remote draft so a
     // future promote of the same candidate (rare) doesn't restore stale.
     clearDraftAnalysis(candidateId)
+    if (candidateId) {
+      deleteRemoteDraft(supabase, candidateId).catch(() => {})
+    }
 
     // If this signal was promoted from a scanner candidate, link + claim
     // it now (only after the signal actually inserted — pre-claiming on
@@ -408,6 +465,7 @@ export default function LogSignal() {
             onAnalysisReset={() => {
               setAnalysis(null)
               clearDraftAnalysis(candidateId)
+              deleteRemoteDraft(supabase, candidateId).catch(() => {})
             }}
           />
 
