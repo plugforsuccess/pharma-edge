@@ -371,22 +371,46 @@ export default function PlaceOrderPanel({ signal, calculation, onOrderPlaced }) 
                 </p>
               </>
             ) : (
-              <>
-                <p className="text-red-400 font-bold text-sm mb-2">Order Failed</p>
-                <p className="text-zinc-400 text-xs break-all">{orderResult.error}</p>
-                {orderResult.detail && (
-                  <pre className="text-muted text-[10px] mt-2 whitespace-pre-wrap break-all font-mono">
-                    {orderResult.detail}
-                  </pre>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setStep('idle')}
-                  className="text-red-400 text-xs mt-2 hover:text-red-300"
-                >
-                  Try again
-                </button>
-              </>
+              (() => {
+                const interp = interpretBrokerError(orderResult.error, orderResult.detail)
+                return (
+                  <>
+                    <p className="text-red-400 font-bold text-sm mb-2">
+                      {interp.title}
+                    </p>
+                    <p className="text-zinc-300 text-xs leading-relaxed">
+                      {interp.explanation}
+                    </p>
+                    {interp.suggestion && (
+                      <div className="mt-3 pt-3 border-t border-red-900/40">
+                        <p className="text-yellow-400 text-[10px] uppercase tracking-wider mb-1">
+                          What to do
+                        </p>
+                        <p className="text-zinc-400 text-xs leading-relaxed">
+                          {interp.suggestion}
+                        </p>
+                      </div>
+                    )}
+                    <details className="mt-3">
+                      <summary className="text-muted text-[10px] cursor-pointer select-none">
+                        Raw broker response
+                      </summary>
+                      <pre className="text-muted text-[10px] mt-2 whitespace-pre-wrap break-all font-mono">
+                        {orderResult.detail
+                          ? `${orderResult.error}\n\n${orderResult.detail}`
+                          : orderResult.error}
+                      </pre>
+                    </details>
+                    <button
+                      type="button"
+                      onClick={() => setStep('idle')}
+                      className="text-red-400 text-xs mt-3 hover:text-red-300"
+                    >
+                      Try again
+                    </button>
+                  </>
+                )
+              })()
             )}
           </div>
         )}
@@ -416,4 +440,113 @@ function fmt$(value) {
   const n = Number(value)
   if (!Number.isFinite(n)) return '—'
   return n.toLocaleString(undefined, { maximumFractionDigits: 0 })
+}
+
+// Broker-side rejections come back as opaque preflight error codes.
+// Translate the most common ones into plain English with a suggested
+// next step so the user knows whether to retry, switch broker, or
+// fund the account. Falls back to the raw message when we can't
+// pattern-match.
+function interpretBrokerError(rawError, rawDetail) {
+  let parsed = null
+  if (rawDetail) {
+    try {
+      parsed = typeof rawDetail === 'string' ? JSON.parse(rawDetail) : rawDetail
+    } catch {
+      /* leave as string */
+    }
+  }
+  const inner = (parsed?.error?.errors && parsed.error.errors[0]) || {}
+  const innerCode = inner.code || ''
+  const innerMessage = inner.message || parsed?.error?.message || rawError || ''
+  const ml = String(innerMessage).toLowerCase()
+
+  if (
+    innerCode === 'instrument_validation_failed' ||
+    /not supported/.test(ml) ||
+    /closing only/.test(ml) ||
+    /closing-only/.test(ml)
+  ) {
+    return {
+      title: 'Broker restricted this instrument',
+      explanation:
+        'Tastytrade has flagged this contract as not currently supported for opening trades. The most common cause is the underlying being marked "closing-only" by the broker — usually due to hard-to-borrow conditions, heavy short interest, or a recent halt.',
+      suggestion:
+        'Wait it out (usually lifts in days/weeks), try the same trade on a different broker (Robinhood / IBKR may not mirror this restriction), or pick a different ticker from your queue. The signal hash you locked is still valid regardless of where you execute.',
+    }
+  }
+
+  if (
+    /buying power/.test(ml) ||
+    /insufficient/.test(ml) ||
+    innerCode === 'buying_power_insufficient'
+  ) {
+    return {
+      title: 'Insufficient buying power',
+      explanation:
+        'Your Tastytrade account does not have enough available buying power to open this position at the size selected.',
+      suggestion:
+        'Reduce the contract count in the Strike Calculator, transfer funds to the account, or pick a candidate with a smaller premium.',
+    }
+  }
+
+  if (
+    /hard to borrow/.test(ml) ||
+    /\bhtb\b/.test(ml) ||
+    /not borrowable/.test(ml)
+  ) {
+    return {
+      title: 'Hard to borrow',
+      explanation:
+        'The underlying stock is currently expensive or unavailable to borrow, which Tastytrade flags before letting you take a position that effectively shorts shares (the short leg of a put spread).',
+      suggestion:
+        'Same playbook as closing-only: wait, switch broker, or pick a different ticker. Hard-to-borrow can be a confirming bearish signal — but it can also force you to a different platform.',
+    }
+  }
+
+  if (/strike/.test(ml) && /(invalid|not.*available|not found)/.test(ml)) {
+    return {
+      title: 'Strike not available',
+      explanation:
+        'The broker does not have an option contract listed at this strike for the selected expiry. Common for newly-IPO\'d names or thin chains.',
+      suggestion:
+        'Open the option chain in your broker and pick the closest available strike, then re-run the calculator with the adjusted value.',
+    }
+  }
+
+  if (/(expir(y|ation))/.test(ml) && /(invalid|not.*available|not found)/.test(ml)) {
+    return {
+      title: 'Expiry not available',
+      explanation:
+        'The broker doesn\'t list options for the expiry date you selected. Could be a non-standard date, a holiday-shifted Friday, or a name with quarterly-only expirations.',
+      suggestion:
+        'Pick a nearby standard expiry (third Friday of the month is the safe default) and update the calculator.',
+    }
+  }
+
+  if (/order limit/.test(ml) || /position limit/.test(ml)) {
+    return {
+      title: 'Position limit exceeded',
+      explanation:
+        'Your account or the broker has a per-position or per-symbol limit that this order would exceed.',
+      suggestion:
+        'Reduce contract count, or check Tastytrade settings → Trading → Position Limits.',
+    }
+  }
+
+  if (/market closed/.test(ml) || /outside.*hours/.test(ml)) {
+    return {
+      title: 'Market closed',
+      explanation:
+        'Tastytrade only routes options orders during regular market hours (9:30am–4:00pm ET, Mon–Fri).',
+      suggestion:
+        'Wait for the next session open and resubmit.',
+    }
+  }
+
+  return {
+    title: 'Order rejected',
+    explanation: innerMessage || 'The broker rejected this order without a recognised error code.',
+    suggestion: null,
+  }
 }
