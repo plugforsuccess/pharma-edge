@@ -227,11 +227,18 @@ function CandidateCard({ candidate, expanded, busy, onToggle, onDismiss, onPromo
           )}
         </div>
 
+        {/* Collapsed-only summary: when expanded, the full Catalyst +
+            Detected Signals sections below already cover this, so
+            hiding it here removes the duplicate. Company name stays
+            visible in both states because it's the human label. */}
         <p className="text-subtle text-xs truncate">
-          {candidate.company_name} · {prettyCatalyst(candidate.catalyst_type)}
+          {candidate.company_name || candidate.ticker || 'Unknown'}
+          {!expanded && candidate.catalyst_type
+            ? ` · ${prettyCatalyst(candidate.catalyst_type)}`
+            : ''}
         </p>
 
-        {flags[0] && (
+        {!expanded && flags[0] && (
           <p className="text-red-400 text-[10px] mt-1 truncate">⚠ {flags[0]}</p>
         )}
       </button>
