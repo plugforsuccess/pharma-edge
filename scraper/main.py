@@ -37,7 +37,7 @@ from scrapers.fda_calendar import (
     fetch_fda_press_releases,
     fetch_pdufa_dates,
 )
-from scrapers.market_cap import market_cap_for
+from scrapers.market_cap import is_known_mega_sponsor, market_cap_for
 from scrapers.pdufa_8k import fetch_pdufa_8k
 from scrapers.sec_edgar import (
     fetch_biotech_8k,
@@ -156,13 +156,21 @@ def main() -> None:
         # Market-cap-weighted re-scoring: the strategy is micro-cap
         # biotech, but big sponsors run more+bigger trials and so
         # disproportionately trip signals like "31 sites terminated".
-        # Bias smaller sponsors up, mega-caps down. Only enrich the
+        # Two pass: hardcoded mega-sponsor list (guaranteed correct,
+        # 0-cost), then yfinance for everything else. Only enrich the
         # top 30 by raw score to cap the yfinance load.
         for sd in scored[:30]:
-            tk = sd.get("ticker") or resolve_ticker(sd.get("sponsor", ""), ticker_map)
+            sponsor = sd.get("sponsor", "")
+            if is_known_mega_sponsor(sponsor):
+                sd["score"] = max(0, sd["score"] - 4)
+                sd.setdefault("flags", []).append("Mega-cap sponsor — catalyst rarely material")
+                # Skip yfinance: hardcoded list is authoritative for these.
+                continue
+            tk = sd.get("ticker") or resolve_ticker(sponsor, ticker_map)
             sd["ticker"] = tk
             cap = market_cap_for(tk) if tk else None
             sd["market_cap"] = cap
+            print(f"  cap-weight: {sponsor!r} ticker={tk!r} cap={cap}")
             if cap is None:
                 continue
             if cap < 2_000_000_000:
@@ -379,17 +387,26 @@ def main() -> None:
     try:
         enriched: list[dict[str, Any]] = []
         for filing in filings_8k:
+            company = filing.get("company", "") or ""
+            # Skip known mega-cap sponsors — those filings aren't
+            # actionable from the queue anyway.
+            if is_known_mega_sponsor(company):
+                continue
             t = (filing.get("ticker") or "").upper()
             if not t:
                 t = resolve_ticker(
-                    filing.get("company", ""),
+                    company,
                     ticker_map,
                     cik=str(filing.get("cik", "")),
                 )
             if not t:
                 continue
-            enriched.append({**filing, "ticker": t})
-        print(f"  {len(enriched)} of {len(filings_8k)} 8-K filings have a resolvable ticker")
+            cap = market_cap_for(t)
+            if cap is not None and cap >= 10_000_000_000:
+                # Mega/large cap that slipped past the name list: drop.
+                continue
+            enriched.append({**filing, "ticker": t, "market_cap": cap})
+        print(f"  {len(enriched)} of {len(filings_8k)} 8-K filings made it past the cap+ticker filter")
 
         eight_k_candidates = 0
         for filing in enriched[:5]:
@@ -401,7 +418,7 @@ def main() -> None:
                     "catalyst_date": filing.get("filed_at", ""),
                     "source": "sec_edgar",
                     "flags": [f"Recent {filing.get('form_type', '8-K')} filing"],
-                    "market_cap": market_cap_for(filing["ticker"]),
+                    "market_cap": filing.get("market_cap"),
                     "raw_data": {
                         "filing_url": filing.get("filing_url", ""),
                         "file_date": filing.get("filed_at", ""),

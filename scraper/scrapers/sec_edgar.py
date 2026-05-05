@@ -135,6 +135,11 @@ def fetch_biotech_8k(days_back: int = 1) -> list[dict[str, Any]]:
     for hit in data.get("hits", {}).get("hits", [])[:50]:
         src = hit.get("_source", {}) or {}
         tickers = src.get("tickers") or []
+        # SEC FTS returns CIKs in a `ciks` array (zero-padded strings).
+        # `entity_id` is a different identifier and isn't usable for
+        # company_tickers.json lookup.
+        ciks = src.get("ciks") or []
+        cik = ciks[0] if ciks else ""
         out.append(
             {
                 "ticker": tickers[0] if tickers else "",
@@ -145,7 +150,7 @@ def fetch_biotech_8k(days_back: int = 1) -> list[dict[str, Any]]:
                     f"https://www.sec.gov/Archives/edgar/{src.get('file_path', '')}"
                 ),
                 "description": src.get("period_of_report", ""),
-                "cik": src.get("entity_id", ""),
+                "cik": cik,
             }
         )
     return out

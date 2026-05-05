@@ -46,24 +46,40 @@ def fetch_pdufa_8k(days_back: int = 14) -> list[dict[str, Any]]:
     case the candidate still goes through with a 'review filing' flag
     so the user gets a pointer instead of a silent miss."""
     since = (datetime.utcnow() - timedelta(days=days_back)).strftime("%Y-%m-%d")
-    # Single broad term is more reliable than OR-of-quoted-phrases against
-    # EDGAR FTS — the body-level regex below filters non-matches anyway.
-    params = {
-        "q": "PDUFA",
-        "dateRange": "custom",
-        "startdt": since,
-        "forms": "8-K",
-    }
-    try:
-        resp = requests.get(EDGAR_FTS, params=params, headers=_headers(), timeout=30)
-        resp.raise_for_status()
-        body = resp.json()
-    except Exception as exc:
-        print(f"  fetch_pdufa_8k: {exc}")
-        return []
+    # EDGAR FTS appears to drop bare single-word queries. Phrase-quoted
+    # queries are reliable but only match exact wording; we issue three
+    # narrow phrase queries and merge by file_path so we still cover
+    # the action / goal / target wording variants.
+    phrase_queries = [
+        '"PDUFA action date"',
+        '"PDUFA goal date"',
+        '"PDUFA target date"',
+    ]
+    seen_paths: set[str] = set()
+    raw_hits: list[dict[str, Any]] = []
+    for q in phrase_queries:
+        params = {
+            "q": q,
+            "dateRange": "custom",
+            "startdt": since,
+            "forms": "8-K",
+        }
+        try:
+            resp = requests.get(EDGAR_FTS, params=params, headers=_headers(), timeout=30)
+            resp.raise_for_status()
+            body = resp.json()
+        except Exception as exc:
+            print(f"  fetch_pdufa_8k {q}: {exc}")
+            continue
+        sub = body.get("hits", {}).get("hits", []) or []
+        print(f"  fetch_pdufa_8k {q}: {len(sub)} hits")
+        for h in sub:
+            fp = (h.get("_source") or {}).get("file_path", "")
+            if fp and fp not in seen_paths:
+                seen_paths.add(fp)
+                raw_hits.append(h)
 
-    raw_hits = body.get("hits", {}).get("hits", []) or []
-    print(f"  fetch_pdufa_8k: {len(raw_hits)} raw 8-K hits before regex")
+    print(f"  fetch_pdufa_8k: {len(raw_hits)} unique 8-K hits across phrase variants")
 
     out: list[dict[str, Any]] = []
     for hit in raw_hits[:30]:
@@ -74,7 +90,10 @@ def fetch_pdufa_8k(days_back: int = 14) -> list[dict[str, Any]]:
         tickers = src.get("tickers") or []
         ticker = tickers[0].upper() if tickers else ""
         company = src.get("entity_name", "") or ""
-        cik = str(src.get("entity_id", "") or "")
+        # SEC FTS returns CIKs in a `ciks` array (zero-padded strings);
+        # `entity_id` is a different identifier and isn't the CIK.
+        ciks = src.get("ciks") or []
+        cik = ciks[0] if ciks else ""
         filing_url = f"https://www.sec.gov/Archives/edgar/{file_path}"
         pdufa_date, excerpt = _extract_pdufa_date(filing_url)
 
