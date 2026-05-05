@@ -30,10 +30,11 @@ const MAX_FILING_CHARS = 50_000
 const CLAUDE_TIMEOUT_MS = 50_000
 const MAX_TOKENS = 8192
 const RATE_LIMIT_PER_HOUR = Number(Deno.env.get('CLAUDE_RATE_LIMIT_PER_HOUR') ?? '30')
-// 3 searches typically covers gap-spotting + precedent + recent press
-// in ~15-20s. Bumped back up to 5 if/when we move past the free tier
-// 60s wall-clock limit (Supabase Pro = 150s).
-const WEB_SEARCH_MAX_USES = Number(Deno.env.get('WEB_SEARCH_MAX_USES') ?? '3')
+// 2 searches keeps us under the Supabase free-tier 60s wall clock
+// even when Claude's reasoning + JSON output runs long (we saw 51s
+// even at 3 searches). Bump back to 3-5 when on Pro (150s wall) or
+// after migrating to Cloudflare Workers / Vercel Edge (10+ min).
+const WEB_SEARCH_MAX_USES = Number(Deno.env.get('WEB_SEARCH_MAX_USES') ?? '2')
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',

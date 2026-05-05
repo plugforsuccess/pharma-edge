@@ -98,7 +98,28 @@ export default function AnalyzeFilingPanel({
           filing_text: filingText,
         },
       })
-      if (fnError) throw fnError
+      if (fnError) {
+        // FunctionsHttpError wraps the original Response on .context.
+        // supabase-js's default message ('Failed to send a request to
+        // the Edge Function') hides the actual server-side error
+        // (timeout, rate limit, etc). Read the body so we can show
+        // what really happened.
+        let body = null
+        try {
+          body = await fnError.context?.json?.()
+        } catch {
+          /* ignore */
+        }
+        if (!body) {
+          try {
+            const text = await fnError.context?.text?.()
+            if (text) body = { error: text }
+          } catch {
+            /* ignore */
+          }
+        }
+        throw new Error(body?.error || fnError.message || 'Analysis failed')
+      }
       if (!data?.success) throw new Error(data?.error || 'Analysis failed')
 
       onAnalysisComplete?.({
