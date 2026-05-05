@@ -8,11 +8,14 @@ export const signalColor = (direction) => {
   return 'text-zinc-400 bg-zinc-900 border-zinc-700'
 }
 
+// Direction enum stays {long_put, long_call, watch} for hash stability,
+// but display labels reflect the actual structure used (spreads only —
+// naked options are forbidden by the pre-trade checklist).
 export const directionLabel = (direction) =>
-  ({ long_put: 'PUT', long_call: 'CALL', watch: 'WATCH' }[direction] || direction)
+  ({ long_put: 'PUT SPREAD', long_call: 'CALL SPREAD', watch: 'WATCH' }[direction] || direction)
 
 export const directionLabelLong = (direction) =>
-  ({ long_put: 'LONG PUT', long_call: 'LONG CALL', watch: 'WATCH' }[direction] || direction)
+  ({ long_put: 'BEAR PUT SPREAD', long_call: 'BULL CALL SPREAD', watch: 'WATCH' }[direction] || direction)
 
 export const catalystLabel = (type) =>
   ({

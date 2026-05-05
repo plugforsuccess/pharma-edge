@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, Check, X, ChevronDown, ChevronUp, Sparkles } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import { directionLabelLong } from '../lib/design'
 import clsx from 'clsx'
 
 export default function ScannerCandidates() {
@@ -303,8 +304,7 @@ function CandidateCard({ candidate, expanded, busy, onToggle, onDismiss, onPromo
                         : 'text-zinc-400',
                   )}
                 >
-                  Suggested:{' '}
-                  {String(analysis.suggested_direction).replace('_', ' ').toUpperCase()}
+                  Suggested: {directionLabelLong(analysis.suggested_direction)}
                 </p>
               )}
             </div>

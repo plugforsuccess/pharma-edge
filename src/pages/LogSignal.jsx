@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import AnalyzeFilingPanel from '../components/AnalyzeFilingPanel'
 import StrikePriceCalculator from '../components/StrikePriceCalculator'
+import { directionLabelLong } from '../lib/design'
 import clsx from 'clsx'
 
 const CHECKLIST_ITEMS = [
@@ -276,8 +277,8 @@ export default function LogSignal() {
             </label>
             <div className="grid grid-cols-3 gap-2">
               {[
-                { value: 'long_put', label: 'Long Put', color: 'border-red-500 bg-red-950/30 text-red-400' },
-                { value: 'long_call', label: 'Long Call', color: 'border-green-500 bg-green-950/30 text-green-400' },
+                { value: 'long_put', label: 'Bear Put Spread', color: 'border-red-500 bg-red-950/30 text-red-400' },
+                { value: 'long_call', label: 'Bull Call Spread', color: 'border-green-500 bg-green-950/30 text-green-400' },
                 { value: 'watch', label: 'Watch', color: 'border-zinc-500 bg-zinc-900 text-zinc-400' },
               ].map((opt) => (
                 <button
@@ -477,7 +478,7 @@ export default function LogSignal() {
           <div className="bg-card border border-border rounded-xl p-4 space-y-3">
             <Row label="Ticker" value={form.ticker} />
             <Row label="Company" value={form.company_name} />
-            <Row label="Direction" value={form.direction.replace('_', ' ').toUpperCase()} highlight />
+            <Row label="Direction" value={directionLabelLong(form.direction)} highlight />
             <Row label="Structure" value={form.structure.replace(/_/g, ' ').toUpperCase()} />
             <Row label="Catalyst" value={form.catalyst_date} />
             <Row label="Type" value={form.trade_type.toUpperCase()} />
