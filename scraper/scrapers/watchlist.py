@@ -21,7 +21,7 @@ import requests
 from supabase import Client
 
 from .clinicaltrials import normalize_ct_date
-from .market_cap import market_cap_for
+from .market_cap import market_cap_for, stock_price_for
 
 CTGOV = 'https://clinicaltrials.gov/api/v2/studies'
 EDGAR_FTS = 'https://efts.sec.gov/LATEST/search-index'
@@ -129,6 +129,14 @@ def _scan_ctgov(item: dict[str, Any]) -> list[dict[str, Any]]:
         phases = (design.get('phases') or [''])[0]
         raw_completion = (status_module.get('primaryCompletionDateStruct') or {}).get('date', '')
         completion, completion_precision = normalize_ct_date(raw_completion)
+        interventions = (
+            (protocol.get('armsInterventionsModule') or {}).get('interventions') or []
+        )
+        drug_name = ''
+        if interventions:
+            drug_name = (interventions[0].get('name', '') or '').strip()
+        conditions_list = (protocol.get('conditionsModule') or {}).get('conditions') or []
+        indication = conditions_list[0] if conditions_list else ''
         hits.append(
             {
                 'nct_id': nct_id,
@@ -146,6 +154,8 @@ def _scan_ctgov(item: dict[str, Any]) -> list[dict[str, Any]]:
                 'raw_data': {
                     'sponsor': sponsor,
                     'title': ident.get('briefTitle'),
+                    'drug_name': drug_name,
+                    'indication': indication,
                     'enrollment': (design.get('enrollmentInfo') or {}).get('count'),
                     'overall_status': status_module.get('overallStatus'),
                     'catalyst_date_raw': raw_completion,
@@ -309,6 +319,8 @@ def scan_watchlist(supabase: Client) -> dict[str, int]:
 
 def _insert(supabase: Client, user_id: str, hit: dict[str, Any]) -> None:
     flags = [f for f in (hit.get('flags') or []) if f]
+    raw_data = dict(hit.get('raw_data') or {})
+    raw_data.setdefault('stock_price', stock_price_for(hit['ticker']))
     payload = {
         'ticker': hit['ticker'],
         'company_name': hit['company_name'],
@@ -319,7 +331,7 @@ def _insert(supabase: Client, user_id: str, hit: dict[str, Any]) -> None:
         'source': hit['source'],
         'nct_id': hit.get('nct_id'),
         'market_cap': market_cap_for(hit['ticker']),
-        'raw_data': hit['raw_data'],
+        'raw_data': raw_data,
         'requested_by': user_id,
     }
     try:

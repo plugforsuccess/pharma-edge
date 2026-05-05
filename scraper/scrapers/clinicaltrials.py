@@ -190,10 +190,19 @@ def score_trial(
 
     raw_pc = (status.get("primaryCompletionDateStruct") or {}).get("date", "")
     pc_normalized, pc_precision = normalize_ct_date(raw_pc)
+    interventions = (
+        (protocol.get("armsInterventionsModule") or {}).get("interventions") or []
+    )
+    drug_name = ""
+    if interventions:
+        drug_name = (interventions[0].get("name", "") or "").strip()
+    indication = conditions[0] if conditions else ""
     return {
         "nct_id": ident.get("nctId", ""),
         "title": ident.get("briefTitle", ""),
         "sponsor": sponsor.get("name", ""),
+        "drug_name": drug_name,
+        "indication": indication,
         "phase": phase,
         "conditions": conditions,
         "enrollment": enrollment,

@@ -41,6 +41,7 @@ from scrapers.market_cap import (
     is_known_mega_sponsor,
     is_non_tradeable_sponsor,
     market_cap_for,
+    stock_price_for,
 )
 from scrapers.pdufa_8k import fetch_pdufa_8k
 from scrapers.sec_edgar import (
@@ -186,6 +187,7 @@ def main() -> None:
             sd["ticker"] = tk
             cap = market_cap_for(tk) if tk else None
             sd["market_cap"] = cap
+            sd["stock_price"] = stock_price_for(tk) if tk else None
             print(f"  cap-weight: {sponsor!r} ticker={tk!r} cap={cap}")
             if cap is None:
                 continue
@@ -347,6 +349,7 @@ def main() -> None:
                     hit["company_name"], ticker_map, cik=hit.get("cik", "")
                 )
                 cap = market_cap_for(hit_ticker)
+                price = stock_price_for(hit_ticker)
                 base = {
                     "ticker": hit_ticker,
                     "company_name": hit["company_name"],
@@ -361,6 +364,7 @@ def main() -> None:
                         "excerpt": hit["excerpt"],
                         "form_type": "8-K",
                         "scan_type": "pdufa_8k",
+                        "stock_price": price,
                     },
                 }
                 analysis = analyze_scanner_candidate(base)
@@ -431,7 +435,13 @@ def main() -> None:
             if cap is not None and cap >= 10_000_000_000:
                 skip_too_big += 1
                 continue
-            enriched.append({**filing, "ticker": t, "company": company, "market_cap": cap})
+            enriched.append({
+                **filing,
+                "ticker": t,
+                "company": company,
+                "market_cap": cap,
+                "stock_price": stock_price_for(t),
+            })
         print(
             f"  8-K filter: kept={len(enriched)} skip_mega={skip_mega} "
             f"skip_no_ticker={skip_no_ticker} skip_too_big={skip_too_big} "
@@ -456,6 +466,7 @@ def main() -> None:
                         "form_type": filing.get("form_type", "8-K"),
                         "description": filing.get("description", ""),
                         "scan_type": "biotech_8k",
+                        "stock_price": filing.get("stock_price"),
                     },
                 }
                 analysis = analyze_scanner_candidate(base)

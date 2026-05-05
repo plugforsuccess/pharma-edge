@@ -149,25 +149,51 @@ def is_non_tradeable_sponsor(sponsor: str) -> bool:
 def market_cap_for(ticker: str) -> int | None:
     """Returns the integer USD market cap for `ticker`, or None on any
     failure / missing data. Cached per ticker for the cron run."""
+    summary = _summary_for(ticker)
+    return summary["market_cap"] if summary else None
+
+
+def stock_price_for(ticker: str) -> float | None:
+    """Returns the latest traded price for `ticker`, or None.
+    Sharing the cache with market_cap_for so a single yfinance call
+    serves both."""
+    summary = _summary_for(ticker)
+    return summary["last_price"] if summary else None
+
+
+_SUMMARY_CACHE: dict[str, dict[str, float | int | None] | None] = {}
+
+
+def _summary_for(ticker: str) -> dict[str, float | int | None] | None:
+    """Single yfinance fast_info call for a ticker, returning both
+    market cap (int) and last price (float). Cached per cron run."""
     if not ticker:
         return None
-    if ticker in _CACHE:
-        return _CACHE[ticker]
-    cap: int | None = None
+    if ticker in _SUMMARY_CACHE:
+        return _SUMMARY_CACHE[ticker]
+    out: dict[str, float | int | None] | None = None
     try:
         import yfinance as yf
 
         info = yf.Ticker(ticker).fast_info
-        raw = None
-        try:
-            raw = info["market_cap"]
-        except (KeyError, TypeError):
-            raw = getattr(info, "market_cap", None)
-        if raw and raw > 0:
-            cap = int(raw)
+
+        def _get(key: str):
+            try:
+                return info[key]
+            except (KeyError, TypeError):
+                return getattr(info, key, None)
+
+        cap_raw = _get("market_cap")
+        price_raw = _get("last_price") or _get("last_traded_price")
+        out = {
+            "market_cap": int(cap_raw) if cap_raw and cap_raw > 0 else None,
+            "last_price": float(price_raw) if price_raw and price_raw > 0 else None,
+        }
     except Exception as exc:
-        print(f"  market_cap_for({ticker}): {exc}")
-    if cap is None:
-        print(f"  market_cap_for({ticker}): None (yfinance returned no value)")
-    _CACHE[ticker] = cap
-    return cap
+        print(f"  yfinance({ticker}): {exc}")
+    if out is None:
+        print(f"  yfinance({ticker}): None (no value)")
+    _SUMMARY_CACHE[ticker] = out
+    # Keep _CACHE legacy key in sync so old callers still work.
+    _CACHE[ticker] = out["market_cap"] if out else None
+    return out

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Check, X, ChevronDown, ChevronUp, Sparkles } from 'lucide-react'
+import { ArrowLeft, Check, X, ChevronDown, ChevronUp, Sparkles, Star } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { directionLabelLong } from '../lib/design'
@@ -13,11 +13,68 @@ export default function ScannerCandidates() {
   const [loading, setLoading] = useState(true)
   const [expanded, setExpanded] = useState(null)
   const [working, setWorking] = useState(null)
+  // Set of tickers the user already watches — drives the ⭐ toggle.
+  // Hydrated on mount; mutated locally on toggle so UI updates without refetch.
+  const [watchedTickers, setWatchedTickers] = useState(() => new Set())
 
   useEffect(() => {
     fetchCandidates()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    if (!user) return
+    let cancelled = false
+    supabase
+      .from('watchlist')
+      .select('ticker')
+      .eq('user_id', user.id)
+      .then(({ data }) => {
+        if (cancelled || !data) return
+        setWatchedTickers(new Set(data.map((r) => (r.ticker || '').toUpperCase())))
+      })
+    return () => { cancelled = true }
+  }, [user?.id])
+
+  async function toggleWatchlist(candidate) {
+    if (!user) return
+    const ticker = (candidate.ticker || '').toUpperCase()
+    if (!ticker) return
+    const isWatched = watchedTickers.has(ticker)
+    // Optimistic UI: flip the badge first; revert on error.
+    setWatchedTickers((prev) => {
+      const next = new Set(prev)
+      isWatched ? next.delete(ticker) : next.add(ticker)
+      return next
+    })
+    if (isWatched) {
+      const { error } = await supabase
+        .from('watchlist')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('ticker', ticker)
+      if (error) {
+        setWatchedTickers((prev) => new Set(prev).add(ticker))
+      }
+    } else {
+      const { error } = await supabase.from('watchlist').insert({
+        user_id: user.id,
+        ticker,
+        company_name: candidate.company_name || '',
+        drug_name: candidate.raw_data?.drug_name || null,
+        indication: candidate.raw_data?.indication || null,
+        catalyst_type: candidate.catalyst_type || null,
+        catalyst_date: candidate.catalyst_date || null,
+      })
+      if (error) {
+        setWatchedTickers((prev) => {
+          const next = new Set(prev)
+          next.delete(ticker)
+          return next
+        })
+      }
+    }
+  }
 
   async function fetchCandidates() {
     setLoading(true)
@@ -60,15 +117,19 @@ export default function ScannerCandidates() {
     // after a successful signal insert. Pre-claiming meant the candidate
     // silently disappeared from the queue if the user backed out.
     const analysis = candidate.claude_analysis ?? null
+    const rd = candidate.raw_data || {}
     navigate('/log', {
       state: {
         prefill: {
           ticker: candidate.ticker || '',
           company_name: candidate.company_name || '',
+          drug_name: rd.drug_name || '',
+          indication: rd.indication || '',
           catalyst_type: candidate.catalyst_type || 'phase3_readout',
           catalyst_date: candidate.catalyst_date || '',
-          catalyst_date_precision:
-            candidate.raw_data?.catalyst_date_precision || 'day',
+          catalyst_date_precision: rd.catalyst_date_precision || 'day',
+          stock_price_at_signal:
+            rd.stock_price != null ? String(rd.stock_price) : '',
           thesis: analysis?.preliminary_thesis || '',
           direction: analysis?.suggested_direction || 'long_put',
         },
@@ -125,11 +186,15 @@ export default function ScannerCandidates() {
               candidate={candidate}
               expanded={expanded === candidate.id}
               busy={working === candidate.id}
+              isWatched={watchedTickers.has(
+                (candidate.ticker || '').toUpperCase(),
+              )}
               onToggle={() =>
                 setExpanded((cur) => (cur === candidate.id ? null : candidate.id))
               }
               onDismiss={() => dismiss(candidate)}
               onPromote={() => promote(candidate)}
+              onWatchlistToggle={() => toggleWatchlist(candidate)}
             />
           ))}
         </div>
@@ -185,7 +250,16 @@ function formatCatalystDate(date, precision) {
   return `${monthName} ${d}, ${y}`
 }
 
-function CandidateCard({ candidate, expanded, busy, onToggle, onDismiss, onPromote }) {
+function CandidateCard({
+  candidate,
+  expanded,
+  busy,
+  isWatched,
+  onToggle,
+  onDismiss,
+  onPromote,
+  onWatchlistToggle,
+}) {
   const analysis = candidate.claude_analysis ?? null
   const score = candidate.score ?? 0
   const flags = Array.isArray(candidate.flags) ? candidate.flags : []
@@ -203,10 +277,31 @@ function CandidateCard({ candidate, expanded, busy, onToggle, onDismiss, onPromo
 
   return (
     <div className="bg-card border border-border rounded-xl overflow-hidden">
+      <div className="relative">
+        {candidate.ticker && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              onWatchlistToggle?.()
+            }}
+            aria-label={isWatched ? 'Remove from watchlist' : 'Add to watchlist'}
+            title={isWatched ? 'Watching — click to stop' : 'Add to watchlist (track future activity)'}
+            className="absolute top-3 right-3 p-1.5 rounded-full hover:bg-bg z-10 transition-colors"
+          >
+            <Star
+              size={16}
+              className={clsx(
+                'transition-colors',
+                isWatched ? 'text-yellow-400 fill-yellow-400' : 'text-zinc-600',
+              )}
+            />
+          </button>
+        )}
       <button
         type="button"
         onClick={onToggle}
-        className="w-full text-left p-4"
+        className="w-full text-left p-4 pr-12"
         aria-expanded={expanded}
       >
         <div className="flex items-start justify-between mb-2">
@@ -264,6 +359,7 @@ function CandidateCard({ candidate, expanded, busy, onToggle, onDismiss, onPromo
           <p className="text-red-400 text-[10px] mt-1 truncate">⚠ {flags[0]}</p>
         )}
       </button>
+      </div>
 
       {expanded && (
         <div className="px-4 pb-4 border-t border-border">

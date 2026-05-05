@@ -156,9 +156,16 @@ export default function LogSignal() {
     structure:
       DEFAULT_STRUCTURE[prefill.direction] || DEFAULT_STRUCTURE.long_put,
     entry_price: '',
-    expiry_date: '',
+    // Default expiry to catalyst_date + 35 days (mid of 30–45 window
+    // per the strategy rule). User can override; if catalyst_date is
+    // empty at mount we leave expiry blank and let the user edit.
+    expiry_date: prefill.catalyst_date
+      ? new Date(new Date(prefill.catalyst_date).getTime() + 35 * 86400_000)
+          .toISOString()
+          .slice(0, 10)
+      : '',
     market_cap: '',
-    stock_price_at_signal: '',
+    stock_price_at_signal: prefill.stock_price_at_signal || '',
     your_probability: '',
     market_implied_probability: '',
     thesis: prefill.thesis || '',
