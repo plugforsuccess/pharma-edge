@@ -19,11 +19,12 @@ export default function AnalyzeFilingPanel({
   indication,
   catalystType,
   catalystDate,
+  analysis,
   onAnalysisComplete,
+  onAnalysisReset,
 }) {
   const [filingText, setFilingText] = useState('')
   const [loading, setLoading] = useState(false)
-  const [analysis, setAnalysis] = useState(null)
   const [error, setError] = useState('')
   const [expanded, setExpanded] = useState(true)
   const [fetching, setFetching] = useState(false)
@@ -98,8 +99,7 @@ export default function AnalyzeFilingPanel({
       if (fnError) throw fnError
       if (!data?.success) throw new Error(data?.error || 'Analysis failed')
 
-      setAnalysis({ ...data.analysis, _market_metrics: data.market_metrics ?? null })
-      onAnalysisComplete?.(data.analysis)
+      onAnalysisComplete?.({ ...data.analysis, _market_metrics: data.market_metrics ?? null })
     } catch (e) {
       setError(e.message || 'Analysis failed. Check your filing text and try again.')
     }
@@ -116,7 +116,12 @@ export default function AnalyzeFilingPanel({
       >
         <div className="flex items-center gap-2">
           <Sparkles size={14} className="text-red-400" />
-          <span className="text-white text-sm font-semibold">Claude Analysis</span>
+          <span className="text-white text-sm font-semibold">Pre-Trade Research</span>
+          {analysis && (
+            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full border border-green-900 bg-green-950/40 text-green-400">
+              ✓ Saved as draft
+            </span>
+          )}
         </div>
         {expanded ? (
           <ChevronUp size={14} className="text-zinc-500" />
@@ -219,7 +224,7 @@ Good sources:
               )}
             </>
           ) : (
-            <AnalysisResult analysis={analysis} onReset={() => setAnalysis(null)} />
+            <AnalysisResult analysis={analysis} onReset={() => onAnalysisReset?.()} />
           )}
         </div>
       )}

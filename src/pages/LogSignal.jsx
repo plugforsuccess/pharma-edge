@@ -81,6 +81,11 @@ export default function LogSignal() {
   }
 
   function handleAnalysisComplete(result) {
+    // Result already includes _market_metrics (added by AnalyzeFilingPanel).
+    // Storing the full object here means the panel stays in result-mode
+    // across step navigation and a future submit can persist the rich
+    // structured analysis (red flags, bull/bear, IV) once we add the
+    // schema column for it.
     setAnalysis(result)
     setForm((prev) => ({
       ...prev,
@@ -343,7 +348,9 @@ export default function LogSignal() {
             indication={form.indication}
             catalystType={form.catalyst_type}
             catalystDate={form.catalyst_date}
+            analysis={analysis}
             onAnalysisComplete={handleAnalysisComplete}
+            onAnalysisReset={() => setAnalysis(null)}
           />
 
           {form.catalyst_date && form.direction !== 'watch' && (
