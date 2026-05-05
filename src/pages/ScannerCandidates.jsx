@@ -198,9 +198,9 @@ function CandidateCard({ candidate, expanded, busy, onToggle, onDismiss, onPromo
                 'text-[10px] font-bold px-2 py-0.5 rounded-full border',
                 scoreClass,
               )}
-              title="Signal score: rules-based catalyst strength (phase, enrollment, site terminations, market cap). Distinct from your trade-thesis confidence."
+              title="Catalyst Strength: how many setup signals this catalyst trips — phase (P3 +3, P2 +2), small enrollment +1, multiple endpoints +2, site terminations +3, trial halt +4, recent amendment +3, then market-cap weighted. NOT your conviction in a trade thesis (that's Confidence on LogSignal)."
             >
-              Signal: {score}/10
+              Catalyst Strength: {score}/10
             </span>
             {isWatchlist && (
               <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border border-yellow-700 bg-yellow-950 text-yellow-400">
