@@ -127,8 +127,18 @@ def _scan_ctgov(item: dict[str, Any]) -> list[dict[str, Any]]:
         if not nct_id:
             continue
         phases = (design.get('phases') or [''])[0]
+        # CT.gov returns 'PHASE2', 'PHASE3', etc. Strip the prefix so
+        # flags read 'Phase 2' instead of 'Phase PHASE2'.
+        phase_label = str(phases).replace('PHASE', '').strip() if phases else ''
         raw_completion = (status_module.get('primaryCompletionDateStruct') or {}).get('date', '')
         completion, completion_precision = normalize_ct_date(raw_completion)
+        # Skip catalysts that have already passed — not actionable for
+        # opening new trades. Keep current/future only; the COMPLETED
+        # status filter on the API call still pulls the metadata for
+        # context, but we filter by date here.
+        today_iso = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+        if completion and completion < today_iso:
+            continue
         interventions = (
             (protocol.get('armsInterventionsModule') or {}).get('interventions') or []
         )
@@ -145,7 +155,7 @@ def _scan_ctgov(item: dict[str, Any]) -> list[dict[str, Any]]:
                 'catalyst_type': 'phase3_readout' if 'PHASE3' in str(phases) else 'phase2_readout',
                 'catalyst_date': completion,
                 'flags': [
-                    f'Phase {phases}' if phases else None,
+                    f'Phase {phase_label}' if phase_label else None,
                     f'Why stopped: {status_module["whyStopped"]}'
                     if status_module.get('whyStopped')
                     else None,

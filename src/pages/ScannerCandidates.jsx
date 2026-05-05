@@ -347,9 +347,19 @@ function CandidateCard({
         {/* Collapsed-only summary: when expanded, the full Catalyst +
             Detected Signals sections below already cover this, so
             hiding it here removes the duplicate. Company name stays
-            visible in both states because it's the human label. */}
+            visible in both states because it's the human label.
+            Drug name + indication shown in collapsed view so the
+            same sponsor's multiple trials are distinguishable
+            (e.g. KPTI has 5+ ongoing programs — same ticker, different
+            drugs/indications). */}
         <p className="text-subtle text-xs truncate">
           {candidate.company_name || candidate.ticker || 'Unknown'}
+          {!expanded && candidate.raw_data?.drug_name
+            ? ` · ${candidate.raw_data.drug_name}`
+            : ''}
+          {!expanded && candidate.raw_data?.indication
+            ? ` · ${candidate.raw_data.indication}`
+            : ''}
           {!expanded && candidate.catalyst_type
             ? ` · ${prettyCatalyst(candidate.catalyst_type)}`
             : ''}
