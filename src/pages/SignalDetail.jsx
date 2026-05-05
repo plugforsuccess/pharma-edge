@@ -132,7 +132,7 @@ export default function SignalDetail() {
           <>
             <div className="border-t border-border my-3" />
             <p className="text-subtle text-xs font-semibold uppercase tracking-wider mb-2">
-              Claude Analysis
+              Pre-Trade Research
             </p>
             <p className="text-zinc-400 text-sm leading-relaxed whitespace-pre-wrap">
               {signal.claude_analysis}
@@ -140,6 +140,10 @@ export default function SignalDetail() {
           </>
         )}
       </div>
+
+      {signal.claude_analysis_full && (
+        <RichAnalysisCard analysis={signal.claude_analysis_full} />
+      )}
 
       <div className="bg-card border border-border rounded-xl p-4 mb-4">
         <h3 className="text-subtle text-xs font-semibold uppercase tracking-wider mb-3">
@@ -404,6 +408,137 @@ function LoadingState() {
             className="bg-card border border-border rounded-xl p-4 animate-pulse h-24"
           />
         ))}
+    </div>
+  )
+}
+
+function RichAnalysisCard({ analysis }) {
+  const m = analysis._market_metrics
+  const flags = Array.isArray(analysis.flags) ? analysis.flags : []
+  const keyRisks = Array.isArray(analysis.key_risks) ? analysis.key_risks : []
+  const strike = analysis.strike_suggestion
+  return (
+    <div className="bg-card border border-border rounded-xl p-4 mb-4 space-y-4">
+      <h3 className="text-subtle text-xs font-semibold uppercase tracking-wider">
+        Locked Research Snapshot
+      </h3>
+
+      {(analysis.bull_case || analysis.bear_case) && (
+        <div className="grid grid-cols-2 gap-3">
+          <div className="bg-green-950/20 border border-green-900/30 rounded-lg p-3">
+            <p className="text-green-400 text-[10px] font-semibold mb-1">BULL CASE</p>
+            <p className="text-zinc-400 text-[11px] leading-relaxed">
+              {analysis.bull_case || '—'}
+            </p>
+          </div>
+          <div className="bg-red-950/20 border border-red-900/30 rounded-lg p-3">
+            <p className="text-red-400 text-[10px] font-semibold mb-1">BEAR CASE</p>
+            <p className="text-zinc-400 text-[11px] leading-relaxed">
+              {analysis.bear_case || '—'}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {m && (
+        <div className="bg-bg border border-border rounded-lg p-3">
+          <p className="text-muted text-[10px] uppercase tracking-wider mb-2">
+            Live Market Conditions at Lock
+          </p>
+          <div className="grid grid-cols-3 gap-2 text-center">
+            {m.iv != null && (
+              <div>
+                <p className="text-white text-sm font-bold">{(m.iv * 100).toFixed(1)}%</p>
+                <p className="text-muted text-[10px]">30-day IV</p>
+              </div>
+            )}
+            {m.ivRank != null && (
+              <div>
+                <p className="text-white text-sm font-bold">{(m.ivRank * 100).toFixed(0)}</p>
+                <p className="text-muted text-[10px]">IV Rank /100</p>
+              </div>
+            )}
+            {m.hv30 != null && (
+              <div>
+                <p className="text-white text-sm font-bold">{(m.hv30 * 100).toFixed(1)}%</p>
+                <p className="text-muted text-[10px]">30-day HV</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {strike && (
+        <div className="bg-bg border border-border rounded-lg p-3">
+          <p className="text-muted text-[10px] uppercase tracking-wider mb-2">
+            Strike Suggestion at Lock
+          </p>
+          <div className="grid grid-cols-3 gap-2 text-center mb-2">
+            {strike.buy_strike_pct_otm != null && (
+              <div>
+                <p className="text-white text-sm font-bold">{strike.buy_strike_pct_otm}%</p>
+                <p className="text-muted text-[10px]">Buy OTM</p>
+              </div>
+            )}
+            {strike.sell_strike_pct_otm != null && (
+              <div>
+                <p className="text-white text-sm font-bold">{strike.sell_strike_pct_otm}%</p>
+                <p className="text-muted text-[10px]">Sell OTM</p>
+              </div>
+            )}
+            {strike.expected_move_pct != null && (
+              <div>
+                <p className="text-red-400 text-sm font-bold">{strike.expected_move_pct}%</p>
+                <p className="text-muted text-[10px]">Expected Move</p>
+              </div>
+            )}
+          </div>
+          {strike.rationale && (
+            <p className="text-zinc-400 text-[11px] leading-relaxed">{strike.rationale}</p>
+          )}
+        </div>
+      )}
+
+      {flags.length > 0 && (
+        <div>
+          <p className="text-muted text-[10px] uppercase tracking-wider mb-2">Red Flags</p>
+          <div className="space-y-1">
+            {flags.map((flag, i) => (
+              <div key={i} className="flex items-start gap-2">
+                <span className="text-red-500 text-xs mt-0.5">⚠</span>
+                <p className="text-zinc-400 text-xs">{flag}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {keyRisks.length > 0 && (
+        <div>
+          <p className="text-muted text-[10px] uppercase tracking-wider mb-2">Key Risks</p>
+          <div className="space-y-1">
+            {keyRisks.map((risk, i) => (
+              <p key={i} className="text-zinc-400 text-xs">• {risk}</p>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {analysis.data_quality && (
+        <div>
+          <p className="text-muted text-[10px] uppercase tracking-wider">Data Quality at Lock</p>
+          <p
+            className={clsx('text-xs font-semibold mt-0.5', {
+              'text-green-400': analysis.data_quality === 'high',
+              'text-yellow-400': analysis.data_quality === 'medium',
+              'text-red-400': analysis.data_quality === 'low',
+            })}
+          >
+            {String(analysis.data_quality).toUpperCase()}
+            {analysis.data_quality_reason ? ` — ${analysis.data_quality_reason}` : ''}
+          </p>
+        </div>
+      )}
     </div>
   )
 }

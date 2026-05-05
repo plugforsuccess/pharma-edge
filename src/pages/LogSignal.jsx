@@ -141,6 +141,7 @@ export default function LogSignal() {
       market_implied_probability: num(form.market_implied_probability),
       thesis: form.thesis.trim(),
       claude_analysis: analysis?.claude_analysis ?? null,
+      claude_analysis_full: analysis ?? null,
       confidence_score: form.confidence_score,
       enrollment_signal: analysis?.signal_scores?.enrollment_signal ?? 0,
       fda_precedent_signal: analysis?.signal_scores?.fda_precedent_signal ?? 0,
