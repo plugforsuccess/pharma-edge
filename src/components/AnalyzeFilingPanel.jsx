@@ -101,7 +101,12 @@ export default function AnalyzeFilingPanel({
       if (fnError) throw fnError
       if (!data?.success) throw new Error(data?.error || 'Analysis failed')
 
-      onAnalysisComplete?.({ ...data.analysis, _market_metrics: data.market_metrics ?? null })
+      onAnalysisComplete?.({
+        ...data.analysis,
+        _market_metrics: data.market_metrics ?? null,
+        _citations: data.citations ?? [],
+        _web_searches_used: data.web_searches_used ?? 0,
+      })
     } catch (e) {
       setError(e.message || 'Analysis failed. Check your filing text and try again.')
     }
@@ -319,6 +324,11 @@ function AnalysisResult({ analysis, onReset }) {
         </div>
       )}
 
+      <SearchProvenance
+        searches={analysis._web_searches_used ?? 0}
+        citations={analysis._citations ?? []}
+      />
+
       {analysis._market_metrics && (
         <div className="bg-bg border border-border rounded-lg p-3">
           <p className="text-muted text-[10px] uppercase tracking-wider mb-2">
@@ -429,6 +439,68 @@ function AnalysisResult({ analysis, onReset }) {
             Re-analyze
           </button>
         </div>
+      )}
+    </div>
+  )
+}
+
+function SearchProvenance({ searches, citations }) {
+  // Always render — when searches=0 we show an honest "no web context"
+  // hint so the user knows this analysis was filing-text only.
+  const list = Array.isArray(citations) ? citations : []
+  // Citations from Anthropic web_search come in as objects; we display
+  // url + title when present. Dedup by URL.
+  const seen = new Set()
+  const items = []
+  for (const c of list) {
+    const url = c?.url || c?.encrypted_url || ''
+    if (!url || seen.has(url)) continue
+    seen.add(url)
+    items.push({ url, title: c?.title || url })
+    if (items.length >= 8) break
+  }
+  if (searches === 0 && items.length === 0) {
+    return (
+      <div className="bg-bg border border-border rounded-lg p-3">
+        <p className="text-muted text-[10px] uppercase tracking-wider mb-1">
+          Web Search
+        </p>
+        <p className="text-zinc-500 text-xs">
+          Analysis based on filing text only — no web context pulled.
+        </p>
+      </div>
+    )
+  }
+  return (
+    <div className="bg-bg border border-border rounded-lg p-3">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-muted text-[10px] uppercase tracking-wider">
+          Web Search
+        </p>
+        <span className="text-zinc-400 text-[10px]">
+          🔍 {searches} {searches === 1 ? 'search' : 'searches'}
+        </span>
+      </div>
+      {items.length > 0 ? (
+        <div className="space-y-1">
+          {items.map((c, i) => (
+            <a
+              key={i}
+              href={c.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block text-red-400 text-xs hover:text-red-300 truncate"
+              title={c.url}
+            >
+              {c.title}
+            </a>
+          ))}
+        </div>
+      ) : (
+        <p className="text-zinc-500 text-xs">
+          {searches} search{searches === 1 ? '' : 'es'} performed but no
+          source URLs returned.
+        </p>
       )}
     </div>
   )
