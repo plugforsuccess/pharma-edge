@@ -137,7 +137,11 @@ def main() -> None:
         print(f"  {len(trials)} upcoming trial readouts")
 
         scored: list[dict[str, Any]] = []
-        for trial in trials[:50]:
+        # Score *all* trials, not the first 50 — at the previous cap
+        # the threshold-of-5 left 2 candidates out of 2233 and both
+        # were mega-caps. Cap-weighting + a relaxed threshold means
+        # we need a much bigger pool to surface micro-caps.
+        for trial in trials[:300]:
             try:
                 nct_id = (
                     trial.get("protocolSection", {})
@@ -147,7 +151,10 @@ def main() -> None:
                 anomaly = detect_enrollment_anomalies(nct_id) if nct_id else {}
                 amendment = check_protocol_amendments(nct_id) if nct_id else {}
                 score_data = score_trial(trial, anomaly, amendment)
-                if score_data["score"] >= 5:
+                # Lower threshold to 3 — micro-caps get +2 from the cap
+                # adjustment below, so a Phase 3 trial alone (score 3)
+                # can rise to 5 if its sponsor is sub-$2B.
+                if score_data["score"] >= 3:
                     scored.append(score_data)
             except Exception as exc:
                 errors.append(f"trial scoring: {exc}")
@@ -158,8 +165,8 @@ def main() -> None:
         # disproportionately trip signals like "31 sites terminated".
         # Two pass: hardcoded mega-sponsor list (guaranteed correct,
         # 0-cost), then yfinance for everything else. Only enrich the
-        # top 30 by raw score to cap the yfinance load.
-        for sd in scored[:30]:
+        # top 50 by raw score to cap the yfinance load.
+        for sd in scored[:50]:
             sponsor = sd.get("sponsor", "")
             if is_known_mega_sponsor(sponsor):
                 sd["score"] = max(0, sd["score"] - 4)
@@ -183,7 +190,9 @@ def main() -> None:
             else:
                 sd["score"] = max(0, sd["score"] - 4)
         scored.sort(key=lambda x: x["score"], reverse=True)
-        # Only keep candidates that survived the cap-weighting at >= 5.
+        # Final keeper threshold: >= 5 after cap weighting. A Phase 3
+        # trial (raw 3) at a micro-cap (+2) clears; a Phase 2 trial
+        # (raw 2) at any cap doesn't, unless it has additional signals.
         scored = [sd for sd in scored if sd["score"] >= 5]
         all_candidates.extend(scored[:10])
 
@@ -386,11 +395,13 @@ def main() -> None:
     print("Surfacing 8-K filings as scanner candidates...")
     try:
         enriched: list[dict[str, Any]] = []
+        skip_mega = 0
+        skip_no_ticker = 0
+        skip_too_big = 0
         for filing in filings_8k:
             company = filing.get("company", "") or ""
-            # Skip known mega-cap sponsors — those filings aren't
-            # actionable from the queue anyway.
             if is_known_mega_sponsor(company):
+                skip_mega += 1
                 continue
             t = (filing.get("ticker") or "").upper()
             if not t:
@@ -400,21 +411,23 @@ def main() -> None:
                     cik=str(filing.get("cik", "")),
                 )
             if not t:
+                skip_no_ticker += 1
                 continue
-            # Fall back to ticker_map title when SEC FTS shipped the
-            # filing without entity_name (happens occasionally).
             if not company:
-                # ticker_map.by_name is normalized → ticker; we don't
-                # have a reverse, so we re-walk it. ~13K entries, cheap.
                 for k, v in (ticker_map.get("by_name") or {}).items():
                     if v == t:
                         company = k.upper()
                         break
             cap = market_cap_for(t)
             if cap is not None and cap >= 10_000_000_000:
-                # Mega/large cap that slipped past the name list: drop.
+                skip_too_big += 1
                 continue
             enriched.append({**filing, "ticker": t, "company": company, "market_cap": cap})
+        print(
+            f"  8-K filter: kept={len(enriched)} skip_mega={skip_mega} "
+            f"skip_no_ticker={skip_no_ticker} skip_too_big={skip_too_big} "
+            f"of {len(filings_8k)} raw"
+        )
         print(f"  {len(enriched)} of {len(filings_8k)} 8-K filings made it past the cap+ticker filter")
 
         eight_k_candidates = 0

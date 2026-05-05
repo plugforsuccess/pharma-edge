@@ -47,34 +47,36 @@ def fetch_pdufa_8k(days_back: int = 14) -> list[dict[str, Any]]:
     so the user gets a pointer instead of a silent miss."""
     since = (datetime.utcnow() - timedelta(days=days_back)).strftime("%Y-%m-%d")
     today = datetime.utcnow().strftime("%Y-%m-%d")
-    # Same parens-AND-OR shape as the proven `fetch_biotech_8k` query.
-    # Bare-word and quoted-phrase queries both came back empty against
-    # this endpoint; this matches the working pattern. enddt is required
-    # alongside startdt or SEC FTS silently ignores the date range.
-    params = {
-        "q": "(PDUFA AND (action OR goal OR target) AND date)",
-        "dateRange": "custom",
-        "startdt": since,
-        "enddt": today,
-        "forms": "8-K",
-    }
-    try:
-        resp = requests.get(EDGAR_FTS, params=params, headers=_headers(), timeout=30)
-        resp.raise_for_status()
-        body = resp.json()
-    except Exception as exc:
-        print(f"  fetch_pdufa_8k: {exc}")
-        return []
-
-    # Diagnostic: log SEC's reported total + the keys we got back so we
-    # can spot future query-shape regressions without having to print
-    # the full body to scan_log.
-    total = (body.get("hits") or {}).get("total")
-    raw_hits = body.get("hits", {}).get("hits", []) or []
-    print(
-        f"  fetch_pdufa_8k: total={total} raw_hits={len(raw_hits)} "
-        f"keys={list(body.keys())}"
-    )
+    # Try a strict query first, then fall back to a broader one if SEC
+    # returns 0. The body-level regex below filters non-matches anyway,
+    # so over-fetching just costs a few extra body GETs.
+    queries = [
+        "(PDUFA AND (action OR goal OR target) AND date)",
+        "(PDUFA)",
+    ]
+    raw_hits: list[dict[str, Any]] = []
+    body: dict[str, Any] = {}
+    for q in queries:
+        params = {
+            "q": q,
+            "dateRange": "custom",
+            "startdt": since,
+            "enddt": today,
+            "forms": "8-K",
+        }
+        try:
+            resp = requests.get(EDGAR_FTS, params=params, headers=_headers(), timeout=30)
+            resp.raise_for_status()
+            body = resp.json()
+        except Exception as exc:
+            print(f"  fetch_pdufa_8k {q!r}: {exc}")
+            continue
+        total = (body.get("hits") or {}).get("total")
+        sub = body.get("hits", {}).get("hits", []) or []
+        print(f"  fetch_pdufa_8k {q!r}: total={total} hits={len(sub)}")
+        if sub:
+            raw_hits = sub
+            break
 
     out: list[dict[str, Any]] = []
     for hit in raw_hits[:30]:
