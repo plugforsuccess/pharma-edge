@@ -37,7 +37,11 @@ from scrapers.fda_calendar import (
     fetch_fda_press_releases,
     fetch_pdufa_dates,
 )
-from scrapers.market_cap import is_known_mega_sponsor, market_cap_for
+from scrapers.market_cap import (
+    is_known_mega_sponsor,
+    is_non_tradeable_sponsor,
+    market_cap_for,
+)
 from scrapers.pdufa_8k import fetch_pdufa_8k
 from scrapers.sec_edgar import (
     fetch_biotech_8k,
@@ -151,6 +155,11 @@ def main() -> None:
                 anomaly = detect_enrollment_anomalies(nct_id) if nct_id else {}
                 amendment = check_protocol_amendments(nct_id) if nct_id else {}
                 score_data = score_trial(trial, anomaly, amendment)
+                # Drop academic / government / hospital sponsors before
+                # they enter the pool — they trip catalyst signals but
+                # have no tradeable stock.
+                if is_non_tradeable_sponsor(score_data.get("sponsor", "")):
+                    continue
                 # Lower threshold to 3 — micro-caps get +2 from the cap
                 # adjustment below, so a Phase 3 trial alone (score 3)
                 # can rise to 5 if its sponsor is sub-$2B.
@@ -400,7 +409,7 @@ def main() -> None:
         skip_too_big = 0
         for filing in filings_8k:
             company = filing.get("company", "") or ""
-            if is_known_mega_sponsor(company):
+            if is_known_mega_sponsor(company) or is_non_tradeable_sponsor(company):
                 skip_mega += 1
                 continue
             t = (filing.get("ticker") or "").upper()

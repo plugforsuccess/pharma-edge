@@ -68,6 +68,84 @@ def is_known_mega_sponsor(sponsor: str) -> bool:
     return any(name in s for name in KNOWN_MEGA_SPONSORS)
 
 
+# Substrings that indicate the sponsor is academic / government /
+# cooperative-group rather than a publicly-traded company. CT.gov is
+# full of NIH, NCI, university hospital, and foreign public-health
+# trials — those generate strong catalyst signals but aren't tradeable.
+NON_TRADEABLE_KEYWORDS: tuple[str, ...] = (
+    "assistance publique",
+    "centre hospitalier",
+    "centers for disease control",
+    "department of defense",
+    "department of veterans",
+    "ecog-acrin",
+    "fred hutchinson",
+    "hopitaux",
+    "hôpitaux",
+    "karolinska",
+    "klinikum",
+    "ministry of health",
+    "national cancer institute",
+    "national health service",
+    "national institute",
+    "national institutes of health",
+    "nci ",
+    "nhs ",
+    "nih ",
+    "nrg oncology",
+    "swog cancer",
+    "u.s. army",
+    "us army",
+    "veterans affairs",
+    "world health organization",
+    # Academic medical centers (most common CT.gov sponsors)
+    "boston children",
+    "brigham and women",
+    "children's hospital",
+    "children's oncology",
+    "city of hope",
+    "cleveland clinic",
+    "columbia university",
+    "dana-farber",
+    "duke clinical",
+    "duke university",
+    "fox chase",
+    "harvard medical",
+    "icahn school",
+    "johns hopkins",
+    "lurie cancer",
+    "massachusetts general",
+    "mayo clinic",
+    "md anderson",
+    "memorial sloan",
+    "moffitt cancer",
+    "mount sinai",
+    "nyu langone",
+    "sidney kimmel",
+    "siteman cancer",
+    "stanford university",
+    "ucla",
+    "ucsf",
+    "university hospital",
+    "university of",
+    "vanderbilt university",
+    "weill cornell",
+    "winship cancer",
+    "yale university",
+)
+
+
+def is_non_tradeable_sponsor(sponsor: str) -> bool:
+    """True when the sponsor is an academic / government / hospital
+    entity that doesn't have a tradeable stock. Drop these before they
+    enter the candidate pool — they trip catalyst signals but aren't
+    actionable from the trade flow."""
+    if not sponsor:
+        return False
+    s = sponsor.lower()
+    return any(name in s for name in NON_TRADEABLE_KEYWORDS)
+
+
 def market_cap_for(ticker: str) -> int | None:
     """Returns the integer USD market cap for `ticker`, or None on any
     failure / missing data. Cached per ticker for the cron run."""
