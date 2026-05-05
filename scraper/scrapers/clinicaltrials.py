@@ -27,9 +27,14 @@ def normalize_ct_date(raw: str) -> tuple[str | None, str]:
     won't accept partial formats either, so the prefill silently fails
     on month-only dates.
 
-    Convention: month-only → mid-month (15th); year-only → mid-year
-    (Jun 30); precision flag goes on raw_data so the UI can label it
-    'estimated' and prompt the user to confirm before locking.
+    Convention: month-only → first of month (01); year-only → Jan 1.
+    The earliest-possible-date assumption is the conservative choice
+    for options-buying — the strategy needs expiry > catalyst + 30d
+    DTE, so assuming the catalyst could land on day 1 of the window
+    forces longer-dated expiry choices and avoids being caught short
+    if the actual date lands earlier in the month than expected.
+    Precision flag goes on raw_data so the UI can label it 'estimated'
+    and prompt the user to confirm before locking.
     """
     if not raw:
         return None, "unknown"
@@ -37,9 +42,9 @@ def normalize_ct_date(raw: str) -> tuple[str | None, str]:
     if re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw):
         return raw, "day"
     if re.fullmatch(r"\d{4}-\d{2}", raw):
-        return f"{raw}-15", "month"
+        return f"{raw}-01", "month"
     if re.fullmatch(r"\d{4}", raw):
-        return f"{raw}-06-30", "year"
+        return f"{raw}-01-01", "year"
     return None, "unknown"
 
 

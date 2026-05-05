@@ -77,14 +77,15 @@ function buildUserPrompt(input: {
   const m = input.market_metrics
   // Tell Claude exactly how precise the date is so it doesn't manufacture
   // false precision in the analysis text. CT.gov estimated trial dates
-  // often arrive as YYYY-MM only; we normalized to mid-month for the
-  // date input but Claude should still write 'August 2026' (not 'August
-  // 15, 2026') in its prose when the source was month-only.
+  // often arrive as YYYY-MM only; we normalize to the 1st of the month
+  // (earliest-possible placeholder) for the date input but Claude should
+  // still write 'August 2026' (not 'August 1, 2026') in its prose when
+  // the source was month-only.
   const datePrecisionNote =
     input.catalyst_date_precision === 'month'
-      ? ' (NOTE: source date precision is month-only; in your analysis text refer to the catalyst as the month/year, e.g. "August 2026", not the exact day — the day is a mid-month placeholder.)'
+      ? ' (NOTE: source date precision is month-only; in your analysis text refer to the catalyst as the month/year, e.g. "August 2026", not the exact day — the day defaults to the 1st as an earliest-possible placeholder.)'
       : input.catalyst_date_precision === 'year'
-        ? ' (NOTE: source date precision is year-only; in your analysis text refer to the catalyst as the year only, e.g. "2026" — the month/day are placeholders.)'
+        ? ' (NOTE: source date precision is year-only; in your analysis text refer to the catalyst as the year only, e.g. "2026" — the month/day default to January 1st as an earliest-possible placeholder.)'
         : ''
   // Format IV / HV / IV-rank as percentages so Claude reads them as
   // it would in a research note. Skip the section entirely if the
