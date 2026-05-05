@@ -13,6 +13,7 @@
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { fetchMarketMetrics, type MarketMetrics } from './tastytrade.ts'
 
 const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY')
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
@@ -62,13 +63,41 @@ function buildUserPrompt(input: {
   catalyst_type: string
   catalyst_date: string
   filing_text: string
+  market_metrics: MarketMetrics | null
 }): string {
+  const m = input.market_metrics
+  // Format IV / HV / IV-rank as percentages so Claude reads them as
+  // it would in a research note. Skip the section entirely if the
+  // metrics fetch failed so Claude falls back to its category priors.
+  let marketBlock = ''
+  if (m) {
+    const pct = (v: number | null) =>
+      v == null ? 'n/a' : `${(v * 100).toFixed(1)}%`
+    const score = (v: number | null) =>
+      v == null ? 'n/a' : (v * 100).toFixed(0)
+    marketBlock = `
+
+CURRENT MARKET CONDITIONS (live from Tastytrade):
+- 30-day implied volatility: ${pct(m.iv)}
+- 30-day historical volatility: ${pct(m.hv30)}
+- IV − HV spread: ${pct(m.ivHvDifference)} (positive = options are pricing in elevated risk vs realized)
+- IV rank: ${score(m.ivRank)} / 100 (where this name's IV sits in its 52-week range)
+- IV percentile: ${score(m.ivPercentile)} / 100
+- Beta: ${m.beta ?? 'n/a'}
+
+Calibrate strike_suggestion to these conditions:
+- IV > 150% or IV rank > 80 → use WIDER spreads (e.g. 12% buy / 35% sell) so the net debit stays under the 40% premium-of-width cap
+- IV < 50% or IV rank < 30 → tighter spreads acceptable (e.g. 5% buy / 20% sell); options are relatively cheap so capturing modest moves still pays
+- High IV − HV spread ( > 30% ) → market is over-pricing this catalyst; favour put-side spreads if your fundamental read is bearish
+- Negative IV − HV spread → market is under-pricing; check if your filing read justifies a contrarian setup`
+  }
+
   return `Analyze the following public filing for ${input.company_name} (${input.ticker}).
 
 Drug: ${input.drug_name || 'Not specified'}
 Indication: ${input.indication || 'Not specified'}
 Catalyst Type: ${input.catalyst_type}
-Catalyst Date: ${input.catalyst_date}
+Catalyst Date: ${input.catalyst_date}${marketBlock}
 
 FILING TEXT:
 ${input.filing_text}
@@ -180,6 +209,12 @@ serve(async (req) => {
     return json({ success: false, error: `filing_text exceeds ${MAX_FILING_CHARS} character cap` }, 400)
   }
 
+  // Fetch live market metrics from Tastytrade so Claude can calibrate
+  // strike_suggestion to actual IV instead of training-data priors.
+  // Failures fall through with null — the prompt simply omits the
+  // market block and Claude reverts to category-based heuristics.
+  const marketMetrics = await fetchMarketMetrics(adminClient, ticker)
+
   const userPrompt = buildUserPrompt({
     ticker,
     company_name,
@@ -188,6 +223,7 @@ serve(async (req) => {
     catalyst_type,
     catalyst_date,
     filing_text,
+    market_metrics: marketMetrics,
   })
 
   const controller = new AbortController()
@@ -269,5 +305,7 @@ serve(async (req) => {
   // count against the user's quota.
   await adminClient.from('claude_calls').insert({ user_id: user.id })
 
-  return json({ success: true, analysis })
+  // Echo the live market metrics back to the client so the UI can show
+  // 'Live IV: 165%' beneath the suggested strikes for transparency.
+  return json({ success: true, analysis, market_metrics: marketMetrics })
 })

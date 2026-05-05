@@ -98,7 +98,7 @@ export default function AnalyzeFilingPanel({
       if (fnError) throw fnError
       if (!data?.success) throw new Error(data?.error || 'Analysis failed')
 
-      setAnalysis(data.analysis)
+      setAnalysis({ ...data.analysis, _market_metrics: data.market_metrics ?? null })
       onAnalysisComplete?.(data.analysis)
     } catch (e) {
       setError(e.message || 'Analysis failed. Check your filing text and try again.')
@@ -308,6 +308,40 @@ function AnalysisResult({ analysis, onReset }) {
               <p className="text-white font-bold text-sm">{yourProb}%</p>
               <p className="text-muted text-[10px]">Claude Read</p>
             </div>
+          </div>
+        </div>
+      )}
+
+      {analysis._market_metrics && (
+        <div className="bg-bg border border-border rounded-lg p-3">
+          <p className="text-muted text-[10px] uppercase tracking-wider mb-2">
+            Live Market Conditions
+          </p>
+          <div className="grid grid-cols-3 gap-2 text-center">
+            {analysis._market_metrics.iv != null && (
+              <div>
+                <p className="text-white text-sm font-bold">
+                  {(analysis._market_metrics.iv * 100).toFixed(1)}%
+                </p>
+                <p className="text-muted text-[10px]">30-day IV</p>
+              </div>
+            )}
+            {analysis._market_metrics.ivRank != null && (
+              <div>
+                <p className="text-white text-sm font-bold">
+                  {(analysis._market_metrics.ivRank * 100).toFixed(0)}
+                </p>
+                <p className="text-muted text-[10px]">IV Rank /100</p>
+              </div>
+            )}
+            {analysis._market_metrics.hv30 != null && (
+              <div>
+                <p className="text-white text-sm font-bold">
+                  {(analysis._market_metrics.hv30 * 100).toFixed(1)}%
+                </p>
+                <p className="text-muted text-[10px]">30-day HV</p>
+              </div>
+            )}
           </div>
         </div>
       )}
