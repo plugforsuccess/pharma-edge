@@ -395,12 +395,17 @@ export default function LogSignal() {
           {form.catalyst_date && form.catalyst_date < today() && (
             <p className="text-red-400 text-xs">Catalyst date must be today or later.</p>
           )}
-          {(form.catalyst_date_precision === 'month' ||
-            form.catalyst_date_precision === 'year') && (
+          {form.catalyst_date_precision === 'month' && (
             <p className="text-yellow-400 text-xs leading-relaxed">
-              ⚠ CT.gov returned {form.catalyst_date_precision}-only precision —
-              prefilled to mid-{form.catalyst_date_precision === 'month' ? 'month' : 'year'}.
-              Confirm the exact date with the company press release before locking.
+              ⚠ CT.gov has only confirmed the <span className="font-semibold">month</span> for this catalyst.
+              The day above is a mid-month placeholder. Verify the exact date with the company's
+              press release or 8-K before locking — the signal hash will preserve whatever you set.
+            </p>
+          )}
+          {form.catalyst_date_precision === 'year' && (
+            <p className="text-yellow-400 text-xs leading-relaxed">
+              ⚠ CT.gov has only confirmed the <span className="font-semibold">year</span> for this catalyst.
+              The month and day above are placeholders. Verify the exact date with the company before locking.
             </p>
           )}
 

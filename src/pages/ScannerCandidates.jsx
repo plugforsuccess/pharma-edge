@@ -167,6 +167,24 @@ function formatMarketCap(cap) {
   return `$${cap}`
 }
 
+// Render the catalyst date at its real precision so we don't show a
+// fake-precise 'August 15, 2026' when CT.gov only confirmed 'August 2026'.
+// Splits the YYYY-MM-DD string manually instead of constructing a Date so
+// timezone offsets don't shift the day.
+function formatCatalystDate(date, precision) {
+  if (!date) return null
+  const parts = String(date).split('-').map(Number)
+  const [y, m, d] = parts
+  if (!y) return null
+  if (precision === 'year') return String(y)
+  const monthName = new Date(Date.UTC(y, (m || 1) - 1, 1)).toLocaleDateString('en-US', {
+    month: 'long',
+    timeZone: 'UTC',
+  })
+  if (precision === 'month') return `${monthName} ${y}`
+  return `${monthName} ${d}, ${y}`
+}
+
 function CandidateCard({ candidate, expanded, busy, onToggle, onDismiss, onPromote }) {
   const analysis = candidate.claude_analysis ?? null
   const score = candidate.score ?? 0
@@ -258,25 +276,24 @@ function CandidateCard({ candidate, expanded, busy, onToggle, onDismiss, onPromo
             </p>
             {candidate.catalyst_date ? (
               <p className="text-subtle text-xs mt-0.5">
-                {new Date(candidate.catalyst_date).toLocaleDateString('en-US', {
-                  month: 'long',
-                  day: 'numeric',
-                  year: 'numeric',
-                })}
+                {formatCatalystDate(
+                  candidate.catalyst_date,
+                  candidate.raw_data?.catalyst_date_precision,
+                )}
                 {candidate.raw_data?.catalyst_date_precision === 'month' && (
                   <span
-                    className="ml-2 text-[10px] text-yellow-400"
-                    title="CT.gov returned month-only precision; the day is a mid-month estimate. Confirm the exact date with the company before locking a signal."
+                    className="ml-2 text-[10px] text-muted"
+                    title="CT.gov reported only the month — exact day not yet disclosed. Verify with the company's press release before locking a signal."
                   >
-                    (est. month — confirm)
+                    · exact day TBD
                   </span>
                 )}
                 {candidate.raw_data?.catalyst_date_precision === 'year' && (
                   <span
-                    className="ml-2 text-[10px] text-yellow-400"
-                    title="CT.gov returned year-only precision; the date shown is a mid-year estimate."
+                    className="ml-2 text-[10px] text-muted"
+                    title="CT.gov reported only the year — exact month and day not yet disclosed."
                   >
-                    (est. year — confirm)
+                    · month/day TBD
                   </span>
                 )}
               </p>
