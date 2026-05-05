@@ -22,9 +22,10 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
 
 const CLAUDE_MODEL = 'claude-sonnet-4-6'
 const MAX_FILING_CHARS = 50_000
-const CLAUDE_TIMEOUT_MS = 50_000
-const MAX_TOKENS = 4096
+const CLAUDE_TIMEOUT_MS = 90_000   // bumped from 50s — web_search adds latency
+const MAX_TOKENS = 8192             // bumped from 4096 — multi-search + JSON
 const RATE_LIMIT_PER_HOUR = Number(Deno.env.get('CLAUDE_RATE_LIMIT_PER_HOUR') ?? '30')
+const WEB_SEARCH_MAX_USES = Number(Deno.env.get('WEB_SEARCH_MAX_USES') ?? '5')
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -48,9 +49,16 @@ You are rigorous, skeptical, and data-driven. You do not invest — you analyze.
 - Common red flags in trial data (endpoint switching, cherry-picked populations, marginal p-values)
 - Cash runway analysis for small-cap biotech
 
+WEB SEARCH:
+You have a web_search tool. Use it (up to ${WEB_SEARCH_MAX_USES} searches) to pull supplementary context the filing text alone doesn't cover — recent company press releases, FDA correspondence, analogous trial readouts in the same indication / mechanism, AdComm transcripts, journal articles. Search early in your reasoning, before forming a conclusion.
+
+ALLOWED SOURCES TO CITE: SEC filings (sec.gov), FDA documents (fda.gov), ClinicalTrials.gov, peer-reviewed journals (NEJM, Lancet, JAMA, Nature, Science, biorxiv), company investor-relations pages (e.g. investors.{company}.com), and reputable trade press (Endpoints News, FierceBiotech, BioSpace, STAT News).
+
+DO NOT cite or rely on: Twitter/X, Reddit, Stocktwits, message boards, YouTube, blog comments, or any unmoderated forum content. If a search returns mostly low-quality sources, treat the topic as unverified and lower your confidence_score accordingly.
+
 CRITICAL RULES:
 1. Never provide investment advice
-2. Always cite specific data points from the provided text
+2. Always cite specific data points from the provided text or web sources (with URLs in the rationale fields)
 3. Be explicit about what you do NOT know or cannot determine
 4. Flag when data is insufficient for high-confidence analysis
 5. Return ONLY valid JSON — no preamble, no markdown, no explanation outside the JSON`
@@ -259,6 +267,18 @@ serve(async (req) => {
         model: CLAUDE_MODEL,
         max_tokens: MAX_TOKENS,
         system: SYSTEM_PROMPT,
+        // Anthropic-managed server tool. Search executes server-side
+        // and results stream back inside the same turn — Claude
+        // continues reasoning and emits the final JSON without us
+        // having to round-trip tool_use blocks. Capped at
+        // WEB_SEARCH_MAX_USES per call (~$0.01 each) for cost control.
+        tools: [
+          {
+            type: 'web_search_20250305',
+            name: 'web_search',
+            max_uses: WEB_SEARCH_MAX_USES,
+          },
+        ],
         messages: [{ role: 'user', content: userPrompt }],
       }),
       signal: controller.signal,
@@ -286,13 +306,28 @@ serve(async (req) => {
     )
   }
 
-  const textBlock = (claudeData?.content || []).find((b: { type?: string }) => b?.type === 'text') as
-    | { text?: string }
-    | undefined
-  const rawText = textBlock?.text || ''
+  // With server-side web_search the content array can contain
+  // server_tool_use + web_search_tool_result blocks interleaved with
+  // text. The JSON we want is the LAST text block (after all searches
+  // resolve). Also collect URL citations + count searches used.
+  const blocks = (claudeData?.content || []) as Array<{
+    type?: string
+    text?: string
+    citations?: unknown[]
+  }>
+  const textBlocks = blocks.filter((b) => b?.type === 'text')
+  const lastText = textBlocks[textBlocks.length - 1]
+  const rawText = lastText?.text || ''
   if (!rawText) {
     return json({ success: false, error: 'no text content in claude response' }, 502)
   }
+  const citations: unknown[] = []
+  for (const b of textBlocks) {
+    if (Array.isArray(b.citations)) citations.push(...b.citations)
+  }
+  const searchUsage = blocks.filter(
+    (b) => (b as { type?: string }).type === 'server_tool_use',
+  ).length
 
   const stripped = rawText.replace(/```json|```/g, '').trim()
   const first = stripped.indexOf('{')
@@ -324,5 +359,11 @@ serve(async (req) => {
 
   // Echo the live market metrics back to the client so the UI can show
   // 'Live IV: 165%' beneath the suggested strikes for transparency.
-  return json({ success: true, analysis, market_metrics: marketMetrics })
+  return json({
+    success: true,
+    analysis,
+    market_metrics: marketMetrics,
+    citations,
+    web_searches_used: searchUsage,
+  })
 })
