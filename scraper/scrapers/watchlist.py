@@ -93,10 +93,12 @@ def _scan_ctgov(item: dict[str, Any]) -> list[dict[str, Any]]:
         # protocolSection.statusModule.whyStopped; some v2 builds
         # accept it as a top-level shorthand and some don't, so we
         # read it back from the protocol path instead of requesting
-        # it as its own field.
+        # it as its own field. Condition + InterventionName are
+        # required for indication / drug_name extraction below.
         'fields': (
             'NCTId,BriefTitle,Phase,OverallStatus,'
-            'PrimaryCompletionDate,EnrollmentCount,LeadSponsorName'
+            'PrimaryCompletionDate,EnrollmentCount,LeadSponsorName,'
+            'Condition,InterventionName'
         ),
         'pageSize': 25,
         'format': 'json',

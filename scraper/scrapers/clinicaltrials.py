@@ -66,9 +66,13 @@ def fetch_upcoming_readouts(days_ahead: int = 120) -> list[dict[str, Any]]:
     params: dict[str, Any] = {
         "filter.overallStatus": "ACTIVE_NOT_RECRUITING,RECRUITING",
         "filter.advanced": advanced,
+        # Condition + InterventionName are required for the indication
+        # and drug_name extraction in score_trial. Without them v2
+        # returns empty modules even though the API call succeeds.
         "fields": (
             "NCTId,BriefTitle,OverallStatus,Phase,"
-            "PrimaryCompletionDate,LeadSponsorName,EnrollmentCount"
+            "PrimaryCompletionDate,LeadSponsorName,EnrollmentCount,"
+            "Condition,InterventionName"
         ),
         "pageSize": 100,
         "format": "json",
