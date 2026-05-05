@@ -150,6 +150,7 @@ export default function LogSignal() {
     indication: prefill.indication || '',
     catalyst_type: prefill.catalyst_type || 'pdufa',
     catalyst_date: prefill.catalyst_date || '',
+    catalyst_date_precision: prefill.catalyst_date_precision || 'day',
     direction: prefill.direction || 'long_put',
     trade_type: 'paper',
     structure:
@@ -379,13 +380,28 @@ export default function LogSignal() {
           <Input
             label="Catalyst Date"
             value={form.catalyst_date}
-            onChange={(v) => update('catalyst_date', v)}
+            onChange={(v) => {
+              // Manual edit overrides any prefilled precision —
+              // a date the user typed is a real day-precision date.
+              update('catalyst_date', v)
+              if (form.catalyst_date_precision !== 'day') {
+                update('catalyst_date_precision', 'day')
+              }
+            }}
             type="date"
             min={today()}
             required
           />
           {form.catalyst_date && form.catalyst_date < today() && (
             <p className="text-red-400 text-xs">Catalyst date must be today or later.</p>
+          )}
+          {(form.catalyst_date_precision === 'month' ||
+            form.catalyst_date_precision === 'year') && (
+            <p className="text-yellow-400 text-xs leading-relaxed">
+              ⚠ CT.gov returned {form.catalyst_date_precision}-only precision —
+              prefilled to mid-{form.catalyst_date_precision === 'month' ? 'month' : 'year'}.
+              Confirm the exact date with the company press release before locking.
+            </p>
           )}
 
           <div>
@@ -460,6 +476,7 @@ export default function LogSignal() {
             indication={form.indication}
             catalystType={form.catalyst_type}
             catalystDate={form.catalyst_date}
+            catalystDatePrecision={form.catalyst_date_precision}
             analysis={analysis}
             onAnalysisComplete={handleAnalysisComplete}
             onAnalysisReset={() => {

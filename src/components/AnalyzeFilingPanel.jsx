@@ -19,6 +19,7 @@ export default function AnalyzeFilingPanel({
   indication,
   catalystType,
   catalystDate,
+  catalystDatePrecision,
   analysis,
   onAnalysisComplete,
   onAnalysisReset,
@@ -93,6 +94,7 @@ export default function AnalyzeFilingPanel({
           indication,
           catalyst_type: catalystType,
           catalyst_date: catalystDate,
+          catalyst_date_precision: catalystDatePrecision || 'day',
           filing_text: filingText,
         },
       })

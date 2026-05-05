@@ -67,6 +67,8 @@ export default function ScannerCandidates() {
           company_name: candidate.company_name || '',
           catalyst_type: candidate.catalyst_type || 'phase3_readout',
           catalyst_date: candidate.catalyst_date || '',
+          catalyst_date_precision:
+            candidate.raw_data?.catalyst_date_precision || 'day',
           thesis: analysis?.preliminary_thesis || '',
           direction: analysis?.suggested_direction || 'long_put',
         },
@@ -261,6 +263,22 @@ function CandidateCard({ candidate, expanded, busy, onToggle, onDismiss, onPromo
                   day: 'numeric',
                   year: 'numeric',
                 })}
+                {candidate.raw_data?.catalyst_date_precision === 'month' && (
+                  <span
+                    className="ml-2 text-[10px] text-yellow-400"
+                    title="CT.gov returned month-only precision; the day is a mid-month estimate. Confirm the exact date with the company before locking a signal."
+                  >
+                    (est. month — confirm)
+                  </span>
+                )}
+                {candidate.raw_data?.catalyst_date_precision === 'year' && (
+                  <span
+                    className="ml-2 text-[10px] text-yellow-400"
+                    title="CT.gov returned year-only precision; the date shown is a mid-year estimate."
+                  >
+                    (est. year — confirm)
+                  </span>
+                )}
               </p>
             ) : (
               <p className="text-muted text-xs mt-0.5 italic">

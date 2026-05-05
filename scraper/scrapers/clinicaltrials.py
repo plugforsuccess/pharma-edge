@@ -10,6 +10,7 @@ the v2 history endpoint ships or wire up the legacy v1 study record diff.
 
 from __future__ import annotations
 
+import re
 import time
 from datetime import datetime, timedelta
 from typing import Any
@@ -17,6 +18,29 @@ from typing import Any
 import requests
 
 CTGOV_BASE = "https://clinicaltrials.gov/api/v2/studies"
+
+
+def normalize_ct_date(raw: str) -> tuple[str | None, str]:
+    """CT.gov returns dates at varying precision (estimated dates can be
+    YYYY-MM or even YYYY only). signals.catalyst_date is a DATE column
+    so we MUST emit YYYY-MM-DD or NULL — and HTML <input type=date>
+    won't accept partial formats either, so the prefill silently fails
+    on month-only dates.
+
+    Convention: month-only → mid-month (15th); year-only → mid-year
+    (Jun 30); precision flag goes on raw_data so the UI can label it
+    'estimated' and prompt the user to confirm before locking.
+    """
+    if not raw:
+        return None, "unknown"
+    raw = raw.strip()
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw):
+        return raw, "day"
+    if re.fullmatch(r"\d{4}-\d{2}", raw):
+        return f"{raw}-15", "month"
+    if re.fullmatch(r"\d{4}", raw):
+        return f"{raw}-06-30", "year"
+    return None, "unknown"
 
 
 def fetch_upcoming_readouts(days_ahead: int = 120) -> list[dict[str, Any]]:
@@ -164,6 +188,8 @@ def score_trial(
         score += 3
         flags.append("Recent protocol amendment detected — endpoint change possible")
 
+    raw_pc = (status.get("primaryCompletionDateStruct") or {}).get("date", "")
+    pc_normalized, pc_precision = normalize_ct_date(raw_pc)
     return {
         "nct_id": ident.get("nctId", ""),
         "title": ident.get("briefTitle", ""),
@@ -173,7 +199,9 @@ def score_trial(
         "enrollment": enrollment,
         "score": min(score, 10),
         "flags": flags,
-        "primary_completion": (
-            (status.get("primaryCompletionDateStruct") or {}).get("date", "")
-        ),
+        "primary_completion": pc_normalized,
+        # Mirror onto a shared key so downstream main.py / UI can read
+        # one consistent field regardless of which scraper produced it.
+        "catalyst_date_raw": raw_pc,
+        "catalyst_date_precision": pc_precision,
     }

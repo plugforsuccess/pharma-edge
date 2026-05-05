@@ -62,10 +62,22 @@ function buildUserPrompt(input: {
   indication?: string
   catalyst_type: string
   catalyst_date: string
+  catalyst_date_precision: 'day' | 'month' | 'year' | 'unknown'
   filing_text: string
   market_metrics: MarketMetrics | null
 }): string {
   const m = input.market_metrics
+  // Tell Claude exactly how precise the date is so it doesn't manufacture
+  // false precision in the analysis text. CT.gov estimated trial dates
+  // often arrive as YYYY-MM only; we normalized to mid-month for the
+  // date input but Claude should still write 'August 2026' (not 'August
+  // 15, 2026') in its prose when the source was month-only.
+  const datePrecisionNote =
+    input.catalyst_date_precision === 'month'
+      ? ' (NOTE: source date precision is month-only; in your analysis text refer to the catalyst as the month/year, e.g. "August 2026", not the exact day — the day is a mid-month placeholder.)'
+      : input.catalyst_date_precision === 'year'
+        ? ' (NOTE: source date precision is year-only; in your analysis text refer to the catalyst as the year only, e.g. "2026" — the month/day are placeholders.)'
+        : ''
   // Format IV / HV / IV-rank as percentages so Claude reads them as
   // it would in a research note. Skip the section entirely if the
   // metrics fetch failed so Claude falls back to its category priors.
@@ -97,7 +109,7 @@ Calibrate strike_suggestion to these conditions:
 Drug: ${input.drug_name || 'Not specified'}
 Indication: ${input.indication || 'Not specified'}
 Catalyst Type: ${input.catalyst_type}
-Catalyst Date: ${input.catalyst_date}${marketBlock}
+Catalyst Date: ${input.catalyst_date}${datePrecisionNote}${marketBlock}
 
 FILING TEXT:
 ${input.filing_text}
@@ -197,6 +209,10 @@ serve(async (req) => {
   const indication = body.indication ? String(body.indication) : undefined
   const catalyst_type = String(body.catalyst_type ?? '').trim()
   const catalyst_date = String(body.catalyst_date ?? '').trim()
+  const rawPrecision = String(body.catalyst_date_precision ?? 'day')
+  const catalyst_date_precision = (
+    ['day', 'month', 'year', 'unknown'].includes(rawPrecision) ? rawPrecision : 'day'
+  ) as 'day' | 'month' | 'year' | 'unknown'
   const filing_text = String(body.filing_text ?? '')
 
   if (!ticker || !company_name || !catalyst_type || !catalyst_date) {
@@ -222,6 +238,7 @@ serve(async (req) => {
     indication,
     catalyst_type,
     catalyst_date,
+    catalyst_date_precision,
     filing_text,
     market_metrics: marketMetrics,
   })

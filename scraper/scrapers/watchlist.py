@@ -20,6 +20,7 @@ import feedparser
 import requests
 from supabase import Client
 
+from .clinicaltrials import normalize_ct_date
 from .market_cap import market_cap_for
 
 CTGOV = 'https://clinicaltrials.gov/api/v2/studies'
@@ -126,7 +127,8 @@ def _scan_ctgov(item: dict[str, Any]) -> list[dict[str, Any]]:
         if not nct_id:
             continue
         phases = (design.get('phases') or [''])[0]
-        completion = (status_module.get('primaryCompletionDateStruct') or {}).get('date', '')
+        raw_completion = (status_module.get('primaryCompletionDateStruct') or {}).get('date', '')
+        completion, completion_precision = normalize_ct_date(raw_completion)
         hits.append(
             {
                 'nct_id': nct_id,
@@ -146,6 +148,8 @@ def _scan_ctgov(item: dict[str, Any]) -> list[dict[str, Any]]:
                     'title': ident.get('briefTitle'),
                     'enrollment': (design.get('enrollmentInfo') or {}).get('count'),
                     'overall_status': status_module.get('overallStatus'),
+                    'catalyst_date_raw': raw_completion,
+                    'catalyst_date_precision': completion_precision,
                 },
             }
         )
