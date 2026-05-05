@@ -198,8 +198,9 @@ function CandidateCard({ candidate, expanded, busy, onToggle, onDismiss, onPromo
                 'text-[10px] font-bold px-2 py-0.5 rounded-full border',
                 scoreClass,
               )}
+              title="Signal score: rules-based catalyst strength (phase, enrollment, site terminations, market cap). Distinct from your trade-thesis confidence."
             >
-              Score: {score}/10
+              Signal: {score}/10
             </span>
             {isWatchlist && (
               <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border border-yellow-700 bg-yellow-950 text-yellow-400">
