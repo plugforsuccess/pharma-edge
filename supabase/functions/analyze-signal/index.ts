@@ -1,15 +1,17 @@
-// Pharma Edge — analyze-signal edge function.
+// Pharma Edge — analyze-signal edge function (streaming).
 //
-// Pure analysis endpoint. Reads filing text + signal context, calls Claude,
-// returns structured analysis JSON. The CLIENT decides what to do with the
-// result (prefill a draft signal). This function never writes to the
-// signals table — that avoids the IDOR vector from the spec where any
-// authenticated user could pass a foreign signal_id and have it
-// overwritten via the service role.
+// Streams Anthropic's response as Server-Sent Events to the client.
+// Solves the wall-clock issue by sending bytes continuously to the
+// gateway (no idle-timeout cut-off) and gives the client a chance
+// to render progressive output.
 //
-// Per-user rate limit: claude_calls table. Each successful Claude call
-// inserts a row keyed by user_id; new requests are rejected with 429
-// once the rolling-1h count crosses RATE_LIMIT_PER_HOUR.
+// Event types emitted to the client:
+//   start    — { ticker } analysis kicked off
+//   keepalive — periodic heartbeat (every 4s) to hold the connection
+//   text     — { delta } incremental Claude text token
+//   search   — { query } a web_search tool invocation just fired
+//   complete — { analysis, market_metrics, citations, web_searches_used } final structured JSON
+//   error    — { error } fatal failure; client should surface
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
@@ -22,19 +24,10 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
 
 const CLAUDE_MODEL = 'claude-sonnet-4-6'
 const MAX_FILING_CHARS = 50_000
-// Supabase free tier severs the client connection at ~60s wall clock.
-// Cap our internal Claude timeout below that so we return a clean
-// 'analysis timed out' error before Supabase cuts us off (which
-// otherwise surfaces as the misleading 'Failed to send a request to
-// the Edge Function' on the client).
-const CLAUDE_TIMEOUT_MS = 50_000
 const MAX_TOKENS = 8192
 const RATE_LIMIT_PER_HOUR = Number(Deno.env.get('CLAUDE_RATE_LIMIT_PER_HOUR') ?? '30')
-// 2 searches keeps us under the Supabase free-tier 60s wall clock
-// even when Claude's reasoning + JSON output runs long (we saw 51s
-// even at 3 searches). Bump back to 3-5 when on Pro (150s wall) or
-// after migrating to Cloudflare Workers / Vercel Edge (10+ min).
-const WEB_SEARCH_MAX_USES = Number(Deno.env.get('WEB_SEARCH_MAX_USES') ?? '2')
+const WEB_SEARCH_MAX_USES = Number(Deno.env.get('WEB_SEARCH_MAX_USES') ?? '4')
+const KEEPALIVE_MS = 4_000
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -42,35 +35,27 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-function json(body: unknown, status = 200): Response {
+function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   })
 }
 
-const SYSTEM_PROMPT = `You are a pharmaceutical industry analyst specializing in FDA regulatory strategy and clinical trial analysis. Your job is to analyze public biotech/pharma filings and determine whether a drug catalyst (FDA decision, trial readout, etc.) is likely to be positive or negative based purely on the scientific and regulatory evidence.
+const SYSTEM_PROMPT = `You are a pharmaceutical industry analyst specializing in FDA regulatory strategy and clinical trial analysis. You are rigorous, skeptical, and data-driven. You do not invest — you analyze.
 
-You are rigorous, skeptical, and data-driven. You do not invest — you analyze. You have deep knowledge of:
-- FDA approval history and precedent by indication
-- Clinical trial design and endpoint selection
-- Statistical significance standards in drug development
-- Common red flags in trial data (endpoint switching, cherry-picked populations, marginal p-values)
-- Cash runway analysis for small-cap biotech
+WEB SEARCH: You have a web_search tool. Use it (up to ${WEB_SEARCH_MAX_USES} searches max) to pull supplementary context the filing text alone doesn't cover. Be selective — only search when the gap is critical (recent press release on this exact drug, FDA precedent for this exact mechanism). Don't search for general industry context you already know.
 
-WEB SEARCH:
-You have a web_search tool. Use it (up to ${WEB_SEARCH_MAX_USES} searches) to pull supplementary context the filing text alone doesn't cover — recent company press releases, FDA correspondence, analogous trial readouts in the same indication / mechanism, AdComm transcripts, journal articles. Search early in your reasoning, before forming a conclusion.
+ALLOWED SOURCES: SEC filings (sec.gov), FDA documents (fda.gov), ClinicalTrials.gov, peer-reviewed journals (NEJM, Lancet, JAMA, Nature, Science, biorxiv), company IR pages, reputable trade press (Endpoints News, FierceBiotech, BioSpace, STAT News).
 
-ALLOWED SOURCES TO CITE: SEC filings (sec.gov), FDA documents (fda.gov), ClinicalTrials.gov, peer-reviewed journals (NEJM, Lancet, JAMA, Nature, Science, biorxiv), company investor-relations pages (e.g. investors.{company}.com), and reputable trade press (Endpoints News, FierceBiotech, BioSpace, STAT News).
-
-DO NOT cite or rely on: Twitter/X, Reddit, Stocktwits, message boards, YouTube, blog comments, or any unmoderated forum content. If a search returns mostly low-quality sources, treat the topic as unverified and lower your confidence_score accordingly.
+DO NOT cite or rely on: Twitter/X, Reddit, Stocktwits, message boards, YouTube, blog comments. If a search returns mostly low-quality sources, treat the topic as unverified and lower confidence_score.
 
 CRITICAL RULES:
 1. Never provide investment advice
-2. Always cite specific data points from the provided text or web sources (with URLs in the rationale fields)
-3. Be explicit about what you do NOT know or cannot determine
-4. Flag when data is insufficient for high-confidence analysis
-5. Return ONLY valid JSON — no preamble, no markdown, no explanation outside the JSON`
+2. Always cite specific data points from text or web sources
+3. Be explicit about what you don't know
+4. Flag when data is insufficient
+5. Return ONLY valid JSON — no preamble, no markdown`
 
 function buildUserPrompt(input: {
   ticker: string
@@ -84,44 +69,28 @@ function buildUserPrompt(input: {
   market_metrics: MarketMetrics | null
 }): string {
   const m = input.market_metrics
-  // Tell Claude exactly how precise the date is so it doesn't manufacture
-  // false precision in the analysis text. CT.gov estimated trial dates
-  // often arrive as YYYY-MM only; we normalize to the 1st of the month
-  // (earliest-possible placeholder) for the date input but Claude should
-  // still write 'August 2026' (not 'August 1, 2026') in its prose when
-  // the source was month-only.
   const datePrecisionNote =
     input.catalyst_date_precision === 'month'
-      ? ' (NOTE: source date precision is month-only; in your analysis text refer to the catalyst as the month/year, e.g. "August 2026", not the exact day — the day defaults to the 1st as an earliest-possible placeholder.)'
+      ? ' (NOTE: source date precision is month-only; refer to the catalyst as the month/year, e.g. "August 2026", not the exact day — the day defaults to the 1st as an earliest-possible placeholder.)'
       : input.catalyst_date_precision === 'year'
-        ? ' (NOTE: source date precision is year-only; in your analysis text refer to the catalyst as the year only, e.g. "2026" — the month/day default to January 1st as an earliest-possible placeholder.)'
+        ? ' (NOTE: source date precision is year-only; refer to the catalyst as the year only.)'
         : ''
-  // Format IV / HV / IV-rank as percentages so Claude reads them as
-  // it would in a research note. Skip the section entirely if the
-  // metrics fetch failed so Claude falls back to its category priors.
   let marketBlock = ''
   if (m) {
-    const pct = (v: number | null) =>
-      v == null ? 'n/a' : `${(v * 100).toFixed(1)}%`
-    const score = (v: number | null) =>
-      v == null ? 'n/a' : (v * 100).toFixed(0)
+    const pct = (v: number | null) => (v == null ? 'n/a' : `${(v * 100).toFixed(1)}%`)
+    const score = (v: number | null) => (v == null ? 'n/a' : (v * 100).toFixed(0))
     marketBlock = `
 
 CURRENT MARKET CONDITIONS (live from Tastytrade):
-- 30-day implied volatility: ${pct(m.iv)}
-- 30-day historical volatility: ${pct(m.hv30)}
-- IV − HV spread: ${pct(m.ivHvDifference)} (positive = options are pricing in elevated risk vs realized)
-- IV rank: ${score(m.ivRank)} / 100 (where this name's IV sits in its 52-week range)
-- IV percentile: ${score(m.ivPercentile)} / 100
+- 30-day IV: ${pct(m.iv)}
+- 30-day HV: ${pct(m.hv30)}
+- IV-HV spread: ${pct(m.ivHvDifference)}
+- IV rank: ${score(m.ivRank)}/100
+- IV percentile: ${score(m.ivPercentile)}/100
 - Beta: ${m.beta ?? 'n/a'}
 
-Calibrate strike_suggestion to these conditions:
-- IV > 150% or IV rank > 80 → use WIDER spreads (e.g. 12% buy / 35% sell) so the net debit stays under the 40% premium-of-width cap
-- IV < 50% or IV rank < 30 → tighter spreads acceptable (e.g. 5% buy / 20% sell); options are relatively cheap so capturing modest moves still pays
-- High IV − HV spread ( > 30% ) → market is over-pricing this catalyst; favour put-side spreads if your fundamental read is bearish
-- Negative IV − HV spread → market is under-pricing; check if your filing read justifies a contrarian setup`
+Calibrate strike_suggestion: IV>150% or rank>80 → wider (12/35); IV<50% or rank<30 → tighter (5/20); high IV-HV spread (>30%) → market over-pricing; negative IV-HV → market under-pricing.`
   }
-
   return `Analyze the following public filing for ${input.company_name} (${input.ticker}).
 
 Drug: ${input.drug_name || 'Not specified'}
@@ -134,91 +103,73 @@ ${input.filing_text}
 
 Return a JSON object with EXACTLY this structure:
 {
-  "thesis": "2-4 sentence summary of your core thesis on whether this catalyst is likely positive or negative, citing specific data points",
-  "claude_analysis": "Detailed 4-6 sentence analysis covering: trial design quality, endpoint appropriateness, FDA precedent, data quality concerns, and any red flags found",
-  "direction_recommendation": "long_put" | "long_call" | "watch",
+  "thesis": "2-4 sentence summary citing specific data points",
+  "claude_analysis": "Detailed 4-6 sentence analysis: trial design quality, endpoint appropriateness, FDA precedent, data quality concerns, red flags",
+  "direction_recommendation": "long_put"|"long_call"|"watch",
   "confidence_score": <integer 1-10>,
-  "market_implied_probability": <estimated market probability of positive outcome as integer 0-100, or null if unknown>,
-  "your_probability": <your estimated probability of positive outcome as integer 0-100>,
-  "signal_scores": {
-    "enrollment_signal": <0-10, 0 if no enrollment data present>,
-    "fda_precedent_signal": <0-10, 0 if no precedent data present>,
-    "protocol_amendment_signal": <0-10, 0 if no amendments found>,
-    "insider_selling_signal": <0-10, 0 if no insider data present>,
-    "cash_runway_signal": <0-10, 0 if no cash data present>
-  },
-  "key_risks": ["risk1", "risk2", "risk3"],
+  "market_implied_probability": <integer 0-100 or null>,
+  "your_probability": <integer 0-100>,
+  "signal_scores": { "enrollment_signal": <0-10>, "fda_precedent_signal": <0-10>, "protocol_amendment_signal": <0-10>, "insider_selling_signal": <0-10>, "cash_runway_signal": <0-10> },
+  "key_risks": ["risk1","risk2","risk3"],
   "bull_case": "What would need to be true for a positive outcome",
-  "bear_case": "What the data suggests about why this could fail",
-  "data_quality": "high" | "medium" | "low",
-  "data_quality_reason": "Why you rated data quality as you did",
-  "suggested_structure": "bear_put_spread" | "bull_call_spread" | "watch",
-  "suggested_dte_days": <integer, recommended days to expiration past catalyst>,
-  "flags": ["any specific red flags found in the text"],
-  "strike_suggestion": {
-    "buy_strike_pct_otm": <integer % out of the money for the BUY strike — for puts the buy strike is below stock price, for calls it is above>,
-    "sell_strike_pct_otm": <integer % out of the money for the SELL strike — should be further OTM than the buy strike>,
-    "expected_move_pct": <integer expected stock % move on catalyst, absolute value>,
-    "max_premium_pct_of_spread": <integer 0-40 — never recommend paying more than 40% of spread width in premium>,
-    "rationale": "Why these strikes make sense given the expected move on this catalyst"
-  }
+  "bear_case": "Why this could fail",
+  "data_quality": "high"|"medium"|"low",
+  "data_quality_reason": "Why",
+  "suggested_structure": "bear_put_spread"|"bull_call_spread"|"watch",
+  "suggested_dte_days": <integer>,
+  "flags": ["red flags found"],
+  "strike_suggestion": { "buy_strike_pct_otm": <integer>, "sell_strike_pct_otm": <integer>, "expected_move_pct": <integer>, "max_premium_pct_of_spread": <integer 0-40>, "rationale": "Why" }
 }`
+}
+
+function sseEvent(event: string, data: unknown): string {
+  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
+}
+
+function extractJson(rawText: string): unknown {
+  const stripped = rawText.replace(/```json|```/g, '').trim()
+  const first = stripped.indexOf('{')
+  const last = stripped.lastIndexOf('}')
+  if (first === -1 || last === -1 || last <= first) {
+    throw new Error('claude did not return parseable JSON')
+  }
+  return JSON.parse(stripped.slice(first, last + 1))
 }
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
-  if (req.method !== 'POST') return json({ success: false, error: 'method not allowed' }, 405)
+  if (req.method !== 'POST') return jsonResponse({ success: false, error: 'method not allowed' }, 405)
 
-  if (!ANTHROPIC_API_KEY) {
-    return json(
-      { success: false, error: 'ANTHROPIC_API_KEY is not configured. Run: supabase secrets set ANTHROPIC_API_KEY=...' },
-      500,
-    )
-  }
-  if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SUPABASE_SERVICE_ROLE_KEY) {
-    return json({ success: false, error: 'edge function misconfigured: missing SUPABASE env' }, 500)
-  }
+  if (!ANTHROPIC_API_KEY) return jsonResponse({ success: false, error: 'ANTHROPIC_API_KEY not configured' }, 500)
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SUPABASE_SERVICE_ROLE_KEY)
+    return jsonResponse({ success: false, error: 'edge function misconfigured' }, 500)
 
-  // Auth: require a real user JWT.
   const authHeader = req.headers.get('Authorization')
-  if (!authHeader?.startsWith('Bearer ')) {
-    return json({ success: false, error: 'unauthorized' }, 401)
-  }
+  if (!authHeader?.startsWith('Bearer ')) return jsonResponse({ success: false, error: 'unauthorized' }, 401)
   const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     global: { headers: { Authorization: authHeader } },
   })
   const { data: { user }, error: authError } = await userClient.auth.getUser()
-  if (authError || !user) {
-    return json({ success: false, error: 'unauthorized' }, 401)
-  }
+  if (authError || !user) return jsonResponse({ success: false, error: 'unauthorized' }, 401)
 
   const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
-  // Per-user rate limit (rolling 1h).
   const sinceIso = new Date(Date.now() - 60 * 60 * 1000).toISOString()
   const { count: recentCalls, error: rateError } = await adminClient
     .from('claude_calls')
     .select('id', { count: 'exact', head: true })
     .eq('user_id', user.id)
     .gte('called_at', sinceIso)
-  if (rateError) {
-    return json({ success: false, error: `rate-limit lookup failed: ${rateError.message}` }, 500)
-  }
+  if (rateError) return jsonResponse({ success: false, error: `rate-limit lookup failed: ${rateError.message}` }, 500)
   if ((recentCalls ?? 0) >= RATE_LIMIT_PER_HOUR) {
-    return json(
-      {
-        success: false,
-        error: `rate limited: ${RATE_LIMIT_PER_HOUR} analyses per hour cap reached. Try again later.`,
-      },
-      429,
-    )
+    return jsonResponse({ success: false, error: `rate limited: ${RATE_LIMIT_PER_HOUR} analyses per hour cap reached` }, 429)
   }
 
   let body: Record<string, unknown>
   try {
     body = await req.json()
   } catch {
-    return json({ success: false, error: 'invalid JSON body' }, 400)
+    return jsonResponse({ success: false, error: 'invalid JSON body' }, 400)
   }
 
   const ticker = String(body.ticker ?? '').trim()
@@ -234,21 +185,16 @@ serve(async (req) => {
   const filing_text = String(body.filing_text ?? '')
 
   if (!ticker || !company_name || !catalyst_type || !catalyst_date) {
-    return json({ success: false, error: 'missing required fields (ticker, company_name, catalyst_type, catalyst_date)' }, 400)
+    return jsonResponse({ success: false, error: 'missing required fields' }, 400)
   }
   if (filing_text.length < 200) {
-    return json({ success: false, error: 'filing_text must be at least 200 characters' }, 400)
+    return jsonResponse({ success: false, error: 'filing_text must be at least 200 characters' }, 400)
   }
   if (filing_text.length > MAX_FILING_CHARS) {
-    return json({ success: false, error: `filing_text exceeds ${MAX_FILING_CHARS} character cap` }, 400)
+    return jsonResponse({ success: false, error: `filing_text exceeds ${MAX_FILING_CHARS} character cap` }, 400)
   }
 
-  // Fetch live market metrics from Tastytrade so Claude can calibrate
-  // strike_suggestion to actual IV instead of training-data priors.
-  // Failures fall through with null — the prompt simply omits the
-  // market block and Claude reverts to category-based heuristics.
   const marketMetrics = await fetchMarketMetrics(adminClient, ticker)
-
   const userPrompt = buildUserPrompt({
     ticker,
     company_name,
@@ -261,119 +207,166 @@ serve(async (req) => {
     market_metrics: marketMetrics,
   })
 
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), CLAUDE_TIMEOUT_MS)
+  const stream = new ReadableStream({
+    async start(controller) {
+      const enc = new TextEncoder()
+      const send = (event: string, data: unknown) => {
+        try {
+          controller.enqueue(enc.encode(sseEvent(event, data)))
+        } catch {
+          /* controller closed */
+        }
+      }
 
-  let claudeResp: Response
-  try {
-    claudeResp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: CLAUDE_MODEL,
-        max_tokens: MAX_TOKENS,
-        system: SYSTEM_PROMPT,
-        // Anthropic-managed server tool. Search executes server-side
-        // and results stream back inside the same turn — Claude
-        // continues reasoning and emits the final JSON without us
-        // having to round-trip tool_use blocks. Capped at
-        // WEB_SEARCH_MAX_USES per call (~$0.01 each) for cost control.
-        tools: [
-          {
-            type: 'web_search_20250305',
-            name: 'web_search',
-            max_uses: WEB_SEARCH_MAX_USES,
+      // Periodic keepalive so the gateway sees regular bytes and
+      // doesn't terminate an apparently-idle connection while Claude
+      // is still thinking.
+      const keepalive = setInterval(() => {
+        try {
+          controller.enqueue(enc.encode(`: keepalive\n\n`))
+        } catch {
+          clearInterval(keepalive)
+        }
+      }, KEEPALIVE_MS)
+
+      try {
+        send('start', { ticker, company_name })
+
+        const claudeResp = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': ANTHROPIC_API_KEY!,
+            'anthropic-version': '2023-06-01',
           },
-        ],
-        messages: [{ role: 'user', content: userPrompt }],
-      }),
-      signal: controller.signal,
-    })
-  } catch (e) {
-    clearTimeout(timer)
-    const aborted = e instanceof Error && e.name === 'AbortError'
-    return json({ success: false, error: aborted ? 'analysis timed out' : 'claude call failed' }, 502)
-  }
-  clearTimeout(timer)
+          body: JSON.stringify({
+            model: CLAUDE_MODEL,
+            max_tokens: MAX_TOKENS,
+            stream: true,
+            system: SYSTEM_PROMPT,
+            tools: [
+              { type: 'web_search_20250305', name: 'web_search', max_uses: WEB_SEARCH_MAX_USES },
+            ],
+            messages: [{ role: 'user', content: userPrompt }],
+          }),
+        })
 
-  if (!claudeResp.ok) {
-    const text = await claudeResp.text().catch(() => '')
-    return json(
-      { success: false, error: `claude returned ${claudeResp.status}`, detail: text.slice(0, 500) },
-      502,
-    )
-  }
+        if (!claudeResp.ok || !claudeResp.body) {
+          const detail = await claudeResp.text().catch(() => '')
+          send('error', {
+            error: `claude returned ${claudeResp.status}`,
+            detail: detail.slice(0, 500),
+          })
+          return
+        }
 
-  const claudeData = await claudeResp.json()
-  if (claudeData?.stop_reason && claudeData.stop_reason !== 'end_turn') {
-    return json(
-      { success: false, error: `analysis truncated (stop_reason=${claudeData.stop_reason}). Try a shorter filing.` },
-      502,
-    )
-  }
+        // Parse Anthropic's SSE stream incrementally. Accumulate text
+        // from `text_delta` events; track citations / search count
+        // from server_tool_use blocks. Forward digestible events to
+        // the client as we go.
+        const reader = claudeResp.body.getReader()
+        const decoder = new TextDecoder()
+        let buf = ''
+        let textAccum = ''
+        const citations: unknown[] = []
+        let searchCount = 0
+        let stopReason: string | null = null
 
-  // With server-side web_search the content array can contain
-  // server_tool_use + web_search_tool_result blocks interleaved with
-  // text. The JSON we want is the LAST text block (after all searches
-  // resolve). Also collect URL citations + count searches used.
-  const blocks = (claudeData?.content || []) as Array<{
-    type?: string
-    text?: string
-    citations?: unknown[]
-  }>
-  const textBlocks = blocks.filter((b) => b?.type === 'text')
-  const lastText = textBlocks[textBlocks.length - 1]
-  const rawText = lastText?.text || ''
-  if (!rawText) {
-    return json({ success: false, error: 'no text content in claude response' }, 502)
-  }
-  const citations: unknown[] = []
-  for (const b of textBlocks) {
-    if (Array.isArray(b.citations)) citations.push(...b.citations)
-  }
-  const searchUsage = blocks.filter(
-    (b) => (b as { type?: string }).type === 'server_tool_use',
-  ).length
+        while (true) {
+          const { value, done } = await reader.read()
+          if (done) break
+          buf += decoder.decode(value, { stream: true })
+          const lines = buf.split('\n')
+          buf = lines.pop() ?? ''
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue
+            const payload = line.slice(6).trim()
+            if (!payload || payload === '[DONE]') continue
+            let evt: Record<string, unknown>
+            try {
+              evt = JSON.parse(payload)
+            } catch {
+              continue
+            }
+            const t = evt.type as string
 
-  const stripped = rawText.replace(/```json|```/g, '').trim()
-  const first = stripped.indexOf('{')
-  const last = stripped.lastIndexOf('}')
-  if (first === -1 || last === -1 || last <= first) {
-    return json({ success: false, error: 'claude did not return parseable JSON', raw: rawText.slice(0, 500) }, 502)
-  }
-  const jsonText = stripped.slice(first, last + 1)
+            if (t === 'content_block_start') {
+              const cb = evt.content_block as Record<string, unknown> | undefined
+              if (cb?.type === 'server_tool_use') {
+                searchCount++
+                const input = cb.input as Record<string, unknown> | undefined
+                send('search', { query: input?.query ?? '(unknown query)' })
+              }
+            } else if (t === 'content_block_delta') {
+              const delta = evt.delta as Record<string, unknown> | undefined
+              if (delta?.type === 'text_delta' && typeof delta.text === 'string') {
+                textAccum += delta.text
+                send('text', { delta: delta.text })
+              }
+              if (delta?.type === 'citations_delta') {
+                const c = (delta as { citation?: unknown }).citation
+                if (c) citations.push(c)
+              }
+            } else if (t === 'message_delta') {
+              const d = evt.delta as Record<string, unknown> | undefined
+              if (d?.stop_reason) stopReason = d.stop_reason as string
+            } else if (t === 'message_stop') {
+              // wrap up below
+            } else if (t === 'error') {
+              const err = evt.error as Record<string, unknown> | undefined
+              send('error', { error: (err?.message as string) || 'claude stream error' })
+              return
+            }
+          }
+        }
 
-  let analysis: Record<string, unknown>
-  try {
-    analysis = JSON.parse(jsonText)
-  } catch (e) {
-    return json(
-      { success: false, error: 'JSON parse failed: ' + (e as Error).message, raw: jsonText.slice(0, 500) },
-      502,
-    )
-  }
+        if (stopReason && stopReason !== 'end_turn' && stopReason !== 'tool_use') {
+          send('error', { error: `analysis truncated (stop_reason=${stopReason})` })
+          return
+        }
 
-  if (!analysis.signal_scores || typeof analysis.signal_scores !== 'object') {
-    analysis.signal_scores = {}
-  }
-  // strike_suggestion is optional in the response — UI degrades gracefully
-  // to its hardcoded defaults when absent.
+        // Parse the accumulated text as JSON.
+        let analysis: unknown
+        try {
+          analysis = extractJson(textAccum)
+        } catch (e) {
+          send('error', {
+            error: 'JSON parse failed: ' + (e as Error).message,
+            raw: textAccum.slice(0, 500),
+          })
+          return
+        }
 
-  // Log the successful call AFTER Claude returns so failed calls don't
-  // count against the user's quota.
-  await adminClient.from('claude_calls').insert({ user_id: user.id })
+        // Log the successful Claude call AFTER the stream completes
+        // so failed/aborted calls don't count against quota.
+        await adminClient.from('claude_calls').insert({ user_id: user.id })
 
-  // Echo the live market metrics back to the client so the UI can show
-  // 'Live IV: 165%' beneath the suggested strikes for transparency.
-  return json({
-    success: true,
-    analysis,
-    market_metrics: marketMetrics,
-    citations,
-    web_searches_used: searchUsage,
+        send('complete', {
+          analysis,
+          market_metrics: marketMetrics,
+          citations,
+          web_searches_used: searchCount,
+        })
+      } catch (e) {
+        send('error', { error: (e as Error).message || 'stream failed' })
+      } finally {
+        clearInterval(keepalive)
+        try {
+          controller.close()
+        } catch {
+          /* already closed */
+        }
+      }
+    },
+  })
+
+  return new Response(stream, {
+    headers: {
+      ...corsHeaders,
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    },
   })
 })

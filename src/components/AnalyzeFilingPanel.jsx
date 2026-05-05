@@ -6,7 +6,7 @@ import {
   Download,
   Sparkles,
 } from 'lucide-react'
-import { supabase } from '../lib/supabase'
+import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from '../lib/supabase'
 import clsx from 'clsx'
 
 const MIN_FILING_CHARS = 200
@@ -30,6 +30,9 @@ export default function AnalyzeFilingPanel({
   const [expanded, setExpanded] = useState(true)
   const [fetching, setFetching] = useState(false)
   const [fetchInfo, setFetchInfo] = useState('')
+  // Live progress fed by the analyze-signal SSE stream.
+  const [progressText, setProgressText] = useState('')
+  const [searchActivity, setSearchActivity] = useState([])
 
   async function fetchFilings() {
     if (!ticker?.trim()) {
@@ -85,9 +88,24 @@ export default function AnalyzeFilingPanel({
 
     setLoading(true)
     setError('')
+    setProgressText('')
+    setSearchActivity([])
     try {
-      const { data, error: fnError } = await supabase.functions.invoke('analyze-signal', {
-        body: {
+      // analyze-signal streams Server-Sent Events. supabase-js's
+      // functions.invoke() doesn't read streams, so go raw fetch
+      // and parse the SSE protocol manually.
+      const { data: sessionData } = await supabase.auth.getSession()
+      const accessToken = sessionData?.session?.access_token
+      if (!accessToken) throw new Error('Not signed in')
+
+      const resp = await fetch(`${SUPABASE_URL}/functions/v1/analyze-signal`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+          apikey: SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify({
           ticker,
           company_name: companyName,
           drug_name: drugName,
@@ -96,42 +114,79 @@ export default function AnalyzeFilingPanel({
           catalyst_date: catalystDate,
           catalyst_date_precision: catalystDatePrecision || 'day',
           filing_text: filingText,
-        },
+        }),
       })
-      if (fnError) {
-        // FunctionsHttpError wraps the original Response on .context.
-        // supabase-js's default message ('Failed to send a request to
-        // the Edge Function') hides the actual server-side error
-        // (timeout, rate limit, etc). Read the body so we can show
-        // what really happened.
-        let body = null
+
+      if (!resp.ok) {
+        // The server may have returned a JSON error before opening a
+        // stream (auth failure, rate limit, etc).
+        let msg = `analyze-signal returned ${resp.status}`
         try {
-          body = await fnError.context?.json?.()
+          const body = await resp.json()
+          if (body?.error) msg = body.error
         } catch {
           /* ignore */
         }
-        if (!body) {
+        throw new Error(msg)
+      }
+      if (!resp.body) throw new Error('analyze-signal returned no body')
+
+      const reader = resp.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let final = null
+      let streamErr = null
+
+      while (true) {
+        const { value, done } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        // Each SSE event ends with a blank line.
+        const events = buffer.split('\n\n')
+        buffer = events.pop() ?? ''
+        for (const block of events) {
+          if (!block.trim() || block.trim().startsWith(':')) continue // keepalive
+          let eventName = 'message'
+          let dataRaw = ''
+          for (const line of block.split('\n')) {
+            if (line.startsWith('event: ')) eventName = line.slice(7).trim()
+            else if (line.startsWith('data: ')) dataRaw += line.slice(6)
+          }
+          if (!dataRaw) continue
+          let payload
           try {
-            const text = await fnError.context?.text?.()
-            if (text) body = { error: text }
+            payload = JSON.parse(dataRaw)
           } catch {
-            /* ignore */
+            continue
+          }
+          if (eventName === 'text' && typeof payload?.delta === 'string') {
+            setProgressText((cur) => cur + payload.delta)
+          } else if (eventName === 'search') {
+            const query = String(payload?.query || '').slice(0, 100)
+            setSearchActivity((cur) => [...cur, query])
+          } else if (eventName === 'complete') {
+            final = payload
+          } else if (eventName === 'error') {
+            streamErr = payload?.error || 'analysis failed'
           }
         }
-        throw new Error(body?.error || fnError.message || 'Analysis failed')
       }
-      if (!data?.success) throw new Error(data?.error || 'Analysis failed')
+
+      if (streamErr) throw new Error(streamErr)
+      if (!final?.analysis) throw new Error('analysis stream ended without a result')
 
       onAnalysisComplete?.({
-        ...data.analysis,
-        _market_metrics: data.market_metrics ?? null,
-        _citations: data.citations ?? [],
-        _web_searches_used: data.web_searches_used ?? 0,
+        ...final.analysis,
+        _market_metrics: final.market_metrics ?? null,
+        _citations: final.citations ?? [],
+        _web_searches_used: final.web_searches_used ?? 0,
       })
     } catch (e) {
       setError(e.message || 'Analysis failed. Check your filing text and try again.')
     }
     setLoading(false)
+    setProgressText('')
+    setSearchActivity([])
   }
 
   return (
@@ -243,6 +298,33 @@ Good sources:
                   )}
                 </button>
               </div>
+
+              {loading && (progressText || searchActivity.length > 0) && (
+                <div className="mt-3 bg-bg border border-border rounded-lg p-3 space-y-2">
+                  {searchActivity.length > 0 && (
+                    <div>
+                      <p className="text-muted text-[10px] uppercase tracking-wider mb-1">
+                        Searching the web
+                      </p>
+                      {searchActivity.slice(-3).map((q, i) => (
+                        <p key={i} className="text-zinc-400 text-[11px]">
+                          🔍 {q}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                  {progressText && (
+                    <div>
+                      <p className="text-muted text-[10px] uppercase tracking-wider mb-1">
+                        Reasoning ({progressText.length} chars)
+                      </p>
+                      <p className="text-zinc-500 text-[10px] font-mono leading-snug max-h-24 overflow-y-auto whitespace-pre-wrap">
+                        {progressText.slice(-400)}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {error && (
                 <div className="flex items-start gap-2 mt-3 bg-red-950/30 border border-red-900/50 rounded-lg p-3">
