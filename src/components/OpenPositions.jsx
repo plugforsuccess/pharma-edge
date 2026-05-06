@@ -204,7 +204,7 @@ function AddPositionModal({ onClose, onSaved }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center">
+    <div className="fixed inset-0 z-[60] flex items-end justify-center">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div
         className="relative w-full max-w-md bg-bg-elev border-t border-border rounded-t-2xl p-4 space-y-3 max-h-[85vh] overflow-y-auto"
