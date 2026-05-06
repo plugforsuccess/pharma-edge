@@ -213,10 +213,11 @@ export default function Markets() {
               <div className="text-2xl font-display tracking-tight">
                 {data.ticker}
               </div>
-              <div className="text-xs text-subtle">
-                exp {data.expiration} · {data.days_to_expiration}d
+              <div className="text-xs text-subtle flex items-center gap-2 flex-wrap">
+                <span>exp {data.expiration} · {data.days_to_expiration}d</span>
+                <SourceBadge source={data.source} />
                 {data.from_cache && (
-                  <span className="ml-2 text-muted">
+                  <span className="text-muted">
                     · cached {formatCacheAge(data.cache_age_ms)} ago
                   </span>
                 )}
@@ -325,6 +326,25 @@ function formatNumber(v) {
   const n = Number(v)
   if (!Number.isFinite(n)) return '—'
   return n.toFixed(2)
+}
+
+function SourceBadge({ source }) {
+  if (source === 'dxlink') {
+    return (
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-green-950 border border-green-800 text-green-400 text-[9px] uppercase tracking-wider font-semibold">
+        <span className="w-1 h-1 rounded-full bg-green-400 animate-pulse" />
+        live
+      </span>
+    )
+  }
+  if (source === 'yahoo') {
+    return (
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-yellow-950 border border-yellow-800 text-yellow-400 text-[9px] uppercase tracking-wider font-semibold">
+        15m delayed
+      </span>
+    )
+  }
+  return null
 }
 
 function formatCacheAge(ms) {

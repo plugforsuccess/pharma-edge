@@ -1,0 +1,33 @@
+# Fly.io config for the Wiley Edge DXLink worker.
+#
+# Single shared-cpu-1x instance in iad (matches Tastytrade's US-East
+# colo, so latency to the dxFeed gateway is minimal). The worker
+# doesn't expose HTTP — Fly's health check just verifies the process
+# is alive via the [services] block being absent.
+#
+# `auto_stop_machines = false` is critical: this is a long-running
+# WebSocket worker, NOT a request-handling app. Fly's default would
+# spin it down on idle and we'd miss every quote frame.
+
+app = "wiley-edge-dxlink"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  TASTYTRADE_BASE_URL = "https://api.tastyworks.com"
+  FLUSH_INTERVAL_MS = "750"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
+
+# No [[services]] block — the worker doesn't accept incoming HTTP.
+# Fly will use the process check (is the container running?) as health.
+
+[deploy]
+  strategy = "immediate"  # one instance, no rolling
+
+[mounts]
+  # No persistent storage needed; all state lives in Supabase.

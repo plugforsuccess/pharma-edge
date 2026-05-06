@@ -2,27 +2,26 @@
 //
 // Computes Gamma Exposure (GEX) per strike for a single ticker so the
 // /markets page can render a heatmap of where dealer hedging flow is
-// concentrated — same idea as SpotGamma / gexstream.com.
+// concentrated.
 //
-// Data source: Yahoo Finance v7 options endpoint. We tried Tastytrade
-// REST /market-data first but production routes live equity + option
-// quotes through DXLink streaming only — REST returns 502 on prod.
-// Yahoo's options endpoint gives spot + full chain (OI + IV per
-// strike) in a single REST call with no auth, which is exactly what
-// we need.
+// Data flow:
+//   1. dxlink-worker (Fly.io) holds a persistent WS to Tastytrade's
+//      DXLink gateway and streams Quote / Greeks / Summary events into
+//      public.dxlink_quotes (~750ms cache TTL inside the worker).
+//   2. This edge function reads the latest dxlink_quotes rows for the
+//      requested ticker, picks the closest expiry to preferredDte, and
+//      computes GEX from real-time gamma + OI per strike.
+//   3. We don't recompute Black-Scholes — gamma comes straight off the
+//      Greeks event from dxFeed. dealer notional = OI × gamma × 100 × S²
+//      with calls positive / puts negative.
 //
-// Math:
-//   γ(S,K,T,σ,r) = N'(d1) / (S · σ · √T)
-//   where N'(x) = (1 / √(2π)) · e^(-x²/2)
-//
-//   GEX_call_strike = +OI_call · γ_call · 100 · S²
-//   GEX_put_strike  = -OI_put  · γ_put  · 100 · S²
-//   (Convention: dealers are net short calls / long puts to retail, so
-//    call-side OI implies positive dealer gamma at that strike.)
+// Fallback: if dxlink_quotes has no rows for the ticker (worker hasn't
+// subscribed to it yet, or worker is down), we fall back to Yahoo so
+// the user gets *something* instead of an error. The fallback is
+// flagged in the response so the UI can warn that data is delayed.
 //
 // Auth: real user JWT (verify_jwt=true at the platform level + getUser
-// here). 5-minute cache via the gex_snapshots table; refresh:true
-// bypasses.
+// here). 5-minute snapshot cache via gex_snapshots; refresh:true bypasses.
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
@@ -32,13 +31,14 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
 
-// Risk-free rate proxy. Short-Treasury-ish; gamma is largely insensitive
-// to r so a hardcoded 0.045 is fine until rates move materially.
 const RISK_FREE = 0.045
-// Strike window around spot — dealer hedging gamma decays sharply at
-// the wings, so we cut off rather than computing the full chain.
 const STRIKE_WINDOW_PCT = 0.30
 const CACHE_TTL_MS = 5 * 60 * 1000
+// Worker writes are debounced to ~750ms. If the freshest row for a
+// ticker is older than this, the worker is asleep / disconnected /
+// hasn't subscribed to the ticker — we should fall back to Yahoo
+// rather than serve stale data.
+const DXLINK_FRESH_MS = 30 * 1000
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -53,21 +53,15 @@ function json(body: unknown, status = 200): Response {
   })
 }
 
+// ─── Black-Scholes gamma (used only by the Yahoo fallback) ──────
 function normPdf(x: number): number {
   return Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI)
 }
-
-function bsGamma(
-  spot: number,
-  strike: number,
-  timeYears: number,
-  sigma: number,
-  rate: number,
-): number {
-  if (!(spot > 0 && strike > 0 && timeYears > 0 && sigma > 0)) return 0
-  const sqrtT = Math.sqrt(timeYears)
+function bsGamma(spot: number, strike: number, t: number, sigma: number): number {
+  if (!(spot > 0 && strike > 0 && t > 0 && sigma > 0)) return 0
+  const sqrtT = Math.sqrt(t)
   const d1 =
-    (Math.log(spot / strike) + (rate + 0.5 * sigma * sigma) * timeYears) /
+    (Math.log(spot / strike) + (RISK_FREE + 0.5 * sigma * sigma) * t) /
     (sigma * sqrtT)
   return normPdf(d1) / (spot * sigma * sqrtT)
 }
@@ -88,63 +82,199 @@ interface ComputeArgs {
   preferredDte: number
 }
 
-async function computeGex(args: ComputeArgs) {
+// ─── Primary path: read from dxlink_quotes ──────────────────────
+//
+// We pick the option-row expiration closest to preferredDte (across
+// the rows the worker is currently subscribed to), then aggregate
+// Greeks + OI per strike. Spot comes from the equity-row Quote.
+
+interface DxQuoteRow {
+  symbol: string
+  kind: 'equity' | 'option'
+  underlying: string | null
+  expiration_date: string | null
+  strike: number | null
+  option_type: 'C' | 'P' | null
+  bid: number | null
+  ask: number | null
+  mid: number | null
+  iv: number | null
+  gamma: number | null
+  open_interest: number | null
+  updated_at: string
+}
+
+async function computeFromDxLink(
+  supabase: ReturnType<typeof createClient>,
+  args: ComputeArgs,
+): Promise<{ result?: ComputeOutput; error?: string }> {
   const { ticker, preferredDte } = args
 
-  const chain = await fetchYahooChain(ticker, preferredDte)
-  const { spot, expirationDate, daysToExpiration, strikes } = chain
-  if (!Number.isFinite(spot) || spot <= 0) {
-    return { error: `no spot price for ${ticker}` }
-  }
-  if (strikes.length === 0) {
-    return { error: `empty option chain for ${ticker}` }
+  // Pull equity row + every option row for this ticker in one query.
+  const { data: rows, error } = await supabase
+    .from('dxlink_quotes')
+    .select(
+      'symbol, kind, underlying, expiration_date, strike, option_type, ' +
+        'bid, ask, mid, iv, gamma, open_interest, updated_at',
+    )
+    .or(`symbol.eq.${ticker},underlying.eq.${ticker}`)
+  if (error) return { error: `dxlink_quotes query: ${error.message}` }
+
+  const equity = (rows as DxQuoteRow[] | null)?.find((r) => r.kind === 'equity')
+  if (!equity) return { error: 'no dxlink subscription for ticker' }
+  const spot = equity.mid ?? equity.bid ?? equity.ask
+  if (!spot || spot <= 0) {
+    return { error: 'no spot price in dxlink_quotes' }
   }
 
-  // Trim to ATM ± window so we don't render bars for far wings that
-  // contribute negligibly to gamma anyway.
+  // Stale check — worker probably down or this ticker dropped.
+  const equityAge = Date.now() - new Date(equity.updated_at).getTime()
+  if (equityAge > DXLINK_FRESH_MS) {
+    return { error: `dxlink stale (${Math.round(equityAge / 1000)}s old)` }
+  }
+
+  const optionRows = (rows as DxQuoteRow[]).filter((r) => r.kind === 'option')
+  if (optionRows.length === 0) return { error: 'no dxlink option rows for ticker' }
+
+  // Group by expiration_date → pick closest to preferredDte.
+  const byExpiry = new Map<string, DxQuoteRow[]>()
+  for (const r of optionRows) {
+    if (!r.expiration_date) continue
+    const arr = byExpiry.get(r.expiration_date) ?? []
+    arr.push(r)
+    byExpiry.set(r.expiration_date, arr)
+  }
+  const todayMs = Date.now()
+  let bestExp: string | null = null
+  let bestDelta = Infinity
+  for (const [exp] of byExpiry) {
+    const expMs = new Date(exp + 'T00:00:00Z').getTime()
+    const days = Math.max(0, Math.round((expMs - todayMs) / 86_400_000))
+    const delta = Math.abs(days - preferredDte)
+    if (delta < bestDelta) {
+      bestDelta = delta
+      bestExp = exp
+    }
+  }
+  if (!bestExp) return { error: 'no expirations in dxlink rows' }
+  const chosenRows = byExpiry.get(bestExp)!
+  const expMs = new Date(bestExp + 'T00:00:00Z').getTime()
+  const daysToExpiration = Math.max(
+    1,
+    Math.round((expMs - todayMs) / 86_400_000),
+  )
+
+  // Aggregate per strike — call + put rows merge into one StrikeResult.
   const lo = spot * (1 - STRIKE_WINDOW_PCT)
   const hi = spot * (1 + STRIKE_WINDOW_PCT)
-  const trimmedStrikes = strikes.filter((s) => s.strike >= lo && s.strike <= hi)
-  if (trimmedStrikes.length === 0) {
-    return { error: `no strikes within ±${STRIKE_WINDOW_PCT * 100}% of spot` }
+  const byStrike = new Map<number, StrikeResult>()
+  const dealerNotional = spot * spot
+
+  for (const r of chosenRows) {
+    if (r.strike == null || r.strike < lo || r.strike > hi) continue
+    const oi = r.open_interest ?? 0
+    if (oi === 0) continue
+    const gamma = r.gamma ?? 0
+    if (!Number.isFinite(gamma) || gamma <= 0) continue
+    const existing = byStrike.get(r.strike) ?? {
+      strike: r.strike,
+      oi_call: 0,
+      oi_put: 0,
+      iv_call: null,
+      iv_put: null,
+      gex_call: 0,
+      gex_put: 0,
+      gex_net: 0,
+    }
+    if (r.option_type === 'C') {
+      existing.oi_call = oi
+      existing.iv_call = r.iv ?? null
+      existing.gex_call = +(oi * gamma * dealerNotional)
+    } else if (r.option_type === 'P') {
+      existing.oi_put = oi
+      existing.iv_put = r.iv ?? null
+      existing.gex_put = -(oi * gamma * dealerNotional)
+    }
+    existing.gex_net = existing.gex_call + existing.gex_put
+    byStrike.set(r.strike, existing)
   }
 
-  const timeYears = Math.max(daysToExpiration, 1) / 365
+  const results = Array.from(byStrike.values()).sort((a, b) => a.strike - b.strike)
+  if (results.length === 0) return { error: 'no strikes had OI + gamma in cache' }
+
+  return { result: shapeOutput(ticker, spot, bestExp, daysToExpiration, results, 'dxlink') }
+}
+
+// ─── Fallback: Yahoo (15-min delayed, computes BS gamma here) ───
+async function computeFromYahoo(args: ComputeArgs): Promise<{ result?: ComputeOutput; error?: string }> {
+  const { ticker, preferredDte } = args
+  let chain
+  try {
+    chain = await fetchYahooChain(ticker, preferredDte)
+  } catch (err) {
+    if (err instanceof YahooError) return { error: err.message }
+    throw err
+  }
+  const { spot, expirationDate, daysToExpiration, strikes } = chain
+  if (!Number.isFinite(spot) || spot <= 0) return { error: `no spot for ${ticker}` }
+
+  const lo = spot * (1 - STRIKE_WINDOW_PCT)
+  const hi = spot * (1 + STRIKE_WINDOW_PCT)
+  const trimmed = strikes.filter((s) => s.strike >= lo && s.strike <= hi)
+  if (trimmed.length === 0) return { error: 'no strikes in window' }
+
+  const t = Math.max(daysToExpiration, 1) / 365
   const results: StrikeResult[] = []
+  const dealerNotional = spot * spot
 
-  for (const s of trimmedStrikes) {
+  for (const s of trimmed) {
     if (s.callOI === 0 && s.putOI === 0) continue
-
     const sigmaCall = s.callIV ?? s.putIV ?? 0
     const sigmaPut = s.putIV ?? s.callIV ?? 0
-    const gammaCall = bsGamma(spot, s.strike, timeYears, sigmaCall, RISK_FREE)
-    const gammaPut = bsGamma(spot, s.strike, timeYears, sigmaPut, RISK_FREE)
-
-    // 100 = contract multiplier. Final units are dealer dollar gamma
-    // (γ · OI · 100 · S²) ÷ 100 to fit on a chart axis as $ / 1% move.
-    const dealerNotional = spot * spot
-    const gexCall = +(s.callOI * gammaCall * dealerNotional)
-    const gexPut = -(s.putOI * gammaPut * dealerNotional)
-
+    const gC = bsGamma(spot, s.strike, t, sigmaCall)
+    const gP = bsGamma(spot, s.strike, t, sigmaPut)
     results.push({
       strike: s.strike,
       oi_call: s.callOI,
       oi_put: s.putOI,
       iv_call: s.callIV,
       iv_put: s.putIV,
-      gex_call: gexCall,
-      gex_put: gexPut,
-      gex_net: gexCall + gexPut,
+      gex_call: +(s.callOI * gC * dealerNotional),
+      gex_put: -(s.putOI * gP * dealerNotional),
+      gex_net: 0,
     })
+    const r = results[results.length - 1]
+    r.gex_net = r.gex_call + r.gex_put
   }
+  if (results.length === 0) return { error: 'no strikes had OI' }
+  results.sort((a, b) => a.strike - b.strike)
 
-  if (results.length === 0) {
-    return { error: 'no strikes had open interest' }
-  }
+  return { result: shapeOutput(ticker, spot, expirationDate, daysToExpiration, results, 'yahoo') }
+}
 
-  // Zero-gamma flip: where cumulative GEX (from low strike upward)
-  // changes sign. Below it dealers are short gamma and amplify
-  // volatility; above it they're long gamma and dampen.
+// ─── Common output shaping ──────────────────────────────────────
+interface ComputeOutput {
+  ticker: string
+  spot: number
+  expiration: string
+  days_to_expiration: number
+  strikes: StrikeResult[]
+  total_gex: number
+  zero_gamma_strike: number | null
+  largest_positive_strike: number
+  largest_negative_strike: number
+  source: 'dxlink' | 'yahoo'
+  computed_at: string
+}
+
+function shapeOutput(
+  ticker: string,
+  spot: number,
+  expiration: string,
+  daysToExpiration: number,
+  results: StrikeResult[],
+  source: 'dxlink' | 'yahoo',
+): ComputeOutput {
   let cumulative = 0
   let zeroGammaStrike: number | null = null
   for (let i = 0; i < results.length; i++) {
@@ -155,7 +285,6 @@ async function computeGex(args: ComputeArgs) {
       break
     }
   }
-
   let largestPositive = results[0]
   let largestNegative = results[0]
   let totalGex = 0
@@ -164,17 +293,17 @@ async function computeGex(args: ComputeArgs) {
     if (r.gex_net > largestPositive.gex_net) largestPositive = r
     if (r.gex_net < largestNegative.gex_net) largestNegative = r
   }
-
   return {
     ticker: ticker.toUpperCase(),
     spot,
-    expiration: expirationDate,
+    expiration,
     days_to_expiration: daysToExpiration,
     strikes: results,
     total_gex: totalGex,
     zero_gamma_strike: zeroGammaStrike,
     largest_positive_strike: largestPositive.strike,
     largest_negative_strike: largestNegative.strike,
+    source,
     computed_at: new Date().toISOString(),
   }
 }
@@ -233,34 +362,54 @@ serve(async (req) => {
     }
   }
 
+  // Try DXLink cache first; fall back to Yahoo on any failure.
+  let result: ComputeOutput | null = null
+  let dxLinkError: string | null = null
   try {
-    const result = await computeGex({ ticker, preferredDte })
-    if ('error' in result) {
-      return json({ success: false, error: result.error }, 502)
-    }
-    adminClient
-      .from('gex_snapshots')
-      .upsert(
-        {
-          ticker,
-          payload: result,
-          computed_at: new Date().toISOString(),
-        },
-        { onConflict: 'ticker' },
-      )
-      .then(() => {})
-    return json({
-      success: true,
-      data: { ...result, from_cache: false, cache_age_ms: 0 },
-    })
-  } catch (err) {
-    if (err instanceof YahooError) {
+    const dx = await computeFromDxLink(adminClient, { ticker, preferredDte })
+    if (dx.result) result = dx.result
+    else dxLinkError = dx.error ?? 'dxlink unknown error'
+  } catch (e) {
+    dxLinkError = e instanceof Error ? e.message : 'dxlink threw'
+  }
+
+  if (!result) {
+    try {
+      const y = await computeFromYahoo({ ticker, preferredDte })
+      if (y.result) result = y.result
+      else {
+        return json(
+          {
+            success: false,
+            error: `dxlink: ${dxLinkError}; yahoo: ${y.error}`,
+          },
+          502,
+        )
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
       return json(
-        { success: false, error: err.message, status: err.status },
+        { success: false, error: `dxlink: ${dxLinkError}; yahoo: ${msg}` },
         502,
       )
     }
-    const msg = err instanceof Error ? err.message : String(err)
-    return json({ success: false, error: msg }, 500)
   }
+
+  // Snapshot the response so repeated tab-clicks don't re-query.
+  adminClient
+    .from('gex_snapshots')
+    .upsert(
+      {
+        ticker,
+        payload: result,
+        computed_at: new Date().toISOString(),
+      },
+      { onConflict: 'ticker' },
+    )
+    .then(() => {})
+
+  return json({
+    success: true,
+    data: { ...result, from_cache: false, cache_age_ms: 0 },
+  })
 })
