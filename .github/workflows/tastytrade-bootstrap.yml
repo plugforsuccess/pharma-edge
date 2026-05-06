@@ -1,0 +1,211 @@
+# One-shot Tastytrade OAuth bootstrap.
+#
+# Trades an authorization_code for a refresh_token, then writes the
+# refresh_token into:
+#   1. Fly secrets         (so the dxlink-worker can authenticate)
+#   2. Supabase secrets    (so place-order / get-account edge functions work)
+#   3. GitHub Actions secrets (so future deploy-dxlink-worker runs keep it)
+#
+# The refresh_token is masked immediately on receipt and never echoed.
+#
+# Required GitHub Actions secrets (Settings → Secrets and variables → Actions):
+#   TASTYTRADE_CLIENT_ID        — OAuth app client_id (developer portal)
+#   TASTYTRADE_CLIENT_SECRET    — OAuth app client_secret
+#   FLY_API_TOKEN               — Fly.io personal access token
+#   SUPABASE_ACCESS_TOKEN       — Supabase Management API token (account/tokens)
+#   TASTYTRADE_BOOTSTRAP_PAT    — Fine-grained GitHub PAT, this repo only,
+#                                 with `Secrets: write` permission
+#
+# Trigger: Actions → "Tastytrade OAuth Bootstrap" → Run workflow.
+# Input the fresh authorization code from the Tastytrade redirect URL.
+# Codes expire ~60s after issuance — re-authorize right before running.
+
+name: Tastytrade OAuth Bootstrap
+
+on:
+  workflow_dispatch:
+    inputs:
+      auth_code:
+        description: 'Fresh authorization code from the Tastytrade redirect URL (the value of ?code=...)'
+        required: true
+        type: string
+      redirect_uri:
+        description: 'Redirect URI registered on the OAuth app (must match byte-for-byte)'
+        required: true
+        type: string
+        default: 'https://pharma-edge.vercel.app/auth/tastytrade/callback'
+
+concurrency:
+  group: tastytrade-bootstrap
+  cancel-in-progress: false
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Exchange auth_code → refresh_token
+        id: exchange
+        env:
+          CLIENT_ID: ${{ secrets.TASTYTRADE_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.TASTYTRADE_CLIENT_SECRET }}
+          AUTH_CODE: ${{ inputs.auth_code }}
+          REDIRECT_URI: ${{ inputs.redirect_uri }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CLIENT_ID:-}" ] || [ -z "${CLIENT_SECRET:-}" ]; then
+            echo "::error::TASTYTRADE_CLIENT_ID and TASTYTRADE_CLIENT_SECRET must be set as repo Actions secrets"
+            exit 1
+          fi
+
+          response=$(curl -sS -w "\n%{http_code}" -X POST \
+            https://api.tastyworks.com/oauth/token \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            --data-urlencode "grant_type=authorization_code" \
+            --data-urlencode "code=${AUTH_CODE}" \
+            --data-urlencode "client_id=${CLIENT_ID}" \
+            --data-urlencode "client_secret=${CLIENT_SECRET}" \
+            --data-urlencode "redirect_uri=${REDIRECT_URI}")
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+
+          if [ "$http_code" != "200" ]; then
+            echo "::error::Tastytrade /oauth/token returned HTTP $http_code"
+            # Body may contain helpful error detail but no secrets — safe to print.
+            echo "$body"
+            echo
+            echo "Common causes:"
+            echo "  - code already used (single-use, ~60s TTL — re-authorize and retry)"
+            echo "  - redirect_uri mismatch (must be byte-identical to the registered URI)"
+            echo "  - wrong client_secret"
+            exit 1
+          fi
+
+          refresh_token=$(echo "$body" | jq -r '.refresh_token // empty')
+          if [ -z "$refresh_token" ]; then
+            echo "::error::Response had no refresh_token"
+            echo "$body"
+            exit 1
+          fi
+
+          # Mask immediately so any later accidental echo is redacted.
+          echo "::add-mask::$refresh_token"
+          echo "REFRESH_TOKEN=$refresh_token" >> "$GITHUB_ENV"
+
+          # Surface non-secret metadata.
+          token_type=$(echo "$body" | jq -r '.token_type // ""')
+          scope=$(echo "$body" | jq -r '.scope // ""')
+          expires_in=$(echo "$body" | jq -r '.expires_in // ""')
+          echo "token_type=$token_type"
+          echo "scope=$scope"
+          echo "access_token expires_in=${expires_in}s"
+          echo "refresh_token length=${#refresh_token}"
+
+      - name: Set Fly secret
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          REFRESH_TOKEN: ${{ env.REFRESH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${FLY_API_TOKEN:-}" ]; then
+            echo "::warning::FLY_API_TOKEN not set — skipping Fly secret update"
+            exit 0
+          fi
+          curl -sSL https://fly.io/install.sh | sh
+          export FLYCTL_INSTALL="/home/runner/.fly"
+          export PATH="$FLYCTL_INSTALL/bin:$PATH"
+          flyctl secrets set \
+            TASTYTRADE_REFRESH_TOKEN="$REFRESH_TOKEN" \
+            --app pharma-edge
+          echo "Fly secret set; worker will redeploy with the new token."
+
+      - name: Set Supabase edge function secret
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          REFRESH_TOKEN: ${{ env.REFRESH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SUPABASE_ACCESS_TOKEN:-}" ]; then
+            echo "::warning::SUPABASE_ACCESS_TOKEN not set — skipping Supabase secret update"
+            exit 0
+          fi
+          # Supabase Management API: POST /v1/projects/{ref}/secrets
+          # Body is an array of {name, value} objects; existing secrets with
+          # the same name are overwritten.
+          payload=$(jq -nc --arg v "$REFRESH_TOKEN" \
+            '[{name:"TASTYTRADE_REFRESH_TOKEN", value:$v}]')
+          http_code=$(curl -sS -o /tmp/sb_resp.json -w "%{http_code}" \
+            -X POST https://api.supabase.com/v1/projects/rghoynbaykeyjbhqmaff/secrets \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data "$payload")
+          if [ "$http_code" != "200" ] && [ "$http_code" != "201" ] && [ "$http_code" != "204" ]; then
+            echo "::error::Supabase secrets API returned HTTP $http_code"
+            cat /tmp/sb_resp.json
+            exit 1
+          fi
+          echo "Supabase edge function secret set."
+
+      - name: Set GitHub Actions repo secret
+        env:
+          GH_PAT: ${{ secrets.TASTYTRADE_BOOTSTRAP_PAT }}
+          REFRESH_TOKEN: ${{ env.REFRESH_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_PAT:-}" ]; then
+            echo "::warning::TASTYTRADE_BOOTSTRAP_PAT not set — skipping GH Actions secret update"
+            echo "         The deploy-dxlink-worker workflow will not have the token until you set it manually."
+            exit 0
+          fi
+          python3 -m pip install --quiet pynacl requests
+          python3 - <<'PY'
+          import base64, os, sys, requests
+          from nacl import encoding, public
+
+          repo  = os.environ["REPO"]
+          token = os.environ["GH_PAT"]
+          value = os.environ["REFRESH_TOKEN"]
+          name  = "TASTYTRADE_REFRESH_TOKEN"
+
+          api = "https://api.github.com"
+          headers = {
+              "Authorization": f"Bearer {token}",
+              "Accept": "application/vnd.github+json",
+              "X-GitHub-Api-Version": "2022-11-28",
+          }
+
+          r = requests.get(f"{api}/repos/{repo}/actions/secrets/public-key", headers=headers, timeout=15)
+          r.raise_for_status()
+          pk = r.json()
+          public_key = public.PublicKey(pk["key"].encode("utf-8"), encoding.Base64Encoder())
+          sealed = public.SealedBox(public_key).encrypt(value.encode("utf-8"))
+          encrypted = base64.b64encode(sealed).decode("utf-8")
+
+          r = requests.put(
+              f"{api}/repos/{repo}/actions/secrets/{name}",
+              headers=headers,
+              json={"encrypted_value": encrypted, "key_id": pk["key_id"]},
+              timeout=15,
+          )
+          if r.status_code not in (201, 204):
+              print(f"GitHub secrets API returned HTTP {r.status_code}: {r.text}", file=sys.stderr)
+              sys.exit(1)
+          print(f"GitHub Actions secret '{name}' set ({'created' if r.status_code == 201 else 'updated'}).")
+          PY
+
+      - name: Summary
+        run: |
+          {
+            echo "## Tastytrade OAuth bootstrap"
+            echo ""
+            echo "- ✅ Exchanged authorization_code for refresh_token"
+            echo "- ✅ Updated Fly secret \`TASTYTRADE_REFRESH_TOKEN\` (worker redeploying)"
+            echo "- ✅ Updated Supabase edge function secret \`TASTYTRADE_REFRESH_TOKEN\`"
+            echo "- ✅ Updated GitHub Actions secret \`TASTYTRADE_REFRESH_TOKEN\`"
+            echo ""
+            echo "Next: run **Deploy DXLink Worker** to pick up the new credentials,"
+            echo "then watch \`fly logs\` for a successful \`login()\` + dxFeed subscribe."
+          } >> "$GITHUB_STEP_SUMMARY"
