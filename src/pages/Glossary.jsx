@@ -204,6 +204,151 @@ export default function Glossary() {
         </p>
       </section>
 
+      {/* ── Reading the heatmap colors ──
+          Renders the actual viridis + magenta gradients so users can map
+          a cell they see in /markets straight back to a magnitude class.
+          Color stops mirror GexMatrix.jsx exactly. */}
+      <section className="bg-card border border-border rounded-xl p-4 space-y-4">
+        <div>
+          <h2 className="text-sm font-semibold text-fg">
+            Reading the heatmap colors
+          </h2>
+          <p className="text-xs text-amber-400 mt-0.5">
+            What each cell color means + how to spot the structural markers.
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-green-400">
+            Positive GEX (call-side concentration)
+          </h3>
+          <div className="flex items-center gap-2 text-[10px] text-subtle">
+            <span className="shrink-0">Near zero</span>
+            <div
+              className="flex-1 h-5 rounded"
+              style={{
+                background:
+                  'linear-gradient(90deg, rgb(21,41,94) 0%, rgb(58,93,160) 20%, rgb(45,173,187) 40%, rgb(61,168,86) 60%, rgb(163,230,53) 80%, rgb(250,204,21) 100%)',
+              }}
+              aria-hidden
+            />
+            <span className="shrink-0">Largest call wall</span>
+          </div>
+          <ul className="text-[11px] text-subtle space-y-1 leading-relaxed pl-3">
+            <li>
+              <span className="inline-block w-3 h-3 align-middle mr-1.5 rounded-sm" style={{ background: 'rgb(21,41,94)' }} />
+              <strong className="text-fg">Dark navy</strong> — minimal
+              dealer hedging at this strike, ignore
+            </li>
+            <li>
+              <span className="inline-block w-3 h-3 align-middle mr-1.5 rounded-sm" style={{ background: 'rgb(58,93,160)' }} />
+              <span className="inline-block w-3 h-3 align-middle mr-1.5 rounded-sm" style={{ background: 'rgb(45,173,187)' }} />
+              <strong className="text-fg">Blue / teal</strong> — moderate
+              positive GEX; supports / resists mildly
+            </li>
+            <li>
+              <span className="inline-block w-3 h-3 align-middle mr-1.5 rounded-sm" style={{ background: 'rgb(61,168,86)' }} />
+              <span className="inline-block w-3 h-3 align-middle mr-1.5 rounded-sm" style={{ background: 'rgb(163,230,53)' }} />
+              <strong className="text-fg">Green / lime</strong> — strong
+              call wall, real magnet
+            </li>
+            <li>
+              <span className="inline-block w-3 h-3 align-middle mr-1.5 rounded-sm" style={{ background: 'rgb(250,204,21)' }} />
+              <strong className="text-fg">Yellow</strong> — the largest
+              positive GEX in the matrix; this is your primary call wall
+              (gets the ★)
+            </li>
+          </ul>
+        </div>
+
+        <div className="space-y-2 pt-1 border-t border-border">
+          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-crimson">
+            Negative GEX (put-side concentration)
+          </h3>
+          <div className="flex items-center gap-2 text-[10px] text-subtle">
+            <span className="shrink-0">Near zero</span>
+            <div
+              className="flex-1 h-5 rounded"
+              style={{
+                background:
+                  'linear-gradient(90deg, rgb(21,41,94) 0%, rgb(76,29,149) 40%, rgb(134,25,143) 70%, rgb(217,46,155) 100%)',
+              }}
+              aria-hidden
+            />
+            <span className="shrink-0">Largest put wall</span>
+          </div>
+          <ul className="text-[11px] text-subtle space-y-1 leading-relaxed pl-3">
+            <li>
+              <span className="inline-block w-3 h-3 align-middle mr-1.5 rounded-sm" style={{ background: 'rgb(76,29,149)' }} />
+              <strong className="text-fg">Indigo</strong> — moderate put
+              concentration; downside support at this level
+            </li>
+            <li>
+              <span className="inline-block w-3 h-3 align-middle mr-1.5 rounded-sm" style={{ background: 'rgb(134,25,143)' }} />
+              <strong className="text-fg">Purple</strong> — strong put
+              wall, dealer flow defends here
+            </li>
+            <li>
+              <span className="inline-block w-3 h-3 align-middle mr-1.5 rounded-sm" style={{ background: 'rgb(217,46,155)' }} />
+              <strong className="text-fg">Magenta</strong> — the largest
+              negative GEX; primary put wall, key support level
+            </li>
+          </ul>
+        </div>
+
+        <div className="space-y-2 pt-1 border-t border-border">
+          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-amber-400">
+            Special markers
+          </h3>
+          <ul className="text-[11px] text-subtle space-y-1.5 leading-relaxed">
+            <li className="flex items-start gap-2">
+              <span className="text-amber-400 shrink-0 w-4 text-center">★</span>
+              <span>
+                <strong className="text-fg">Star</strong> on the cell with
+                the largest absolute GEX in the entire matrix — your most
+                "magnetic" strike (could be call or put wall)
+              </span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-amber-400 shrink-0 w-4 text-center">▶</span>
+              <span>
+                <strong className="text-fg">Triangle</strong> on the spot
+                row, with an amber horizontal divider — current price
+                location in the strike ladder
+              </span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-cyan-400 shrink-0 w-4 text-center">●</span>
+              <span>
+                <strong className="text-fg">Cyan border</strong> (when
+                visible) marks the flip strike — where cumulative GEX
+                crosses zero
+              </span>
+            </li>
+          </ul>
+        </div>
+
+        <div className="space-y-2 pt-1 border-t border-border">
+          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-amber-400">
+            Practical reading
+          </h3>
+          <p className="text-[11px] text-subtle leading-relaxed">
+            Color intensity scales relative to the <strong className="text-fg">
+            largest absolute GEX in the visible window</strong>, not to a
+            fixed dollar amount. A yellow cell on a low-volume biotech
+            might be $5M; on SPY it's $300M+. Always read the dollar value,
+            not just the color.
+          </p>
+          <p className="text-[11px] text-subtle leading-relaxed">
+            Walls of <strong className="text-fg">opposite color stacked
+            close to spot</strong> = a tight battle zone. Expect
+            volatility compression until one breaks. Walls{' '}
+            <strong className="text-fg">far apart from spot</strong> =
+            wide pin range; price drifts inside the corridor.
+          </p>
+        </div>
+      </section>
+
       <Term
         title="Gamma Exposure (GEX)"
         short="$ that dealers must trade per 1% spot move."
