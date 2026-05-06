@@ -42,6 +42,10 @@ const RISK_FREE = 0.045
 // Strike window around spot — dealer hedging gamma decays sharply at
 // the wings, so we cut off rather than computing the full chain.
 const STRIKE_WINDOW_PCT = 0.30
+// gex_snapshots cache TTL — short enough that the heatmap reflects
+// real intraday movement, long enough to absorb a tab-mash on the
+// /markets ticker picker.
+const CACHE_TTL_MS = 5 * 60 * 1000
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -276,8 +280,30 @@ serve(async (req) => {
     ? Math.max(1, Math.min(365, Number(body.preferred_dte)))
     : 30
   const expirationOverride = body.expiration ? String(body.expiration) : null
+  const forceRefresh = body.refresh === true
 
   const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+
+  // Cache key: ticker + expiry override (so callers asking for a
+  // specific expiration don't get a stale front-month payload back).
+  const cacheKey = expirationOverride ? `${ticker}|${expirationOverride}` : ticker
+
+  if (!forceRefresh) {
+    const { data: cached } = await adminClient
+      .from('gex_snapshots')
+      .select('payload, computed_at')
+      .eq('ticker', cacheKey)
+      .maybeSingle()
+    if (cached?.payload && cached.computed_at) {
+      const age = Date.now() - new Date(cached.computed_at).getTime()
+      if (age >= 0 && age < CACHE_TTL_MS) {
+        return json({
+          success: true,
+          data: { ...cached.payload, from_cache: true, cache_age_ms: age },
+        })
+      }
+    }
+  }
 
   try {
     const result = await computeGex(adminClient, {
@@ -288,7 +314,23 @@ serve(async (req) => {
     if ('error' in result) {
       return json({ success: false, error: result.error }, 502)
     }
-    return json({ success: true, data: result })
+    // Fire-and-forget cache write — failure here shouldn't block the
+    // response. Worst case, next hit recomputes.
+    adminClient
+      .from('gex_snapshots')
+      .upsert(
+        {
+          ticker: cacheKey,
+          payload: result,
+          computed_at: new Date().toISOString(),
+        },
+        { onConflict: 'ticker' },
+      )
+      .then(() => {})
+    return json({
+      success: true,
+      data: { ...result, from_cache: false, cache_age_ms: 0 },
+    })
   } catch (err) {
     if (err instanceof TastytradeError) {
       return json({ success: false, error: err.message, status: err.status }, 502)

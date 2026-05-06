@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { ArrowLeft, RefreshCw, Activity } from 'lucide-react'
+import { ArrowLeft, RefreshCw, Activity, Star } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { useAuth } from '../context/AuthContext'
 import GexHeatmap from '../components/GexHeatmap'
 
 // Curated ticker set — index ETFs and the most-liquid single names
@@ -29,19 +30,49 @@ const TICKERS = [
 
 export default function Markets() {
   const navigate = useNavigate()
+  const { user } = useAuth()
   const [ticker, setTicker] = useState(TICKERS[0].symbol)
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  // User's watchlist tickers, shown as a separate section in the picker
+  // so a biotech a user is tracking shows up here without needing to be
+  // hardcoded into TICKERS.
+  const [watchlist, setWatchlist] = useState([])
 
-  async function load(sym) {
+  useEffect(() => {
+    if (!user) return
+    let cancelled = false
+    supabase
+      .from('watchlist')
+      .select('ticker')
+      .eq('user_id', user.id)
+      .then(({ data }) => {
+        if (cancelled || !data) return
+        const seen = new Set(TICKERS.map((t) => t.symbol))
+        const unique = []
+        for (const row of data) {
+          const sym = String(row.ticker || '').toUpperCase()
+          if (sym && !seen.has(sym)) {
+            seen.add(sym)
+            unique.push(sym)
+          }
+        }
+        setWatchlist(unique)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [user?.id])
+
+  async function load(sym, { refresh = false } = {}) {
     setLoading(true)
     setError(null)
     setData(null)
     try {
       const { data: result, error: invokeErr } = await supabase.functions.invoke(
         'compute-gex',
-        { body: { ticker: sym } },
+        { body: { ticker: sym, refresh } },
       )
       if (invokeErr) {
         const detail = await readErrorBody(invokeErr)
@@ -80,7 +111,7 @@ export default function Markets() {
           </p>
         </div>
         <button
-          onClick={() => load(ticker)}
+          onClick={() => load(ticker, { refresh: true })}
           disabled={loading}
           className="p-2 text-subtle hover:text-fg disabled:opacity-50"
           aria-label="Refresh"
@@ -89,9 +120,29 @@ export default function Markets() {
         </button>
       </div>
 
-      {/* Ticker picker — horizontal scroll keeps the grid mobile-friendly. */}
+      {/* Ticker picker — horizontal scroll keeps the grid mobile-friendly.
+          Watchlist tickers come first (with a star) so the user's own picks
+          are reachable without scrolling past the curated list. */}
       <div className="-mx-4 px-4 overflow-x-auto">
         <div className="flex gap-2 pb-1">
+          {watchlist.map((sym) => (
+            <button
+              key={`wl-${sym}`}
+              onClick={() => setTicker(sym)}
+              className={
+                'shrink-0 inline-flex items-center gap-1 px-3 py-1.5 rounded-full border text-xs font-medium transition ' +
+                (ticker === sym
+                  ? 'bg-brand text-bg border-brand'
+                  : 'bg-card text-fg border-amber-400/40 hover:border-amber-400/70')
+              }
+            >
+              <Star size={11} className="fill-current" />
+              {sym}
+            </button>
+          ))}
+          {watchlist.length > 0 && (
+            <div className="shrink-0 w-px bg-border mx-1" aria-hidden />
+          )}
           {TICKERS.map((t) => (
             <button
               key={t.symbol}
@@ -119,6 +170,11 @@ export default function Markets() {
               </div>
               <div className="text-xs text-subtle">
                 exp {data.expiration} · {data.days_to_expiration}d
+                {data.from_cache && (
+                  <span className="ml-2 text-muted">
+                    · cached {formatCacheAge(data.cache_age_ms)} ago
+                  </span>
+                )}
               </div>
             </div>
             <div className="text-right">
@@ -222,6 +278,14 @@ function formatNumber(v) {
   const n = Number(v)
   if (!Number.isFinite(n)) return '—'
   return n.toFixed(2)
+}
+
+function formatCacheAge(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return 'just now'
+  const sec = Math.round(ms / 1000)
+  if (sec < 60) return `${sec}s`
+  const min = Math.round(sec / 60)
+  return `${min}m`
 }
 
 function formatGex(v) {
