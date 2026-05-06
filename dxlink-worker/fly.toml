@@ -9,7 +9,7 @@
 # WebSocket worker, NOT a request-handling app. Fly's default would
 # spin it down on idle and we'd miss every quote frame.
 
-app = "wiley-edge-dxlink"
+app = "pharma-edge"
 primary_region = "iad"
 
 [build]

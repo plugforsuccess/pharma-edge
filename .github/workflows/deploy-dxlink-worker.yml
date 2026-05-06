@@ -42,26 +42,40 @@ jobs:
       - name: Install flyctl
         uses: superfly/flyctl-actions/setup-flyctl@master
 
-      # If the app doesn't exist yet, create it. `apps list` is the
-      # idempotent existence check; `create` errors with a non-zero
-      # exit if the name is already taken (which is what we want — we
-      # treat that as "already exists, fall through to deploy").
+      # Diagnostic — prints flyctl version and the orgs the API token
+      # has access to. Helps debug "wrong org" issues without needing
+      # to open the Fly dashboard.
+      - name: Show flyctl context
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl version
+          echo "---"
+          echo "orgs visible to this token:"
+          flyctl orgs list || true
+          echo "---"
+          echo "apps in default org:"
+          flyctl apps list || true
+
+      # `flyctl status` exits non-zero when the app doesn't exist, so
+      # we use that as the existence check. Errors out of create now
+      # surface loudly instead of being swallowed by `set +e`.
       - name: Ensure Fly app exists
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: |
-          set +e
-          if flyctl apps list --json | grep -q '"Name":"wiley-edge-dxlink"'; then
-            echo "app already exists"
+          if flyctl status -a pharma-edge >/dev/null 2>&1; then
+            echo "app pharma-edge already exists"
           else
-            echo "creating app wiley-edge-dxlink"
-            flyctl apps create wiley-edge-dxlink --org personal
+            echo "creating app pharma-edge"
+            flyctl apps create pharma-edge
           fi
-          set -e
+          # Confirm we can talk to it before moving on.
+          flyctl status -a pharma-edge
 
-      # Sync secrets from GitHub Actions to Fly. Idempotent: if the
-      # value is unchanged Fly skips the redeploy. We pass them all
-      # in one command so any change triggers at most one redeploy.
+      # Sync secrets from GitHub Actions to Fly. --stage queues the
+      # secrets without triggering a redeploy mid-pipeline; the deploy
+      # step below picks them up.
       - name: Sync Fly secrets
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
@@ -71,13 +85,13 @@ jobs:
             TASTYTRADE_PASSWORD="${{ secrets.TASTYTRADE_PASSWORD }}" \
             SUPABASE_URL="${{ secrets.SUPABASE_URL }}" \
             SUPABASE_SERVICE_ROLE_KEY="${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
-            --app wiley-edge-dxlink \
-            --stage  # don't trigger an immediate redeploy; the deploy step below does that
+            --app pharma-edge \
+            --stage
 
       - name: Deploy
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: flyctl deploy --remote-only --app wiley-edge-dxlink
+        run: flyctl deploy --remote-only --app pharma-edge
 
       - name: Tail logs (10s sample)
         env:
@@ -86,4 +100,4 @@ jobs:
           # Best-effort sample of the freshly-deployed instance's
           # boot logs. Helps debug from the Actions run page if
           # secrets are wrong without needing to open the Fly UI.
-          timeout 10 flyctl logs --app wiley-edge-dxlink || true
+          timeout 10 flyctl logs --app pharma-edge || true
