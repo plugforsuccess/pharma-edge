@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, RefreshCw, Activity, Star, Lock } from 'lucide-react'
+import { ArrowLeft, RefreshCw, Activity, Star, Lock, ChevronDown } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { useSubscription } from '../hooks/useSubscription'
 import GexHeatmap from '../components/GexHeatmap'
+import TickerDrawer from '../components/TickerDrawer'
 import UpgradeNotice from '../components/UpgradeNotice'
 
 // Curated ticker set — index ETFs and the most-liquid single names
@@ -38,6 +39,7 @@ export default function Markets() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [drawerOpen, setDrawerOpen] = useState(false)
   // User's watchlist tickers, shown as a separate section in the picker
   // so a biotech a user is tracking shows up here without needing to be
   // hardcoded into TICKERS.
@@ -210,9 +212,16 @@ export default function Markets() {
         <div className="bg-card border border-border rounded-xl p-4 space-y-3">
           <div className="flex items-baseline justify-between">
             <div>
-              <div className="text-2xl font-display tracking-tight">
+              <button
+                type="button"
+                onClick={() => setDrawerOpen(true)}
+                className="inline-flex items-baseline gap-1.5 text-2xl font-display tracking-tight
+                           hover:text-amber-400 transition-colors"
+                aria-label="Pick a different ticker"
+              >
                 {data.ticker}
-              </div>
+                <ChevronDown size={16} className="text-subtle" />
+              </button>
               <div className="text-xs text-subtle flex items-center gap-2 flex-wrap">
                 <span>exp {data.expiration} · {data.days_to_expiration}d</span>
                 <SourceBadge source={data.source} />
@@ -291,11 +300,22 @@ export default function Markets() {
       </div>
 
       <p className="text-[10px] text-muted leading-relaxed px-1">
-        Self-computed from Tastytrade option chains using Black-Scholes
-        gamma at the front-month expiry. Convention: dealers are net short
-        calls / long puts to retail, so call-side OI shows positive (green)
-        and put-side OI shows negative (red).
+        Live data via Tastytrade DXLink streaming when available; falls
+        back to delayed Yahoo data otherwise. Convention: dealers are
+        net short calls / long puts to retail, so call-side OI shows
+        positive (green) and put-side OI shows negative (red).
       </p>
+
+      <TickerDrawer
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        curated={TICKERS}
+        watchlist={isPro ? watchlist : []}
+        gatedSet={gatedTickers}
+        selected={ticker}
+        onSelect={(sym) => setTicker(sym)}
+        onUpgrade={() => navigate('/settings')}
+      />
     </div>
   )
 }
