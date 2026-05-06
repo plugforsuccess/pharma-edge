@@ -29,6 +29,7 @@ import {
   fetchOptionQuotes,
   TastytradeError,
   type ChainExpiration,
+  type EquityQuoteDiagnostic,
   type OptionQuote,
 } from './tastytrade.ts'
 
@@ -123,9 +124,15 @@ async function computeGex(
 ) {
   const { ticker, preferredDte, expirationOverride } = args
 
-  const spot = await fetchEquityLast(supabase, ticker)
+  const quoteDiagnostics: EquityQuoteDiagnostic[] = []
+  const spot = await fetchEquityLast(supabase, ticker, quoteDiagnostics)
   if (spot == null || spot <= 0) {
-    return { error: `no live quote for ${ticker}` }
+    return {
+      error: `no live quote for ${ticker} — Tastytrade ${
+        Deno.env.get('TASTYTRADE_BASE_URL')?.includes('cert.') ? 'sandbox' : 'production'
+      } returned no usable price`,
+      diagnostics: quoteDiagnostics,
+    }
   }
 
   const chain = await fetchNestedChain(supabase, ticker)
@@ -312,7 +319,11 @@ serve(async (req) => {
       expirationOverride,
     })
     if ('error' in result) {
-      return json({ success: false, error: result.error }, 502)
+      return json({
+        success: false,
+        error: result.error,
+        diagnostics: 'diagnostics' in result ? result.diagnostics : undefined,
+      }, 502)
     }
     // Fire-and-forget cache write — failure here shouldn't block the
     // response. Worst case, next hit recomputes.

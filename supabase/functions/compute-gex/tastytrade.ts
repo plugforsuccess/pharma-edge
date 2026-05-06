@@ -241,22 +241,90 @@ export async function fetchOptionQuotes(
   return out
 }
 
+export interface EquityQuoteDiagnostic {
+  endpointTried: string
+  status: number
+  bodyShape: string
+}
+
+// Tries multiple Tastytrade quote endpoints because the sandbox's
+// behaviour around equity quotes is inconsistent — single-symbol
+// /market-data/{symbol} is the most reliable, but some plans only
+// surface batched /market-data/by-type. We accept whichever returns
+// a usable price first, falling back to bid/ask midpoint as a last
+// resort. `diagnostics` accumulates per-attempt info so a 502 can
+// surface what actually broke.
 export async function fetchEquityLast(
   supabase: SupabaseClient,
   ticker: string,
+  diagnostics?: EquityQuoteDiagnostic[],
 ): Promise<number | null> {
-  const resp = await tastytradeFetch(
-    supabase,
-    `/market-data/by-type?equity=${encodeURIComponent(ticker.toUpperCase())}`,
-  )
-  if (!resp.ok) return null
-  const body = await resp.json().catch(() => null) as
-    | { data?: { items?: Array<Record<string, unknown>> } }
-    | null
-  const item = body?.data?.items?.[0]
-  if (!item) return null
-  const v = item['last'] ?? item['mark'] ?? item['mid']
-  if (v == null || v === '') return null
-  const n = Number(v)
-  return Number.isFinite(n) ? n : null
+  const sym = ticker.toUpperCase()
+  const numFromObj = (obj: Record<string, unknown>): number | null => {
+    const candidates = ['last', 'mark', 'mid', 'close', 'prev-close']
+    for (const k of candidates) {
+      const v = obj[k]
+      if (v == null || v === '') continue
+      const n = Number(v)
+      if (Number.isFinite(n) && n > 0) return n
+    }
+    const bid = Number(obj['bid'])
+    const ask = Number(obj['ask'])
+    if (Number.isFinite(bid) && Number.isFinite(ask) && bid > 0 && ask > 0) {
+      return (bid + ask) / 2
+    }
+    return null
+  }
+
+  // Attempt 1: /market-data/{symbol} — flat data object, no items array.
+  try {
+    const path1 = `/market-data/${encodeURIComponent(sym)}`
+    const resp = await tastytradeFetch(supabase, path1)
+    let shape = 'no-body'
+    if (resp.ok) {
+      const body = await resp.json().catch(() => null) as
+        | { data?: Record<string, unknown> }
+        | null
+      const data = body?.data
+      shape = data ? `flat:${Object.keys(data).slice(0, 6).join(',')}` : 'empty-data'
+      if (data) {
+        const v = numFromObj(data)
+        if (v != null) return v
+      }
+    }
+    diagnostics?.push({ endpointTried: path1, status: resp.status, bodyShape: shape })
+  } catch (e) {
+    diagnostics?.push({
+      endpointTried: 'GET /market-data/{symbol}',
+      status: -1,
+      bodyShape: e instanceof Error ? `throw:${e.message}` : 'throw',
+    })
+  }
+
+  // Attempt 2: /market-data/by-type?equity= — items array shape.
+  try {
+    const path2 = `/market-data/by-type?equity=${encodeURIComponent(sym)}`
+    const resp = await tastytradeFetch(supabase, path2)
+    let shape = 'no-body'
+    if (resp.ok) {
+      const body = await resp.json().catch(() => null) as
+        | { data?: { items?: Array<Record<string, unknown>> } }
+        | null
+      const item = body?.data?.items?.[0]
+      shape = item ? `items[0]:${Object.keys(item).slice(0, 6).join(',')}` : 'empty-items'
+      if (item) {
+        const v = numFromObj(item)
+        if (v != null) return v
+      }
+    }
+    diagnostics?.push({ endpointTried: path2, status: resp.status, bodyShape: shape })
+  } catch (e) {
+    diagnostics?.push({
+      endpointTried: 'GET /market-data/by-type',
+      status: -1,
+      bodyShape: e instanceof Error ? `throw:${e.message}` : 'throw',
+    })
+  }
+
+  return null
 }

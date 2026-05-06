@@ -91,15 +91,26 @@ export default function Markets() {
         { body: { ticker: sym, refresh } },
       )
       if (invokeErr) {
-        const detail = await readErrorBody(invokeErr)
-        throw new Error(detail || invokeErr.message || 'request failed')
+        const parsed = await readErrorBody(invokeErr)
+        throw Object.assign(
+          new Error(parsed?.error || invokeErr.message || 'request failed'),
+          { diagnostics: parsed?.diagnostics ?? null },
+        )
       }
       if (!result?.success) {
-        throw new Error(result?.error || 'compute-gex returned no data')
+        throw Object.assign(
+          new Error(result?.error || 'compute-gex returned no data'),
+          { diagnostics: result?.diagnostics ?? null },
+        )
       }
       setData(result.data)
     } catch (err) {
-      setError(err.message || String(err))
+      console.error('compute-gex error', err, err?.diagnostics)
+      const diag = err?.diagnostics
+      const diagText = Array.isArray(diag) && diag.length > 0
+        ? '\n' + diag.map((d) => `  ${d.endpointTried} → ${d.status} (${d.bodyShape})`).join('\n')
+        : ''
+      setError((err.message || String(err)) + diagText)
     } finally {
       setLoading(false)
     }
@@ -263,9 +274,11 @@ export default function Markets() {
             <div className="text-crimson font-medium mb-1">
               Couldn't compute GEX.
             </div>
-            <div className="text-subtle">{error}</div>
+            <div className="text-subtle whitespace-pre-line font-mono text-[10px] leading-relaxed">
+              {error}
+            </div>
             <button
-              onClick={() => load(ticker)}
+              onClick={() => load(ticker, { refresh: true })}
               className="mt-3 text-xs underline text-fg"
             >
               Try again
@@ -335,16 +348,17 @@ function formatGex(v) {
 }
 
 // supabase-js wraps non-2xx responses in a generic FunctionsHttpError;
-// the actual error message is on the wrapped Response body.
+// the actual error body lives on `context`. We return the parsed body
+// (or null) so the caller can read diagnostics fields too.
 async function readErrorBody(invokeErr) {
   try {
     const ctx = invokeErr?.context
     if (ctx && typeof ctx.json === 'function') {
-      const body = await ctx.json()
-      return body?.error || null
+      return await ctx.json()
     }
     if (ctx && typeof ctx.text === 'function') {
-      return await ctx.text()
+      const text = await ctx.text()
+      try { return JSON.parse(text) } catch { return { error: text } }
     }
   } catch {
     /* ignore */
