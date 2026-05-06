@@ -39,9 +39,13 @@
   --color-green-400: #1de851;
   --color-green-500: #00c805;
 
-  /* Fonts */
+  /* Fonts — Space Grotesk reads modern + confident without the
+     literary weight Fraunces carried (Pharma/Wiley Edge era). It
+     pairs well with Inter Tight at body sizes since both are
+     geometric sans, and keeps JetBrains Mono in its lane for
+     numbers / hashes / OCC symbols where terminal feel matters. */
   --font-sans: "Inter Tight", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Fraunces", "Inter Tight", ui-serif, Georgia, serif;
+  --font-display: "Space Grotesk", "Inter Tight", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
 }
 

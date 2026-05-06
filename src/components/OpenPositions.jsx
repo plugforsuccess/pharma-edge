@@ -204,15 +204,12 @@ function AddPositionModal({ onClose, onSaved }) {
   }
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-end justify-center">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div
-        className="relative w-full max-w-md bg-bg-elev border-t border-border rounded-t-2xl p-4 space-y-3 max-h-[85vh] overflow-y-auto"
-        style={{ paddingBottom: 'calc(2rem + env(safe-area-inset-bottom))' }}
+        className="relative w-full max-w-md bg-bg-elev border border-border rounded-2xl p-4 space-y-3 max-h-[90vh] overflow-y-auto"
+        style={{ paddingBottom: 'calc(1.25rem + env(safe-area-inset-bottom))' }}
       >
-        <div className="pt-1 flex justify-center">
-          <div className="w-10 h-1 rounded-full bg-border" />
-        </div>
         <h2 className="text-base font-semibold text-fg">Add Position</h2>
         <p className="text-xs text-subtle leading-relaxed">
           Track a spread you placed via Tastytrade, Robinhood, or anywhere else.

@@ -71,9 +71,9 @@ export default function Login() {
         <div className="mb-10 text-center">
           <BrandMark />
           <p className="eyebrow mt-5">Real-Time GEX &amp; Options Flow</p>
-          <h1 className="font-display text-[2.5rem] leading-[1.05] mt-2">
-            <span className="brand-text">Cash</span>{' '}
-            <span className="text-fg italic">Moves</span>
+          <h1 className="font-display text-[2.5rem] leading-[1.05] mt-2 tracking-tight">
+            <span className="brand-text font-bold">Cash</span>{' '}
+            <span className="text-fg font-light">Moves</span>
           </h1>
           <p className="text-subtle text-sm mt-3 leading-relaxed max-w-xs mx-auto">
             See where the cash moves. Live dealer positioning, options

@@ -84,15 +84,16 @@ export default function Dashboard() {
 
   return (
     <div className="px-5 pt-7 pb-6">
-      {/* Editorial header — wordmark sets "Cash" in the gold accent
-          (will swap to money-green once the palette PR lands) and
-          "Moves" in italic fg. */}
+      {/* Wordmark — gold "Cash" + white "Moves". Italic dropped with
+          the Space Grotesk swap (it has no true italic; browser-
+          synthesized obliques on a wordmark read as "almost" instead
+          of intentional). Weight contrast carries the rhythm. */}
       <header className="flex items-start justify-between mb-7">
         <div>
           <p className="eyebrow">{dateStr} · The Tape</p>
-          <h1 className="font-display text-[2rem] leading-[1.05] mt-1.5">
-            <span className="brand-text">Cash</span>{' '}
-            <span className="text-fg italic">Moves</span>
+          <h1 className="font-display text-[2rem] leading-[1.05] mt-1.5 tracking-tight">
+            <span className="brand-text font-bold">Cash</span>{' '}
+            <span className="text-fg font-light">Moves</span>
           </h1>
         </div>
         <NotificationCenter />
