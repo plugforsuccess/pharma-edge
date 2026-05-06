@@ -16,6 +16,7 @@ const Settings = lazy(() => import('./pages/Settings'))
 const ScannerCandidates = lazy(() => import('./pages/ScannerCandidates'))
 const OptionCalculator = lazy(() => import('./pages/OptionCalculator'))
 const PublicRecord = lazy(() => import('./pages/PublicRecord'))
+const Markets = lazy(() => import('./pages/Markets'))
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -71,6 +72,7 @@ export default function App() {
             <Route path="settings" element={<Settings />} />
             <Route path="scanner" element={<ScannerCandidates />} />
             <Route path="calculator" element={<OptionCalculator />} />
+            <Route path="markets" element={<Markets />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -1,9 +1,9 @@
 import { Suspense } from 'react'
 import { Outlet, NavLink } from 'react-router-dom'
 import {
+  Activity,
   BarChart2,
   BookOpen,
-  Calculator,
   Calendar,
   Home,
   Settings,
@@ -13,8 +13,8 @@ import clsx from 'clsx'
 
 const nav = [
   { to: '/', icon: Home, label: 'Home' },
+  { to: '/markets', icon: Activity, label: 'Markets' },
   { to: '/calendar', icon: Calendar, label: 'Calendar' },
-  { to: '/calculator', icon: Calculator, label: 'Calc' },
   { to: '/record', icon: BarChart2, label: 'Record' },
   { to: '/rules', icon: BookOpen, label: 'Rules' },
   { to: '/settings', icon: Settings, label: 'Settings' },
