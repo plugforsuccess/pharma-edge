@@ -199,7 +199,7 @@ export default function Glossary() {
         <p className="text-[10px] text-muted leading-relaxed pt-2 border-t border-border">
           None of this is investment advice. GEX informs probability, not
           certainty — walls fail, flips move, regimes change intraday.
-          Always size positions per Wiley Edge rules (max 2% per options
+          Always size positions per Cash Moves rules (max 2% per options
           trade, max 20% sector exposure).
         </p>
       </section>

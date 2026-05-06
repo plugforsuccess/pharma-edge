@@ -49,7 +49,7 @@ jobs:
         working-directory: public-record
         run: |
           git config user.email "pharma-edge-bot@users.noreply.github.com"
-          git config user.name "Pharma Edge Bot"
+          git config user.name "Cash Moves Bot"
           git add anchors/
           if git diff --staged --quiet; then
             echo "No anchor changes to commit"

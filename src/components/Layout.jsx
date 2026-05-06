@@ -11,14 +11,18 @@ import {
 import InstallPrompt from './InstallPrompt'
 import clsx from 'clsx'
 
-// Bottom nav. Calendar moved off-nav (still at /calendar route, linked
-// from Home) so we can promote Flow — the dedicated options-prints
-// stream — to a first-class destination next to Markets.
-//   Home (today's view) | Markets (GEX) | Flow (prints) |
-//   Scanner (biotech queue) | Record (track record) | Settings
+// Bottom nav. Naming conventions per the Cash Moves brand:
+//   /        → "Tape"   (the home dashboard, "The Tape")
+//   /markets → "Gamma"  (the GEX dashboard, "Gamma Map")
+//   /flow    → "Flow"
+//   /scanner → "Scanner"
+//   /record  → "Record"
+//   /settings→ "Settings"
+// Labels stay short for the 6-tab bar; full names live on the
+// page headings.
 const nav = [
-  { to: '/', icon: Home, label: 'Home' },
-  { to: '/markets', icon: Activity, label: 'Markets' },
+  { to: '/', icon: Home, label: 'Tape' },
+  { to: '/markets', icon: Activity, label: 'Gamma' },
   { to: '/flow', icon: Flame, label: 'Flow' },
   { to: '/scanner', icon: Sparkles, label: 'Scanner' },
   { to: '/record', icon: BarChart2, label: 'Record' },

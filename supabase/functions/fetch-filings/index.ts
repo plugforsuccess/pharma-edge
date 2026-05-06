@@ -1,4 +1,4 @@
-// Pharma Edge — fetch-filings edge function.
+// Cash Moves — fetch-filings edge function.
 //
 // Given a ticker (and optionally a company_name), pulls a digestible
 // snapshot from three public sources:

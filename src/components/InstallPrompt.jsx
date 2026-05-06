@@ -53,7 +53,7 @@ export default function InstallPrompt() {
               <span className="text-white font-bold text-xs">WE</span>
             </div>
             <div>
-              <p className="text-white text-sm font-semibold">Install Wiley Edge</p>
+              <p className="text-white text-sm font-semibold">Install Cash Moves</p>
               <p className="text-subtle text-xs">Add to your home screen</p>
             </div>
           </div>

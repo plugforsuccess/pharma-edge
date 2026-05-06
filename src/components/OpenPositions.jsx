@@ -216,7 +216,7 @@ function AddPositionModal({ onClose, onSaved }) {
         <h2 className="text-base font-semibold text-fg">Add Position</h2>
         <p className="text-xs text-subtle leading-relaxed">
           Track a spread you placed via Tastytrade, Robinhood, or anywhere else.
-          Monitor will poll the spread mid every 5 min and alert at Wiley Edge thresholds.
+          Monitor will poll the spread mid every 5 min and alert at Cash Moves thresholds.
         </p>
 
         <Field label="Ticker">

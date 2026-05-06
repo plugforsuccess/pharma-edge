@@ -1,8 +1,8 @@
 {
   "id": "/?source=pwa",
-  "name": "Wiley Edge",
-  "short_name": "WileyEdge",
-  "description": "Catalyst & market structure intelligence — biotech, GEX, and an immutable trade record",
+  "name": "Cash Moves",
+  "short_name": "CashMoves",
+  "description": "See where the cash moves — real-time GEX, options flow, and an immutable trade record.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

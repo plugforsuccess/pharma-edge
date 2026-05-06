@@ -136,7 +136,7 @@ export default function Markets() {
           <ArrowLeft size={20} />
         </button>
         <div className="flex-1">
-          <h1 className="text-lg font-semibold leading-tight">Gamma Exposure</h1>
+          <h1 className="text-lg font-semibold leading-tight">Gamma Map</h1>
           <p className="text-xs text-subtle">
             Where dealer hedging flow concentrates by strike.
           </p>

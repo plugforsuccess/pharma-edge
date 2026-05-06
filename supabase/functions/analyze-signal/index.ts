@@ -1,4 +1,4 @@
-// Pharma Edge — analyze-signal edge function (streaming).
+// Cash Moves — analyze-signal edge function (streaming).
 //
 // Streams Anthropic's response as Server-Sent Events to the client.
 // Solves the wall-clock issue by sending bytes continuously to the

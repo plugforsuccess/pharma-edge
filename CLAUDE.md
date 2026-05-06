@@ -1,7 +1,31 @@
-# CLAUDE.md — Pharma Edge
+# CLAUDE.md — Cash Moves
 
 > This file is the onboarding document for any AI agent or developer working on this codebase.
 > Read this entire file before touching any code. Every decision in here was made deliberately.
+>
+> **Brand history:** the project started as **Pharma Edge** (biotech-only),
+> rebranded mid-build to **Wiley Edge** (founder-anchored), and now ships
+> as **Cash Moves** (cashmoves.io). The repository directory, GitHub repo
+> name (`plugforsuccess/pharma-edge`), Fly.io app name (`pharma-edge`),
+> and Supabase project ref (`rghoynbaykeyjbhqmaff`) are all retained as
+> stable infrastructure identifiers — they're not customer-facing and
+> renaming them would orphan production. **Treat the product name as
+> "Cash Moves" everywhere user-visible. Never expose old names in UI,
+> emails, push subjects, OG tags, or shareable copy.**
+>
+> Naming conventions to apply consistently in new code:
+>   * Main dashboard → "The Tape"
+>   * Individual alert / signal → "A Move" (plural "Moves")
+>   * Watchlist → "Tracking"
+>   * Premium tier → "Cash Moves Pro"
+>   * Top tier → "Inner Circle"
+>   * GEX dashboard → "Gamma Map"
+>   * Zero-gamma level → "The Flip"
+>   * Largest dealer position → "The Wall"
+>
+> The DB table `signals` and column names are **not** renamed — the
+> immutability/hash trigger contract depends on them. Apply the
+> naming conventions to UI strings only.
 
 ---
 
@@ -58,14 +82,17 @@ Treat file paths and component names from the unimplemented sections as the buil
 
 ## What This Project Is
 
-**Pharma Edge** is a biotech catalyst signal scanner and immutable trade thesis tracker built by Cameron Wiley.
+**Cash Moves** (cashmoves.io) is a real-time options flow and gamma exposure platform that surfaces where institutional money is actually positioned. Built by Cameron Wiley.
 
-The app does three things:
-1. Scans public data sources (ClinicalTrials.gov, FDA calendar, SEC EDGAR) for mispriced biotech catalysts
-2. Uses Claude API to analyze public filings and generate a thesis with signal scores
-3. Records every trade decision with a SHA-256 hash anchored to a public GitHub commit — creating a tamper-proof track record
+Positioning: same brand tier as Unusual Whales — built for serious traders who want dealer positioning, unusual options activity, and GEX levels in one tape. Comparable, not feature-clone.
 
-The strategy is based on reading public FDA precedent and clinical trial data better than the retail market prices it. Primary instrument is bear put spreads on micro-cap biotech stocks ahead of PDUFA dates. Secondary instrument is Kalshi NO contracts on FDA approval markets when a market exists and edge ≥ 15 points.
+The app does four things:
+1. **Gamma Map** — live GEX by strike for the streamed-ticker universe (SPY/QQQ/IWM/AAPL/etc.) with "The Flip" (zero-gamma level) and "The Wall" (largest dealer position) called out. dxlink-worker streams Greeks + OI in real time during RTH.
+2. **Flow** — live options-print stream with UOA detection. Surfaces where the size is going strike by strike.
+3. **Suggested Plays** — Claude reads the GEX matrix + flow + scanner data and proposes 0–3 spread setups that fit the user's account-size rules.
+4. **Immutable track record** — every signal locked is SHA-256 hashed and anchored to a public GitHub commit. Public profile at `/r/:slug` is the credibility layer.
+
+Legacy biotech-catalyst scanner (CT.gov, FDA, SEC EDGAR → scanner_candidates) is retained as a secondary signal source — it feeds candidates into the same Log-a-Move flow as GEX-driven plays. The "biotech_catalyst" vs "gex_flow" `signal_source` column distinguishes the two.
 
 **This is not a toy project. Real capital trades off these signals.**
 

@@ -289,9 +289,9 @@ function SubscriptionSection({ tier, isPro }) {
             <Zap size={16} className="text-amber-400" />
           </div>
           <div className="flex-1">
-            <p className="text-white text-sm font-semibold">Pro</p>
+            <p className="text-white text-sm font-semibold">Cash Moves Pro</p>
             <p className="text-subtle text-xs">
-              Full access to scanner, GEX, broker execution, and analysis.
+              Full Gamma Map, Flow, Suggested Plays, broker execution, and Claude analysis.
             </p>
           </div>
         </div>
@@ -304,27 +304,27 @@ function SubscriptionSection({ tier, isPro }) {
             <div className="flex-1">
               <p className="text-white text-sm font-semibold">Free</p>
               <p className="text-subtle text-xs">
-                3 GEX tickers · read-only public records.
+                3 Gamma Map tickers · read-only public records.
               </p>
             </div>
           </div>
 
           <div className="bg-bg border border-amber-400/20 rounded-lg p-3 space-y-2">
             <div className="flex items-baseline justify-between">
-              <p className="text-white text-sm font-semibold">Pro</p>
+              <p className="text-white text-sm font-semibold">Cash Moves Pro</p>
               <p className="text-amber-400 text-sm font-display">
                 $39<span className="text-xs text-subtle">/mo</span>
               </p>
             </div>
             <ul className="text-subtle text-xs space-y-1 list-disc list-inside">
-              <li>Full GEX list + watchlist tickers</li>
-              <li>Biotech scanner queue + push alerts</li>
-              <li>Full Claude analysis quota</li>
+              <li>Full Gamma Map ticker list + watchlist</li>
+              <li>Live options Flow + UOA detection</li>
+              <li>Suggested Plays (Claude-generated spread setups)</li>
               <li>Tastytrade execution</li>
-              <li>Hash-anchored track record</li>
+              <li>Hash-anchored public track record</li>
             </ul>
             <a
-              href="mailto:cameron@wileyedge.com?subject=Wiley%20Edge%20Pro%20interest"
+              href="mailto:cameron@cashmoves.io?subject=Cash%20Moves%20Pro%20interest"
               className="block w-full text-center bg-amber-400 hover:bg-amber-300 text-bg font-semibold rounded-lg py-2 text-xs transition mt-1"
             >
               Go Pro

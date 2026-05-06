@@ -1,4 +1,10 @@
-# Fly.io config for the Wiley Edge DXLink worker.
+# Fly.io config for the Cash Moves DXLink worker.
+#
+# NOTE: `app = "pharma-edge"` is intentionally retained — it's the
+# stable Fly app identifier created during the original brand era.
+# Renaming would orphan the running machines + secrets and require a
+# full re-deploy. The brand-facing name is "Cash Moves" everywhere
+# user-visible; the Fly slug stays put.
 #
 # Single shared-cpu-1x instance in iad (matches Tastytrade's US-East
 # colo, so latency to the dxFeed gateway is minimal). The worker

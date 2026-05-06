@@ -125,7 +125,7 @@ export class DxLinkClient {
     this.sendFrame({
       type: 'SETUP',
       channel: 0,
-      version: '0.1-wiley-edge',
+      version: '0.1-cash-moves',
       keepaliveTimeout: 60,
       acceptKeepaliveTimeout: 60,
     })

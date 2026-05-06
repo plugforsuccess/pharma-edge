@@ -1,4 +1,4 @@
-// Wiley Edge — DXLink quote worker.
+// Cash Moves — DXLink quote worker.
 //
 // Long-running Deno process that:
 //   1. Logs into Tastytrade with username/password
@@ -60,7 +60,7 @@ async function rougheSpot(ticker: string): Promise<number | null> {
   try {
     const resp = await fetch(
       `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d`,
-      { headers: { 'User-Agent': 'wiley-edge-dxlink-worker/0.1' } },
+      { headers: { 'User-Agent': 'cash-moves-dxlink-worker/0.1' } },
     )
     if (!resp.ok) return null
     const body = await resp.json()
@@ -134,7 +134,7 @@ async function buildSubscriptionPlan(
 }
 
 async function main() {
-  console.log('[main] booting Wiley Edge DXLink worker')
+  console.log('[main] booting Cash Moves DXLink worker')
   startFlushLoop()
   startFlowFlushLoop()
   startFlowPruneLoop()

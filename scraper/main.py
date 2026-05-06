@@ -1,4 +1,4 @@
-"""Pharma Edge daily scanner entrypoint.
+"""Cash Moves daily scanner entrypoint.
 
 Run from CI on a 12:00 UTC cron (= 7am ET in standard time, 8am ET during
 DST — see CLAUDE.md). Locally, set the env vars in scraper/.env and run:
@@ -88,7 +88,7 @@ def send_alert_email(digest: str, candidate_count: int, fda_count: int) -> None:
         return
 
     subject = (
-        f"Pharma Edge Daily Scan — {candidate_count} candidates, "
+        f"Cash Moves Daily Scan — {candidate_count} candidates, "
         f"{fda_count} FDA events — {datetime.utcnow().strftime('%b %d, %Y')}"
     )
 
@@ -119,7 +119,7 @@ def main() -> None:
     load_dotenv()
     preflight()
 
-    print(f"[{datetime.utcnow().isoformat()}] Starting Pharma Edge daily scan...")
+    print(f"[{datetime.utcnow().isoformat()}] Starting Cash Moves daily scan...")
     scan_log: dict[str, Any] = {
         "started_at": datetime.utcnow().isoformat(),
         "results": {},

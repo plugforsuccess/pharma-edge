@@ -1,8 +1,8 @@
-// Wiley Edge — monitor-positions edge function.
+// Cash Moves — monitor-positions edge function.
 //
 // Iterates every public.open_positions row with status='open', fetches
 // the current spread mid, computes P&L %, fires alerts when thresholds
-// hit (Wiley Edge rules: -50% stop, +50/+100/+200 profit ladder, DTE
+// hit (Cash Moves rules: -50% stop, +50/+100/+200 profit ladder, DTE
 // < 21, expiring tomorrow). Idempotent on triggers_fired so we never
 // double-alert.
 //
@@ -181,7 +181,7 @@ function evaluateTriggers(
       out.push({
         type: 'position_profit_50',
         fired: true,
-        message: `${pos.ticker} ${pos.strategy_type} at +50% — sell 50% per Wiley Edge rules`,
+        message: `${pos.ticker} ${pos.strategy_type} at +50% — sell 50% per Cash Moves rules`,
       })
     }
     if (pnlPct >= 100 && !fired.position_profit_100) {

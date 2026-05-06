@@ -1,4 +1,4 @@
-// Pharma Edge — send-alerts edge function.
+// Cash Moves — send-alerts edge function.
 //
 // Service-role-only endpoint. Called by send-catalyst-alerts.yml (cron) to
 // fan out catalyst-approaching reminders and post-catalyst outcome
@@ -203,7 +203,7 @@ serve(async (req) => {
         subject = `🛑 ${ticker} stop loss hit — ${pnlStr}`
         pushBody = `${ticker} ${strategy} at ${pnlStr} — exit per the −50% rule.`
         htmlBody = positionAlertHtml(ticker, strategy, longK, shortK, pnlStr,
-          'Stop loss triggered', 'Exit immediately per Wiley Edge rules.', clickUrl)
+          'Stop loss triggered', 'Exit immediately per Cash Moves rules.', clickUrl)
         break
       case 'position_profit_50':
         subject = `${ticker} +50% — sell half`
@@ -219,7 +219,7 @@ serve(async (req) => {
         break
       case 'position_profit_200':
         subject = `${ticker} +200% — sell 75%`
-        pushBody = `${ticker} ${strategy} at +200%. Sell 75% per Wiley Edge ladder.`
+        pushBody = `${ticker} ${strategy} at +200%. Sell 75% per Cash Moves ladder.`
         htmlBody = positionAlertHtml(ticker, strategy, longK, shortK, pnlStr,
           'Profit ladder: +200%', 'Sell 75% per profit ladder.', clickUrl)
         break
@@ -311,7 +311,7 @@ serve(async (req) => {
 
   // Web-push fan-out
   const pushStats = await fanOutPush(supabase, userId, {
-    title: 'Wiley Edge',
+    title: 'Cash Moves',
     body: pushBody,
     url: clickUrl,
     type: alertType,

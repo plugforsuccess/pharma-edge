@@ -1,5 +1,5 @@
 # Polls open positions every 5 min during US RTH and fires alerts
-# when Wiley Edge thresholds hit (-50% stop, +50/+100/+200 profit
+# when Cash Moves thresholds hit (-50% stop, +50/+100/+200 profit
 # ladder, 21 DTE warning, expiring tomorrow).
 #
 # Idempotent on `triggers_fired` JSONB so repeated cron runs only

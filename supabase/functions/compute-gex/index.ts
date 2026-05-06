@@ -1,4 +1,4 @@
-// Wiley Edge — compute-gex edge function.
+// Cash Moves — compute-gex edge function.
 //
 // Computes Gamma Exposure (GEX) per strike for a single ticker so the
 // /markets page can render a heatmap of where dealer hedging flow is

@@ -1,4 +1,4 @@
-name: Daily Pharma Edge Scan
+name: Daily Cash Moves Scan
 
 on:
   schedule:

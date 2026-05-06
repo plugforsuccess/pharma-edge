@@ -1,4 +1,4 @@
-// Pharma Edge — place-order edge function.
+// Cash Moves — place-order edge function.
 //
 // Verifies the caller's JWT, derives user_id from the verified token (NOT
 // from the request body), validates that the signal belongs to the user,

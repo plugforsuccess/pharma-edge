@@ -84,13 +84,15 @@ export default function Dashboard() {
 
   return (
     <div className="px-5 pt-7 pb-6">
-      {/* Editorial header */}
+      {/* Editorial header — wordmark sets "Cash" in the gold accent
+          (will swap to money-green once the palette PR lands) and
+          "Moves" in italic fg. */}
       <header className="flex items-start justify-between mb-7">
         <div>
-          <p className="eyebrow">{dateStr} · Session Open</p>
+          <p className="eyebrow">{dateStr} · The Tape</p>
           <h1 className="font-display text-[2rem] leading-[1.05] mt-1.5">
-            <span className="brand-text">Pharma</span>{' '}
-            <span className="text-fg italic">Edge</span>
+            <span className="brand-text">Cash</span>{' '}
+            <span className="text-fg italic">Moves</span>
           </h1>
         </div>
         <NotificationCenter />
@@ -149,18 +151,19 @@ export default function Dashboard() {
         )}
       </div>
 
-      {/* Signals header */}
+      {/* Moves header — naming convention: a "move" is one signal /
+          alert; plural "Moves" becomes the cross-page noun. */}
       <div className="flex items-end justify-between mb-3">
         <div>
           <p className="eyebrow">Live Theses</p>
-          <h2 className="font-display text-xl text-fg mt-0.5">Active Signals</h2>
+          <h2 className="font-display text-xl text-fg mt-0.5">Live Moves</h2>
         </div>
         <button
           onClick={() => navigate('/log')}
           className="btn-primary inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-lg"
         >
           <Plus size={13} strokeWidth={2.5} />
-          Log Signal
+          Log Move
         </button>
       </div>
 
@@ -184,7 +187,7 @@ export default function Dashboard() {
               strokeWidth={1.5}
               className="mx-auto mb-3 text-muted"
             />
-            <p className="font-display text-lg text-fg">No active signals</p>
+            <p className="font-display text-lg text-fg">No moves on the tape</p>
             <p className="text-subtle text-xs mt-1">
               Log your first thesis to start the public record.
             </p>

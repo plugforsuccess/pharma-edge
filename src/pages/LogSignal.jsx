@@ -602,7 +602,7 @@ export default function LogSignal() {
               paperDaysRemaining(profile?.paper_trading_started_at) > 0 && (
                 <p className="text-amber-400 text-[11px] leading-relaxed mt-2">
                   ⚠ You're <strong>{paperDaysRemaining(profile?.paper_trading_started_at)} days</strong>{' '}
-                  into the 90-day paper-trading window. Wiley Edge rules say
+                  into the 90-day paper-trading window. Cash Moves rules say
                   no real-money trades until 90+ paper signals are resolved
                   with a positive edge — switch back to <strong>Paper</strong>{' '}
                   unless you're consciously overriding the rule.

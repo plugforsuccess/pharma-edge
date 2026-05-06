@@ -1,4 +1,4 @@
-// Pharma Edge — get-account edge function.
+// Cash Moves — get-account edge function.
 //
 // Returns the Tastytrade accounts the bot's credentials have access to,
 // with balances. Scoped to the configured TASTYTRADE_USERNAME — for now

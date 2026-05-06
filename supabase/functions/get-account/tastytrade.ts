@@ -1,4 +1,4 @@
-// Tastytrade auth + REST helpers for Pharma Edge edge functions.
+// Tastytrade auth + REST helpers for Cash Moves edge functions.
 //
 // Tastytrade uses session-token auth (POST /sessions with username +
 // password returns a 24h session-token). To avoid logging in on every

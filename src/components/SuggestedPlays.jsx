@@ -111,7 +111,7 @@ export default function SuggestedPlays({ ticker, isPro }) {
         </div>
         <p className="text-xs text-subtle leading-relaxed">
           Claude reads the live GEX matrix and proposes 0–3 spread trade
-          setups that fit your Wiley Edge rules — strikes, expiration,
+          setups that fit your Cash Moves rules — strikes, expiration,
           contract count, R/R, and the rationale citing specific GEX
           numbers. Pro feature.
         </p>

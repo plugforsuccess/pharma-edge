@@ -1,7 +1,7 @@
-// Wiley Edge — suggest-plays edge function.
+// Cash Moves — suggest-plays edge function.
 //
 // Given a ticker, fetch the live GEX matrix from compute-gex and ask
-// Claude to propose 3 spread trade ideas that fit the Wiley Edge
+// Claude to propose 3 spread trade ideas that fit the Cash Moves
 // trading rules + GEX playbook from /glossary. Returns structured JSON
 // the /markets "Suggested Plays" card renders into clickable setups.
 //
@@ -12,8 +12,8 @@
 //   - 5-min response cache via play_suggestions table (per ticker)
 //
 // Hard rules baked into the prompt — NOT optional:
-//   - Spreads only, no naked options (Wiley Edge rule)
-//   - Min 21 DTE (Wiley Edge entry rule, except 0DTE pin trades)
+//   - Spreads only, no naked options (Cash Moves rule)
+//   - Min 21 DTE (Cash Moves entry rule, except 0DTE pin trades)
 //   - Max 40% premium / spread width (sizing rule)
 //   - Position size = floor(account * 2% / max_loss_per_spread)
 //   - Refuse if no high-conviction setup exists (return empty)
@@ -44,7 +44,7 @@ function json(body: unknown, status = 200): Response {
   })
 }
 
-const SYSTEM_PROMPT = `You are a Wiley Edge spread-trade advisor. Given a Gamma Exposure (GEX) matrix snapshot for a ticker, propose 0–3 high-conviction spread trade ideas that fit BOTH the GEX playbook and the Wiley Edge trading rules.
+const SYSTEM_PROMPT = `You are a Cash Moves spread-trade advisor. Given a Gamma Exposure (GEX) matrix snapshot for a ticker, propose 0–3 high-conviction spread trade ideas that fit BOTH the GEX playbook and the Cash Moves trading rules.
 
 GEX PLAYBOOK (from /glossary):
 - Regime A = above flip + Net GEX positive → range-bound, mean-revert. Setups: pin trades (long call spread toward call wall), short premium, breakout calls AT the call wall.
@@ -54,7 +54,7 @@ GEX PLAYBOOK (from /glossary):
 
 FLOW DATA (when present): you will see today's per-strike volume and premium, plus a "NOTABLE" section flagging strikes where today's volume is ≥5× standing OI (likely directional bets, not hedging). Use flow to confirm or contradict the GEX read. If flow concentrates at a call wall, the wall is being reinforced. If flow concentrates ABOVE the call wall (out-of-the-money calls running 5x OI), traders expect a breakout — favour breakout call spreads. If flow is heavy on puts at strikes near the put wall, position for support. Mismatch between dealer positioning (GEX) and trader bets (flow) = transition signal; reduce conviction or pick the side flow is on.
 
-WILEY EDGE RULES — NEVER VIOLATE:
+CASH MOVES RULES — NEVER VIOLATE:
 - SPREADS ONLY. No naked options.
 - Min 21 DTE on entry, except explicit 0–7 DTE pin trades.
 - Max 40% of spread width in net debit (R/R cap).

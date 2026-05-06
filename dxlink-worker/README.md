@@ -1,4 +1,4 @@
-# Wiley Edge — DXLink Quote Worker
+# Cash Moves — DXLink Quote Worker
 
 Long-running Deno process that maintains a single WebSocket connection
 to Tastytrade's dxFeed (DXLink) gateway and streams real-time quotes,
