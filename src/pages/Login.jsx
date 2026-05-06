@@ -70,14 +70,14 @@ export default function Login() {
         {/* Hero */}
         <div className="mb-10 text-center">
           <BrandMark />
-          <p className="eyebrow mt-5">Biotech Catalyst Intelligence</p>
+          <p className="eyebrow mt-5">Real-Time GEX &amp; Options Flow</p>
           <h1 className="font-display text-[2.5rem] leading-[1.05] mt-2">
-            <span className="brand-text">Pharma</span>{' '}
-            <span className="text-fg italic">Edge</span>
+            <span className="brand-text">Cash</span>{' '}
+            <span className="text-fg italic">Moves</span>
           </h1>
           <p className="text-subtle text-sm mt-3 leading-relaxed max-w-xs mx-auto">
-            Read the public record better than the market.
-            Trade with a tamper-proof thesis.
+            See where the cash moves. Live dealer positioning, options
+            flow, and a tamper-proof trade record.
           </p>
         </div>
 
@@ -187,7 +187,7 @@ function BrandMark() {
           className="font-display text-2xl font-semibold"
           style={{ color: '#1a1208' }}
         >
-          PE
+          $
         </span>
       </div>
       <span

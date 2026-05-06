@@ -50,7 +50,7 @@ export default function InstallPrompt() {
         <div className="flex items-start justify-between mb-3">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 bg-red-600 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-xs">WE</span>
+              <span className="text-white font-bold text-xs">$</span>
             </div>
             <div>
               <p className="text-white text-sm font-semibold">Install Cash Moves</p>
