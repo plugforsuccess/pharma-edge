@@ -7,18 +7,24 @@
 //   whole option chain with OI + IV per strike. Yahoo's
 //   /v7/finance/options/{symbol} does exactly that.
 //
+// Auth: as of late 2024 Yahoo gates the v7 options endpoint behind
+// a cookie+crumb token pair (the same flow yfinance uses). We do a
+// two-step bootstrap (hit fc.yahoo.com for session cookies, then
+// /v1/test/getcrumb with those cookies for the token), cache the
+// pair in module scope for ~30 min, and attach `&crumb=...` plus
+// the `Cookie:` header to every options call.
+//
 // Caveats:
 //   - Unofficial endpoint; can rate-limit or change shape without notice
 //   - Quotes lag real-time by up to 15 min on free Yahoo data
 //   - For dealer GEX positioning, that's plenty fresh — flow accumulates
 //     over hours, not seconds. The 5-min cache absorbs most volatility.
-//
-// We send a browser-like User-Agent because Yahoo will sometimes
-// reject the default Deno fetch UA.
 
 const UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+
+const CRUMB_TTL_MS = 30 * 60 * 1000
 
 export interface YahooStrike {
   strike: number
@@ -46,9 +52,76 @@ export class YahooError extends Error {
   }
 }
 
+// Module-scoped cache. Edge function instances live for minutes between
+// invocations on warm starts, so re-using the crumb saves a round-trip.
+let cachedAuth: { cookie: string; crumb: string; expiresAt: number } | null = null
+
+async function getYahooAuth(): Promise<{ cookie: string; crumb: string }> {
+  const now = Date.now()
+  if (cachedAuth && cachedAuth.expiresAt > now) {
+    return { cookie: cachedAuth.cookie, crumb: cachedAuth.crumb }
+  }
+
+  // Step 1 — hit fc.yahoo.com to get session cookies. Yahoo returns
+  // 404 but sets the A1/A3/B cookies we need on the response. We do
+  // not follow redirects; we just want the Set-Cookie headers off
+  // the first response.
+  const cookieResp = await fetch('https://fc.yahoo.com/', {
+    headers: { 'User-Agent': UA, 'Accept': '*/*' },
+    redirect: 'manual',
+  })
+  await cookieResp.body?.cancel().catch(() => {})
+
+  // Deno exposes getSetCookie() which returns an array of raw
+  // Set-Cookie headers (modern Headers API). Older Headers API
+  // collapses multiple Set-Cookie into one comma-joined string —
+  // splitting on the right boundary is fragile, so we prefer the
+  // array form when available.
+  type HeadersWithSet = Headers & { getSetCookie?: () => string[] }
+  const headers = cookieResp.headers as HeadersWithSet
+  let setCookies: string[] = []
+  if (typeof headers.getSetCookie === 'function') {
+    setCookies = headers.getSetCookie()
+  }
+  if (setCookies.length === 0) {
+    const raw = cookieResp.headers.get('set-cookie')
+    if (raw) {
+      setCookies = raw.split(/,(?=\s*[A-Za-z][A-Za-z0-9_-]*=)/)
+    }
+  }
+  const cookieParts = setCookies
+    .map((c) => c.split(';')[0].trim())
+    .filter(Boolean)
+  if (cookieParts.length === 0) {
+    throw new YahooError('yahoo: no session cookies returned from fc.yahoo.com')
+  }
+  const cookie = cookieParts.join('; ')
+
+  // Step 2 — exchange cookies for a crumb token. Body is a short
+  // alphanumeric string; HTML or empty means we got bounced to a
+  // login wall and the cookie step needs to retry on the next call.
+  const crumbResp = await fetch('https://query1.finance.yahoo.com/v1/test/getcrumb', {
+    headers: { 'User-Agent': UA, 'Cookie': cookie, 'Accept': '*/*' },
+  })
+  if (!crumbResp.ok) {
+    throw new YahooError(`yahoo crumb: ${crumbResp.status}`, crumbResp.status)
+  }
+  const crumb = (await crumbResp.text()).trim()
+  if (!crumb || crumb.length > 64 || crumb.includes('<')) {
+    throw new YahooError(`yahoo crumb: invalid response (${crumb.slice(0, 32)})`)
+  }
+
+  cachedAuth = { cookie, crumb, expiresAt: now + CRUMB_TTL_MS }
+  return { cookie, crumb }
+}
+
 async function fetchYahooRaw(ticker: string, dateUnix?: number): Promise<unknown> {
   const sym = encodeURIComponent(ticker.toUpperCase())
-  const qs = dateUnix ? `?date=${dateUnix}` : ''
+  const { cookie, crumb } = await getYahooAuth()
+  const params = new URLSearchParams()
+  params.set('crumb', crumb)
+  if (dateUnix) params.set('date', String(dateUnix))
+
   // query1 and query2 are symmetric mirrors; round-robin gives us a
   // free retry against transient gateway errors on one of them.
   const hosts = ['query1.finance.yahoo.com', 'query2.finance.yahoo.com']
@@ -56,13 +129,22 @@ async function fetchYahooRaw(ticker: string, dateUnix?: number): Promise<unknown
   let lastErr: Error | null = null
   for (const host of hosts) {
     try {
-      const resp = await fetch(`https://${host}/v7/finance/options/${sym}${qs}`, {
-        headers: { 'User-Agent': UA, 'Accept': 'application/json' },
-      })
-      if (resp.ok) {
-        return await resp.json()
-      }
+      const resp = await fetch(
+        `https://${host}/v7/finance/options/${sym}?${params.toString()}`,
+        {
+          headers: {
+            'User-Agent': UA,
+            'Accept': 'application/json',
+            'Cookie': cookie,
+          },
+        },
+      )
+      if (resp.ok) return await resp.json()
       lastStatus = resp.status
+      // 401 most likely means the crumb/cookie expired between
+      // bootstrap and this call. Bust the cache so the next request
+      // re-bootstraps; user can hit "Try again" to retry.
+      if (resp.status === 401) cachedAuth = null
     } catch (e) {
       lastErr = e instanceof Error ? e : new Error(String(e))
     }
