@@ -29,5 +29,6 @@ primary_region = "iad"
 [deploy]
   strategy = "immediate"  # one instance, no rolling
 
-[mounts]
-  # No persistent storage needed; all state lives in Supabase.
+# No [mounts] section — the worker is stateless; all state lives in
+# Supabase. (An empty [mounts] table makes Fly try to bind a volume
+# named "" to the machine, which errors deploy.)
