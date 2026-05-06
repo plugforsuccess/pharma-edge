@@ -662,7 +662,7 @@ serve(async (req) => {
   // Cache key includes mode + expiration override so different views
   // of the same ticker don't trample each other in the snapshot.
   const cacheKey = matrixMode
-    ? `${ticker}|matrix`
+    ? `${ticker}|matrix|${metric}`
     : (expirationOverride ? `${ticker}|${expirationOverride}` : ticker)
 
   if (!forceRefresh) {

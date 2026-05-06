@@ -8,6 +8,8 @@ import { HOT_TICKERS, TICKER_UNIVERSE } from '../lib/tickerUniverse'
 import GexMatrix from '../components/GexMatrix'
 import TickerDrawer from '../components/TickerDrawer'
 import ReplaySlider from '../components/ReplaySlider'
+import SuggestedPlays from '../components/SuggestedPlays'
+import TrinityView from '../components/TrinityView'
 import UpgradeNotice from '../components/UpgradeNotice'
 
 // HOT_TICKERS = the ~50 names the dxlink-worker actually streams
@@ -27,6 +29,10 @@ export default function Markets() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  // Internal view switcher: GEX (single-ticker matrix, default),
+  // Trinity (3-ticker comparison), VEX (vega exposure — backend math
+  // pending; tab is a teaser placeholder for now).
+  const [view, setView] = useState('gex')
   // Replay mode: when active, the time slider feeds historical
   // snapshot payloads to the matrix instead of the live data fetched
   // by load(). Toggling off clears the snapshot and we go back to live.
@@ -164,6 +170,39 @@ export default function Markets() {
           <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
         </button>
       </div>
+
+      {/* View tabs — switches between single-ticker matrix, 3-ticker
+          comparison, and (placeholder) vega exposure. Trinity tab
+          hides the ticker picker since it has its own per-column
+          tickers. VEX is a stub until the Black-Scholes vega path
+          ships in the next push. */}
+      <div className="flex gap-1 border border-border rounded-lg p-1 bg-card">
+        <TabButton active={view === 'gex'} onClick={() => setView('gex')}>
+          GEX
+        </TabButton>
+        <TabButton active={view === 'trinity'} onClick={() => setView('trinity')}>
+          Trinity
+        </TabButton>
+        <TabButton active={view === 'vex'} onClick={() => setView('vex')}>
+          VEX <span className="text-[8px] uppercase opacity-60 ml-1">soon</span>
+        </TabButton>
+      </div>
+
+      {view === 'trinity' && <TrinityView />}
+
+      {view === 'vex' && (
+        <div className="bg-card border border-border rounded-xl p-6 text-center space-y-2">
+          <p className="text-sm text-fg font-semibold">NetVEX coming soon</p>
+          <p className="text-xs text-subtle leading-relaxed">
+            Net Vega Exposure — same matrix structure as GEX but
+            measuring sensitivity to IV moves instead of spot moves.
+            The dxlink-worker is already streaming vega; backend math
+            for the Yahoo fallback ships in the next push.
+          </p>
+        </div>
+      )}
+
+      {view === 'gex' && (<>
 
       {/* Ticker picker — horizontal scroll keeps the grid mobile-friendly.
           Watchlist tickers come first (with a star) so the user's own picks
@@ -322,12 +361,15 @@ export default function Markets() {
         }}
       />
 
+      <SuggestedPlays ticker={ticker} isPro={isPro} />
+
       <p className="text-[10px] text-muted leading-relaxed px-1">
         Live data via Tastytrade DXLink streaming when available; falls
         back to delayed Yahoo data otherwise. Convention: dealers are
         net short calls / long puts to retail, so call-side OI shows
         positive (green) and put-side OI shows negative (red).
       </p>
+      </>)}
 
       <TickerDrawer
         open={drawerOpen}
@@ -340,6 +382,22 @@ export default function Markets() {
         onUpgrade={() => navigate('/settings')}
       />
     </div>
+  )
+}
+
+function TabButton({ active, onClick, children }) {
+  return (
+    <button
+      onClick={onClick}
+      className={
+        'flex-1 px-3 py-1.5 rounded-md text-xs font-semibold transition ' +
+        (active
+          ? 'bg-amber-400 text-bg'
+          : 'text-subtle hover:text-fg hover:bg-bg-elev')
+      }
+    >
+      {children}
+    </button>
   )
 }
 

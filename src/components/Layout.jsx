@@ -3,20 +3,26 @@ import { Outlet, NavLink } from 'react-router-dom'
 import {
   Activity,
   BarChart2,
-  BookOpen,
   Calendar,
   Home,
+  Sparkles,
   Settings,
 } from 'lucide-react'
 import InstallPrompt from './InstallPrompt'
 import clsx from 'clsx'
 
+// Bottom nav. Rules dropped from here (always accessible from Settings
+// or Home cards) so we can promote Scanner — the daily biotech
+// candidate review queue is high-frequency-use and was previously
+// only reachable via a deep link. Six items still; hierarchy:
+//   Home (today's view) | Markets (GEX) | Scanner (biotech queue) |
+//   Calendar (catalysts) | Record (track record) | Settings
 const nav = [
   { to: '/', icon: Home, label: 'Home' },
   { to: '/markets', icon: Activity, label: 'Markets' },
+  { to: '/scanner', icon: Sparkles, label: 'Scanner' },
   { to: '/calendar', icon: Calendar, label: 'Calendar' },
   { to: '/record', icon: BarChart2, label: 'Record' },
-  { to: '/rules', icon: BookOpen, label: 'Rules' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ]
 
