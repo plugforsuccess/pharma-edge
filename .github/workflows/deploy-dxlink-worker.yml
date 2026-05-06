@@ -6,8 +6,9 @@
 #
 # Required GitHub Actions secrets (Settings → Secrets and variables → Actions):
 #   FLY_API_TOKEN              — Fly.io personal access token (Fly dashboard → Settings → Access Tokens)
-#   TASTYTRADE_USERNAME        — Tastytrade prod login
-#   TASTYTRADE_PASSWORD        — Tastytrade prod password
+#   TASTYTRADE_CLIENT_ID       — Tastytrade OAuth app client_id (developer portal)
+#   TASTYTRADE_CLIENT_SECRET   — Tastytrade OAuth app client_secret
+#   TASTYTRADE_REFRESH_TOKEN   — Personal OAuth Grant refresh_token from the same portal
 #   SUPABASE_URL               — https://rghoynbaykeyjbhqmaff.supabase.co
 #   SUPABASE_SERVICE_ROLE_KEY  — from Supabase project settings → API
 #
@@ -110,8 +111,9 @@ jobs:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: |
           flyctl secrets set \
-            TASTYTRADE_USERNAME="${{ secrets.TASTYTRADE_USERNAME }}" \
-            TASTYTRADE_PASSWORD="${{ secrets.TASTYTRADE_PASSWORD }}" \
+            TASTYTRADE_CLIENT_ID="${{ secrets.TASTYTRADE_CLIENT_ID }}" \
+            TASTYTRADE_CLIENT_SECRET="${{ secrets.TASTYTRADE_CLIENT_SECRET }}" \
+            TASTYTRADE_REFRESH_TOKEN="${{ secrets.TASTYTRADE_REFRESH_TOKEN }}" \
             SUPABASE_URL="${{ secrets.SUPABASE_URL }}" \
             SUPABASE_SERVICE_ROLE_KEY="${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
             --app pharma-edge \
