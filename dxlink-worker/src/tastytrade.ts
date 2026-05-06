@@ -1,54 +1,76 @@
 // Tastytrade REST helpers needed by the worker:
-//  1. POST /sessions          — get a session-token from username/password
-//  2. GET  /api-quote-tokens  — exchange session-token for a DXLink streamer
-//                                token + websocket URL (24h TTL)
+//  1. POST /oauth/token        — exchange refresh_token for an access_token
+//                                 (~24h TTL)
+//  2. GET  /api-quote-tokens   — exchange access_token for a DXLink streamer
+//                                 token + websocket URL (24h TTL)
 //  3. GET  /option-chains/{symbol}/nested — pull strikes + OCC streamer
 //                                            symbols for a ticker
 //
 // We don't share `tastytrade_sessions` with the edge-function helpers
-// because the worker is a long-lived process: it just keeps tokens in
-// memory and refreshes them on a timer / on 401.
+// because the worker is a long-lived process: tokens stay in memory
+// and refresh on a timer / on 401. The `login()` export name is
+// preserved for caller compatibility but it now performs OAuth refresh.
+//
+// Required Fly secrets:
+//   TASTYTRADE_CLIENT_ID
+//   TASTYTRADE_CLIENT_SECRET
+//   TASTYTRADE_REFRESH_TOKEN
 
 const BASE =
   Deno.env.get('TASTYTRADE_BASE_URL') || 'https://api.tastyworks.com'
-const USERNAME = Deno.env.get('TASTYTRADE_USERNAME')
-const PASSWORD = Deno.env.get('TASTYTRADE_PASSWORD')
+const CLIENT_ID = Deno.env.get('TASTYTRADE_CLIENT_ID')
+const CLIENT_SECRET = Deno.env.get('TASTYTRADE_CLIENT_SECRET')
+let CURRENT_REFRESH_TOKEN = Deno.env.get('TASTYTRADE_REFRESH_TOKEN') ?? ''
 
 export interface SessionAuth {
-  sessionToken: string
-  expiresAt: number   // ms epoch
+  sessionToken: string  // OAuth access_token (kept name for caller compat)
+  expiresAt: number     // ms epoch
 }
 
 export interface StreamerAuth {
   token: string
-  url: string         // wss URL we open the dxFeed connection to
-  expiresAt: number   // ms epoch
+  url: string           // wss URL we open the dxFeed connection to
+  expiresAt: number     // ms epoch
 }
 
+// `login()` keeps its name so call-sites in main.ts don't change. It
+// now performs an OAuth refresh-token grant. Tastytrade may rotate
+// the refresh_token on each exchange; if so we cache the new value
+// in process memory (re-read happens on next worker restart from the
+// Fly secret, which means a rotated token effectively only survives
+// for the lifetime of the process unless the operator updates the
+// secret. In practice Tastytrade refresh tokens rotate rarely and
+// the worker restarts on deploys, so this is fine).
 export async function login(): Promise<SessionAuth> {
-  if (!USERNAME || !PASSWORD) {
-    throw new Error('TASTYTRADE_USERNAME / TASTYTRADE_PASSWORD env vars not set')
+  if (!CLIENT_ID || !CLIENT_SECRET || !CURRENT_REFRESH_TOKEN) {
+    throw new Error(
+      'TASTYTRADE_CLIENT_ID / TASTYTRADE_CLIENT_SECRET / TASTYTRADE_REFRESH_TOKEN env vars not set',
+    )
   }
-  const resp = await fetch(`${BASE}/sessions`, {
+  const form = new URLSearchParams({
+    grant_type: 'refresh_token',
+    refresh_token: CURRENT_REFRESH_TOKEN,
+    client_id: CLIENT_ID,
+    client_secret: CLIENT_SECRET,
+  })
+  const resp = await fetch(`${BASE}/oauth/token`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      login: USERNAME,
-      password: PASSWORD,
-      'remember-me': true,
-    }),
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: form.toString(),
   })
   if (!resp.ok) {
     const detail = await resp.text().catch(() => '')
-    throw new Error(`tastytrade login ${resp.status}: ${detail.slice(0, 200)}`)
+    throw new Error(`tastytrade oauth refresh ${resp.status}: ${detail.slice(0, 200)}`)
   }
   const body = await resp.json()
-  const token = body?.data?.['session-token']
-  if (!token) throw new Error('tastytrade login: no session-token in response')
+  const accessToken: string | undefined = body?.access_token
+  const expiresIn: number = Number(body?.expires_in) || 23 * 60 * 60
+  if (body?.refresh_token) CURRENT_REFRESH_TOKEN = body.refresh_token
+  if (!accessToken) throw new Error('tastytrade oauth refresh: no access_token in response')
   return {
-    sessionToken: token,
-    // sessions live ~24h; treat 23h as the safe expiry
-    expiresAt: Date.now() + 23 * 60 * 60 * 1000,
+    sessionToken: accessToken,
+    // 5-min buffer so we proactively refresh before real expiry.
+    expiresAt: Date.now() + (expiresIn - 300) * 1000,
   }
 }
 
@@ -56,7 +78,7 @@ export async function getStreamerAuth(session: SessionAuth): Promise<StreamerAut
   // /api-quote-tokens returns { data: { token, dxlink-url, level } }
   // Tokens are 24h; we'll refresh ~22h.
   const resp = await fetch(`${BASE}/api-quote-tokens`, {
-    headers: { Authorization: session.sessionToken },
+    headers: { Authorization: `Bearer ${session.sessionToken}` },
   })
   if (!resp.ok) {
     const detail = await resp.text().catch(() => '')
@@ -94,7 +116,7 @@ export async function fetchNestedChain(
 ): Promise<ChainExpiration[]> {
   const resp = await fetch(
     `${BASE}/option-chains/${encodeURIComponent(ticker.toUpperCase())}/nested`,
-    { headers: { Authorization: session.sessionToken } },
+    { headers: { Authorization: `Bearer ${session.sessionToken}` } },
   )
   if (!resp.ok) {
     const detail = await resp.text().catch(() => '')

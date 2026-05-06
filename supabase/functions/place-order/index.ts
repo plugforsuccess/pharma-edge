@@ -7,7 +7,7 @@
 // reflects the latest order on the signal row.
 //
 // Required Supabase secrets:
-//   TASTYTRADE_USERNAME, TASTYTRADE_PASSWORD
+//   TASTYTRADE_CLIENT_ID, TASTYTRADE_CLIENT_SECRET, TASTYTRADE_REFRESH_TOKEN
 //   (optionally TASTYTRADE_BASE_URL — defaults to api.cert.tastyworks.com)
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'

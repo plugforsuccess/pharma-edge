@@ -55,10 +55,14 @@ cd dxlink-worker
 # 4. Launch (creates the app — answer "no" to "deploy now")
 fly launch --copy-config --no-deploy
 
-# 5. Set secrets (use the same values as the Supabase edge function):
+# 5. Set secrets (use the same values as the Supabase edge function).
+#    OAuth refresh-token grant: client_id + client_secret are from the
+#    Tastytrade developer portal; refresh_token is from a "Personal
+#    OAuth Grant" mint on the same page.
 fly secrets set \
-  TASTYTRADE_USERNAME=... \
-  TASTYTRADE_PASSWORD=... \
+  TASTYTRADE_CLIENT_ID=... \
+  TASTYTRADE_CLIENT_SECRET=... \
+  TASTYTRADE_REFRESH_TOKEN=... \
   SUPABASE_URL=https://rghoynbaykeyjbhqmaff.supabase.co \
   SUPABASE_SERVICE_ROLE_KEY=...
 

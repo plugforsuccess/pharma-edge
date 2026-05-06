@@ -1,10 +1,10 @@
 // Cash Moves — get-account edge function.
 //
-// Returns the Tastytrade accounts the bot's credentials have access to,
-// with balances. Scoped to the configured TASTYTRADE_USERNAME — for now
-// that's a single bot user, so any signed-in app user sees the same set.
-// When multi-broker / multi-tenant arrives, this becomes the place to
-// scope by mapping table.
+// Returns the Tastytrade accounts the bot's OAuth grant has access to,
+// with balances. Scoped to the configured TASTYTRADE_REFRESH_TOKEN —
+// for now that's a single owner-level grant, so any signed-in app user
+// sees the same set. When multi-broker / multi-tenant arrives, this
+// becomes the place to scope by per-user OAuth mapping.
 //
 // Auth: requires a real user JWT (verify_jwt=true at the platform level
 // + auth.getUser() check here). We don't trust user_id from the body;
