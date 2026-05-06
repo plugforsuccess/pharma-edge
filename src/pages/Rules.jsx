@@ -116,6 +116,7 @@ export default function Rules() {
               <span className="absolute left-4 top-1/2 -translate-y-1/2 text-subtle">$</span>
               <input
                 type="number"
+              inputMode="decimal"
                 step="any"
                 min="0"
                 value={accountSize}

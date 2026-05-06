@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, TrendingUp, TrendingDown, Clock, AlertTriangle } from 'lucide-react'
+import { Plus, TrendingUp, TrendingDown, Clock, AlertTriangle, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 
@@ -74,6 +74,7 @@ export default function OpenPositions() {
                 key={p.id}
                 p={p}
                 onClick={() => navigate(`/position/${p.id}`)}
+                onCloseShortcut={() => navigate(`/position/${p.id}?close=1`)}
               />
             ))}
         </div>
@@ -92,7 +93,7 @@ export default function OpenPositions() {
   )
 }
 
-function PositionRow({ p, onClick }) {
+function PositionRow({ p, onClick, onCloseShortcut }) {
   const dte = daysUntil(p.expiration)
   const pnl = p.last_pnl_pct
   const pnlTone =
@@ -101,45 +102,58 @@ function PositionRow({ p, onClick }) {
   const showStopWarning = pnl != null && pnl <= -50
   const showDteWarning = dte <= 21
 
+  // Outer is a non-button div so we can nest a separate close button
+  // without producing invalid markup. Click on the main area still
+  // navigates to PositionDetail; the X is its own affordance.
   return (
-    <button
-      onClick={onClick}
-      className="w-full text-left px-4 py-3 hover:bg-bg-elev transition flex items-center gap-3"
-    >
-      <div className="flex-1 min-w-0">
-        <div className="flex items-baseline gap-2">
-          <span className="text-sm font-semibold text-fg">{p.ticker}</span>
-          <span className="text-[10px] uppercase tracking-wider text-muted">
-            {p.strategy_type.replace(/_/g, ' ')}
-          </span>
+    <div className="flex items-stretch hover:bg-bg-elev transition">
+      <button
+        onClick={onClick}
+        className="flex-1 text-left px-4 py-3 flex items-center gap-3 min-w-0"
+      >
+        <div className="flex-1 min-w-0">
+          <div className="flex items-baseline gap-2">
+            <span className="text-sm font-semibold text-fg">{p.ticker}</span>
+            <span className="text-[10px] uppercase tracking-wider text-muted">
+              {p.strategy_type.replace(/_/g, ' ')}
+            </span>
+          </div>
+          <div className="text-[11px] font-mono-tab text-subtle">
+            ${formatStrike(p.long_strike)} / ${formatStrike(p.short_strike)} · {p.contracts}c
+          </div>
+          <div className="flex items-center gap-2 text-[10px] text-muted mt-0.5">
+            <Clock size={9} className={showDteWarning ? 'text-amber-400' : ''} />
+            <span className={showDteWarning ? 'text-amber-400' : ''}>{dte}d</span>
+            <span>·</span>
+            <span>{p.expiration}</span>
+            {showStopWarning && (
+              <>
+                <span>·</span>
+                <AlertTriangle size={9} className="text-crimson" />
+                <span className="text-crimson">stop</span>
+              </>
+            )}
+          </div>
         </div>
-        <div className="text-[11px] font-mono-tab text-subtle">
-          ${formatStrike(p.long_strike)} / ${formatStrike(p.short_strike)} · {p.contracts}c
+        <div className="text-right shrink-0">
+          <div className={`text-sm font-mono-tab font-semibold flex items-center gap-1 justify-end ${pnlTone}`}>
+            <PnlIcon size={11} />
+            {pnl != null ? `${pnl >= 0 ? '+' : ''}${pnl.toFixed(0)}%` : '—'}
+          </div>
+          <div className="text-[10px] text-muted">
+            {p.last_polled_at ? agoString(p.last_polled_at) : 'awaiting poll'}
+          </div>
         </div>
-        <div className="flex items-center gap-2 text-[10px] text-muted mt-0.5">
-          <Clock size={9} className={showDteWarning ? 'text-amber-400' : ''} />
-          <span className={showDteWarning ? 'text-amber-400' : ''}>{dte}d</span>
-          <span>·</span>
-          <span>{p.expiration}</span>
-          {showStopWarning && (
-            <>
-              <span>·</span>
-              <AlertTriangle size={9} className="text-crimson" />
-              <span className="text-crimson">stop</span>
-            </>
-          )}
-        </div>
-      </div>
-      <div className="text-right shrink-0">
-        <div className={`text-sm font-mono-tab font-semibold flex items-center gap-1 justify-end ${pnlTone}`}>
-          <PnlIcon size={11} />
-          {pnl != null ? `${pnl >= 0 ? '+' : ''}${pnl.toFixed(0)}%` : '—'}
-        </div>
-        <div className="text-[10px] text-muted">
-          {p.last_polled_at ? agoString(p.last_polled_at) : 'awaiting poll'}
-        </div>
-      </div>
-    </button>
+      </button>
+      <button
+        onClick={onCloseShortcut}
+        title="Close position"
+        aria-label={`Close ${p.ticker} position`}
+        className="px-3 border-l border-border text-subtle hover:text-crimson transition flex items-center"
+      >
+        <X size={14} />
+      </button>
+    </div>
   )
 }
 
@@ -233,6 +247,7 @@ function AddPositionModal({ onClose, onSaved }) {
           <Field label="Long strike">
             <input
               type="number"
+              inputMode="decimal"
               step="0.5"
               value={form.long_strike}
               onChange={(e) => update('long_strike', e.target.value)}
@@ -242,6 +257,7 @@ function AddPositionModal({ onClose, onSaved }) {
           <Field label="Short strike">
             <input
               type="number"
+              inputMode="decimal"
               step="0.5"
               value={form.short_strike}
               onChange={(e) => update('short_strike', e.target.value)}
@@ -262,6 +278,7 @@ function AddPositionModal({ onClose, onSaved }) {
           <Field label="Contracts">
             <input
               type="number"
+              inputMode="decimal"
               min="1"
               value={form.contracts}
               onChange={(e) => update('contracts', e.target.value)}
@@ -273,6 +290,7 @@ function AddPositionModal({ onClose, onSaved }) {
         <Field label="Entry debit per spread ($)">
           <input
             type="number"
+              inputMode="decimal"
             step="0.01"
             value={form.entry_debit_per_spread}
             onChange={(e) => update('entry_debit_per_spread', e.target.value)}

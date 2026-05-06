@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Share2, TrendingUp, TrendingDown, Minus } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import Sparkline from '../components/Sparkline'
 import clsx from 'clsx'
 
 const SIGNAL_TYPES = [
@@ -140,6 +141,26 @@ export default function TrackRecord() {
               <StatBox label="Paper" value={stats.paper} color="text-zinc-400" />
               <StatBox label="Real" value={stats.real} color="text-white" />
             </div>
+
+            {stats.equityCurve && stats.equityCurve.length >= 2 && (
+              <div className="mt-4 pt-4 border-t border-border">
+                <div className="flex items-baseline justify-between mb-2">
+                  <p className="text-muted text-[10px] uppercase tracking-wider">
+                    Cumulative %
+                  </p>
+                  <p
+                    className={clsx(
+                      'text-sm font-mono-tab font-semibold',
+                      stats.cumPnlPct >= 0 ? 'text-green-400' : 'text-red-400',
+                    )}
+                  >
+                    {stats.cumPnlPct >= 0 ? '+' : ''}
+                    {stats.cumPnlPct.toFixed(0)}%
+                  </p>
+                </div>
+                <Sparkline values={stats.equityCurve} width={320} height={56} />
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3 mb-4">
@@ -289,6 +310,23 @@ function computeStats(rows) {
     ? Math.round(lossesWithPnl.reduce((s, o) => s + Number(o.pnl_percent), 0) / lossesWithPnl.length)
     : null
 
+  // Equity curve: cumulative running pnl_percent in chronological order.
+  // Approximates portfolio % return assuming equal sizing — close enough
+  // for the shareable shape, not a strict P&L attribution.
+  const chronological = resolved
+    .filter((o) => o.pnl_percent != null)
+    .slice()
+    .sort(
+      (a, b) =>
+        new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime(),
+    )
+  let cum = 0
+  const equityCurve = chronological.map((o) => {
+    cum += Number(o.pnl_percent)
+    return cum
+  })
+  const cumPnlPct = equityCurve.length ? equityCurve[equityCurve.length - 1] : 0
+
   return {
     total: resolved.length,
     wins: wins.length,
@@ -305,6 +343,8 @@ function computeStats(rows) {
     avgPnlWins,
     avgPnlLosses,
     bySignalType,
+    equityCurve,
+    cumPnlPct,
   }
 }
 

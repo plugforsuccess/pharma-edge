@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { ExternalLink, Shield } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import Sparkline from '../components/Sparkline'
 import clsx from 'clsx'
 
 const REPO = import.meta.env.VITE_PUBLIC_RECORD_REPO || ''
@@ -84,6 +85,37 @@ export default function PublicRecord() {
         </div>
       </div>
 
+      {stats && stats.equityCurve.length >= 2 && (
+        <div className="bg-card border border-border rounded-xl p-4 mb-3">
+          <div className="flex items-baseline justify-between mb-2">
+            <p className="text-muted text-[10px] uppercase tracking-wider">
+              Cumulative %
+            </p>
+            <p
+              className={clsx(
+                'text-base font-mono-tab font-semibold',
+                stats.cumPnl >= 0 ? 'text-green-400' : 'text-red-400',
+              )}
+            >
+              {stats.cumPnl >= 0 ? '+' : ''}
+              {stats.cumPnl.toFixed(0)}%
+            </p>
+          </div>
+          <Sparkline values={stats.equityCurve} width={400} height={70} />
+        </div>
+      )}
+
+      {stats?.lastUpdated && (
+        <p className="text-muted text-[10px] mb-3">
+          Last updated{' '}
+          {stats.lastUpdated.toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+          })}
+        </p>
+      )}
+
       {stats && (
         <div className="mb-6">
           <div className="grid grid-cols-2 gap-3 mb-3">
@@ -158,7 +190,19 @@ export default function PublicRecord() {
 
 function computeStats(rows) {
   if (!rows?.length) {
-    return { total: 0, resolved: 0, wins: 0, losses: 0, winRate: 0, paper: 0, real: 0, avgPnl: null }
+    return {
+      total: 0,
+      resolved: 0,
+      wins: 0,
+      losses: 0,
+      winRate: 0,
+      paper: 0,
+      real: 0,
+      avgPnl: null,
+      equityCurve: [],
+      cumPnl: 0,
+      lastUpdated: null,
+    }
   }
   const resolved = rows.filter((s) => s.thesis_correct !== null && s.thesis_correct !== undefined)
   const wins = resolved.filter((s) => s.thesis_correct).length
@@ -170,6 +214,28 @@ function computeStats(rows) {
     ? Math.round(withPnl.reduce((sum, s) => sum + Number(s.pnl_percent), 0) / withPnl.length)
     : null
 
+  // Cumulative running % of resolved P&L in chronological order. Same
+  // approximation as TrackRecord — equal-sized signals — enough to read
+  // the shape of the record at a glance.
+  const chrono = withPnl.slice().sort((a, b) => {
+    const ta = new Date(a.outcome_date || a.logged_at).getTime()
+    const tb = new Date(b.outcome_date || b.logged_at).getTime()
+    return ta - tb
+  })
+  let cum = 0
+  const equityCurve = chrono.map((s) => {
+    cum += Number(s.pnl_percent)
+    return cum
+  })
+  const cumPnl = equityCurve.length ? equityCurve[equityCurve.length - 1] : 0
+
+  // Most recent activity timestamp (logged_at OR outcome_date) for the
+  // "Last updated" header.
+  const allTimes = rows.flatMap((r) =>
+    [r.logged_at, r.outcome_date].filter(Boolean).map((t) => new Date(t).getTime()),
+  )
+  const lastUpdated = allTimes.length ? new Date(Math.max(...allTimes)) : null
+
   return {
     total: rows.length,
     resolved: resolved.length,
@@ -179,6 +245,9 @@ function computeStats(rows) {
     paper,
     real,
     avgPnl,
+    equityCurve,
+    cumPnl,
+    lastUpdated,
   }
 }
 

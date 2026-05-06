@@ -404,6 +404,7 @@ function NumberInput({ label, value, onChange, prefix, suffix }) {
         )}
         <input
           type="number"
+              inputMode="decimal"
           step="any"
           value={value}
           onChange={(e) => onChange(e.target.value)}

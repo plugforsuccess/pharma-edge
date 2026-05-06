@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ArrowUpCircle, ArrowDownCircle, Flame, Filter } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useSubscription } from '../hooks/useSubscription'
+import LiveDataStatus from '../components/LiveDataStatus'
 
 // Options flow page — today's per-strike volume + premium + UOA
 // (unusual options activity) across the full streamed universe.
@@ -108,6 +109,8 @@ export default function Flow() {
         </p>
       </div>
 
+      <LiveDataStatus />
+
       <div className="flex gap-2">
         <input
           type="text"
@@ -148,6 +151,18 @@ export default function Flow() {
       {error && (
         <div className="bg-red-950/30 border border-red-900/50 text-red-400 text-xs rounded p-3">
           Couldn't load flow: {error}
+        </div>
+      )}
+
+      {loading && (
+        <div className="bg-card border border-border rounded-xl p-3 space-y-2 animate-pulse" aria-label="Loading flow">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <div className="h-3 w-16 rounded bg-white/[0.04]" />
+              <div className="h-2 rounded bg-white/[0.04]" style={{ width: `${40 + ((i * 9) % 40)}%` }} />
+              <div className="h-3 w-10 rounded bg-white/[0.04] ml-auto" />
+            </div>
+          ))}
         </div>
       )}
 

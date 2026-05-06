@@ -85,8 +85,16 @@ export default function SuggestedPlays({ ticker, isPro }) {
         throw new Error(msg)
       }
       if (!result?.success) throw new Error(result?.error || 'no plays returned')
-      setData(result.data)
-      saveCachedPlays(ticker, result.data)
+      // Anchor the freshness clock to when the server says it was
+      // computed, not when we received the response — so a cached hit
+      // shows the right "expires in" countdown.
+      const serverAgeMs = Number(result.data?.cache_age_ms) || 0
+      const dataWithStamp = {
+        ...result.data,
+        _computed_at: Date.now() - serverAgeMs,
+      }
+      setData(dataWithStamp)
+      saveCachedPlays(ticker, dataWithStamp)
     } catch (err) {
       setError(err.message || String(err))
     } finally {
@@ -114,19 +122,17 @@ export default function SuggestedPlays({ ticker, isPro }) {
   return (
     <div className="bg-card border border-border rounded-xl overflow-hidden">
       <div className="px-4 py-3 flex items-center justify-between border-b border-border">
-        <div className="flex items-center gap-2">
-          <Sparkles size={14} className="text-amber-400" />
-          <h2 className="text-sm font-semibold">Suggested Plays</h2>
-          {data?.from_cache && (
-            <span className="text-[9px] uppercase tracking-wider text-muted">
-              cached
-            </span>
+        <div className="flex items-center gap-2 min-w-0">
+          <Sparkles size={14} className="text-amber-400 shrink-0" />
+          <h2 className="text-sm font-semibold shrink-0">Suggested Plays</h2>
+          {data?._computed_at && (
+            <CacheTimer computedAt={data._computed_at} />
           )}
         </div>
         <button
           onClick={fetchPlays}
           disabled={loading}
-          className="text-xs text-amber-400 hover:text-amber-300 disabled:opacity-50 transition"
+          className="text-xs text-amber-400 hover:text-amber-300 disabled:opacity-50 transition shrink-0"
         >
           {loading ? 'Thinking…' : data ? 'Re-analyze' : 'Generate'}
         </button>
@@ -215,6 +221,37 @@ export default function SuggestedPlays({ ticker, isPro }) {
       </div>
     </div>
   )
+}
+
+// Live "cached Xm ago · expires in Ym" pill. Re-renders every 30s
+// so the user can tell at a glance whether re-analyzing is worthwhile.
+function CacheTimer({ computedAt }) {
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000)
+    return () => clearInterval(id)
+  }, [])
+  const ageMs = Math.max(0, now - computedAt)
+  const remainingMs = PLAYS_CACHE_TTL_MS - ageMs
+  const expired = remainingMs <= 0
+  return (
+    <span
+      className={
+        'text-[9px] uppercase tracking-wider truncate ' +
+        (expired ? 'text-amber-400' : 'text-muted')
+      }
+    >
+      {expired
+        ? 'stale — re-analyze'
+        : `cached ${formatMs(ageMs)} · expires in ${formatMs(remainingMs)}`}
+    </span>
+  )
+}
+
+function formatMs(ms) {
+  const s = Math.max(0, Math.round(ms / 1000))
+  if (s < 60) return `${s}s`
+  return `${Math.round(s / 60)}m`
 }
 
 function PlayCard({ play, onOpenCalculator, onLogSignal }) {

@@ -180,6 +180,7 @@ export default function Settings() {
           value={form.account_size}
           onChange={(v) => update('account_size', v)}
           type="number"
+              inputMode="decimal"
           prefix="$"
           step="any"
           min="0"
@@ -189,6 +190,7 @@ export default function Settings() {
           value={form.max_position_pct}
           onChange={(v) => update('max_position_pct', v)}
           type="number"
+              inputMode="decimal"
           suffix="%"
           step="any"
           min="0"
@@ -198,6 +200,7 @@ export default function Settings() {
           value={form.max_sector_pct}
           onChange={(v) => update('max_sector_pct', v)}
           type="number"
+              inputMode="decimal"
           suffix="%"
           step="any"
           min="0"
@@ -336,7 +339,7 @@ function SubscriptionSection({ tier, isPro }) {
   )
 }
 
-function Input({ label, value, onChange, placeholder, type = 'text', prefix, suffix, step, min }) {
+function Input({ label, value, onChange, placeholder, type = 'text', prefix, suffix, step, min, inputMode }) {
   return (
     <div>
       <label className="text-muted text-[10px] uppercase tracking-wider block mb-1">{label}</label>
@@ -350,6 +353,7 @@ function Input({ label, value, onChange, placeholder, type = 'text', prefix, suf
           type={type}
           step={step}
           min={min}
+          inputMode={inputMode || (type === 'number' ? 'decimal' : undefined)}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
@@ -439,40 +443,59 @@ function PushSection({ userId }) {
 
   const isEnabled = permission === 'granted'
 
-  return (
-    <Section title="Push Notifications">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex-1">
-          <p className="text-white text-sm font-medium">
-            {isEnabled ? 'Enabled' : 'Off'}
-          </p>
-          <p className="text-subtle text-xs mt-0.5">
-            Catalyst reminders + outcome reminders sent to this device alongside email.
-          </p>
-        </div>
-        {isEnabled ? (
-          <button
-            type="button"
-            onClick={disable}
-            disabled={busy}
-            className="flex items-center gap-2 bg-card border border-border hover:border-red-500
-                       text-white text-sm font-semibold rounded-xl px-3 py-2 transition-colors disabled:opacity-50"
-          >
-            <BellOff size={14} />
-            Disable
-          </button>
-        ) : (
+  // When push is off, present it as a one-tap CTA card with a value
+  // pitch — most users won't dig into a small button. When already
+  // enabled we shrink back to a compact status row.
+  if (!isEnabled) {
+    return (
+      <Section title="Push Notifications">
+        <div className="bg-gradient-to-br from-amber-950/40 to-bg-elev/40 border border-amber-400/30 rounded-2xl p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-xl bg-amber-400/15 flex items-center justify-center">
+              <Bell size={15} className="text-amber-400" />
+            </div>
+            <p className="text-fg text-sm font-semibold">Stay in the loop</p>
+          </div>
+          <ul className="text-subtle text-xs leading-relaxed space-y-1 list-disc pl-4">
+            <li>Catalyst reminders 14d / 7d / 1d before resolution</li>
+            <li>Stop-loss alerts when an open position hits −50%</li>
+            <li>Profit-take alerts at +50% / +100% / +200%</li>
+            <li>DTE warning when expiry is ≤ 21 days</li>
+          </ul>
           <button
             type="button"
             onClick={enable}
             disabled={busy}
-            className="flex items-center gap-2 bg-red-600 hover:bg-red-500 disabled:bg-red-950
-                       text-white text-sm font-semibold rounded-xl px-3 py-2 transition-colors"
+            className="w-full flex items-center justify-center gap-2 bg-amber-400 hover:bg-amber-300 disabled:opacity-50 text-bg text-sm font-semibold rounded-xl px-3 py-2.5 transition-colors"
           >
             <Bell size={14} />
-            Enable
+            {busy ? 'Enabling…' : 'Enable Push Alerts'}
           </button>
-        )}
+          {feedback && <p className="text-subtle text-xs">{feedback}</p>}
+        </div>
+      </Section>
+    )
+  }
+
+  return (
+    <Section title="Push Notifications">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1">
+          <p className="text-white text-sm font-medium">Enabled</p>
+          <p className="text-subtle text-xs mt-0.5">
+            Catalyst + position alerts sent to this device alongside email.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={disable}
+          disabled={busy}
+          className="flex items-center gap-2 bg-card border border-border hover:border-red-500
+                     text-white text-sm font-semibold rounded-xl px-3 py-2 transition-colors disabled:opacity-50"
+        >
+          <BellOff size={14} />
+          Disable
+        </button>
       </div>
       {feedback && <p className="text-subtle text-xs">{feedback}</p>}
     </Section>

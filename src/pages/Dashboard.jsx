@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronRight, Cpu, Eye, Plus, TrendingUp } from 'lucide-react'
+import { Activity, ChevronRight, Cpu, Eye, Plus, Sparkles, TrendingUp } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { daysUntil } from '../utils/dates'
@@ -113,6 +113,16 @@ export default function Dashboard() {
 
       <PaperTradingStatus stats={stats} />
 
+      {/* First-run guidance — fades out the moment the user has any
+          surface they could be working from (signal, scanner pick, or
+          a watchlist hit). Avoids the "what do I do next" beat that
+          a new login otherwise lands on. */}
+      {!loading &&
+        stats.total === 0 &&
+        stats.open === 0 &&
+        pendingCandidates === 0 &&
+        watchlistCandidates === 0 && <OnboardingCard navigate={navigate} />}
+
       <OpenPositions />
 
       {/* Queue cards */}
@@ -189,6 +199,66 @@ export default function Dashboard() {
             />
           ))
         )}
+      </div>
+    </div>
+  )
+}
+
+function OnboardingCard({ navigate }) {
+  const steps = [
+    {
+      icon: Activity,
+      title: 'Open the Markets tab',
+      sub: 'See the live GEX matrix for SPY, QQQ, AAPL, and ~50 other names.',
+      cta: 'Markets',
+      onClick: () => navigate('/markets'),
+    },
+    {
+      icon: Sparkles,
+      title: 'Generate Suggested Plays',
+      sub: 'Claude reads the matrix and proposes 0–3 spread setups that fit your account.',
+      cta: 'Generate',
+      onClick: () => navigate('/markets'),
+    },
+    {
+      icon: Plus,
+      title: 'Log a signal',
+      sub: 'Lock the thesis with an immutable SHA-256 hash so it counts toward your record.',
+      cta: 'Log',
+      onClick: () => navigate('/log'),
+    },
+  ]
+  return (
+    <div className="surface rounded-2xl p-4 mb-5 space-y-3 border border-amber-400/20">
+      <div className="flex items-center gap-2">
+        <span className="eyebrow text-[#f4cf8e]">Start Here</span>
+      </div>
+      <p className="text-fg text-sm font-display">
+        Welcome. Here's the loop.
+      </p>
+      <div className="space-y-2">
+        {steps.map((step, i) => (
+          <button
+            key={i}
+            onClick={step.onClick}
+            className="w-full flex items-start gap-3 text-left bg-bg-elev/40 hover:bg-bg-elev rounded-xl p-3 transition"
+          >
+            <div className="w-7 h-7 shrink-0 rounded-lg bg-amber-400/10 flex items-center justify-center text-amber-400">
+              <step.icon size={14} strokeWidth={2} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-baseline gap-2">
+                <span className="text-fg text-[13px] font-semibold">
+                  {i + 1}. {step.title}
+                </span>
+              </div>
+              <p className="text-subtle text-[11px] leading-relaxed mt-0.5">
+                {step.sub}
+              </p>
+            </div>
+            <ChevronRight size={14} className="text-muted shrink-0 mt-1.5" />
+          </button>
+        ))}
       </div>
     </div>
   )

@@ -175,6 +175,9 @@ export default function LogSignal() {
     long_strike: prefill.long_strike != null ? String(prefill.long_strike) : '',
     short_strike:
       prefill.short_strike != null ? String(prefill.short_strike) : '',
+    // Filled by StrikePriceCalculator's onCalculationComplete callback so
+    // we can auto-create the open_positions row after the signal locks.
+    contracts: '1',
     market_cap: '',
     stock_price_at_signal: prefill.stock_price_at_signal || '',
     your_probability: '',
@@ -332,6 +335,48 @@ export default function LogSignal() {
           reviewed_at: new Date().toISOString(),
         })
         .eq('id', candidateId)
+    }
+
+    // Auto-create the open_positions row so monitor-positions starts
+    // tracking P&L immediately. We only create when the user has the
+    // calculator-derived strikes + entry — otherwise we'd be guessing.
+    // Failure here is non-fatal: the user can still tap "+ Add" on the
+    // Open Positions widget to enter manually.
+    const longStrikeNum = num(form.long_strike)
+    const shortStrikeNum = num(form.short_strike)
+    const entryPriceNum = num(form.entry_price)
+    const contractsNum = Math.max(1, parseInt(form.contracts, 10) || 1)
+    if (
+      form.direction !== 'watch' &&
+      form.expiry_date &&
+      longStrikeNum != null &&
+      shortStrikeNum != null &&
+      entryPriceNum != null &&
+      entryPriceNum > 0
+    ) {
+      const strategyType =
+        form.structure === 'bull_call_spread'
+          ? 'BULL_CALL'
+          : form.structure === 'bear_put_spread'
+            ? 'BEAR_PUT'
+            : null
+      if (strategyType) {
+        await supabase.from('open_positions').insert({
+          user_id: user.id,
+          signal_id: data.id,
+          ticker,
+          strategy_type: strategyType,
+          long_strike: longStrikeNum,
+          short_strike: shortStrikeNum,
+          expiration: form.expiry_date,
+          contracts: contractsNum,
+          entry_debit_per_spread: entryPriceNum,
+          thesis: form.thesis.trim() || null,
+          source: isGexFlow ? 'gex_play' : 'catalyst',
+        })
+        // Insert is fire-and-forget on failure (non-fatal) — RLS
+        // violations or a dup row shouldn't block the signal flow.
+      }
     }
 
     setLoading(false)
@@ -553,6 +598,16 @@ export default function LogSignal() {
                 </button>
               ))}
             </div>
+            {form.trade_type === 'real' &&
+              paperDaysRemaining(profile?.paper_trading_started_at) > 0 && (
+                <p className="text-amber-400 text-[11px] leading-relaxed mt-2">
+                  ⚠ You're <strong>{paperDaysRemaining(profile?.paper_trading_started_at)} days</strong>{' '}
+                  into the 90-day paper-trading window. Wiley Edge rules say
+                  no real-money trades until 90+ paper signals are resolved
+                  with a positive edge — switch back to <strong>Paper</strong>{' '}
+                  unless you're consciously overriding the rule.
+                </p>
+              )}
           </div>
 
           <button
@@ -617,17 +672,23 @@ export default function LogSignal() {
               buyStrikeOtmPct={analysis?.strike_suggestion?.buy_strike_pct_otm}
               sellStrikeOtmPct={analysis?.strike_suggestion?.sell_strike_pct_otm}
               onCalculationComplete={(calc) => {
-                if (
-                  !form.entry_price &&
-                  calc?.contracts &&
-                  calc?.totalCost
-                ) {
-                  const perShare =
-                    Number(calc.totalCost) / calc.contracts / 100
-                  if (Number.isFinite(perShare) && perShare > 0) {
-                    update('entry_price', perShare.toFixed(2))
-                  }
-                }
+                // Capture the calculator's authoritative result so the
+                // open_positions row we auto-create on submit gets the
+                // exact strikes/expiry/contracts/debit the user sized to.
+                setForm((prev) => ({
+                  ...prev,
+                  long_strike: calc?.buyStrike ?? prev.long_strike,
+                  short_strike: calc?.sellStrike ?? prev.sellStrike,
+                  expiry_date: calc?.expiry || prev.expiry_date,
+                  contracts:
+                    calc?.contracts != null
+                      ? String(calc.contracts)
+                      : prev.contracts,
+                  entry_price:
+                    !prev.entry_price && calc?.premium
+                      ? calc.premium
+                      : prev.entry_price,
+                }))
               }}
             />
           )}
@@ -797,7 +858,17 @@ export default function LogSignal() {
   )
 }
 
-function Input({ label, value, onChange, placeholder, type = 'text', required, min }) {
+// Returns days remaining in the 90-day paper-trading window. 0 if the
+// user is past the window (or hasn't started — the Dashboard widget
+// stamps paper_trading_started_at on first render).
+function paperDaysRemaining(startedAt) {
+  if (!startedAt) return 0
+  const start = new Date(`${startedAt}T00:00:00Z`).getTime()
+  const elapsed = (Date.now() - start) / 86_400_000
+  return Math.max(0, Math.ceil(90 - elapsed))
+}
+
+function Input({ label, value, onChange, placeholder, type = 'text', required, min, inputMode }) {
   return (
     <div>
       <label className="text-muted text-xs uppercase tracking-wider block mb-1">
@@ -810,6 +881,7 @@ function Input({ label, value, onChange, placeholder, type = 'text', required, m
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         min={min}
+        inputMode={inputMode || (type === 'number' ? 'decimal' : undefined)}
         className="w-full bg-card border border-border text-white placeholder-zinc-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-red-500 transition-colors"
       />
     </div>

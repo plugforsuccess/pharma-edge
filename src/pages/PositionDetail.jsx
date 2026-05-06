@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, X, AlertTriangle, RefreshCw, Check } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
@@ -18,10 +18,12 @@ export default function PositionDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { user } = useAuth()
+  const [searchParams] = useSearchParams()
   const [pos, setPos] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [closeMode, setCloseMode] = useState(false)
+  // Auto-open the close form when arriving via OpenPositions row X.
+  const [closeMode, setCloseMode] = useState(searchParams.get('close') === '1')
   const [exitCredit, setExitCredit] = useState('')
   const [closing, setClosing] = useState(false)
 
@@ -235,6 +237,7 @@ export default function PositionDetail() {
             </label>
             <input
               type="number"
+              inputMode="decimal"
               step="0.01"
               value={exitCredit}
               onChange={(e) => setExitCredit(e.target.value)}

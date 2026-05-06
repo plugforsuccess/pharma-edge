@@ -11,6 +11,7 @@ import ReplaySlider from '../components/ReplaySlider'
 import SuggestedPlays from '../components/SuggestedPlays'
 import TrinityView from '../components/TrinityView'
 import UpgradeNotice from '../components/UpgradeNotice'
+import LiveDataStatus from '../components/LiveDataStatus'
 
 // HOT_TICKERS = the ~50 names the dxlink-worker actually streams
 // (see dxlink-worker/src/tickers.ts). The pill row at the top of the
@@ -171,6 +172,8 @@ export default function Markets() {
         </button>
       </div>
 
+      <LiveDataStatus />
+
       {/* View tabs — switches between single-ticker matrix, 3-ticker
           comparison, and (placeholder) vega exposure. Trinity tab
           hides the ticker picker since it has its own per-column
@@ -324,8 +327,17 @@ export default function Markets() {
         </div>
 
         {loading && (
-          <div className="text-center py-8 text-subtle text-sm">
-            Computing gamma exposure for {ticker}…
+          <div className="space-y-2 py-2 animate-pulse" aria-label="Loading GEX matrix">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <div className="h-3 w-12 rounded bg-white/[0.04]" />
+                <div
+                  className="h-2 rounded bg-white/[0.04]"
+                  style={{ width: `${30 + ((i * 11) % 60)}%` }}
+                />
+                <div className="h-3 w-10 rounded bg-white/[0.04] ml-auto" />
+              </div>
+            ))}
           </div>
         )}
 
@@ -430,11 +442,22 @@ function formatNumber(v) {
 }
 
 function SourceBadge({ source }) {
-  if (source === 'dxlink') {
+  // dxlink data outside RTH means the worker streamed earlier and the
+  // Greeks/OI snapshot is now frozen at the close. Label that distinctly
+  // so users don't think 16:30 ET data is "live".
+  const afterHours = source === 'dxlink' && !isWithinRth()
+  if (source === 'dxlink' && !afterHours) {
     return (
       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-green-950 border border-green-800 text-green-400 text-[9px] uppercase tracking-wider font-semibold">
         <span className="w-1 h-1 rounded-full bg-green-400 animate-pulse" />
         live
+      </span>
+    )
+  }
+  if (source === 'dxlink' && afterHours) {
+    return (
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-950 border border-amber-800 text-amber-400 text-[9px] uppercase tracking-wider font-semibold">
+        after hours
       </span>
     )
   }
@@ -446,6 +469,23 @@ function SourceBadge({ source }) {
     )
   }
   return null
+}
+
+function isWithinRth() {
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    weekday: 'short',
+    hour: 'numeric',
+    minute: 'numeric',
+    hour12: false,
+  })
+  const parts = fmt.formatToParts(new Date())
+  const wd = parts.find((p) => p.type === 'weekday')?.value
+  const hour = Number(parts.find((p) => p.type === 'hour')?.value)
+  const minute = Number(parts.find((p) => p.type === 'minute')?.value)
+  if (wd === 'Sat' || wd === 'Sun') return false
+  const t = hour * 60 + minute
+  return t >= 9 * 60 + 30 && t < 16 * 60
 }
 
 function formatCacheAge(ms) {
