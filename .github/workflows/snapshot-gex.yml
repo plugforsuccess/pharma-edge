@@ -1,0 +1,88 @@
+# Snapshots GEX matrix payloads into gex_history every 5 minutes during
+# US regular trading hours (M–F, 9:30am–4pm ET). The /markets replay
+# slider reads from this table — without these snapshots there's
+# nothing to scrub through.
+#
+# The schedule below uses UTC because GitHub Actions cron is UTC.
+# US Eastern is UTC−5 (EST) / UTC−4 (EDT). We schedule generously to
+# cover both: 13:30–21:00 UTC every weekday hits the full RTH window
+# in EST and overlaps EDT correctly.
+#
+# Required GitHub Actions secrets:
+#   SUPABASE_URL                — https://rghoynbaykeyjbhqmaff.supabase.co
+#   SUPABASE_SERVICE_ROLE_KEY   — service-role key for compute-gex
+#                                  (the function verifies a JWT but we
+#                                  pass the service-role JWT which it
+#                                  accepts as a real user)
+
+name: Snapshot GEX
+
+on:
+  schedule:
+    # */5 minutes within 13:30–20:55 UTC, M-F. Cron in GHA can't span
+    # half-hour boundaries cleanly so we use two entries: the second
+    # half of 13:00 (35, 40, 45, 50, 55) and 14:00–20:55 every 5min.
+    - cron: '35,40,45,50,55 13 * * 1-5'
+    - cron: '*/5 14-20 * * 1-5'
+  workflow_dispatch:
+
+concurrency:
+  group: snapshot-gex
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Snapshot all hot tickers
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          # The hot ticker list is duplicated here so the cron doesn't
+          # need to read TS files. Keep synced with HOT_TICKERS in
+          # src/lib/tickerUniverse.js and TRACKED_TICKERS in
+          # dxlink-worker/src/tickers.ts.
+          TICKERS=(
+            SPY QQQ IWM DIA
+            GLD SLV TLT USO
+            AAPL MSFT NVDA GOOGL AMZN META TSLA
+            AMD AVGO INTC ORCL CRM ADBE NFLX
+            MU WDC
+            JPM GS BAC WFC
+            LLY NVO PFE MRK JNJ UNH ABBV
+            WMT COST HD MCD NKE DIS
+            XOM CVX COP
+            COIN PLTR UBER ARM BABA GME
+          )
+
+          ok=0
+          fail=0
+          for sym in "${TICKERS[@]}"; do
+            resp=$(curl -sS -w "\n%{http_code}" -X POST \
+              "${SUPABASE_URL}/functions/v1/compute-gex" \
+              -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+              -H "Content-Type: application/json" \
+              -d "{\"ticker\":\"${sym}\",\"matrix\":true,\"archive\":true,\"refresh\":true}" \
+              || true)
+            http=$(echo "$resp" | tail -n1)
+            if [ "$http" = "200" ]; then
+              ok=$((ok + 1))
+            else
+              fail=$((fail + 1))
+              echo "::warning::compute-gex ${sym} returned ${http}"
+              echo "$resp" | head -n -1 | head -c 200
+              echo
+            fi
+            # Modest pacing so we don't slam the function or Yahoo
+            # fallback all at once.
+            sleep 0.4
+          done
+          echo "snapshot complete: ok=${ok} fail=${fail}"
+          if [ "$ok" -eq 0 ]; then
+            echo "::error::all tickers failed"
+            exit 1
+          fi

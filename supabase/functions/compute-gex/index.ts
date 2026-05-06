@@ -652,6 +652,11 @@ serve(async (req) => {
       : null
   const forceRefresh = body.refresh === true
   const matrixMode = body.matrix === true
+  // archive=true (used only by the 5-min snapshot cron) tells us to
+  // INSERT the result into gex_history after computing, building the
+  // time-series the /markets replay slider scrubs through. Implies
+  // matrix=true since replay is matrix-only.
+  const archive = body.archive === true
 
   const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
   // Cache key includes mode + expiration override so different views
@@ -714,6 +719,25 @@ serve(async (req) => {
         { onConflict: 'ticker' },
       )
       .then(() => {})
+    // Archive mode: also insert into gex_history so the replay slider
+    // can scrub through the day's snapshots. We don't await this — the
+    // response shouldn't block on the archive write, and an
+    // ON CONFLICT DO NOTHING means a racing cron is harmless.
+    if (archive) {
+      adminClient
+        .from('gex_history')
+        .insert({
+          ticker,
+          snapshot_at: new Date().toISOString(),
+          payload: matrix,
+        })
+        .then(({ error: insertError }) => {
+          if (insertError && insertError.code !== '23505') {
+            // 23505 = unique-violation; ignore (race with another cron run)
+            console.error('[archive] gex_history insert failed:', insertError)
+          }
+        })
+    }
     return json({
       success: true,
       data: { ...matrix, from_cache: false, cache_age_ms: 0 },

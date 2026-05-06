@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, RefreshCw, Activity, Star, Lock, ChevronDown } from 'lucide-react'
+import { ArrowLeft, RefreshCw, Activity, Star, Lock, ChevronDown, Clock, BookOpen } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
@@ -7,6 +7,7 @@ import { useSubscription } from '../hooks/useSubscription'
 import { HOT_TICKERS, TICKER_UNIVERSE } from '../lib/tickerUniverse'
 import GexMatrix from '../components/GexMatrix'
 import TickerDrawer from '../components/TickerDrawer'
+import ReplaySlider from '../components/ReplaySlider'
 import UpgradeNotice from '../components/UpgradeNotice'
 
 // HOT_TICKERS = the ~50 names the dxlink-worker actually streams
@@ -26,6 +27,11 @@ export default function Markets() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  // Replay mode: when active, the time slider feeds historical
+  // snapshot payloads to the matrix instead of the live data fetched
+  // by load(). Toggling off clears the snapshot and we go back to live.
+  const [replayActive, setReplayActive] = useState(false)
+  const [replaySnapshot, setReplaySnapshot] = useState(null)
   // User's watchlist tickers, shown as a separate section in the picker
   // so a biotech a user is tracking shows up here without needing to be
   // hardcoded into TICKERS.
@@ -128,6 +134,27 @@ export default function Markets() {
             Where dealer hedging flow concentrates by strike.
           </p>
         </div>
+        <button
+          onClick={() => setReplayActive((v) => !v)}
+          className={
+            'p-2 transition ' +
+            (replayActive
+              ? 'text-amber-400'
+              : 'text-subtle hover:text-fg')
+          }
+          aria-label="Replay mode"
+          title="Replay today's GEX"
+        >
+          <Clock size={18} />
+        </button>
+        <button
+          onClick={() => navigate('/glossary')}
+          className="p-2 text-subtle hover:text-fg"
+          aria-label="Glossary"
+          title="GEX glossary"
+        >
+          <BookOpen size={18} />
+        </button>
         <button
           onClick={() => load(ticker, { refresh: true })}
           disabled={loading}
@@ -280,8 +307,20 @@ export default function Markets() {
           </div>
         )}
 
-        {!loading && !error && data && <GexMatrix data={data} />}
+        {!loading && !error && (
+          <GexMatrix data={replayActive && replaySnapshot ? replaySnapshot : data} />
+        )}
       </div>
+
+      <ReplaySlider
+        ticker={ticker}
+        active={replayActive}
+        onSnapshot={setReplaySnapshot}
+        onClose={() => {
+          setReplayActive(false)
+          setReplaySnapshot(null)
+        }}
+      />
 
       <p className="text-[10px] text-muted leading-relaxed px-1">
         Live data via Tastytrade DXLink streaming when available; falls
