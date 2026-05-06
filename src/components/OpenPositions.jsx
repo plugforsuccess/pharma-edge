@@ -208,7 +208,7 @@ function AddPositionModal({ onClose, onSaved }) {
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div
         className="relative w-full max-w-md bg-bg-elev border-t border-border rounded-t-2xl p-4 space-y-3 max-h-[85vh] overflow-y-auto"
-        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+        style={{ paddingBottom: 'calc(2rem + env(safe-area-inset-bottom))' }}
       >
         <div className="pt-1 flex justify-center">
           <div className="w-10 h-1 rounded-full bg-border" />
