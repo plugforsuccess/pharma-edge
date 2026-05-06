@@ -1,34 +1,80 @@
-// Curated ticker tracking list.
+// Curated ticker tracking list for the DXLink worker.
 //
-// MVP: just the highest-volume index ETFs and single names. We
-// subscribe to the front-month + next-month chains for each. Total
-// subscription count = ~tickers × 2 expirations × ~80 strikes × 2
-// (call + put) — comfortably under DXLink's per-connection limit on
-// the prod feed.
+// MUST stay synced with HOT_TICKERS in `src/lib/tickerUniverse.js`
+// (frontend) — those are the names the UI shows the green "LIVE" dot
+// next to. If you add a ticker here, add it there too, and vice
+// versa. (Deno workers can't import from src/lib so we duplicate.)
 //
-// Adding a ticker: append below and redeploy the worker. compute-gex
-// will start serving it the moment the first frame lands in
-// dxlink_quotes.
+// We subscribe to the front-month + next-month chain for each ticker.
+// At ~50 tickers × 2 expirations × ~50 strikes × 2 sides × 3 event
+// types we hit ~30,000 dxFeed subscriptions — well under any per-
+// connection cap. Memory footprint stays under 200MB on the Fly VM.
+//
+// Tickers not in this list still work in /markets — compute-gex falls
+// back to Yahoo's 15-min delayed feed so users can pull GEX for any
+// S&P 500 name, just without the real-time stream.
 
 export const TRACKED_TICKERS: string[] = [
-  // Index ETFs
+  // Index ETFs (highest options volume on the planet)
   'SPY',
   'QQQ',
   'IWM',
-  // Mega-cap single names where dealer hedging actually moves the tape
+  'DIA',
+  // Volatility / commodity / rates ETFs
+  'GLD',
+  'SLV',
+  'TLT',
+  'USO',
+  // Mega-cap tech
   'AAPL',
-  'NVDA',
-  'TSLA',
   'MSFT',
-  'AMD',
+  'NVDA',
+  'GOOGL',
   'AMZN',
   'META',
-  'GOOGL',
-  // Large-cap biotechs (keeps the original strategy connected)
+  'TSLA',
+  // Big tech / SaaS / semis
+  'AMD',
+  'AVGO',
+  'INTC',
+  'ORCL',
+  'CRM',
+  'ADBE',
+  'NFLX',
+  // Memory / DRAM
+  'MU',
+  'WDC',
+  // Banks
+  'JPM',
+  'GS',
+  'BAC',
+  'WFC',
+  // Healthcare / pharma
   'LLY',
   'NVO',
-  'MRK',
   'PFE',
+  'MRK',
+  'JNJ',
+  'UNH',
+  'ABBV',
+  // Consumer
+  'WMT',
+  'COST',
+  'HD',
+  'MCD',
+  'NKE',
+  'DIS',
+  // Energy
+  'XOM',
+  'CVX',
+  'COP',
+  // Liquid retail / meme / fintech
+  'COIN',
+  'PLTR',
+  'UBER',
+  'ARM',
+  'BABA',
+  'GME',
 ]
 
 // How many expirations to subscribe to per ticker. 2 = front month +

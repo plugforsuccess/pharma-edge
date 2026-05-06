@@ -4,32 +4,18 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { useSubscription } from '../hooks/useSubscription'
+import { HOT_TICKERS, TICKER_UNIVERSE } from '../lib/tickerUniverse'
 import GexMatrix from '../components/GexMatrix'
 import TickerDrawer from '../components/TickerDrawer'
 import UpgradeNotice from '../components/UpgradeNotice'
 
-// Curated ticker set — index ETFs and the most-liquid single names
-// where dealer hedging flows actually matter, plus a few large-cap
-// biotechs so the page stays connected to the original strategy.
-// Keeping the list short on first ship; users can't add custom tickers
-// from the UI yet (would need a saved-tickers table).
-const TICKERS = [
-  { symbol: 'SPY', label: 'S&P 500' },
-  { symbol: 'QQQ', label: 'Nasdaq-100' },
-  { symbol: 'IWM', label: 'Russell 2000' },
-  { symbol: 'AAPL', label: 'Apple' },
-  { symbol: 'NVDA', label: 'Nvidia' },
-  { symbol: 'TSLA', label: 'Tesla' },
-  { symbol: 'MSFT', label: 'Microsoft' },
-  { symbol: 'AMD', label: 'AMD' },
-  { symbol: 'AMZN', label: 'Amazon' },
-  { symbol: 'META', label: 'Meta' },
-  { symbol: 'GOOGL', label: 'Alphabet' },
-  { symbol: 'LLY', label: 'Eli Lilly' },
-  { symbol: 'NVO', label: 'Novo Nordisk' },
-  { symbol: 'MRK', label: 'Merck' },
-  { symbol: 'PFE', label: 'Pfizer' },
-]
+// HOT_TICKERS = the ~50 names the dxlink-worker actually streams
+// (see dxlink-worker/src/tickers.ts). The pill row at the top of the
+// page shows only these so users see the "live" subset at a glance.
+// The drawer surfaces the full TICKER_UNIVERSE — S&P 500 + SOXX +
+// memory names — for searching anything else (which falls back to
+// Yahoo's 15-min delayed feed via compute-gex's fallback path).
+const TICKERS = HOT_TICKERS
 
 export default function Markets() {
   const navigate = useNavigate()
@@ -307,7 +293,7 @@ export default function Markets() {
       <TickerDrawer
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
-        curated={TICKERS}
+        curated={TICKER_UNIVERSE}
         watchlist={isPro ? watchlist : []}
         gatedSet={gatedTickers}
         selected={ticker}

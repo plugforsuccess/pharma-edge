@@ -129,28 +129,55 @@ export default function TickerDrawer({
             </Section>
           )}
 
-          {filteredCurated.length > 0 && (
-            <Section label="Curated">
-              {filteredCurated.map((t) => {
-                const gated = gatedSet?.has(t.symbol)
-                return (
-                  <Row
-                    key={t.symbol}
-                    symbol={t.symbol}
-                    label={t.label}
-                    locked={gated}
-                    active={selected === t.symbol}
-                    onClick={() => {
-                      if (gated) {
-                        onUpgrade?.()
-                      } else {
-                        onSelect(t.symbol)
-                      }
-                      onClose()
-                    }}
-                  />
-                )
-              })}
+          {/* Hot tickers — the worker streams these in real-time, so
+              they get a green pulse dot. Anything else falls back to
+              Yahoo's 15-min delayed feed. */}
+          {filteredCurated.filter((t) => t.isHot).length > 0 && (
+            <Section label="Live · Real-time stream">
+              {filteredCurated
+                .filter((t) => t.isHot)
+                .map((t) => {
+                  const gated = gatedSet?.has(t.symbol)
+                  return (
+                    <Row
+                      key={t.symbol}
+                      symbol={t.symbol}
+                      label={t.label}
+                      live
+                      locked={gated}
+                      active={selected === t.symbol}
+                      onClick={() => {
+                        if (gated) onUpgrade?.()
+                        else onSelect(t.symbol)
+                        onClose()
+                      }}
+                    />
+                  )
+                })}
+            </Section>
+          )}
+
+          {filteredCurated.filter((t) => !t.isHot).length > 0 && (
+            <Section label="S&P 500 · 15-min delayed">
+              {filteredCurated
+                .filter((t) => !t.isHot)
+                .map((t) => {
+                  const gated = gatedSet?.has(t.symbol)
+                  return (
+                    <Row
+                      key={t.symbol}
+                      symbol={t.symbol}
+                      label={t.label}
+                      locked={gated}
+                      active={selected === t.symbol}
+                      onClick={() => {
+                        if (gated) onUpgrade?.()
+                        else onSelect(t.symbol)
+                        onClose()
+                      }}
+                    />
+                  )
+                })}
             </Section>
           )}
 
@@ -176,7 +203,7 @@ function Section({ label, children }) {
   )
 }
 
-function Row({ symbol, label, starred, locked, active, onClick }) {
+function Row({ symbol, label, starred, locked, live, active, onClick }) {
   return (
     <button
       onClick={onClick}
@@ -188,6 +215,12 @@ function Row({ symbol, label, starred, locked, active, onClick }) {
     >
       <div className="w-3 flex justify-center">
         {starred && <Star size={11} className="fill-amber-400 text-amber-400" />}
+        {!starred && live && (
+          <span
+            className="block w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse"
+            aria-label="Real-time"
+          />
+        )}
         {locked && <Lock size={11} className="text-muted" />}
       </div>
       <div className="flex-1 min-w-0">
