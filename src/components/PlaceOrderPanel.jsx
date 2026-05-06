@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Check, ExternalLink, Loader, X } from 'lucide-react'
+import { AlertTriangle, Check, ExternalLink, Loader, Lock, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import { useSubscription } from '../hooks/useSubscription'
+import UpgradeNotice from './UpgradeNotice'
 import clsx from 'clsx'
 
 const LIVE_CONFIRM_PHRASE = 'LIVE'
 
 export default function PlaceOrderPanel({ signal, calculation, onOrderPlaced }) {
   const { user } = useAuth()
+  const { isPro, limits } = useSubscription()
   const [accounts, setAccounts] = useState([])
   const [accountsError, setAccountsError] = useState('')
   const [selectedAccount, setSelectedAccount] = useState(null)
@@ -113,6 +116,26 @@ export default function PlaceOrderPanel({ signal, calculation, onOrderPlaced }) 
         <p className="text-muted text-xs text-center">
           Run the strike calculator above before placing an order.
         </p>
+      </div>
+    )
+  }
+
+  if (!isPro && !limits.brokerExecutionEnabled) {
+    return (
+      <div className="bg-card border border-amber-400/20 rounded-xl p-4 mb-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <Lock size={14} className="text-amber-400" />
+          <h3 className="text-white text-sm font-semibold">Place Order</h3>
+        </div>
+        <p className="text-subtle text-xs leading-relaxed">
+          Broker execution via Tastytrade is a Pro feature. Free tier
+          users still see the strike calculator and can place orders
+          manually with their broker of choice.
+        </p>
+        <UpgradeNotice
+          message="$39/mo unlocks one-tap broker execution + the rest of Pro."
+          cta="Go Pro"
+        />
       </div>
     )
   }

@@ -1,8 +1,8 @@
 {
   "id": "/?source=pwa",
-  "name": "Pharma Edge",
-  "short_name": "PharmaEdge",
-  "description": "Biotech catalyst signal scanner and trade tracker",
+  "name": "Wiley Edge",
+  "short_name": "WileyEdge",
+  "description": "Catalyst & market structure intelligence — biotech, GEX, and an immutable trade record",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

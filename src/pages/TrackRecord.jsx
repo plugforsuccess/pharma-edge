@@ -56,7 +56,7 @@ export default function TrackRecord() {
 
     if (navigator.share) {
       try {
-        await navigator.share({ title: 'My Pharma Edge Signal Record', text, url })
+        await navigator.share({ title: 'My Wiley Edge Signal Record', text, url })
         return
       } catch {
         // user cancelled or share failed; fall through to clipboard

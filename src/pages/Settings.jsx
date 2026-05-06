@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Bell, BellOff, Check, Copy, ExternalLink, Link2, LogOut, Plus, Trash2 } from 'lucide-react'
+import { Bell, BellOff, Check, Copy, ExternalLink, Link2, LogOut, Plus, Trash2, Zap } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import { useSubscription } from '../hooks/useSubscription'
 import {
   disablePushNotifications,
   enablePushNotifications,
@@ -20,6 +21,7 @@ function slugify(value) {
 
 export default function Settings() {
   const { user, profile, fetchProfile, signOut } = useAuth()
+  const { tier, isPro } = useSubscription()
   const [form, setForm] = useState(initialForm(profile))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -97,6 +99,8 @@ export default function Settings() {
         )}
       </Section>
 
+      <SubscriptionSection tier={tier} isPro={isPro} />
+
       <Section title="Profile">
         <Input
           label="Display Name"
@@ -108,7 +112,7 @@ export default function Settings() {
           label="Public URL Slug"
           value={form.public_slug}
           onChange={(v) => update('public_slug', v)}
-          placeholder="cameron-pharma-edge"
+          placeholder="cameron-wiley"
         />
         {form.public_slug && slugDraft !== form.public_slug && (
           <p className="text-muted text-[10px]">
@@ -266,6 +270,69 @@ function Section({ title, children }) {
       <h3 className="text-subtle text-xs font-semibold uppercase tracking-wider mb-4">{title}</h3>
       <div className="space-y-3">{children}</div>
     </div>
+  )
+}
+
+// Tier card. Shows current plan and either confirms Pro or pitches the
+// upgrade. The "Go Pro" button doesn't open Stripe yet — that wires up
+// once the Stripe webhook + checkout edge function ship. For now it
+// just opens a mailto so a user can flag interest.
+function SubscriptionSection({ tier, isPro }) {
+  return (
+    <Section title="Subscription">
+      {isPro ? (
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-amber-400/10 border border-amber-400/30 flex items-center justify-center">
+            <Zap size={16} className="text-amber-400" />
+          </div>
+          <div className="flex-1">
+            <p className="text-white text-sm font-semibold">Pro</p>
+            <p className="text-subtle text-xs">
+              Full access to scanner, GEX, broker execution, and analysis.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="flex items-center gap-3 mb-3">
+            <div className="w-9 h-9 rounded-lg bg-bg border border-border flex items-center justify-center">
+              <span className="text-subtle text-xs font-semibold">F</span>
+            </div>
+            <div className="flex-1">
+              <p className="text-white text-sm font-semibold">Free</p>
+              <p className="text-subtle text-xs">
+                3 GEX tickers · read-only public records.
+              </p>
+            </div>
+          </div>
+
+          <div className="bg-bg border border-amber-400/20 rounded-lg p-3 space-y-2">
+            <div className="flex items-baseline justify-between">
+              <p className="text-white text-sm font-semibold">Pro</p>
+              <p className="text-amber-400 text-sm font-display">
+                $39<span className="text-xs text-subtle">/mo</span>
+              </p>
+            </div>
+            <ul className="text-subtle text-xs space-y-1 list-disc list-inside">
+              <li>Full GEX list + watchlist tickers</li>
+              <li>Biotech scanner queue + push alerts</li>
+              <li>Full Claude analysis quota</li>
+              <li>Tastytrade execution</li>
+              <li>Hash-anchored track record</li>
+            </ul>
+            <a
+              href="mailto:cameron@wileyedge.com?subject=Wiley%20Edge%20Pro%20interest"
+              className="block w-full text-center bg-amber-400 hover:bg-amber-300 text-bg font-semibold rounded-lg py-2 text-xs transition mt-1"
+            >
+              Go Pro
+            </a>
+            <p className="text-muted text-[10px] text-center">
+              Tier: <span className="font-mono">{tier}</span>
+            </p>
+          </div>
+        </>
+      )}
+    </Section>
   )
 }
 

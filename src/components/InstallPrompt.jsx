@@ -50,10 +50,10 @@ export default function InstallPrompt() {
         <div className="flex items-start justify-between mb-3">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 bg-red-600 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-xs">PE</span>
+              <span className="text-white font-bold text-xs">WE</span>
             </div>
             <div>
-              <p className="text-white text-sm font-semibold">Install Pharma Edge</p>
+              <p className="text-white text-sm font-semibold">Install Wiley Edge</p>
               <p className="text-subtle text-xs">Add to your home screen</p>
             </div>
           </div>

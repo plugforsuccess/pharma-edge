@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react'
-import { ArrowLeft, RefreshCw, Activity, Star } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { ArrowLeft, RefreshCw, Activity, Star, Lock } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import { useSubscription } from '../hooks/useSubscription'
 import GexHeatmap from '../components/GexHeatmap'
+import UpgradeNotice from '../components/UpgradeNotice'
 
 // Curated ticker set — index ETFs and the most-liquid single names
 // where dealer hedging flows actually matter, plus a few large-cap
@@ -31,6 +33,7 @@ const TICKERS = [
 export default function Markets() {
   const navigate = useNavigate()
   const { user } = useAuth()
+  const { isPro, limits } = useSubscription()
   const [ticker, setTicker] = useState(TICKERS[0].symbol)
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -39,6 +42,19 @@ export default function Markets() {
   // so a biotech a user is tracking shows up here without needing to be
   // hardcoded into TICKERS.
   const [watchlist, setWatchlist] = useState([])
+
+  // Free tier sees the first N curated tickers and no watchlist
+  // section; pro sees everything. The Set drives a `gated` flag we
+  // pass into each pill so the lock affordance is visible (better than
+  // hiding the pills entirely — users should see what they'd unlock).
+  const visibleCuratedTickers = useMemo(() => {
+    if (isPro) return TICKERS
+    return TICKERS.slice(0, limits.marketsTickerCap)
+  }, [isPro, limits.marketsTickerCap])
+  const gatedTickers = useMemo(() => {
+    if (isPro) return new Set()
+    return new Set(TICKERS.slice(limits.marketsTickerCap).map((t) => t.symbol))
+  }, [isPro, limits.marketsTickerCap])
 
   useEffect(() => {
     if (!user) return
@@ -122,43 +138,61 @@ export default function Markets() {
 
       {/* Ticker picker — horizontal scroll keeps the grid mobile-friendly.
           Watchlist tickers come first (with a star) so the user's own picks
-          are reachable without scrolling past the curated list. */}
+          are reachable without scrolling past the curated list. Pro-only
+          tickers render with a lock affordance so free users see what
+          they'd unlock rather than the list silently being shorter. */}
       <div className="-mx-4 px-4 overflow-x-auto">
         <div className="flex gap-2 pb-1">
-          {watchlist.map((sym) => (
-            <button
-              key={`wl-${sym}`}
-              onClick={() => setTicker(sym)}
-              className={
-                'shrink-0 inline-flex items-center gap-1 px-3 py-1.5 rounded-full border text-xs font-medium transition ' +
-                (ticker === sym
-                  ? 'bg-brand text-bg border-brand'
-                  : 'bg-card text-fg border-amber-400/40 hover:border-amber-400/70')
-              }
-            >
-              <Star size={11} className="fill-current" />
-              {sym}
-            </button>
-          ))}
-          {watchlist.length > 0 && (
+          {isPro &&
+            watchlist.map((sym) => (
+              <button
+                key={`wl-${sym}`}
+                onClick={() => setTicker(sym)}
+                className={
+                  'shrink-0 inline-flex items-center gap-1 px-3 py-1.5 rounded-full border text-xs font-medium transition ' +
+                  (ticker === sym
+                    ? 'bg-brand text-bg border-brand'
+                    : 'bg-card text-fg border-amber-400/40 hover:border-amber-400/70')
+                }
+              >
+                <Star size={11} className="fill-current" />
+                {sym}
+              </button>
+            ))}
+          {isPro && watchlist.length > 0 && (
             <div className="shrink-0 w-px bg-border mx-1" aria-hidden />
           )}
-          {TICKERS.map((t) => (
-            <button
-              key={t.symbol}
-              onClick={() => setTicker(t.symbol)}
-              className={
-                'shrink-0 px-3 py-1.5 rounded-full border text-xs font-medium transition ' +
-                (ticker === t.symbol
-                  ? 'bg-brand text-bg border-brand'
-                  : 'bg-card text-subtle border-border hover:text-fg hover:border-border-hover')
-              }
-            >
-              {t.symbol}
-            </button>
-          ))}
+          {(isPro ? TICKERS : [...visibleCuratedTickers, ...TICKERS.slice(limits.marketsTickerCap)]).map((t) => {
+            const gated = gatedTickers.has(t.symbol)
+            const active = ticker === t.symbol
+            return (
+              <button
+                key={t.symbol}
+                onClick={() => (gated ? navigate('/settings') : setTicker(t.symbol))}
+                className={
+                  'shrink-0 inline-flex items-center gap-1 px-3 py-1.5 rounded-full border text-xs font-medium transition ' +
+                  (active
+                    ? 'bg-brand text-bg border-brand'
+                    : gated
+                      ? 'bg-card text-muted border-border hover:text-subtle'
+                      : 'bg-card text-subtle border-border hover:text-fg hover:border-border-hover')
+                }
+                title={gated ? 'Upgrade to Pro to unlock' : t.label}
+              >
+                {gated && <Lock size={10} />}
+                {t.symbol}
+              </button>
+            )
+          })}
         </div>
       </div>
+
+      {!isPro && (
+        <UpgradeNotice
+          message={`Free tier: ${limits.marketsTickerCap} tickers. Pro unlocks the full list, watchlist tickers, scanner queue, and broker execution.`}
+          cta="Go Pro"
+        />
+      )}
 
       {/* Header stats */}
       {data && (

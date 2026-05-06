@@ -1,14 +1,17 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Check, X, ChevronDown, ChevronUp, Sparkles, Star } from 'lucide-react'
+import { ArrowLeft, Check, X, ChevronDown, ChevronUp, Sparkles, Star, Lock } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import { useSubscription } from '../hooks/useSubscription'
 import { directionLabelLong } from '../lib/design'
+import UpgradeNotice from '../components/UpgradeNotice'
 import clsx from 'clsx'
 
 export default function ScannerCandidates() {
   const navigate = useNavigate()
   const { user } = useAuth()
+  const { isPro, limits } = useSubscription()
   const [candidates, setCandidates] = useState([])
   const [loading, setLoading] = useState(true)
   const [expanded, setExpanded] = useState(null)
@@ -136,6 +139,44 @@ export default function ScannerCandidates() {
         candidate_id: candidate.id,
       },
     })
+  }
+
+  if (!isPro && !limits.scannerEnabled) {
+    return (
+      <div className="px-4 pt-6 pb-8 space-y-4">
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => navigate(-1)}
+            aria-label="Back"
+            className="w-9 h-9 bg-card border border-border rounded-xl flex items-center justify-center text-zinc-400"
+          >
+            <ArrowLeft size={16} />
+          </button>
+          <div>
+            <h1 className="text-white font-bold">Scanner Queue</h1>
+            <p className="text-subtle text-xs">Pro feature</p>
+          </div>
+        </div>
+        <div className="bg-card border border-amber-400/20 rounded-xl p-6 text-center space-y-3">
+          <div className="w-12 h-12 mx-auto rounded-xl bg-amber-400/10 border border-amber-400/30 flex items-center justify-center">
+            <Lock size={20} className="text-amber-400" />
+          </div>
+          <div>
+            <h2 className="text-white font-semibold">Scanner queue is Pro-only</h2>
+            <p className="text-subtle text-xs mt-1 leading-relaxed">
+              The biotech scanner runs daily across CT.gov, SEC EDGAR, and FDA
+              press releases, then surfaces the highest-conviction catalysts
+              for review.
+            </p>
+          </div>
+          <UpgradeNotice
+            message="$39/mo unlocks the scanner queue, push alerts, and the rest of Pro."
+            cta="Go Pro"
+          />
+        </div>
+      </div>
+    )
   }
 
   return (

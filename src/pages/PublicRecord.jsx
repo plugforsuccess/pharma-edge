@@ -61,11 +61,11 @@ export default function PublicRecord() {
       <div className="mb-8">
         <div className="flex items-center gap-3 mb-2">
           <div className="w-10 h-10 bg-red-600 rounded-xl flex items-center justify-center">
-            <span className="text-white font-bold text-sm">PE</span>
+            <span className="text-white font-bold text-sm">WE</span>
           </div>
           <div>
             <h1 className="text-white font-bold text-lg">
-              {profile?.display_name || 'Pharma Edge Trader'}
+              {profile?.display_name || 'Wiley Edge Trader'}
             </h1>
             <p className="text-subtle text-xs">Public Signal Record</p>
           </div>
@@ -149,7 +149,7 @@ export default function PublicRecord() {
           href="/"
           className="text-subtle text-sm font-bold hover:text-red-400 transition-colors"
         >
-          PHARMA EDGE
+          WILEY EDGE
         </a>
       </div>
     </div>
@@ -324,7 +324,7 @@ function NotFoundPage() {
         This public record doesn't exist or has been set to private.
       </p>
       <a href="/" className="text-red-400 text-sm hover:text-red-300">
-        Back to Pharma Edge →
+        Back to Wiley Edge →
       </a>
     </div>
   )

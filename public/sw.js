@@ -42,7 +42,7 @@ self.addEventListener('push', (event) => {
     data = { body: event.data ? event.data.text() : '' }
   }
 
-  const title = data.title || 'Pharma Edge'
+  const title = data.title || 'Wiley Edge'
   const options = {
     body: data.body || 'New update',
     icon: '/icon-192.png',
