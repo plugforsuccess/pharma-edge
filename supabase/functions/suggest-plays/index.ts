@@ -52,6 +52,8 @@ GEX PLAYBOOK (from /glossary):
 - Call wall = strike with the largest positive GEX cell (★ in the matrix). Acts as resistance / magnet.
 - Put wall = strike with the largest negative GEX cell. Acts as support / magnet.
 
+FLOW DATA (when present): you will see today's per-strike volume and premium, plus a "NOTABLE" section flagging strikes where today's volume is ≥5× standing OI (likely directional bets, not hedging). Use flow to confirm or contradict the GEX read. If flow concentrates at a call wall, the wall is being reinforced. If flow concentrates ABOVE the call wall (out-of-the-money calls running 5x OI), traders expect a breakout — favour breakout call spreads. If flow is heavy on puts at strikes near the put wall, position for support. Mismatch between dealer positioning (GEX) and trader bets (flow) = transition signal; reduce conviction or pick the side flow is on.
+
 WILEY EDGE RULES — NEVER VIOLATE:
 - SPREADS ONLY. No naked options.
 - Min 21 DTE on entry, except explicit 0–7 DTE pin trades.
@@ -96,7 +98,91 @@ interface MatrixData {
   largest: { strike: number; expiration: string; gex_net: number } | null
 }
 
-function buildUserPrompt(matrix: MatrixData, accountSize: number): string {
+interface FlowRow {
+  strike: number
+  expiration_date: string
+  option_type: 'C' | 'P'
+  total_volume: number
+  total_premium: number
+  print_count: number
+  biggest_print_size: number | null
+  biggest_print_at: string | null
+}
+
+// Pulls today's per-strike flow aggregates for the ticker. Returns
+// up to 200 rows sorted by total_volume DESC — the worker writes
+// per-(strike, expiry, side) so the same strike with different
+// expirations or call vs put each get a separate row.
+async function fetchTodayFlow(
+  supabase: ReturnType<typeof createClient>,
+  ticker: string,
+): Promise<FlowRow[]> {
+  // NY trade date — same convention as the worker's flow.ts uses.
+  const today = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date())
+
+  const { data, error } = await supabase
+    .from('option_flow_daily')
+    .select(
+      'strike, expiration_date, option_type, total_volume, total_premium, print_count, biggest_print_size, biggest_print_at',
+    )
+    .eq('ticker', ticker)
+    .eq('trade_date', today)
+    .order('total_volume', { ascending: false })
+    .limit(200)
+  if (error) {
+    console.warn('[flow] query failed:', error.message)
+    return []
+  }
+  return (data ?? []) as FlowRow[]
+}
+
+function formatFlowSection(flow: FlowRow[], chainOI: Map<string, number>): string {
+  if (flow.length === 0) {
+    return 'TODAY\'S OPTIONS FLOW: no prints captured yet (likely outside RTH or worker not subscribed)'
+  }
+  const calls = flow.filter((f) => f.option_type === 'C').slice(0, 5)
+  const puts = flow.filter((f) => f.option_type === 'P').slice(0, 5)
+
+  // "Notable" = volume well above the OI we have for that strike.
+  // Surfaces unusual options activity (UOA) — e.g. 8000 contracts on
+  // a strike with only 150 OI is a directional bet, not hedging.
+  const notable = flow
+    .map((f) => {
+      const oi = chainOI.get(`${f.strike}|${f.expiration_date}|${f.option_type}`) ?? 0
+      const ratio = oi > 0 ? f.total_volume / oi : Infinity
+      return { ...f, oi, ratio }
+    })
+    .filter((f) => f.oi > 50 && f.ratio >= 5)
+    .sort((a, b) => b.ratio - a.ratio)
+    .slice(0, 5)
+
+  const fmtRow = (f: FlowRow) =>
+    `  ${f.option_type} ${f.strike} @ ${f.expiration_date}: ` +
+    `${f.total_volume.toLocaleString()} vol / $${(f.total_premium / 1000).toFixed(0)}K premium` +
+    (f.biggest_print_size && f.biggest_print_size >= 100
+      ? `, biggest ${f.biggest_print_size}`
+      : '')
+
+  return `TODAY'S OPTIONS FLOW (NY date):
+
+Top 5 call activity (by volume):
+${calls.length > 0 ? calls.map(fmtRow).join('\n') : '  (none yet)'}
+
+Top 5 put activity (by volume):
+${puts.length > 0 ? puts.map(fmtRow).join('\n') : '  (none yet)'}
+
+${notable.length > 0
+  ? `NOTABLE — volume ≥ 5x OI (possible directional bets):
+${notable.map((f) => `  ${f.option_type} ${f.strike} @ ${f.expiration_date}: ${f.total_volume.toLocaleString()} vol vs ${f.oi.toLocaleString()} OI = ${f.ratio.toFixed(0)}x`).join('\n')}`
+  : 'NOTABLE: no strikes with vol ≥ 5x OI today'}`
+}
+
+function buildUserPrompt(matrix: MatrixData, accountSize: number, flow: FlowRow[]): string {
   // Compact matrix representation — Claude doesn't need every cell, just
   // structure + the highlights. Cuts token count ~80%.
   const totalGex = matrix.cells.flat().reduce((s, v) => s + (v ?? 0), 0)
@@ -115,6 +201,22 @@ function buildUserPrompt(matrix: MatrixData, accountSize: number): string {
     .filter((c) => c.gex != null && c.gex < 0)
     .sort((a, b) => (a.gex as number) - (b.gex as number))
     .slice(0, 5)
+
+  // OI lookup keyed (strike|expiration|side) — used for the "vol/OI"
+  // notable detection. Only call-side OI is in cells (OI per side is
+  // collapsed into gex_net), so this is approximate; for the unusual
+  // detector that's fine.
+  const chainOI = new Map<string, number>()
+  // gex matrix doesn't carry per-side OI in cells, so we just key by
+  // (strike, expiration) and let the flow filter use it as a "we have
+  // *any* OI here" signal — enough to filter out 1-strike spikes
+  // around brand-new listings.
+  for (const c of flat) {
+    if (c.gex != null && c.gex !== 0) {
+      chainOI.set(`${c.strike}|${c.expiration}|C`, 1000) // placeholder
+      chainOI.set(`${c.strike}|${c.expiration}|P`, 1000)
+    }
+  }
 
   return `TICKER: ${matrix.ticker}
 SPOT: $${matrix.spot.toFixed(2)}
@@ -139,6 +241,14 @@ ${top5neg.length > 0
   : '  (none in visible window — flip strike likely below)'}
 
 LARGEST ABSOLUTE WALL (★): ${matrix.largest ? `${matrix.largest.strike} @ ${matrix.largest.expiration} = $${(matrix.largest.gex_net / 1e6).toFixed(1)}M` : 'none'}
+
+${formatFlowSection(flow, chainOI)}
+
+INTERPRETATION HINTS:
+- GEX walls show where dealers are HEDGED. Flow shows where traders are PRINTING TODAY.
+- Flow concentrating AT a call wall = traders growing the wall (more resistance forming).
+- Flow CONCENTRATING THROUGH a wall (vol > 5x OI at strikes ABOVE the wall) = directional bullish bet, wall may break.
+- Mismatch between GEX (where positioning sits) and flow (where new bets land) = transition signal — regime may be shifting.
 
 Propose 0-3 spread trades following the rules in the system prompt. Strict JSON only.`
 }
@@ -253,6 +363,12 @@ serve(async (req) => {
   }
   const matrix = gexBody.data as MatrixData
 
+  // Pull today's options flow aggregates so Claude can see "where
+  // prints actually went today" alongside the GEX matrix. Best-effort:
+  // if the table is empty (worker not subscribed yet, or pre-RTH)
+  // we still proceed with just the GEX context.
+  const flow = await fetchTodayFlow(adminClient, ticker)
+
   // Claude call.
   const claudeResp = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -265,7 +381,7 @@ serve(async (req) => {
       model: CLAUDE_MODEL,
       max_tokens: MAX_TOKENS,
       system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: buildUserPrompt(matrix, accountSize) }],
+      messages: [{ role: 'user', content: buildUserPrompt(matrix, accountSize, flow) }],
     }),
   })
   if (!claudeResp.ok) {

@@ -32,6 +32,12 @@ import {
 import { DxLinkClient, type SubSpec } from './dxlink.ts'
 import { applyEvent, registerSymbol, startFlushLoop } from './store.ts'
 import {
+  applyTrade,
+  registerOption as registerOptionForFlow,
+  startFlowFlushLoop,
+  startFlowPruneLoop,
+} from './flow.ts'
+import {
   EXPIRATIONS_PER_TICKER,
   STRIKE_WINDOW_PCT,
   TRACKED_TICKERS,
@@ -130,6 +136,8 @@ async function buildSubscriptionPlan(
 async function main() {
   console.log('[main] booting Wiley Edge DXLink worker')
   startFlushLoop()
+  startFlowFlushLoop()
+  startFlowPruneLoop()
 
   let session: SessionAuth = await login()
   console.log('[main] tastytrade session OK')
@@ -158,6 +166,15 @@ async function main() {
       symbol: opt.streamer,
       kind: 'option',
       underlying: opt.ticker,
+      expiration_date: opt.expirationDate,
+      strike: opt.strike,
+      option_type: opt.optionType,
+    })
+    // Mirror into the flow module so Trade events know how to bucket
+    // this symbol without re-parsing the OCC string.
+    registerOptionForFlow({
+      symbol: opt.streamer,
+      ticker: opt.ticker,
       expiration_date: opt.expirationDate,
       strike: opt.strike,
       option_type: opt.optionType,
@@ -199,9 +216,22 @@ async function main() {
             day_volume: numOrNull(ev.dayVolume),
           })
           return
-        case 'Trade':
-          applyEvent(sym, { last: numOrNull(ev.price) })
+        case 'Trade': {
+          // Twin destinations:
+          //   1. dxlink_quotes — store the latest print as `last` so
+          //      compute-gex has a fresh mid value during low-quote
+          //      windows.
+          //   2. flow aggregator — every print becomes part of today's
+          //      per-strike volume / premium bucket.
+          const price = numOrNull(ev.price)
+          const size = numOrNull(ev.size)
+          const eventTime = numOrNull(ev.time)
+          if (price != null) applyEvent(sym, { last: price })
+          if (price != null && size != null) {
+            applyTrade(sym, price, size, eventTime ?? undefined)
+          }
           return
+        }
       }
     },
   })
@@ -218,6 +248,7 @@ async function main() {
     allSpecs.push({ type: 'Quote', symbol: opt.streamer })
     allSpecs.push({ type: 'Greeks', symbol: opt.streamer })
     allSpecs.push({ type: 'Summary', symbol: opt.streamer })
+    allSpecs.push({ type: 'Trade', symbol: opt.streamer })
   }
   const CHUNK = 500
   for (let i = 0; i < allSpecs.length; i += CHUNK) {
@@ -264,9 +295,17 @@ async function main() {
             strike: opt.strike,
             option_type: opt.optionType,
           })
+          registerOptionForFlow({
+            symbol: opt.streamer,
+            ticker: opt.ticker,
+            expiration_date: opt.expirationDate,
+            strike: opt.strike,
+            option_type: opt.optionType,
+          })
           newSpecs.push({ type: 'Quote', symbol: opt.streamer })
           newSpecs.push({ type: 'Greeks', symbol: opt.streamer })
           newSpecs.push({ type: 'Summary', symbol: opt.streamer })
+          newSpecs.push({ type: 'Trade', symbol: opt.streamer })
           options.push(opt)
         }
       }

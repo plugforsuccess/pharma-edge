@@ -34,7 +34,7 @@ const FEED_FIELDS: Record<EventType, string[]> = {
   Quote:   ['eventType', 'eventSymbol', 'bidPrice', 'askPrice'],
   Greeks:  ['eventType', 'eventSymbol', 'volatility', 'delta', 'gamma', 'theta', 'vega', 'rho'],
   Summary: ['eventType', 'eventSymbol', 'openInterest', 'prevDayClosePrice', 'dayVolume'],
-  Trade:   ['eventType', 'eventSymbol', 'price'],
+  Trade:   ['eventType', 'eventSymbol', 'time', 'price', 'size'],
   Profile: ['eventType', 'eventSymbol'],
 }
 
