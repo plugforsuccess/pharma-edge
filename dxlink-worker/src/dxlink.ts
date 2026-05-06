@@ -45,6 +45,10 @@ const KEEPALIVE_INTERVAL_MS = 30_000
 const KEEPALIVE_TIMEOUT_MS = 60_000
 const RECONNECT_BACKOFF_BASE_MS = 1_000
 const RECONNECT_BACKOFF_MAX_MS = 60_000
+// dxFeed rejects oversized FEED_SUBSCRIPTION frames as "Failed to send
+// frame" and closes the connection. 500 entries × ~50 bytes/entry stays
+// well under typical 64KB practical WS frame limits.
+const SUBSCRIPTION_BATCH_SIZE = 500
 
 export class DxLinkClient {
   private ws: WebSocket | null = null
@@ -86,11 +90,20 @@ export class DxLinkClient {
   async subscribe(specs: SubSpec[]) {
     for (const s of specs) this.subscribed.add(`${s.type}|${s.symbol}`)
     if (this.feedReady && this.ws?.readyState === WebSocket.OPEN) {
+      this.sendSubscriptionBatches(specs, false)
+    }
+  }
+
+  // Splits subscription frames into chunks of SUBSCRIPTION_BATCH_SIZE.
+  // Only the first frame carries reset=true; subsequent frames append.
+  private sendSubscriptionBatches(specs: SubSpec[], reset: boolean) {
+    for (let i = 0; i < specs.length; i += SUBSCRIPTION_BATCH_SIZE) {
+      const chunk = specs.slice(i, i + SUBSCRIPTION_BATCH_SIZE)
       this.sendFrame({
         type: 'FEED_SUBSCRIPTION',
         channel: FEED_CHANNEL,
-        reset: false,
-        add: specs,
+        reset: reset && i === 0,
+        add: chunk,
       })
     }
   }
@@ -182,15 +195,13 @@ export class DxLinkClient {
               const [type, symbol] = key.split('|')
               specs.push({ type: type as EventType, symbol })
             }
-            // Reset = true ensures the server clears any stale state
-            // for this channel before installing the new list.
-            this.sendFrame({
-              type: 'FEED_SUBSCRIPTION',
-              channel: FEED_CHANNEL,
-              reset: true,
-              add: specs,
-            })
-            console.log(`[dxlink] resubscribed to ${specs.length} symbols`)
+            // Reset = true on first chunk clears stale server-side
+            // state; subsequent chunks append.
+            this.sendSubscriptionBatches(specs, true)
+            console.log(
+              `[dxlink] resubscribed to ${specs.length} symbols ` +
+                `in ${Math.ceil(specs.length / SUBSCRIPTION_BATCH_SIZE)} batches`,
+            )
           }
         }
         return
