@@ -40,6 +40,12 @@ const CACHE_TTL_MS = 5 * 60 * 1000
 // rather than serve stale data.
 const DXLINK_FRESH_MS = 30 * 1000
 
+// Matrix mode constants. Skylit-style 2D heatmap shows ~4 expirations
+// across and ~25 strikes deep, all clustered tight to ATM.
+const MATRIX_MAX_EXPIRATIONS = 4
+const MATRIX_MAX_STRIKES = 30
+const MATRIX_STRIKE_WINDOW_PCT = 0.05  // ATM ± 5%
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
@@ -80,6 +86,12 @@ interface StrikeResult {
 interface ComputeArgs {
   ticker: string
   preferredDte: number
+  expirationOverride: string | null   // 'YYYY-MM-DD' or null
+}
+
+interface ExpirationInfo {
+  date: string                         // YYYY-MM-DD
+  dte: number
 }
 
 // ─── Primary path: read from dxlink_quotes ──────────────────────
@@ -108,7 +120,7 @@ async function computeFromDxLink(
   supabase: ReturnType<typeof createClient>,
   args: ComputeArgs,
 ): Promise<{ result?: ComputeOutput; error?: string }> {
-  const { ticker, preferredDte } = args
+  const { ticker, preferredDte, expirationOverride } = args
 
   // Pull equity row + every option row for this ticker in one query.
   const { data: rows, error } = await supabase
@@ -136,7 +148,7 @@ async function computeFromDxLink(
   const optionRows = (rows as DxQuoteRow[]).filter((r) => r.kind === 'option')
   if (optionRows.length === 0) return { error: 'no dxlink option rows for ticker' }
 
-  // Group by expiration_date → pick closest to preferredDte.
+  // Group by expiration_date → pick override if requested, else closest to preferredDte.
   const byExpiry = new Map<string, DxQuoteRow[]>()
   for (const r of optionRows) {
     if (!r.expiration_date) continue
@@ -145,24 +157,30 @@ async function computeFromDxLink(
     byExpiry.set(r.expiration_date, arr)
   }
   const todayMs = Date.now()
-  let bestExp: string | null = null
-  let bestDelta = Infinity
-  for (const [exp] of byExpiry) {
+  const dteOf = (exp: string) => {
     const expMs = new Date(exp + 'T00:00:00Z').getTime()
-    const days = Math.max(0, Math.round((expMs - todayMs) / 86_400_000))
-    const delta = Math.abs(days - preferredDte)
-    if (delta < bestDelta) {
-      bestDelta = delta
-      bestExp = exp
+    return Math.max(0, Math.round((expMs - todayMs) / 86_400_000))
+  }
+  const availableExpirations: ExpirationInfo[] = Array.from(byExpiry.keys())
+    .map((date) => ({ date, dte: dteOf(date) }))
+    .sort((a, b) => a.dte - b.dte)
+
+  let bestExp: string | null = null
+  if (expirationOverride && byExpiry.has(expirationOverride)) {
+    bestExp = expirationOverride
+  } else {
+    let bestDelta = Infinity
+    for (const [exp] of byExpiry) {
+      const delta = Math.abs(dteOf(exp) - preferredDte)
+      if (delta < bestDelta) {
+        bestDelta = delta
+        bestExp = exp
+      }
     }
   }
   if (!bestExp) return { error: 'no expirations in dxlink rows' }
   const chosenRows = byExpiry.get(bestExp)!
-  const expMs = new Date(bestExp + 'T00:00:00Z').getTime()
-  const daysToExpiration = Math.max(
-    1,
-    Math.round((expMs - todayMs) / 86_400_000),
-  )
+  const daysToExpiration = Math.max(1, dteOf(bestExp))
 
   // Aggregate per strike — call + put rows merge into one StrikeResult.
   const lo = spot * (1 - STRIKE_WINDOW_PCT)
@@ -202,21 +220,43 @@ async function computeFromDxLink(
   const results = Array.from(byStrike.values()).sort((a, b) => a.strike - b.strike)
   if (results.length === 0) return { error: 'no strikes had OI + gamma in cache' }
 
-  return { result: shapeOutput(ticker, spot, bestExp, daysToExpiration, results, 'dxlink') }
+  return {
+    result: shapeOutput(
+      ticker,
+      spot,
+      bestExp,
+      daysToExpiration,
+      results,
+      'dxlink',
+      availableExpirations,
+    ),
+  }
 }
 
 // ─── Fallback: Yahoo (15-min delayed, computes BS gamma here) ───
 async function computeFromYahoo(args: ComputeArgs): Promise<{ result?: ComputeOutput; error?: string }> {
-  const { ticker, preferredDte } = args
+  const { ticker, preferredDte, expirationOverride } = args
   let chain
   try {
-    chain = await fetchYahooChain(ticker, preferredDte)
+    chain = await fetchYahooChain(ticker, preferredDte, expirationOverride)
   } catch (err) {
     if (err instanceof YahooError) return { error: err.message }
     throw err
   }
-  const { spot, expirationDate, daysToExpiration, strikes } = chain
+  const { spot, expirationDate, daysToExpiration, strikes, expirations } = chain
   if (!Number.isFinite(spot) || spot <= 0) return { error: `no spot for ${ticker}` }
+
+  // Build available_expirations from the unix-timestamp list Yahoo gave us.
+  const todayMs = Date.now()
+  const availableExpirations: ExpirationInfo[] = expirations
+    .map((u) => {
+      const ms = u * 1000
+      const d = new Date(ms)
+      const date = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
+      const dte = Math.max(0, Math.round((ms - todayMs) / 86_400_000))
+      return { date, dte }
+    })
+    .sort((a, b) => a.dte - b.dte)
 
   const lo = spot * (1 - STRIKE_WINDOW_PCT)
   const hi = spot * (1 + STRIKE_WINDOW_PCT)
@@ -249,7 +289,269 @@ async function computeFromYahoo(args: ComputeArgs): Promise<{ result?: ComputeOu
   if (results.length === 0) return { error: 'no strikes had OI' }
   results.sort((a, b) => a.strike - b.strike)
 
-  return { result: shapeOutput(ticker, spot, expirationDate, daysToExpiration, results, 'yahoo') }
+  return {
+    result: shapeOutput(
+      ticker,
+      spot,
+      expirationDate,
+      daysToExpiration,
+      results,
+      'yahoo',
+      availableExpirations,
+    ),
+  }
+}
+
+// ─── Matrix mode (strikes × expirations 2D grid) ────────────────
+//
+// The /markets page renders a Skylit-style heatmap: rows = strikes,
+// columns = expirations, cell color = GEX. computeMatrixFromDxLink
+// pulls every option row for the ticker in one query (we already have
+// it cached) and pivots into a 2D grid. Yahoo path fans out parallel
+// chain fetches, one per expiration.
+
+interface MatrixOutput {
+  ticker: string
+  spot: number
+  source: 'dxlink' | 'yahoo'
+  computed_at: string
+  expirations: ExpirationInfo[]
+  strikes: number[]                      // descending; same length as cells.length
+  cells: (number | null)[][]             // [strike_idx][exp_idx] -> gex_net
+  largest: {
+    strike: number
+    expiration: string
+    gex_net: number
+    strike_index: number
+    expiration_index: number
+  } | null
+}
+
+function todayDateStr(): string {
+  const d = new Date()
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
+}
+
+async function computeMatrixFromDxLink(
+  supabase: ReturnType<typeof createClient>,
+  ticker: string,
+): Promise<{ matrix?: MatrixOutput; error?: string }> {
+  const { data: rows, error } = await supabase
+    .from('dxlink_quotes')
+    .select(
+      'symbol, kind, underlying, expiration_date, strike, option_type, ' +
+        'bid, ask, mid, iv, gamma, open_interest, updated_at',
+    )
+    .or(`symbol.eq.${ticker},underlying.eq.${ticker}`)
+  if (error) return { error: `dxlink_quotes query: ${error.message}` }
+
+  const equity = (rows as DxQuoteRow[] | null)?.find((r) => r.kind === 'equity')
+  if (!equity) return { error: 'no dxlink subscription for ticker' }
+  const spot = equity.mid ?? equity.bid ?? equity.ask
+  if (!spot || spot <= 0) return { error: 'no spot price in dxlink_quotes' }
+
+  const equityAge = Date.now() - new Date(equity.updated_at).getTime()
+  if (equityAge > DXLINK_FRESH_MS) {
+    return { error: `dxlink stale (${Math.round(equityAge / 1000)}s old)` }
+  }
+
+  // Group option rows by (expiration, strike, side).
+  type Bucket = { call_oi: number; call_gamma: number; put_oi: number; put_gamma: number }
+  const byExp = new Map<string, Map<number, Bucket>>()
+  for (const r of (rows as DxQuoteRow[]).filter((r) => r.kind === 'option')) {
+    if (!r.expiration_date || r.strike == null) continue
+    let strikeMap = byExp.get(r.expiration_date)
+    if (!strikeMap) {
+      strikeMap = new Map()
+      byExp.set(r.expiration_date, strikeMap)
+    }
+    let bucket = strikeMap.get(r.strike)
+    if (!bucket) {
+      bucket = { call_oi: 0, call_gamma: 0, put_oi: 0, put_gamma: 0 }
+      strikeMap.set(r.strike, bucket)
+    }
+    if (r.option_type === 'C') {
+      bucket.call_oi = r.open_interest ?? 0
+      bucket.call_gamma = r.gamma ?? 0
+    } else if (r.option_type === 'P') {
+      bucket.put_oi = r.open_interest ?? 0
+      bucket.put_gamma = r.gamma ?? 0
+    }
+  }
+
+  // Pick the next N future expirations.
+  const today = todayDateStr()
+  const futureExps = Array.from(byExp.keys())
+    .filter((e) => e >= today)
+    .sort()
+    .slice(0, MATRIX_MAX_EXPIRATIONS)
+  if (futureExps.length === 0) return { error: 'no future expirations in cache' }
+
+  return buildMatrix(ticker, spot, 'dxlink', futureExps, (exp, strike) => {
+    const bucket = byExp.get(exp)?.get(strike)
+    if (!bucket) return null
+    const callContribution = bucket.call_oi * bucket.call_gamma * spot * spot
+    const putContribution = bucket.put_oi * bucket.put_gamma * spot * spot
+    return callContribution - putContribution
+  }, (exp) => {
+    return Array.from(byExp.get(exp)?.keys() ?? [])
+  })
+}
+
+async function computeMatrixFromYahoo(
+  ticker: string,
+): Promise<{ matrix?: MatrixOutput; error?: string }> {
+  // First call gives us the chain for the nearest expiry plus the full
+  // expirations list. Then fan out parallel calls for the next N-1.
+  let firstChain
+  try {
+    firstChain = await fetchYahooChain(ticker, 0)
+  } catch (err) {
+    if (err instanceof YahooError) return { error: err.message }
+    throw err
+  }
+  const { spot, expirations: expiryUnixes } = firstChain
+  if (!Number.isFinite(spot) || spot <= 0) return { error: `no spot for ${ticker}` }
+
+  const todayUnix = Math.floor(Date.now() / 1000)
+  const futureUnixes = expiryUnixes
+    .filter((u) => u >= todayUnix)
+    .slice(0, MATRIX_MAX_EXPIRATIONS)
+  if (futureUnixes.length === 0) return { error: 'no future expirations from yahoo' }
+
+  // Format unix → YYYY-MM-DD; same as fetchYahooChain's date format.
+  const expDate = (u: number): string => {
+    const d = new Date(u * 1000)
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
+  }
+
+  // Fetch each expiration's chain in parallel (skip the first — we
+  // already have it from the bootstrap call).
+  const firstDate = expDate(futureUnixes[0])
+  const chains = await Promise.all(
+    futureUnixes.map(async (u, i) => {
+      if (i === 0 && expDate(firstChain.expirationUnix) === firstDate) {
+        return firstChain
+      }
+      try {
+        return await fetchYahooChain(ticker, 0, expDate(u))
+      } catch {
+        return null
+      }
+    }),
+  )
+
+  // Index gamma + OI per (expDate, strike).
+  type YBucket = { callOI: number; callIV: number | null; putOI: number; putIV: number | null }
+  const byExp = new Map<string, Map<number, YBucket>>()
+  const dteByExp = new Map<string, number>()
+  for (let i = 0; i < chains.length; i++) {
+    const chain = chains[i]
+    if (!chain) continue
+    const date = chain.expirationDate
+    dteByExp.set(date, chain.daysToExpiration)
+    const strikeMap = new Map<number, YBucket>()
+    for (const s of chain.strikes) {
+      strikeMap.set(s.strike, {
+        callOI: s.callOI,
+        callIV: s.callIV,
+        putOI: s.putOI,
+        putIV: s.putIV,
+      })
+    }
+    byExp.set(date, strikeMap)
+  }
+  const futureExps = Array.from(byExp.keys()).sort().slice(0, MATRIX_MAX_EXPIRATIONS)
+  if (futureExps.length === 0) return { error: 'no chains came back from yahoo' }
+
+  return buildMatrix(ticker, spot, 'yahoo', futureExps, (exp, strike) => {
+    const bucket = byExp.get(exp)?.get(strike)
+    if (!bucket) return null
+    const dte = dteByExp.get(exp) ?? 30
+    const t = Math.max(dte, 1) / 365
+    const sigmaCall = bucket.callIV ?? bucket.putIV ?? 0
+    const sigmaPut = bucket.putIV ?? bucket.callIV ?? 0
+    const gC = bsGamma(spot, strike, t, sigmaCall)
+    const gP = bsGamma(spot, strike, t, sigmaPut)
+    const dealerNotional = spot * spot
+    const gexCall = +(bucket.callOI * gC * dealerNotional)
+    const gexPut = -(bucket.putOI * gP * dealerNotional)
+    return gexCall + gexPut
+  }, (exp) => {
+    return Array.from(byExp.get(exp)?.keys() ?? [])
+  }, dteByExp)
+}
+
+// Common builder — picks the strike window centered on spot, applies
+// the gex(exp, strike) closure to every cell, and finds the largest.
+function buildMatrix(
+  ticker: string,
+  spot: number,
+  source: 'dxlink' | 'yahoo',
+  expirations: string[],
+  gexFor: (exp: string, strike: number) => number | null,
+  strikesIn: (exp: string) => number[],
+  dteByExp?: Map<string, number>,
+): { matrix?: MatrixOutput; error?: string } {
+  // Strike union across all expirations, trimmed to ATM ± window,
+  // capped to MATRIX_MAX_STRIKES centered on spot, descending order.
+  const lo = spot * (1 - MATRIX_STRIKE_WINDOW_PCT)
+  const hi = spot * (1 + MATRIX_STRIKE_WINDOW_PCT)
+  const strikeSet = new Set<number>()
+  for (const exp of expirations) {
+    for (const k of strikesIn(exp)) {
+      if (k >= lo && k <= hi) strikeSet.add(k)
+    }
+  }
+  let strikes = Array.from(strikeSet).sort((a, b) => b - a)
+  if (strikes.length > MATRIX_MAX_STRIKES) {
+    let centerIdx = strikes.findIndex((s) => s <= spot)
+    if (centerIdx < 0) centerIdx = strikes.length - 1
+    const half = Math.floor(MATRIX_MAX_STRIKES / 2)
+    const start = Math.max(0, Math.min(strikes.length - MATRIX_MAX_STRIKES, centerIdx - half))
+    strikes = strikes.slice(start, start + MATRIX_MAX_STRIKES)
+  }
+  if (strikes.length === 0) return { error: 'no strikes within window' }
+
+  const cells: (number | null)[][] = []
+  let largest: MatrixOutput['largest'] = null
+  for (let i = 0; i < strikes.length; i++) {
+    const row: (number | null)[] = []
+    for (let j = 0; j < expirations.length; j++) {
+      const v = gexFor(expirations[j], strikes[i])
+      row.push(v)
+      if (v != null && (largest == null || Math.abs(v) > Math.abs(largest.gex_net))) {
+        largest = {
+          strike: strikes[i],
+          expiration: expirations[j],
+          gex_net: v,
+          strike_index: i,
+          expiration_index: j,
+        }
+      }
+    }
+    cells.push(row)
+  }
+
+  const todayMs = Date.now()
+  const expirationInfos: ExpirationInfo[] = expirations.map((date) => {
+    const dte = dteByExp?.get(date) ??
+      Math.max(0, Math.round((new Date(date + 'T00:00:00Z').getTime() - todayMs) / 86_400_000))
+    return { date, dte }
+  })
+
+  return {
+    matrix: {
+      ticker: ticker.toUpperCase(),
+      spot,
+      source,
+      computed_at: new Date().toISOString(),
+      expirations: expirationInfos,
+      strikes,
+      cells,
+      largest,
+    },
+  }
 }
 
 // ─── Common output shaping ──────────────────────────────────────
@@ -258,6 +560,7 @@ interface ComputeOutput {
   spot: number
   expiration: string
   days_to_expiration: number
+  available_expirations: ExpirationInfo[]
   strikes: StrikeResult[]
   total_gex: number
   zero_gamma_strike: number | null
@@ -274,6 +577,7 @@ function shapeOutput(
   daysToExpiration: number,
   results: StrikeResult[],
   source: 'dxlink' | 'yahoo',
+  availableExpirations: ExpirationInfo[],
 ): ComputeOutput {
   let cumulative = 0
   let zeroGammaStrike: number | null = null
@@ -298,6 +602,7 @@ function shapeOutput(
     spot,
     expiration,
     days_to_expiration: daysToExpiration,
+    available_expirations: availableExpirations,
     strikes: results,
     total_gex: totalGex,
     zero_gamma_strike: zeroGammaStrike,
@@ -341,15 +646,25 @@ serve(async (req) => {
   const preferredDte = Number.isFinite(Number(body.preferred_dte))
     ? Math.max(1, Math.min(365, Number(body.preferred_dte)))
     : 30
+  const expirationOverride =
+    typeof body.expiration === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(body.expiration)
+      ? body.expiration
+      : null
   const forceRefresh = body.refresh === true
+  const matrixMode = body.matrix === true
 
   const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+  // Cache key includes mode + expiration override so different views
+  // of the same ticker don't trample each other in the snapshot.
+  const cacheKey = matrixMode
+    ? `${ticker}|matrix`
+    : (expirationOverride ? `${ticker}|${expirationOverride}` : ticker)
 
   if (!forceRefresh) {
     const { data: cached } = await adminClient
       .from('gex_snapshots')
       .select('payload, computed_at')
-      .eq('ticker', ticker)
+      .eq('ticker', cacheKey)
       .maybeSingle()
     if (cached?.payload && cached.computed_at) {
       const age = Date.now() - new Date(cached.computed_at).getTime()
@@ -362,11 +677,58 @@ serve(async (req) => {
     }
   }
 
+  // Matrix mode short-circuits — different output shape, different
+  // pipeline. DXLink first, Yahoo fallback like the single-exp path.
+  if (matrixMode) {
+    let matrix: MatrixOutput | null = null
+    let dxErr: string | null = null
+    try {
+      const dx = await computeMatrixFromDxLink(adminClient, ticker)
+      if (dx.matrix) matrix = dx.matrix
+      else dxErr = dx.error ?? 'dxlink unknown error'
+    } catch (e) {
+      dxErr = e instanceof Error ? e.message : 'dxlink threw'
+    }
+    if (!matrix) {
+      try {
+        const y = await computeMatrixFromYahoo(ticker)
+        if (y.matrix) matrix = y.matrix
+        else {
+          return json(
+            { success: false, error: `dxlink: ${dxErr}; yahoo: ${y.error}` },
+            502,
+          )
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        return json(
+          { success: false, error: `dxlink: ${dxErr}; yahoo: ${msg}` },
+          502,
+        )
+      }
+    }
+    adminClient
+      .from('gex_snapshots')
+      .upsert(
+        { ticker: cacheKey, payload: matrix, computed_at: new Date().toISOString() },
+        { onConflict: 'ticker' },
+      )
+      .then(() => {})
+    return json({
+      success: true,
+      data: { ...matrix, from_cache: false, cache_age_ms: 0 },
+    })
+  }
+
   // Try DXLink cache first; fall back to Yahoo on any failure.
   let result: ComputeOutput | null = null
   let dxLinkError: string | null = null
   try {
-    const dx = await computeFromDxLink(adminClient, { ticker, preferredDte })
+    const dx = await computeFromDxLink(adminClient, {
+      ticker,
+      preferredDte,
+      expirationOverride,
+    })
     if (dx.result) result = dx.result
     else dxLinkError = dx.error ?? 'dxlink unknown error'
   } catch (e) {
@@ -375,7 +737,7 @@ serve(async (req) => {
 
   if (!result) {
     try {
-      const y = await computeFromYahoo({ ticker, preferredDte })
+      const y = await computeFromYahoo({ ticker, preferredDte, expirationOverride })
       if (y.result) result = y.result
       else {
         return json(
@@ -400,7 +762,7 @@ serve(async (req) => {
     .from('gex_snapshots')
     .upsert(
       {
-        ticker,
+        ticker: cacheKey,
         payload: result,
         computed_at: new Date().toISOString(),
       },

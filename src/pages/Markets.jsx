@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { useSubscription } from '../hooks/useSubscription'
-import GexHeatmap from '../components/GexHeatmap'
+import GexMatrix from '../components/GexMatrix'
 import TickerDrawer from '../components/TickerDrawer'
 import UpgradeNotice from '../components/UpgradeNotice'
 
@@ -88,9 +88,12 @@ export default function Markets() {
     setError(null)
     setData(null)
     try {
+      // matrix:true asks compute-gex for the strikes×expirations grid
+      // (Skylit-style heatmap) instead of the single-expiration shape.
+      const body = { ticker: sym, refresh, matrix: true }
       const { data: result, error: invokeErr } = await supabase.functions.invoke(
         'compute-gex',
-        { body: { ticker: sym, refresh } },
+        { body },
       )
       if (invokeErr) {
         const parsed = await readErrorBody(invokeErr)
@@ -223,7 +226,9 @@ export default function Markets() {
                 <ChevronDown size={16} className="text-subtle" />
               </button>
               <div className="text-xs text-subtle flex items-center gap-2 flex-wrap">
-                <span>exp {data.expiration} · {data.days_to_expiration}d</span>
+                <span>
+                  {data.expirations?.length ?? 0} expirations · {data.strikes?.length ?? 0} strikes
+                </span>
                 <SourceBadge source={data.source} />
                 {data.from_cache && (
                   <span className="text-muted">
@@ -242,27 +247,20 @@ export default function Markets() {
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-2 text-xs">
-            <Stat
-              label="Net GEX"
-              value={formatGex(data.total_gex)}
-              tone={data.total_gex >= 0 ? 'pos' : 'neg'}
-            />
-            <Stat
-              label="Flip"
-              value={
-                data.zero_gamma_strike != null
-                  ? `$${formatNumber(data.zero_gamma_strike)}`
-                  : '—'
-              }
-              tone="neutral"
-            />
-            <Stat
-              label="Largest call"
-              value={`$${formatNumber(data.largest_positive_strike)}`}
-              tone="pos"
-            />
-          </div>
+          {data.largest && (
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <Stat
+                label="Largest wall"
+                value={`$${formatNumber(data.largest.strike)}`}
+                tone={data.largest.gex_net >= 0 ? 'pos' : 'neg'}
+              />
+              <Stat
+                label="Wall expires"
+                value={data.largest.expiration}
+                tone="neutral"
+              />
+            </div>
+          )}
         </div>
       )}
 
@@ -296,7 +294,7 @@ export default function Markets() {
           </div>
         )}
 
-        {!loading && !error && data && <GexHeatmap data={data} />}
+        {!loading && !error && data && <GexMatrix data={data} />}
       </div>
 
       <p className="text-[10px] text-muted leading-relaxed px-1">

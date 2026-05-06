@@ -239,18 +239,41 @@ function parseChain(raw: unknown, ticker: string): YahooChain {
   }
 }
 
-// Public API: fetch the chain for the closest expiration to preferredDte
-// (defaults to ~30 days). Yahoo only returns one expiry per call, so if
-// the closest expiry isn't the front month we round-trip a second time.
+// Public API: fetch the chain for either an explicit YYYY-MM-DD
+// `expirationOverride` (when the user picked one) or the closest
+// expiration to `preferredDte` (default ~30 days). Yahoo only returns
+// one expiry per call, so if the closest expiry isn't the front month
+// we round-trip a second time with the explicit unix timestamp.
 export async function fetchYahooChain(
   ticker: string,
   preferredDte = 30,
+  expirationOverride?: string | null,
 ): Promise<YahooChain> {
   // First call: nearest expiration + the full list of available dates.
   const raw = await fetchYahooRaw(ticker)
   const chain = parseChain(raw, ticker)
 
   if (chain.expirations.length <= 1) return chain
+
+  // Honour an explicit expirationOverride if present and matches a
+  // listed expiry; otherwise fall back to the preferredDte heuristic.
+  if (expirationOverride) {
+    const wantUnix = chain.expirations.find(
+      (u) => dateFromUnix(u).date === expirationOverride,
+    )
+    if (wantUnix && wantUnix !== chain.expirationUnix) {
+      try {
+        const raw2 = await fetchYahooRaw(ticker, wantUnix)
+        return parseChain(raw2, ticker)
+      } catch {
+        return chain
+      }
+    }
+    if (wantUnix === chain.expirationUnix) return chain
+    // Override didn't match any available expiration — fall through
+    // to the DTE heuristic so the user still gets *something*.
+  }
+
   if (Math.abs(chain.daysToExpiration - preferredDte) <= 4) return chain
 
   // Pick the expiration with the smallest |days - preferred| from the
