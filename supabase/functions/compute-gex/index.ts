@@ -1,9 +1,15 @@
-// Pharma Edge — compute-gex edge function.
+// Wiley Edge — compute-gex edge function.
 //
 // Computes Gamma Exposure (GEX) per strike for a single ticker so the
 // /markets page can render a heatmap of where dealer hedging flow is
-// concentrated — same idea as SpotGamma / gexstream.com, but
-// self-computed from Tastytrade option chains so we own the data.
+// concentrated — same idea as SpotGamma / gexstream.com.
+//
+// Data source: Yahoo Finance v7 options endpoint. We tried Tastytrade
+// REST /market-data first but production routes live equity + option
+// quotes through DXLink streaming only — REST returns 502 on prod.
+// Yahoo's options endpoint gives spot + full chain (OI + IV per
+// strike) in a single REST call with no auth, which is exactly what
+// we need.
 //
 // Math:
 //   γ(S,K,T,σ,r) = N'(d1) / (S · σ · √T)
@@ -14,24 +20,13 @@
 //   (Convention: dealers are net short calls / long puts to retail, so
 //    call-side OI implies positive dealer gamma at that strike.)
 //
-// Returned in "$ per 1% underlying move" units (we divide raw γ·OI·S²
-// by 100 once on output) so numbers are readable in the UI.
-//
 // Auth: real user JWT (verify_jwt=true at the platform level + getUser
-// here). No rate limiting yet — option-chain calls are cheap on
-// Tastytrade and the page only triggers one request per tab click.
+// here). 5-minute cache via the gex_snapshots table; refresh:true
+// bypasses.
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import {
-  fetchEquityLast,
-  fetchNestedChain,
-  fetchOptionQuotes,
-  TastytradeError,
-  type ChainExpiration,
-  type EquityQuoteDiagnostic,
-  type OptionQuote,
-} from './tastytrade.ts'
+import { fetchYahooChain, YahooError } from './yahoo.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')
@@ -43,9 +38,6 @@ const RISK_FREE = 0.045
 // Strike window around spot — dealer hedging gamma decays sharply at
 // the wings, so we cut off rather than computing the full chain.
 const STRIKE_WINDOW_PCT = 0.30
-// gex_snapshots cache TTL — short enough that the heatmap reflects
-// real intraday movement, long enough to absorb a tab-mash on the
-// /markets ticker picker.
 const CACHE_TTL_MS = 5 * 60 * 1000
 
 const corsHeaders = {
@@ -61,13 +53,10 @@ function json(body: unknown, status = 200): Response {
   })
 }
 
-// Standard normal pdf — N'(x) = (1/√(2π)) · e^(-x²/2)
 function normPdf(x: number): number {
   return Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI)
 }
 
-// Black-Scholes gamma. Returns 0 if any input is degenerate (zero σ,
-// non-positive T, etc.) — we want to skip the strike, not crash.
 function bsGamma(
   spot: number,
   strike: number,
@@ -94,137 +83,74 @@ interface StrikeResult {
   gex_net: number
 }
 
-function pickExpiration(
-  chain: ChainExpiration[],
-  preferredDte = 30,
-): ChainExpiration | null {
-  if (chain.length === 0) return null
-  // Standard expirations only (skip weeklies on >2 DTE); in practice
-  // the chain comes back with the right ones near the front month, so
-  // just rank by |dte - preferred|.
-  const valid = chain.filter((e) => e.daysToExpiration > 0)
-  if (valid.length === 0) return null
-  valid.sort(
-    (a, b) =>
-      Math.abs(a.daysToExpiration - preferredDte) -
-      Math.abs(b.daysToExpiration - preferredDte),
-  )
-  return valid[0]
-}
-
 interface ComputeArgs {
   ticker: string
   preferredDte: number
-  expirationOverride: string | null
 }
 
-async function computeGex(
-  supabase: ReturnType<typeof createClient>,
-  args: ComputeArgs,
-) {
-  const { ticker, preferredDte, expirationOverride } = args
+async function computeGex(args: ComputeArgs) {
+  const { ticker, preferredDte } = args
 
-  const quoteDiagnostics: EquityQuoteDiagnostic[] = []
-  const spot = await fetchEquityLast(supabase, ticker, quoteDiagnostics)
-  if (spot == null || spot <= 0) {
-    return {
-      error: `no live quote for ${ticker} — Tastytrade ${
-        Deno.env.get('TASTYTRADE_BASE_URL')?.includes('cert.') ? 'sandbox' : 'production'
-      } returned no usable price`,
-      diagnostics: quoteDiagnostics,
-    }
+  const chain = await fetchYahooChain(ticker, preferredDte)
+  const { spot, expirationDate, daysToExpiration, strikes } = chain
+  if (!Number.isFinite(spot) || spot <= 0) {
+    return { error: `no spot price for ${ticker}` }
+  }
+  if (strikes.length === 0) {
+    return { error: `empty option chain for ${ticker}` }
   }
 
-  const chain = await fetchNestedChain(supabase, ticker)
-  if (chain.length === 0) {
-    return { error: `no option chain returned for ${ticker}` }
-  }
-
-  const expiration = expirationOverride
-    ? chain.find((e) => e.expirationDate === expirationOverride) ?? null
-    : pickExpiration(chain, preferredDte)
-  if (!expiration) {
-    return { error: `no usable expiration for ${ticker}` }
-  }
-
-  // Trim to ATM ± window so we don't pay quote-fetch latency on far
-  // wings that contribute negligibly to gamma anyway.
+  // Trim to ATM ± window so we don't render bars for far wings that
+  // contribute negligibly to gamma anyway.
   const lo = spot * (1 - STRIKE_WINDOW_PCT)
   const hi = spot * (1 + STRIKE_WINDOW_PCT)
-  const trimmedStrikes = expiration.strikes.filter(
-    (s) => s.strike >= lo && s.strike <= hi,
-  )
+  const trimmedStrikes = strikes.filter((s) => s.strike >= lo && s.strike <= hi)
   if (trimmedStrikes.length === 0) {
     return { error: `no strikes within ±${STRIKE_WINDOW_PCT * 100}% of spot` }
   }
 
-  // One batched market-data call — call symbols + put symbols in the
-  // same request.
-  const allSymbols = trimmedStrikes.flatMap((s) => [s.callSymbol, s.putSymbol])
-  let quotes: Map<string, OptionQuote>
-  try {
-    quotes = await fetchOptionQuotes(supabase, allSymbols)
-  } catch (err) {
-    const msg = err instanceof TastytradeError ? err.message : 'quote fetch failed'
-    return { error: msg }
-  }
-
-  const timeYears = Math.max(expiration.daysToExpiration, 1) / 365
+  const timeYears = Math.max(daysToExpiration, 1) / 365
   const results: StrikeResult[] = []
 
   for (const s of trimmedStrikes) {
-    const callQ = quotes.get(s.callSymbol)
-    const putQ = quotes.get(s.putSymbol)
-    const oiCall = callQ?.openInterest ?? 0
-    const oiPut = putQ?.openInterest ?? 0
-    if (oiCall === 0 && oiPut === 0) continue
+    if (s.callOI === 0 && s.putOI === 0) continue
 
-    const ivCall = callQ?.impliedVolatility ?? null
-    const ivPut = putQ?.impliedVolatility ?? null
-    const sigmaCall = ivCall ?? ivPut ?? 0
-    const sigmaPut = ivPut ?? ivCall ?? 0
-
+    const sigmaCall = s.callIV ?? s.putIV ?? 0
+    const sigmaPut = s.putIV ?? s.callIV ?? 0
     const gammaCall = bsGamma(spot, s.strike, timeYears, sigmaCall, RISK_FREE)
     const gammaPut = bsGamma(spot, s.strike, timeYears, sigmaPut, RISK_FREE)
 
-    // 100 = contract multiplier. Dividing by 100 again converts the
-    // per-1$-move dollar gamma into per-1%-move dollar gamma so the
-    // numbers fit on a chart axis: γ · OI · 100 · S² · 0.01 = γ · OI · S²
+    // 100 = contract multiplier. Final units are dealer dollar gamma
+    // (γ · OI · 100 · S²) ÷ 100 to fit on a chart axis as $ / 1% move.
     const dealerNotional = spot * spot
-    const gexCall = +(oiCall * gammaCall * dealerNotional)
-    const gexPut = -(oiPut * gammaPut * dealerNotional)
+    const gexCall = +(s.callOI * gammaCall * dealerNotional)
+    const gexPut = -(s.putOI * gammaPut * dealerNotional)
 
     results.push({
       strike: s.strike,
-      oi_call: oiCall,
-      oi_put: oiPut,
-      iv_call: ivCall,
-      iv_put: ivPut,
+      oi_call: s.callOI,
+      oi_put: s.putOI,
+      iv_call: s.callIV,
+      iv_put: s.putIV,
       gex_call: gexCall,
       gex_put: gexPut,
       gex_net: gexCall + gexPut,
     })
   }
 
-  results.sort((a, b) => a.strike - b.strike)
   if (results.length === 0) {
     return { error: 'no strikes had open interest' }
   }
 
   // Zero-gamma flip: where cumulative GEX (from low strike upward)
-  // changes sign. SpotGamma's "flip" interpretation — below it dealers
-  // are short gamma and amplify volatility, above it they're long
-  // gamma and dampen.
+  // changes sign. Below it dealers are short gamma and amplify
+  // volatility; above it they're long gamma and dampen.
   let cumulative = 0
   let zeroGammaStrike: number | null = null
   for (let i = 0; i < results.length; i++) {
     const prev = cumulative
     cumulative += results[i].gex_net
-    if (prev <= 0 && cumulative > 0) {
-      zeroGammaStrike = results[i].strike
-      break
-    }
-    if (prev >= 0 && cumulative < 0) {
+    if ((prev <= 0 && cumulative > 0) || (prev >= 0 && cumulative < 0)) {
       zeroGammaStrike = results[i].strike
       break
     }
@@ -242,8 +168,8 @@ async function computeGex(
   return {
     ticker: ticker.toUpperCase(),
     spot,
-    expiration: expiration.expirationDate,
-    days_to_expiration: expiration.daysToExpiration,
+    expiration: expirationDate,
+    days_to_expiration: daysToExpiration,
     strikes: results,
     total_gex: totalGex,
     zero_gamma_strike: zeroGammaStrike,
@@ -286,20 +212,15 @@ serve(async (req) => {
   const preferredDte = Number.isFinite(Number(body.preferred_dte))
     ? Math.max(1, Math.min(365, Number(body.preferred_dte)))
     : 30
-  const expirationOverride = body.expiration ? String(body.expiration) : null
   const forceRefresh = body.refresh === true
 
   const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-
-  // Cache key: ticker + expiry override (so callers asking for a
-  // specific expiration don't get a stale front-month payload back).
-  const cacheKey = expirationOverride ? `${ticker}|${expirationOverride}` : ticker
 
   if (!forceRefresh) {
     const { data: cached } = await adminClient
       .from('gex_snapshots')
       .select('payload, computed_at')
-      .eq('ticker', cacheKey)
+      .eq('ticker', ticker)
       .maybeSingle()
     if (cached?.payload && cached.computed_at) {
       const age = Date.now() - new Date(cached.computed_at).getTime()
@@ -313,25 +234,15 @@ serve(async (req) => {
   }
 
   try {
-    const result = await computeGex(adminClient, {
-      ticker,
-      preferredDte,
-      expirationOverride,
-    })
+    const result = await computeGex({ ticker, preferredDte })
     if ('error' in result) {
-      return json({
-        success: false,
-        error: result.error,
-        diagnostics: 'diagnostics' in result ? result.diagnostics : undefined,
-      }, 502)
+      return json({ success: false, error: result.error }, 502)
     }
-    // Fire-and-forget cache write — failure here shouldn't block the
-    // response. Worst case, next hit recomputes.
     adminClient
       .from('gex_snapshots')
       .upsert(
         {
-          ticker: cacheKey,
+          ticker,
           payload: result,
           computed_at: new Date().toISOString(),
         },
@@ -343,8 +254,11 @@ serve(async (req) => {
       data: { ...result, from_cache: false, cache_age_ms: 0 },
     })
   } catch (err) {
-    if (err instanceof TastytradeError) {
-      return json({ success: false, error: err.message, status: err.status }, 502)
+    if (err instanceof YahooError) {
+      return json(
+        { success: false, error: err.message, status: err.status },
+        502,
+      )
     }
     const msg = err instanceof Error ? err.message : String(err)
     return json({ success: false, error: msg }, 500)
