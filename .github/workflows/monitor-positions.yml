@@ -1,0 +1,41 @@
+# Polls open positions every 5 min during US RTH and fires alerts
+# when Wiley Edge thresholds hit (-50% stop, +50/+100/+200 profit
+# ladder, 21 DTE warning, expiring tomorrow).
+#
+# Idempotent on `triggers_fired` JSONB so repeated cron runs only
+# send a given alert once per position.
+
+name: Monitor open positions
+
+on:
+  schedule:
+    - cron: '35,40,45,50,55 13 * * 1-5'   # 13:35–13:55 UTC = 9:35–9:55 ET (DST)
+    - cron: '*/5 14-20 * * 1-5'           # 14:00–20:55 UTC = 10:00–16:55 ET
+  workflow_dispatch:
+
+concurrency:
+  group: monitor-positions
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Invoke monitor-positions edge function
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          resp=$(curl -sS -w "\n%{http_code}" -X POST \
+            "${SUPABASE_URL}/functions/v1/monitor-positions" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{}')
+          http=$(echo "$resp" | tail -n1)
+          body=$(echo "$resp" | head -n -1)
+          echo "monitor-positions status=${http} body=${body}"
+          if [ "$http" != "200" ]; then
+            echo "::error::monitor-positions returned ${http}"
+            exit 1
+          fi

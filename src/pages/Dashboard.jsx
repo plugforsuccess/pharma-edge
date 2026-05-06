@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext'
 import { daysUntil } from '../utils/dates'
 import { catalystLabel, directionLabel } from '../lib/design'
 import NotificationCenter from '../components/NotificationCenter'
+import OpenPositions from '../components/OpenPositions'
 import PaperTradingStatus from '../components/PaperTradingStatus'
 import clsx from 'clsx'
 
@@ -111,6 +112,8 @@ export default function Dashboard() {
       </section>
 
       <PaperTradingStatus stats={stats} />
+
+      <OpenPositions />
 
       {/* Queue cards */}
       <div className="space-y-2 mb-5">

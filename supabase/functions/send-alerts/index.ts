@@ -26,6 +26,18 @@ const ALLOWED_TYPES = new Set([
   'catalyst_approaching_7d',
   'catalyst_tomorrow',
   'outcome_reminder',
+  // Position monitoring alerts (fired by monitor-positions cron).
+  // Each fires once per (position_id, alert_type) — idempotency is
+  // enforced upstream in monitor-positions via the triggers_fired
+  // JSONB column on open_positions.
+  'position_stop_loss',
+  'position_profit_50',
+  'position_profit_100',
+  'position_profit_200',
+  'position_dte_21',
+  'position_expiring_tomorrow',
+  'position_filled',
+  'position_closed',
 ])
 
 const corsHeaders = {
@@ -142,8 +154,22 @@ serve(async (req) => {
   if (!ALLOWED_TYPES.has(alertType)) {
     return json({ success: false, error: `unsupported alert_type: ${alertType}` }, 400)
   }
-  if (!userId || !signalId) {
-    return json({ success: false, error: 'user_id and signal_id required' }, 400)
+  // Two flavours of alert:
+  //   - catalyst_* / outcome_reminder → require signal_id, look up signals
+  //   - position_*                    → require payload.position_id; we
+  //                                     read everything we need straight
+  //                                     from the alerts payload (cheaper,
+  //                                     and positions can be sourceless)
+  const isPositionAlert = alertType.startsWith('position_')
+  if (!userId) {
+    return json({ success: false, error: 'user_id required' }, 400)
+  }
+  if (!isPositionAlert && !signalId) {
+    return json({ success: false, error: 'signal_id required for catalyst alerts' }, 400)
+  }
+  const positionPayload = (body.payload ?? {}) as Record<string, unknown>
+  if (isPositionAlert && !positionPayload.position_id) {
+    return json({ success: false, error: 'payload.position_id required for position alerts' }, 400)
   }
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
@@ -157,38 +183,105 @@ serve(async (req) => {
     return json({ success: false, error: 'profile or email not found' }, 404)
   }
 
-  const { data: signal, error: signalError } = await supabase
-    .from('signals')
-    .select('id, ticker, direction, trade_type, catalyst_date, thesis')
-    .eq('id', signalId)
-    .eq('user_id', userId)
-    .maybeSingle()
-  if (signalError || !signal) {
-    return json({ success: false, error: 'signal not found for user' }, 404)
-  }
-
   let subject = ''
   let htmlBody = ''
   let pushBody = ''
+  let clickUrl = ''
 
-  if (alertType === 'outcome_reminder') {
-    subject = `Log outcome for ${signal.ticker} — catalyst was yesterday`
-    htmlBody = outcomeReminderHtml(signal)
-    pushBody = `Catalyst was yesterday. Log the outcome to keep your record clean.`
+  if (isPositionAlert) {
+    const ticker = String(positionPayload.ticker ?? '???')
+    const strategy = String(positionPayload.strategy ?? 'spread')
+    const longK = positionPayload.long_strike
+    const shortK = positionPayload.short_strike
+    const pnl = typeof positionPayload.pnl_pct === 'number' ? positionPayload.pnl_pct : null
+    const pnlStr = pnl != null ? `${pnl >= 0 ? '+' : ''}${pnl.toFixed(0)}%` : '—'
+    const positionId = String(positionPayload.position_id)
+    clickUrl = `${APP_URL}/position/${positionId}`
+
+    switch (alertType) {
+      case 'position_stop_loss':
+        subject = `🛑 ${ticker} stop loss hit — ${pnlStr}`
+        pushBody = `${ticker} ${strategy} at ${pnlStr} — exit per the −50% rule.`
+        htmlBody = positionAlertHtml(ticker, strategy, longK, shortK, pnlStr,
+          'Stop loss triggered', 'Exit immediately per Wiley Edge rules.', clickUrl)
+        break
+      case 'position_profit_50':
+        subject = `${ticker} +50% — sell half`
+        pushBody = `${ticker} ${strategy} at +50%. Take partial off per profit ladder.`
+        htmlBody = positionAlertHtml(ticker, strategy, longK, shortK, pnlStr,
+          'Profit ladder: +50%', 'Sell 50% to lock in.', clickUrl)
+        break
+      case 'position_profit_100':
+        subject = `${ticker} +100% — sell half`
+        pushBody = `${ticker} ${strategy} at +100%. Sell 50% to lock in.`
+        htmlBody = positionAlertHtml(ticker, strategy, longK, shortK, pnlStr,
+          'Profit ladder: +100%', 'Sell 50% to lock in.', clickUrl)
+        break
+      case 'position_profit_200':
+        subject = `${ticker} +200% — sell 75%`
+        pushBody = `${ticker} ${strategy} at +200%. Sell 75% per Wiley Edge ladder.`
+        htmlBody = positionAlertHtml(ticker, strategy, longK, shortK, pnlStr,
+          'Profit ladder: +200%', 'Sell 75% per profit ladder.', clickUrl)
+        break
+      case 'position_dte_21':
+        subject = `${ticker} now 21 DTE — review`
+        pushBody = `${ticker} ${strategy} at 21 DTE. Review per the entry rule.`
+        htmlBody = positionAlertHtml(ticker, strategy, longK, shortK, pnlStr,
+          '21 DTE crossed', 'Review the position. Theta acceleration zone.', clickUrl)
+        break
+      case 'position_expiring_tomorrow':
+        subject = `${ticker} expires tomorrow — close`
+        pushBody = `${ticker} ${strategy} expires tomorrow. Close before settlement.`
+        htmlBody = positionAlertHtml(ticker, strategy, longK, shortK, pnlStr,
+          'Expiring tomorrow', 'Close before expiry to avoid assignment risk.', clickUrl)
+        break
+      case 'position_filled':
+        subject = `${ticker} order filled`
+        pushBody = `${ticker} ${strategy} filled. Tracking has begun.`
+        htmlBody = positionAlertHtml(ticker, strategy, longK, shortK, pnlStr,
+          'Order filled', 'Position is now being monitored.', clickUrl)
+        break
+      case 'position_closed':
+        subject = `${ticker} position closed`
+        pushBody = `${ticker} ${strategy} closed. Final P&L ${pnlStr}.`
+        htmlBody = positionAlertHtml(ticker, strategy, longK, shortK, pnlStr,
+          'Position closed', 'Outcome logged.', clickUrl)
+        break
+      default:
+        subject = `${ticker} position update`
+        pushBody = `${ticker} ${strategy}: ${pnlStr}`
+        htmlBody = positionAlertHtml(ticker, strategy, longK, shortK, pnlStr,
+          'Position update', '', clickUrl)
+    }
   } else {
-    const days = alertType === 'catalyst_approaching_14d'
-      ? 14
-      : alertType === 'catalyst_approaching_7d'
-        ? 7
-        : 1
-    const niceDate = new Date(signal.catalyst_date).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    })
-    subject = `${signal.ticker} catalyst in ${days} day${days > 1 ? 's' : ''} — ${niceDate}`
-    htmlBody = catalystReminderHtml(signal, days)
-    pushBody = `${signal.ticker}: catalyst in ${days} day${days > 1 ? 's' : ''} (${niceDate}).`
+    // ─── Catalyst path (legacy) ────────────────────────────────────
+    const { data: signal, error: signalError } = await supabase
+      .from('signals')
+      .select('id, ticker, direction, trade_type, catalyst_date, thesis')
+      .eq('id', signalId)
+      .eq('user_id', userId)
+      .maybeSingle()
+    if (signalError || !signal) {
+      return json({ success: false, error: 'signal not found for user' }, 404)
+    }
+    clickUrl = `${APP_URL}/signal/${signal.id}`
+    if (alertType === 'outcome_reminder') {
+      subject = `Log outcome for ${signal.ticker} — catalyst was yesterday`
+      htmlBody = outcomeReminderHtml(signal)
+      pushBody = `Catalyst was yesterday. Log the outcome to keep your record clean.`
+    } else {
+      const days = alertType === 'catalyst_approaching_14d'
+        ? 14
+        : alertType === 'catalyst_approaching_7d'
+          ? 7
+          : 1
+      const niceDate = new Date(signal.catalyst_date).toLocaleDateString('en-US', {
+        month: 'short', day: 'numeric', year: 'numeric',
+      })
+      subject = `${signal.ticker} catalyst in ${days} day${days > 1 ? 's' : ''} — ${niceDate}`
+      htmlBody = catalystReminderHtml(signal, days)
+      pushBody = `${signal.ticker}: catalyst in ${days} day${days > 1 ? 's' : ''} (${niceDate}).`
+    }
   }
 
   // Email via Resend
@@ -218,9 +311,9 @@ serve(async (req) => {
 
   // Web-push fan-out
   const pushStats = await fanOutPush(supabase, userId, {
-    title: 'Pharma Edge',
+    title: 'Wiley Edge',
     body: pushBody,
-    url: `${APP_URL}/signal/${signal.id}`,
+    url: clickUrl,
     type: alertType,
   })
 
@@ -327,6 +420,45 @@ function outcomeReminderHtml(signal: Record<string, string>): string {
     </div>
     <div style="text-align:center;">
       <a href="${APP_URL}/signal/${escapeHtml(String(signal.id ?? ''))}" class="cta">Log Outcome →</a>
+    </div>
+  </div></body></html>`
+}
+
+// Position-monitoring email — works for the full ladder of position
+// alerts (stop-loss, profit milestones, DTE warning, expiry). Single
+// template parameterised by headline + cta.
+function positionAlertHtml(
+  ticker: string,
+  strategy: string,
+  longK: unknown,
+  shortK: unknown,
+  pnl: string,
+  headline: string,
+  ctaText: string,
+  url: string,
+): string {
+  return `<!doctype html><html><head><meta charset="utf-8" /><style>
+    body { font-family: -apple-system, sans-serif; background:#0a0a0f; color:#e8e8f0; padding:24px; }
+    .card { max-width:480px; margin:0 auto; background:#111118; border:1px solid #1e1e2e; border-radius:12px; padding:24px; }
+    h1 { font-size:18px; margin:0 0 4px; color:#e8b558; }
+    .ticker { font-size:28px; font-weight:700; margin:8px 0 4px; }
+    .strategy { color:#8b8ba6; font-size:13px; margin-bottom:16px; }
+    .strikes { font-family:monospace; color:#e8e8f0; padding:8px 12px; background:#0a0a0f; border-radius:6px; display:inline-block; margin-bottom:12px; }
+    .pnl { font-size:24px; font-weight:600; margin:12px 0; }
+    .pnl.pos { color:#22c55e; }
+    .pnl.neg { color:#ef4444; }
+    .cta { display:inline-block; padding:12px 20px; background:#e8b558; color:#06060a; border-radius:8px; text-decoration:none; font-weight:600; margin-top:16px; }
+    .note { color:#8b8ba6; font-size:13px; line-height:1.5; }
+  </style></head><body>
+  <div class="card">
+    <h1>${escapeHtml(headline)}</h1>
+    <div class="ticker">${escapeHtml(ticker)}</div>
+    <div class="strategy">${escapeHtml(strategy)}</div>
+    <div class="strikes">${escapeHtml(String(longK ?? ''))} / ${escapeHtml(String(shortK ?? ''))}</div>
+    <div class="pnl ${pnl.startsWith('-') || pnl.startsWith('−') ? 'neg' : 'pos'}">${escapeHtml(pnl)}</div>
+    ${ctaText ? `<p class="note">${escapeHtml(ctaText)}</p>` : ''}
+    <div style="text-align:center;">
+      <a href="${escapeHtml(url)}" class="cta">View Position →</a>
     </div>
   </div></body></html>`
 }
