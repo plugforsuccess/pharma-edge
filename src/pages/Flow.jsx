@@ -76,7 +76,7 @@ export default function Flow() {
 
   if (!isPro) {
     return (
-      <div className="px-4 py-5 max-w-md mx-auto">
+      <div className="px-4 lg:px-6 py-5 max-w-md mx-auto lg:max-w-2xl">
         <div className="bg-card border border-amber-400/20 rounded-xl p-4 space-y-2">
           <h1 className="text-lg font-semibold flex items-center gap-2">
             <Flame size={16} className="text-amber-400" />
@@ -93,13 +93,13 @@ export default function Flow() {
   }
 
   return (
-    <div className="px-4 py-5 max-w-md mx-auto space-y-4">
+    <div className="px-4 lg:px-6 py-5 max-w-md mx-auto lg:max-w-6xl space-y-4">
       <div>
-        <h1 className="text-lg font-semibold leading-tight flex items-center gap-2">
+        <h1 className="text-lg lg:text-2xl font-semibold leading-tight flex items-center gap-2">
           <Flame size={16} className="text-amber-400" />
           Options Flow
         </h1>
-        <p className="text-xs text-subtle">
+        <p className="text-xs lg:text-sm text-subtle">
           Today's prints across the streamed universe.
           {lastFetched && (
             <span className="text-muted ml-1">

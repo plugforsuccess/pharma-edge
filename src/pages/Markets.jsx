@@ -126,18 +126,18 @@ export default function Markets() {
   }, [ticker])
 
   return (
-    <div className="px-4 py-5 space-y-4 max-w-md mx-auto">
+    <div className="px-4 lg:px-6 py-5 space-y-4 max-w-md mx-auto lg:max-w-7xl">
       <div className="flex items-center gap-3">
         <button
           onClick={() => navigate(-1)}
-          className="p-2 -ml-2 text-subtle hover:text-fg"
+          className="lg:hidden p-2 -ml-2 text-subtle hover:text-fg"
           aria-label="Back"
         >
           <ArrowLeft size={20} />
         </button>
         <div className="flex-1">
-          <h1 className="text-lg font-semibold leading-tight">Gamma Map</h1>
-          <p className="text-xs text-subtle">
+          <h1 className="text-lg lg:text-2xl font-semibold leading-tight">Gamma Map</h1>
+          <p className="text-xs lg:text-sm text-subtle">
             Where dealer hedging flow concentrates by strike.
           </p>
         </div>
@@ -265,102 +265,107 @@ export default function Markets() {
         />
       )}
 
-      {/* Header stats */}
-      {data && (
-        <div className="bg-card border border-border rounded-xl p-4 space-y-3">
-          <div className="flex items-baseline justify-between">
-            <div>
-              <button
-                type="button"
-                onClick={() => setDrawerOpen(true)}
-                className="inline-flex items-baseline gap-1.5 text-2xl font-display tracking-tight
-                           hover:text-amber-400 transition-colors"
-                aria-label="Pick a different ticker"
-              >
-                {data.ticker}
-                <ChevronDown size={16} className="text-subtle" />
-              </button>
-              <div className="text-xs text-subtle flex items-center gap-2 flex-wrap">
-                <span>
-                  {data.expirations?.length ?? 0} expirations · {data.strikes?.length ?? 0} strikes
-                </span>
-                <SourceBadge source={data.source} />
-                {data.from_cache && (
-                  <span className="text-muted">
-                    · cached {formatCacheAge(data.cache_age_ms)} ago
+      {/* On lg+: stats card and heatmap sit side-by-side. On mobile
+          they stack linearly (stats → heatmap), preserving the existing
+          mobile flow. */}
+      <div className="lg:grid lg:grid-cols-12 lg:gap-4 lg:items-start space-y-4 lg:space-y-0">
+        {/* Header stats */}
+        {data && (
+          <div className="lg:col-span-4 bg-card border border-border rounded-xl p-4 space-y-3">
+            <div className="flex items-baseline justify-between">
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setDrawerOpen(true)}
+                  className="inline-flex items-baseline gap-1.5 text-2xl font-display tracking-tight
+                             hover:text-amber-400 transition-colors"
+                  aria-label="Pick a different ticker"
+                >
+                  {data.ticker}
+                  <ChevronDown size={16} className="text-subtle" />
+                </button>
+                <div className="text-xs text-subtle flex items-center gap-2 flex-wrap">
+                  <span>
+                    {data.expirations?.length ?? 0} expirations · {data.strikes?.length ?? 0} strikes
                   </span>
-                )}
+                  <SourceBadge source={data.source} />
+                  {data.from_cache && (
+                    <span className="text-muted">
+                      · cached {formatCacheAge(data.cache_age_ms)} ago
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-xl font-mono-tab tabular-nums">
+                  ${formatNumber(data.spot)}
+                </div>
+                <div className="text-[10px] uppercase tracking-wider text-subtle">
+                  spot
+                </div>
               </div>
             </div>
-            <div className="text-right">
-              <div className="text-xl font-mono-tab tabular-nums">
-                ${formatNumber(data.spot)}
+
+            {data.largest && (
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <Stat
+                  label="Largest wall"
+                  value={`$${formatNumber(data.largest.strike)}`}
+                  tone={data.largest.gex_net >= 0 ? 'pos' : 'neg'}
+                />
+                <Stat
+                  label="Wall expires"
+                  value={data.largest.expiration}
+                  tone="neutral"
+                />
               </div>
-              <div className="text-[10px] uppercase tracking-wider text-subtle">
-                spot
-              </div>
-            </div>
+            )}
+          </div>
+        )}
+
+        {/* Heatmap card */}
+        <div className={(data ? 'lg:col-span-8 ' : 'lg:col-span-12 ') + 'bg-card border border-border rounded-xl p-4 min-h-[280px] lg:min-h-[420px]'}>
+          <div className="flex items-center gap-2 mb-3">
+            <Activity size={14} className="text-brand" />
+            <h2 className="text-sm font-semibold">GEX by strike</h2>
           </div>
 
-          {data.largest && (
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <Stat
-                label="Largest wall"
-                value={`$${formatNumber(data.largest.strike)}`}
-                tone={data.largest.gex_net >= 0 ? 'pos' : 'neg'}
-              />
-              <Stat
-                label="Wall expires"
-                value={data.largest.expiration}
-                tone="neutral"
-              />
+          {loading && (
+            <div className="space-y-2 py-2 animate-pulse" aria-label="Loading GEX matrix">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <div className="h-3 w-12 rounded bg-white/[0.04]" />
+                  <div
+                    className="h-2 rounded bg-white/[0.04]"
+                    style={{ width: `${30 + ((i * 11) % 60)}%` }}
+                  />
+                  <div className="h-3 w-10 rounded bg-white/[0.04] ml-auto" />
+                </div>
+              ))}
             </div>
           )}
-        </div>
-      )}
 
-      {/* Heatmap card */}
-      <div className="bg-card border border-border rounded-xl p-4 min-h-[280px]">
-        <div className="flex items-center gap-2 mb-3">
-          <Activity size={14} className="text-brand" />
-          <h2 className="text-sm font-semibold">GEX by strike</h2>
-        </div>
-
-        {loading && (
-          <div className="space-y-2 py-2 animate-pulse" aria-label="Loading GEX matrix">
-            {Array.from({ length: 8 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <div className="h-3 w-12 rounded bg-white/[0.04]" />
-                <div
-                  className="h-2 rounded bg-white/[0.04]"
-                  style={{ width: `${30 + ((i * 11) % 60)}%` }}
-                />
-                <div className="h-3 w-10 rounded bg-white/[0.04] ml-auto" />
+          {!loading && error && (
+            <div className="text-sm">
+              <div className="text-crimson font-medium mb-1">
+                Couldn't compute GEX.
               </div>
-            ))}
-          </div>
-        )}
-
-        {!loading && error && (
-          <div className="text-sm">
-            <div className="text-crimson font-medium mb-1">
-              Couldn't compute GEX.
+              <div className="text-subtle whitespace-pre-line font-mono text-[10px] leading-relaxed">
+                {error}
+              </div>
+              <button
+                onClick={() => load(ticker, { refresh: true })}
+                className="mt-3 text-xs underline text-fg"
+              >
+                Try again
+              </button>
             </div>
-            <div className="text-subtle whitespace-pre-line font-mono text-[10px] leading-relaxed">
-              {error}
-            </div>
-            <button
-              onClick={() => load(ticker, { refresh: true })}
-              className="mt-3 text-xs underline text-fg"
-            >
-              Try again
-            </button>
-          </div>
-        )}
+          )}
 
-        {!loading && !error && (
-          <GexMatrix data={replayActive && replaySnapshot ? replaySnapshot : data} />
-        )}
+          {!loading && !error && (
+            <GexMatrix data={replayActive && replaySnapshot ? replaySnapshot : data} />
+          )}
+        </div>
       </div>
 
       <ReplaySlider

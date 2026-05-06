@@ -83,7 +83,7 @@ export default function Dashboard() {
   })
 
   return (
-    <div className="px-5 pt-7 pb-6">
+    <div className="px-5 lg:px-6 pt-7 pb-6 mx-auto lg:max-w-6xl w-full">
       {/* Wordmark — gold "Cash" + white "Moves". Italic dropped with
           the Space Grotesk swap (it has no true italic; browser-
           synthesized obliques on a wordmark read as "almost" instead
