@@ -91,10 +91,10 @@ export default function PaperTradingStatus({ stats }) {
           style={{
             width: `${progress}%`,
             background: readyForReal
-              ? 'linear-gradient(90deg, #16a34a, #4ade80)'
+              ? 'linear-gradient(90deg, #00a304, #00c805, #1de851)'
               : 'linear-gradient(90deg, #b88830, #e8b558, #f4cf8e)',
             boxShadow: readyForReal
-              ? '0 0 12px rgba(74,222,128,0.5)'
+              ? '0 0 12px rgba(0,200,5,0.5)'
               : '0 0 12px rgba(232,181,88,0.45)',
           }}
         />

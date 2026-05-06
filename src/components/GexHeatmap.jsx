@@ -87,7 +87,7 @@ export default function GexHeatmap({ data }) {
                       className="h-3 rounded-r-sm"
                       style={{
                         width: `${pct}%`,
-                        background: 'linear-gradient(90deg, #16a34a 40%, transparent)',
+                        background: 'linear-gradient(90deg, #00c805 40%, transparent)',
                       }}
                     />
                   )}

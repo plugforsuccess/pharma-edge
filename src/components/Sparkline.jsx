@@ -27,7 +27,7 @@ export default function Sparkline({
   // visually even on a tiny canvas.
   const zeroY = toY(0)
   const last = values[n - 1]
-  const lastTone = last > 0 ? '#22c55e' : last < 0 ? '#ef4444' : '#8b8ba6'
+  const lastTone = last > 0 ? '#00c805' : last < 0 ? '#ef4444' : '#8b8ba6'
 
   return (
     <svg

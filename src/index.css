@@ -16,12 +16,28 @@
   --color-muted: #4a4a64;
   --color-faint: #2a2a3c;
 
-  /* Brand — biotech edge: amber-gold paired with deep crimson for puts */
+  /* Brand — Cash Moves: amber-gold for identity (CTAs, wordmark, Pro
+     tier, "Inner Circle" highlight) paired with crimson for losses /
+     puts / urgent alerts. The "win" green below is its own token so
+     amber doesn't have to carry both brand and P&L jobs. */
   --color-brand: #e8b558;
   --color-brand-hi: #f4cf8e;
   --color-brand-lo: #b88830;
   --color-crimson: #e0344c;
   --color-crimson-hi: #f25068;
+
+  /* Win-state — saturated "money green" lifted from the Cash Moves
+     brand brief (#00c805). Owns one job: positive P&L, long_call
+     direction, "live" pulses. Overrides Tailwind's default green-400
+     and green-500 ramp so existing text-green-400 classes inherit
+     the upgraded tone with no sweep. Dark green-800 / green-900 /
+     green-950 backgrounds keep Tailwind defaults — they read as
+     "subtle wash behind a positive number" rather than as the
+     accent itself. */
+  --color-win: #00c805;
+  --color-win-hi: #1de851;
+  --color-green-400: #1de851;
+  --color-green-500: #00c805;
 
   /* Fonts */
   --font-sans: "Inter Tight", ui-sans-serif, system-ui, sans-serif;
