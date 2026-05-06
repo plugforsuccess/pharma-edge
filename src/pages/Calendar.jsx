@@ -57,9 +57,9 @@ export default function Calendar() {
   const selectedSignals = selected ? signalsOnDay(selected) : []
 
   return (
-    <div className="px-4 pt-6 pb-8">
+    <div className="px-4 lg:px-6 pt-6 pb-8 mx-auto lg:max-w-4xl w-full">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-white text-xl font-bold">Calendar</h1>
+        <h1 className="text-white text-xl lg:text-2xl font-bold">Calendar</h1>
         <div className="flex items-center gap-3">
           <button
             type="button"

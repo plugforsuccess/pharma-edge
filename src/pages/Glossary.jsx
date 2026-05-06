@@ -12,7 +12,7 @@ import { useNavigate } from 'react-router-dom'
 export default function Glossary() {
   const navigate = useNavigate()
   return (
-    <div className="px-4 py-5 space-y-5 max-w-md mx-auto">
+    <div className="px-4 lg:px-6 py-5 space-y-5 max-w-md lg:max-w-3xl mx-auto">
       <div className="flex items-center gap-3">
         <button
           onClick={() => navigate(-1)}

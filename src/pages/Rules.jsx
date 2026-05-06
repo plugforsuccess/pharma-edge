@@ -97,9 +97,9 @@ export default function Rules() {
   }
 
   return (
-    <div className="px-4 pt-6 pb-8 space-y-4">
+    <div className="px-4 lg:px-6 pt-6 pb-8 space-y-4 mx-auto lg:max-w-3xl w-full">
       <div>
-        <h1 className="text-white text-xl font-bold tracking-tight mb-1">Rules</h1>
+        <h1 className="text-white text-xl lg:text-2xl font-bold tracking-tight mb-1">Rules</h1>
         <p className="text-subtle text-xs">
           The non-negotiables. Encoded in the pre-trade checklist and stop-loss UI.
         </p>

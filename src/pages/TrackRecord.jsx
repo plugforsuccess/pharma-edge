@@ -81,9 +81,9 @@ export default function TrackRecord() {
   })
 
   return (
-    <div className="px-4 pt-6 pb-4">
+    <div className="px-4 lg:px-6 pt-6 pb-4 mx-auto lg:max-w-4xl w-full">
       <div className="flex items-center justify-between mb-2">
-        <h1 className="text-white text-xl font-bold">Track Record</h1>
+        <h1 className="text-white text-xl lg:text-2xl font-bold">Track Record</h1>
         {profile?.is_public && profile?.public_slug && (
           <button
             type="button"

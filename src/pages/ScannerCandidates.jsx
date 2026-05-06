@@ -143,7 +143,7 @@ export default function ScannerCandidates() {
 
   if (!isPro && !limits.scannerEnabled) {
     return (
-      <div className="px-4 pt-6 pb-8 space-y-4">
+      <div className="px-4 lg:px-6 pt-6 pb-8 space-y-4 mx-auto lg:max-w-2xl w-full">
         <div className="flex items-center gap-3">
           <button
             type="button"
@@ -180,7 +180,7 @@ export default function ScannerCandidates() {
   }
 
   return (
-    <div className="px-4 pt-6 pb-8">
+    <div className="px-4 lg:px-6 pt-6 pb-8 mx-auto lg:max-w-5xl w-full">
       <div className="flex items-center gap-3 mb-6">
         <button
           type="button"

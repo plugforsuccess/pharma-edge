@@ -384,7 +384,7 @@ export default function LogSignal() {
   }
 
   return (
-    <div className="px-4 pt-6 pb-8">
+    <div className="px-4 lg:px-6 pt-6 pb-8 mx-auto lg:max-w-3xl w-full">
       <div className="flex items-center gap-3 mb-6">
         <button
           type="button"

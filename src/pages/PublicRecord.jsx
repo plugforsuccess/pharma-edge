@@ -58,7 +58,7 @@ export default function PublicRecord() {
   if (notFound) return <NotFoundPage />
 
   return (
-    <div className="min-h-screen bg-bg px-4 py-8 max-w-md mx-auto">
+    <div className="min-h-screen bg-bg px-4 lg:px-6 py-8 max-w-md lg:max-w-3xl mx-auto">
       <div className="mb-8">
         <div className="flex items-center gap-3 mb-2">
           <div className="w-10 h-10 bg-red-600 rounded-xl flex items-center justify-center">

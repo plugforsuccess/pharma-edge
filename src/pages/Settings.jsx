@@ -89,8 +89,8 @@ export default function Settings() {
   }
 
   return (
-    <div className="px-4 pt-6 pb-8 space-y-4">
-      <h1 className="text-white text-xl font-bold tracking-tight">Settings</h1>
+    <div className="px-4 lg:px-6 pt-6 pb-8 space-y-4 mx-auto lg:max-w-2xl w-full">
+      <h1 className="text-white text-xl lg:text-2xl font-bold tracking-tight">Settings</h1>
 
       <Section title="Account">
         <p className="text-white text-sm font-medium break-all">{user?.email}</p>

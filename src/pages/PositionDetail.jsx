@@ -87,7 +87,7 @@ export default function PositionDetail() {
 
   if (loading) {
     return (
-      <div className="px-4 py-6 max-w-md mx-auto">
+      <div className="px-4 lg:px-6 py-6 max-w-md lg:max-w-3xl mx-auto">
         <p className="text-xs text-subtle">Loading…</p>
       </div>
     )
@@ -95,7 +95,7 @@ export default function PositionDetail() {
 
   if (error && !pos) {
     return (
-      <div className="px-4 py-6 max-w-md mx-auto space-y-3">
+      <div className="px-4 lg:px-6 py-6 max-w-md lg:max-w-3xl mx-auto space-y-3">
         <button
           onClick={() => navigate(-1)}
           className="text-xs text-subtle hover:text-fg inline-flex items-center gap-1"
@@ -116,7 +116,7 @@ export default function PositionDetail() {
   const triggers = Object.entries(pos.triggers_fired || {})
 
   return (
-    <div className="px-4 py-5 max-w-md mx-auto space-y-4">
+    <div className="px-4 lg:px-6 py-5 max-w-md lg:max-w-3xl mx-auto space-y-4">
       <div className="flex items-center gap-3">
         <button
           onClick={() => navigate(-1)}
