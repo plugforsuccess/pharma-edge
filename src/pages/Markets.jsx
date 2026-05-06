@@ -212,7 +212,7 @@ export default function Markets() {
           are reachable without scrolling past the curated list. Pro-only
           tickers render with a lock affordance so free users see what
           they'd unlock rather than the list silently being shorter. */}
-      <div className="-mx-4 px-4 overflow-x-auto">
+      <div className="lg:hidden -mx-4 px-4 overflow-x-auto">
         <div className="flex gap-2 pb-1">
           {isPro &&
             watchlist.map((sym) => (
@@ -265,13 +265,16 @@ export default function Markets() {
         />
       )}
 
-      {/* On lg+: stats card and heatmap sit side-by-side. On mobile
-          they stack linearly (stats → heatmap), preserving the existing
-          mobile flow. */}
-      <div className="lg:grid lg:grid-cols-12 lg:gap-4 lg:items-start space-y-4 lg:space-y-0">
-        {/* Header stats */}
+      {/* On lg+: 2-column grid. Stats card + replay slider + suggested
+          plays stack in the left rail (col-span-4) so the empty space
+          under the stats card fills with useful content. Heatmap takes
+          the wide right column and row-spans whatever the left rail
+          needs. On mobile the items stack linearly in source order:
+          stats → heatmap → replay → plays. */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+        {/* Header stats — left col, row 1 */}
         {data && (
-          <div className="lg:col-span-4 bg-card border border-border rounded-xl p-4 space-y-3">
+          <div className="lg:col-span-4 lg:row-start-1 bg-card border border-border rounded-xl p-4 space-y-3">
             <div className="flex items-baseline justify-between">
               <div>
                 <button
@@ -323,8 +326,9 @@ export default function Markets() {
           </div>
         )}
 
-        {/* Heatmap card */}
-        <div className={(data ? 'lg:col-span-8 ' : 'lg:col-span-12 ') + 'bg-card border border-border rounded-xl p-4 min-h-[280px] lg:min-h-[420px]'}>
+        {/* Heatmap card — right col, spans down so the row reflows
+            cleanly even with replay + plays stacked on the left */}
+        <div className={(data ? 'lg:col-span-8 ' : 'lg:col-span-12 ') + 'lg:row-start-1 lg:row-span-3 bg-card border border-border rounded-xl p-4 min-h-[280px] lg:min-h-[420px]'}>
           <div className="flex items-center gap-2 mb-3">
             <Activity size={14} className="text-brand" />
             <h2 className="text-sm font-semibold">GEX by strike</h2>
@@ -366,19 +370,43 @@ export default function Markets() {
             <GexMatrix data={replayActive && replaySnapshot ? replaySnapshot : data} />
           )}
         </div>
+
+        {/* Replay slider — left col, row 2. Hidden until user toggles
+            replay mode via the clock icon in the header. Inactive state
+            shows a discoverable hint card so users know it exists. */}
+        <div className="lg:col-span-4 lg:row-start-2">
+          {replayActive ? (
+            <ReplaySlider
+              ticker={ticker}
+              active={replayActive}
+              onSnapshot={setReplaySnapshot}
+              onClose={() => {
+                setReplayActive(false)
+                setReplaySnapshot(null)
+              }}
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => setReplayActive(true)}
+              className="hidden lg:flex w-full items-center gap-2 px-4 py-3 bg-card border border-border rounded-xl text-left hover:border-amber-400/40 transition group"
+            >
+              <Clock size={14} className="text-amber-400/80 group-hover:text-amber-400" />
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-semibold text-fg">Replay today's GEX</div>
+                <div className="text-[10px] text-muted">
+                  Scrub through 5-min snapshots
+                </div>
+              </div>
+            </button>
+          )}
+        </div>
+
+        {/* Suggested plays — left col, row 3 */}
+        <div className="lg:col-span-4 lg:row-start-3">
+          <SuggestedPlays ticker={ticker} isPro={isPro} />
+        </div>
       </div>
-
-      <ReplaySlider
-        ticker={ticker}
-        active={replayActive}
-        onSnapshot={setReplaySnapshot}
-        onClose={() => {
-          setReplayActive(false)
-          setReplaySnapshot(null)
-        }}
-      />
-
-      <SuggestedPlays ticker={ticker} isPro={isPro} />
 
       <p className="text-[10px] text-muted leading-relaxed px-1">
         Live data via Tastytrade DXLink streaming when available; falls
