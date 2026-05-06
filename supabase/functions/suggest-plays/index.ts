@@ -345,10 +345,17 @@ serve(async (req) => {
   // Pull the live matrix via the existing compute-gex endpoint. Reuses
   // its dxlink/yahoo fallback chain — single source of truth for the
   // numbers Claude reasons about.
+  //
+  // We pass through the *user's* JWT (authHeader) rather than the
+  // service-role key. The Supabase Functions gateway has stricter
+  // validation on internal service-role calls and was rejecting them
+  // with UNAUTHORIZED_INVALID_JWT_FORMAT; user JWTs flow through
+  // cleanly because that's what compute-gex's verify_jwt expects.
   const gexResp = await fetch(`${SUPABASE_URL}/functions/v1/compute-gex`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      Authorization: authHeader,
+      apikey: SUPABASE_ANON_KEY!,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ ticker, matrix: true }),
