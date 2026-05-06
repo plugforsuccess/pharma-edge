@@ -1,0 +1,89 @@
+# Deploy the DXLink quote worker to Fly.io.
+#
+# Triggers:
+#   - workflow_dispatch (manual run from GitHub UI / mobile app)
+#   - push to dxlink-worker/** on main
+#
+# Required GitHub Actions secrets (Settings → Secrets and variables → Actions):
+#   FLY_API_TOKEN              — Fly.io personal access token (Fly dashboard → Settings → Access Tokens)
+#   TASTYTRADE_USERNAME        — Tastytrade prod login
+#   TASTYTRADE_PASSWORD        — Tastytrade prod password
+#   SUPABASE_URL               — https://rghoynbaykeyjbhqmaff.supabase.co
+#   SUPABASE_SERVICE_ROLE_KEY  — from Supabase project settings → API
+#
+# First run creates the app via `flyctl launch --no-deploy` (idempotent —
+# does nothing if the app already exists). Subsequent runs just deploy
+# updates with `flyctl deploy --remote-only`.
+
+name: Deploy DXLink Worker
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'dxlink-worker/**'
+      - '.github/workflows/deploy-dxlink-worker.yml'
+
+concurrency:
+  group: dxlink-worker-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: dxlink-worker
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      # If the app doesn't exist yet, create it. `apps list` is the
+      # idempotent existence check; `create` errors with a non-zero
+      # exit if the name is already taken (which is what we want — we
+      # treat that as "already exists, fall through to deploy").
+      - name: Ensure Fly app exists
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          set +e
+          if flyctl apps list --json | grep -q '"Name":"wiley-edge-dxlink"'; then
+            echo "app already exists"
+          else
+            echo "creating app wiley-edge-dxlink"
+            flyctl apps create wiley-edge-dxlink --org personal
+          fi
+          set -e
+
+      # Sync secrets from GitHub Actions to Fly. Idempotent: if the
+      # value is unchanged Fly skips the redeploy. We pass them all
+      # in one command so any change triggers at most one redeploy.
+      - name: Sync Fly secrets
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl secrets set \
+            TASTYTRADE_USERNAME="${{ secrets.TASTYTRADE_USERNAME }}" \
+            TASTYTRADE_PASSWORD="${{ secrets.TASTYTRADE_PASSWORD }}" \
+            SUPABASE_URL="${{ secrets.SUPABASE_URL }}" \
+            SUPABASE_SERVICE_ROLE_KEY="${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
+            --app wiley-edge-dxlink \
+            --stage  # don't trigger an immediate redeploy; the deploy step below does that
+
+      - name: Deploy
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl deploy --remote-only --app wiley-edge-dxlink
+
+      - name: Tail logs (10s sample)
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          # Best-effort sample of the freshly-deployed instance's
+          # boot logs. Helps debug from the Actions run page if
+          # secrets are wrong without needing to open the Fly UI.
+          timeout 10 flyctl logs --app wiley-edge-dxlink || true
