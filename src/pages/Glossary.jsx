@@ -1,4 +1,4 @@
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, Target } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
 // Plain-language definitions for the GEX vocabulary used on /markets.
@@ -28,6 +28,181 @@ export default function Glossary() {
           </p>
         </div>
       </div>
+
+      {/* ── How to Trade GEX (top-of-page playbook) ──
+          The actionable section. Lives above the term definitions
+          because Cameron wanted "what do I DO with this" front and
+          centre on day 1. */}
+      <section className="bg-card border border-amber-400/30 rounded-xl p-4 space-y-4">
+        <div className="flex items-center gap-2">
+          <Target size={14} className="text-amber-400" />
+          <h2 className="text-sm font-semibold text-fg">
+            How to Trade GEX
+          </h2>
+        </div>
+
+        <div className="space-y-3">
+          <h3 className="text-xs font-semibold text-amber-400 uppercase tracking-wider">
+            The 5-second read
+          </h3>
+          <p className="text-xs text-subtle leading-relaxed">
+            Before you do anything on /markets, note three numbers:
+          </p>
+          <ol className="list-decimal pl-5 text-xs text-subtle space-y-1.5 leading-relaxed">
+            <li>
+              <strong className="text-fg">Net GEX sign</strong> — positive
+              or negative? <span className="text-muted">Regime indicator.</span>
+            </li>
+            <li>
+              <strong className="text-fg">Flip strike vs spot</strong> —
+              are we above or below?{' '}
+              <span className="text-muted">Volatility regime confirmation.</span>
+            </li>
+            <li>
+              <strong className="text-fg">Call Wall</strong> (★ on biggest
+              yellow cell) and{' '}
+              <strong className="text-fg">Put Wall</strong> (biggest
+              magenta) — <span className="text-muted">upper / lower magnets.</span>
+            </li>
+          </ol>
+        </div>
+
+        <div className="space-y-2 pt-1 border-t border-border">
+          <h3 className="text-xs font-semibold text-amber-400 uppercase tracking-wider">
+            Two regimes, two playbooks
+          </h3>
+          <div className="bg-bg-elev border border-border rounded-lg p-3 space-y-2">
+            <p className="text-xs leading-relaxed">
+              <strong className="text-green-400">Regime A:</strong>{' '}
+              <span className="text-subtle">Above flip + Net GEX positive.</span>
+            </p>
+            <p className="text-[11px] text-muted leading-relaxed">
+              Dealers are long gamma → they sell rallies, buy dips →
+              <strong className="text-fg"> range-bound, mean-reverting tape.</strong>
+            </p>
+          </div>
+          <div className="bg-bg-elev border border-border rounded-lg p-3 space-y-2">
+            <p className="text-xs leading-relaxed">
+              <strong className="text-crimson">Regime B:</strong>{' '}
+              <span className="text-subtle">Below flip + Net GEX negative.</span>
+            </p>
+            <p className="text-[11px] text-muted leading-relaxed">
+              Dealers are short gamma → they buy rallies, sell dips →
+              <strong className="text-fg"> trending, volatile tape.</strong>
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-2 pt-1 border-t border-border">
+          <h3 className="text-xs font-semibold text-amber-400 uppercase tracking-wider">
+            Picking a long-options trade
+          </h3>
+          <div className="space-y-2">
+            <PlaybookRow
+              setup="Pin trade (mean-revert)"
+              regime="A"
+              strike="At/just-OTM toward call wall"
+              dte="0–7 DTE"
+              why="High gamma; market magnetizes; theta works for you"
+            />
+            <PlaybookRow
+              setup="Breakout call"
+              regime="A or B"
+              strike="At the call wall"
+              dte="7–21 DTE"
+              why="If wall breaks, dealers chase. Buy AT the wall, not above"
+            />
+            <PlaybookRow
+              setup="Breakdown put"
+              regime="B"
+              strike="At the put wall"
+              dte="7–21 DTE"
+              why="If wall breaks, dealers sell into it → acceleration"
+            />
+            <PlaybookRow
+              setup="Vol expansion (long premium)"
+              regime="B"
+              strike="ATM straddle (both sides)"
+              dte="14–30 DTE"
+              why="Negative GEX = vol expansion in your favor"
+            />
+            <PlaybookRow
+              setup="Biotech catalyst spread"
+              regime="either"
+              strike="Use Strike Calculator; GEX confirms direction"
+              dte="30–45d past catalyst"
+              why="GEX shows where dealers will pin price into the event"
+            />
+          </div>
+        </div>
+
+        <div className="space-y-2 pt-1 border-t border-border">
+          <h3 className="text-xs font-semibold text-amber-400 uppercase tracking-wider">
+            Spot holds
+          </h3>
+          <p className="text-xs text-subtle leading-relaxed">
+            <strong className="text-green-400">Long the underlying:</strong>
+          </p>
+          <ul className="list-disc pl-5 text-[11px] text-subtle space-y-1 leading-relaxed">
+            <li>
+              <em className="text-fg not-italic">Above flip + positive GEX:</em>{' '}
+              low realized vol, tight stops safe (dealers buy dips). Good
+              hold environment.
+            </li>
+            <li>
+              <em className="text-fg not-italic">Below flip + negative GEX:</em>{' '}
+              wide stops, half size. Dealer flow can run against you.
+            </li>
+          </ul>
+          <p className="text-xs text-subtle leading-relaxed pt-1">
+            <strong className="text-crimson">Short the underlying:</strong>
+          </p>
+          <ul className="list-disc pl-5 text-[11px] text-subtle space-y-1 leading-relaxed">
+            <li>
+              <em className="text-fg not-italic">Above flip:</em> don't.
+              Dealer buy-dip flow cushions every selloff. Bad R/R.
+            </li>
+            <li>
+              <em className="text-fg not-italic">Below flip:</em> shorts work.
+              Stop just above the put wall (the support about to break).
+            </li>
+          </ul>
+        </div>
+
+        <div className="space-y-2 pt-1 border-t border-border">
+          <h3 className="text-xs font-semibold text-amber-400 uppercase tracking-wider">
+            Workflow on /markets
+          </h3>
+          <ol className="list-decimal pl-5 text-[11px] text-subtle space-y-1 leading-relaxed">
+            <li>Tap ticker → check spot vs flip → note Net GEX sign</li>
+            <li>Find the largest call wall (★) and largest magenta cell</li>
+            <li>
+              Ask: where would a sensible trader's stop &amp; target be?
+              Walls = both
+            </li>
+            <li>Identify regime A (mean-revert) vs B (trend)</li>
+            <li>
+              Pick instrument: spreads in A (capped vol), straddles/long
+              premium in B
+            </li>
+            <li>
+              Pick expiration: 0–7 DTE pin/scalp, 7–21 swing through
+              walls, 30+ for thesis trades
+            </li>
+            <li>
+              End of day: hit replay (clock icon) → did the wall hold?
+              Did the flip move? That's tomorrow's setup.
+            </li>
+          </ol>
+        </div>
+
+        <p className="text-[10px] text-muted leading-relaxed pt-2 border-t border-border">
+          None of this is investment advice. GEX informs probability, not
+          certainty — walls fail, flips move, regimes change intraday.
+          Always size positions per Wiley Edge rules (max 2% per options
+          trade, max 20% sector exposure).
+        </p>
+      </section>
 
       <Term
         title="Gamma Exposure (GEX)"
@@ -199,5 +374,33 @@ function Term({ title, short, children }) {
         {children}
       </div>
     </section>
+  )
+}
+
+function PlaybookRow({ setup, regime, strike, dte, why }) {
+  return (
+    <div className="bg-bg-elev border border-border rounded-lg p-2.5 space-y-1.5">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-xs font-semibold text-fg leading-tight">
+          {setup}
+        </span>
+        <span className="text-[9px] uppercase tracking-wider text-amber-400 font-semibold shrink-0">
+          {regime}
+        </span>
+      </div>
+      <div className="grid grid-cols-[auto,1fr] gap-x-2 gap-y-0.5 text-[11px] leading-snug">
+        <span className="text-muted uppercase tracking-wider text-[9px] pt-0.5">
+          Strike
+        </span>
+        <span className="text-subtle">{strike}</span>
+        <span className="text-muted uppercase tracking-wider text-[9px] pt-0.5">
+          DTE
+        </span>
+        <span className="text-subtle">{dte}</span>
+      </div>
+      <p className="text-[10px] text-muted leading-relaxed pt-0.5 border-t border-border">
+        {why}
+      </p>
+    </div>
   )
 }
