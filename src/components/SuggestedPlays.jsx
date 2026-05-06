@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Sparkles, ExternalLink, FileText, AlertCircle, Lock } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
@@ -11,13 +11,60 @@ import { useAuth } from '../context/AuthContext'
 //   - "Log as Signal" → /log with prefill (gets immutable hash)
 //
 // Pro-only by design — eats Claude API tokens. Free users see a teaser.
+//
+// Cards are persisted to localStorage keyed by ticker so navigating
+// to /calculator or /log and back doesn't blank the panel. TTL mirrors
+// the server-side play_suggestions cache (5 min).
+
+const PLAYS_CACHE_TTL_MS = 5 * 60 * 1000
+
+function playsCacheKey(ticker) {
+  return ticker ? `pe_plays_${ticker.toUpperCase()}` : null
+}
+
+function loadCachedPlays(ticker) {
+  const key = playsCacheKey(ticker)
+  if (!key || typeof window === 'undefined') return null
+  try {
+    const raw = window.localStorage.getItem(key)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (!parsed?.savedAt || Date.now() - parsed.savedAt > PLAYS_CACHE_TTL_MS) {
+      window.localStorage.removeItem(key)
+      return null
+    }
+    return parsed.data ?? null
+  } catch {
+    return null
+  }
+}
+
+function saveCachedPlays(ticker, data) {
+  const key = playsCacheKey(ticker)
+  if (!key || typeof window === 'undefined' || !data) return
+  try {
+    window.localStorage.setItem(
+      key,
+      JSON.stringify({ savedAt: Date.now(), data }),
+    )
+  } catch {
+    /* quota / private mode — silent */
+  }
+}
 
 export default function SuggestedPlays({ ticker, isPro }) {
   const { profile } = useAuth()
   const navigate = useNavigate()
-  const [data, setData] = useState(null)
+  const [data, setData] = useState(() => loadCachedPlays(ticker))
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+
+  // Re-hydrate on ticker change — Markets reuses this component when
+  // the user picks a different symbol.
+  useEffect(() => {
+    setData(loadCachedPlays(ticker))
+    setError(null)
+  }, [ticker])
 
   async function fetchPlays() {
     setLoading(true)
@@ -39,6 +86,7 @@ export default function SuggestedPlays({ ticker, isPro }) {
       }
       if (!result?.success) throw new Error(result?.error || 'no plays returned')
       setData(result.data)
+      saveCachedPlays(ticker, result.data)
     } catch (err) {
       setError(err.message || String(err))
     } finally {
@@ -270,6 +318,7 @@ function logAsSignal(navigate, play, ticker, spot) {
   navigate('/log', {
     state: {
       prefill: {
+        signal_source: 'gex_flow',
         ticker,
         stock_price_at_signal: String(spot),
         catalyst_type: 'other',

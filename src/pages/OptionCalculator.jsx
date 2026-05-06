@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import StrikePriceCalculator from '../components/StrikePriceCalculator'
 import clsx from 'clsx'
@@ -10,11 +11,28 @@ const TABS = [
 
 export default function OptionCalculator() {
   const { profile } = useAuth()
-  const [direction, setDirection] = useState('long_put')
+  // Suggested Plays / SignalDetail deep-link here with strikes + expiry
+  // already chosen — surface them so the user lands on a pre-filled
+  // calculator instead of an empty form.
+  const location = useLocation()
+  const prefill = location.state?.prefill || {}
+
+  const initialDirection =
+    prefill.direction === 'long_call' || prefill.direction === 'long_put'
+      ? prefill.direction
+      : 'long_put'
+  const [direction, setDirection] = useState(initialDirection)
 
   return (
     <div className="px-4 pt-6 pb-8">
-      <h1 className="text-white text-xl font-bold mb-6">Option Calculator</h1>
+      <h1 className="text-white text-xl font-bold mb-6">
+        Option Calculator
+        {prefill.ticker && (
+          <span className="ml-2 text-base font-mono-tab text-amber-400">
+            {prefill.ticker}
+          </span>
+        )}
+      </h1>
 
       <div className="flex gap-2 mb-4">
         {TABS.map((tab) => (
@@ -40,6 +58,18 @@ export default function OptionCalculator() {
         key={direction}
         direction={direction}
         accountSize={profile?.account_size}
+        initialStockPrice={
+          direction === initialDirection ? prefill.stock_price : undefined
+        }
+        initialBuyStrike={
+          direction === initialDirection ? prefill.long_strike : undefined
+        }
+        initialSellStrike={
+          direction === initialDirection ? prefill.short_strike : undefined
+        }
+        initialExpiry={
+          direction === initialDirection ? prefill.expiration_date : undefined
+        }
       />
 
       <div className="bg-card border border-border rounded-xl p-4 mt-4">

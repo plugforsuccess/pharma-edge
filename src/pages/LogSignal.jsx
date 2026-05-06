@@ -144,11 +144,17 @@ export default function LogSignal() {
   }, [candidateId])
 
   const [form, setForm] = useState(() => ({
+    // 'biotech_catalyst' (default — pharma flow with drug/PDUFA fields)
+    // or 'gex_flow' (GEX matrix-driven options trade — no biotech context).
+    // Suggested Plays sets this when deep-linking from /markets.
+    signal_source: prefill.signal_source || 'biotech_catalyst',
     ticker: (prefill.ticker || '').toUpperCase(),
     company_name: prefill.company_name || '',
     drug_name: prefill.drug_name || '',
     indication: prefill.indication || '',
-    catalyst_type: prefill.catalyst_type || 'pdufa',
+    catalyst_type:
+      prefill.catalyst_type ||
+      (prefill.signal_source === 'gex_flow' ? 'other' : 'pdufa'),
     catalyst_date: prefill.catalyst_date || '',
     catalyst_date_precision: prefill.catalyst_date_precision || 'day',
     direction: prefill.direction || 'long_put',
@@ -156,14 +162,19 @@ export default function LogSignal() {
     structure:
       DEFAULT_STRUCTURE[prefill.direction] || DEFAULT_STRUCTURE.long_put,
     entry_price: '',
-    // Default expiry to catalyst_date + 35 days (mid of 30–45 window
-    // per the strategy rule). User can override; if catalyst_date is
-    // empty at mount we leave expiry blank and let the user edit.
-    expiry_date: prefill.catalyst_date
-      ? new Date(new Date(prefill.catalyst_date).getTime() + 35 * 86400_000)
-          .toISOString()
-          .slice(0, 10)
-      : '',
+    // Prefer an explicit prefill.expiry_date (Suggested Plays sends one),
+    // otherwise default expiry to catalyst_date + 35 days (mid of 30–45
+    // window per the strategy rule). If neither is set we leave blank.
+    expiry_date:
+      prefill.expiry_date ||
+      (prefill.catalyst_date
+        ? new Date(new Date(prefill.catalyst_date).getTime() + 35 * 86400_000)
+            .toISOString()
+            .slice(0, 10)
+        : ''),
+    long_strike: prefill.long_strike != null ? String(prefill.long_strike) : '',
+    short_strike:
+      prefill.short_strike != null ? String(prefill.short_strike) : '',
     market_cap: '',
     stock_price_at_signal: prefill.stock_price_at_signal || '',
     your_probability: '',
@@ -173,6 +184,8 @@ export default function LogSignal() {
     confidence_score: 7,
     ...Object.fromEntries(CHECKLIST_ITEMS.map((i) => [i.key, false])),
   }))
+
+  const isGexFlow = form.signal_source === 'gex_flow'
 
   function update(key, value) {
     setForm((prev) => ({ ...prev, [key]: value }))
@@ -223,25 +236,44 @@ export default function LogSignal() {
     [form],
   )
 
-  const step1Valid =
-    form.ticker.trim() &&
-    form.company_name.trim() &&
-    form.catalyst_date &&
-    form.catalyst_date >= today()
+  // For biotech catalysts we require company + a real future catalyst date.
+  // For GEX flow trades there's no biotech catalyst — the spread expiry is
+  // the de-facto deadline, and company_name is auto-derived from the ticker
+  // on submit, so the only step-1 requirements are ticker + expiry.
+  const step1Valid = isGexFlow
+    ? Boolean(form.ticker.trim() && form.expiry_date && form.expiry_date >= today())
+    : Boolean(
+        form.ticker.trim() &&
+          form.company_name.trim() &&
+          form.catalyst_date &&
+          form.catalyst_date >= today(),
+      )
 
   async function submitSignal() {
     setSubmitError('')
     setLoading(true)
 
     const num = (v) => (v === '' || v == null ? null : Number(v))
+    // For GEX-flow signals the spread expiry IS the resolution date —
+    // we mirror it into catalyst_date so the (still NOT NULL) DB column
+    // is honest about when the thesis must play out, and drug/indication
+    // are explicitly nulled since they don't exist for index trades.
+    const ticker = form.ticker.toUpperCase().trim()
+    const effectiveCatalystDate = isGexFlow
+      ? form.expiry_date
+      : form.catalyst_date
+    const effectiveCompanyName = isGexFlow
+      ? form.company_name.trim() || ticker
+      : form.company_name.trim()
     const signalData = {
       user_id: user.id,
-      ticker: form.ticker.toUpperCase().trim(),
-      company_name: form.company_name.trim(),
-      drug_name: form.drug_name.trim() || null,
-      indication: form.indication.trim() || null,
-      catalyst_type: form.catalyst_type,
-      catalyst_date: form.catalyst_date,
+      signal_source: form.signal_source,
+      ticker,
+      company_name: effectiveCompanyName,
+      drug_name: isGexFlow ? null : form.drug_name.trim() || null,
+      indication: isGexFlow ? null : form.indication.trim() || null,
+      catalyst_type: isGexFlow ? 'other' : form.catalyst_type,
+      catalyst_date: effectiveCatalystDate,
       direction: form.direction,
       trade_type: form.trade_type,
       structure: form.structure,
@@ -336,73 +368,130 @@ export default function LogSignal() {
       </div>
 
       <div className={clsx('space-y-4', step !== 1 && 'hidden')}>
-        <h2 className="text-white font-semibold">Company &amp; Catalyst</h2>
+        <h2 className="text-white font-semibold">
+          {isGexFlow ? 'Trade Setup' : 'Company & Catalyst'}
+        </h2>
+
+        {/* Source toggle — biotech-catalyst flow keeps the full pharma
+            form; GEX-flow strips drug/indication/catalyst_type/catalyst_date
+            since GEX-driven trades have no biotech catalyst. */}
+        <div>
+          <label className="text-muted text-xs uppercase tracking-wider block mb-1">
+            Signal Type
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              { value: 'biotech_catalyst', label: 'Biotech Catalyst' },
+              { value: 'gex_flow', label: 'GEX Flow Trade' },
+            ].map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => update('signal_source', opt.value)}
+                className={clsx(
+                  'py-2 rounded-xl border text-xs font-semibold transition-colors',
+                  form.signal_source === opt.value
+                    ? 'border-amber-400 bg-amber-950/30 text-amber-400'
+                    : 'border-border text-subtle',
+                )}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
           <Input
             label="Ticker"
             value={form.ticker}
             onChange={(v) => update('ticker', v.toUpperCase())}
-            placeholder="ACMX"
+            placeholder={isGexFlow ? 'SPY' : 'ACMX'}
             required
-          />
-          <Input
-            label="Company Name"
-            value={form.company_name}
-            onChange={(v) => update('company_name', v)}
-            placeholder="Acme Therapeutics"
-            required
-          />
-          <Input
-            label="Drug Name"
-            value={form.drug_name}
-            onChange={(v) => update('drug_name', v)}
-            placeholder="ACM-101"
-          />
-          <Input
-            label="Indication"
-            value={form.indication}
-            onChange={(v) => update('indication', v)}
-            placeholder="Pancreatic Cancer"
           />
 
-          <div>
-            <label className="text-muted text-xs uppercase tracking-wider block mb-1">
-              Catalyst Type
-            </label>
-            <select
-              value={form.catalyst_type}
-              onChange={(e) => update('catalyst_type', e.target.value)}
-              className="w-full bg-card border border-border text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-red-500"
-            >
-              <option value="pdufa">PDUFA Date</option>
-              <option value="adcomm">AdComm Meeting</option>
-              <option value="phase2_readout">Phase 2 Readout</option>
-              <option value="phase3_readout">Phase 3 Readout</option>
-              <option value="enrollment_end">Enrollment End</option>
-              <option value="patent_expiry">Patent Expiry</option>
-              <option value="earnings">Earnings</option>
-              <option value="other">Other</option>
-            </select>
-          </div>
+          {!isGexFlow && (
+            <>
+              <Input
+                label="Company Name"
+                value={form.company_name}
+                onChange={(v) => update('company_name', v)}
+                placeholder="Acme Therapeutics"
+                required
+              />
+              <Input
+                label="Drug Name"
+                value={form.drug_name}
+                onChange={(v) => update('drug_name', v)}
+                placeholder="ACM-101"
+              />
+              <Input
+                label="Indication"
+                value={form.indication}
+                onChange={(v) => update('indication', v)}
+                placeholder="Pancreatic Cancer"
+              />
 
-          <Input
-            label="Catalyst Date"
-            value={form.catalyst_date}
-            onChange={(v) => {
-              // Manual edit overrides any prefilled precision —
-              // a date the user typed is a real day-precision date.
-              update('catalyst_date', v)
-              if (form.catalyst_date_precision !== 'day') {
-                update('catalyst_date_precision', 'day')
-              }
-            }}
-            type="date"
-            min={today()}
-            required
-          />
-          {form.catalyst_date && form.catalyst_date < today() && (
+              <div>
+                <label className="text-muted text-xs uppercase tracking-wider block mb-1">
+                  Catalyst Type
+                </label>
+                <select
+                  value={form.catalyst_type}
+                  onChange={(e) => update('catalyst_type', e.target.value)}
+                  className="w-full bg-card border border-border text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-red-500"
+                >
+                  <option value="pdufa">PDUFA Date</option>
+                  <option value="adcomm">AdComm Meeting</option>
+                  <option value="phase2_readout">Phase 2 Readout</option>
+                  <option value="phase3_readout">Phase 3 Readout</option>
+                  <option value="enrollment_end">Enrollment End</option>
+                  <option value="patent_expiry">Patent Expiry</option>
+                  <option value="earnings">Earnings</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+
+              <Input
+                label="Catalyst Date"
+                value={form.catalyst_date}
+                onChange={(v) => {
+                  // Manual edit overrides any prefilled precision —
+                  // a date the user typed is a real day-precision date.
+                  update('catalyst_date', v)
+                  if (form.catalyst_date_precision !== 'day') {
+                    update('catalyst_date_precision', 'day')
+                  }
+                }}
+                type="date"
+                min={today()}
+                required
+              />
+            </>
+          )}
+
+          {isGexFlow && (
+            <>
+              <Input
+                label="Spread Expiration"
+                value={form.expiry_date}
+                onChange={(v) => update('expiry_date', v)}
+                type="date"
+                min={today()}
+                required
+              />
+              <p className="text-[11px] text-muted leading-relaxed -mt-2">
+                For GEX-flow trades the spread expiry is the resolution date —
+                no biotech catalyst is being timed. The expiry is mirrored to
+                <span className="font-mono-tab"> catalyst_date </span>
+                on the underlying record so calendar &amp; alerts still work.
+              </p>
+            </>
+          )}
+
+          {!isGexFlow && form.catalyst_date && form.catalyst_date < today() && (
             <p className="text-red-400 text-xs">Catalyst date must be today or later.</p>
           )}
-          {form.catalyst_date_precision === 'month' && (
+          {!isGexFlow && form.catalyst_date_precision === 'month' && (
             <p className="text-yellow-400 text-xs leading-relaxed">
               ⚠ CT.gov has only confirmed the <span className="font-semibold">month</span> for this catalyst.
               The day above defaults to the 1st as a conservative earliest-possible placeholder.
@@ -410,7 +499,7 @@ export default function LogSignal() {
               the signal hash will preserve whatever you set.
             </p>
           )}
-          {form.catalyst_date_precision === 'year' && (
+          {!isGexFlow && form.catalyst_date_precision === 'year' && (
             <p className="text-yellow-400 text-xs leading-relaxed">
               ⚠ CT.gov has only confirmed the <span className="font-semibold">year</span> for this catalyst.
               The month and day above default to January 1st (earliest possible). Verify the exact
@@ -472,40 +561,59 @@ export default function LogSignal() {
             disabled={!step1Valid}
             className="w-full bg-red-600 hover:bg-red-500 disabled:bg-red-950 disabled:text-red-900 text-white font-semibold rounded-xl py-3 text-sm transition-colors"
           >
-            Next: Analyze Filing
+            {isGexFlow ? 'Next: Strike & Thesis' : 'Next: Analyze Filing'}
           </button>
       </div>
 
       <div className={clsx('space-y-4', step !== 2 && 'hidden')}>
-        <h2 className="text-white font-semibold">Filing Analysis</h2>
-          <p className="text-subtle text-xs">
-            Paste public filing text for the AI analyst to score, or write your thesis manually.
-            Analysis results will fill in your thesis only if it's empty.
-          </p>
+        <h2 className="text-white font-semibold">
+          {isGexFlow ? 'Strike & Thesis' : 'Filing Analysis'}
+        </h2>
+          {!isGexFlow && (
+            <p className="text-subtle text-xs">
+              Paste public filing text for the AI analyst to score, or write your thesis manually.
+              Analysis results will fill in your thesis only if it's empty.
+            </p>
+          )}
+          {isGexFlow && (
+            <p className="text-subtle text-xs">
+              Verify the spread pricing in the calculator below, then confirm
+              the GEX rationale that came in from the matrix. No filing
+              analysis runs for index / ETF flow trades.
+            </p>
+          )}
 
-          <AnalyzeFilingPanel
-            ticker={form.ticker}
-            companyName={form.company_name}
-            drugName={form.drug_name}
-            indication={form.indication}
-            catalystType={form.catalyst_type}
-            catalystDate={form.catalyst_date}
-            catalystDatePrecision={form.catalyst_date_precision}
-            analysis={analysis}
-            onAnalysisComplete={handleAnalysisComplete}
-            onAnalysisReset={() => {
-              setAnalysis(null)
-              clearDraftAnalysis(candidateId)
-              deleteRemoteDraft(supabase, candidateId).catch(() => {})
-            }}
-          />
+          {!isGexFlow && (
+            <AnalyzeFilingPanel
+              ticker={form.ticker}
+              companyName={form.company_name}
+              drugName={form.drug_name}
+              indication={form.indication}
+              catalystType={form.catalyst_type}
+              catalystDate={form.catalyst_date}
+              catalystDatePrecision={form.catalyst_date_precision}
+              analysis={analysis}
+              onAnalysisComplete={handleAnalysisComplete}
+              onAnalysisReset={() => {
+                setAnalysis(null)
+                clearDraftAnalysis(candidateId)
+                deleteRemoteDraft(supabase, candidateId).catch(() => {})
+              }}
+            />
+          )}
 
-          {form.catalyst_date && form.direction !== 'watch' && (
+          {(isGexFlow ? form.expiry_date : form.catalyst_date) &&
+            form.direction !== 'watch' && (
             <StrikePriceCalculator
               direction={form.direction}
               accountSize={profile?.account_size}
               initialStockPrice={form.stock_price_at_signal}
-              catalystDate={form.catalyst_date}
+              initialBuyStrike={form.long_strike || undefined}
+              initialSellStrike={form.short_strike || undefined}
+              initialExpiry={
+                isGexFlow ? form.expiry_date : form.expiry_date || undefined
+              }
+              catalystDate={isGexFlow ? undefined : form.catalyst_date}
               buyStrikeOtmPct={analysis?.strike_suggestion?.buy_strike_pct_otm}
               sellStrikeOtmPct={analysis?.strike_suggestion?.sell_strike_pct_otm}
               onCalculationComplete={(calc) => {
@@ -631,10 +739,14 @@ export default function LogSignal() {
 
           <div className="bg-card border border-border rounded-xl p-4 space-y-3">
             <Row label="Ticker" value={form.ticker} />
-            <Row label="Company" value={form.company_name} />
+            {!isGexFlow && <Row label="Company" value={form.company_name} />}
+            {isGexFlow && <Row label="Source" value="GEX Flow Trade" />}
             <Row label="Direction" value={directionLabelLong(form.direction)} highlight />
             <Row label="Structure" value={form.structure.replace(/_/g, ' ').toUpperCase()} />
-            <Row label="Catalyst" value={form.catalyst_date} />
+            <Row
+              label={isGexFlow ? 'Expiration' : 'Catalyst'}
+              value={isGexFlow ? form.expiry_date : form.catalyst_date}
+            />
             <Row label="Type" value={form.trade_type.toUpperCase()} />
             <Row label="Confidence" value={`${form.confidence_score}/10`} />
           </div>

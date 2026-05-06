@@ -47,6 +47,9 @@ export default function StrikePriceCalculator({
   direction = 'long_put',
   accountSize,
   initialStockPrice,
+  initialBuyStrike,
+  initialSellStrike,
+  initialExpiry,
   catalystDate,
   buyStrikeOtmPct,
   sellStrikeOtmPct,
@@ -58,10 +61,16 @@ export default function StrikePriceCalculator({
   const [stockPrice, setStockPrice] = useState(
     initialStockPrice != null ? String(initialStockPrice) : '',
   )
-  const [buyStrike, setBuyStrike] = useState('')
-  const [sellStrike, setSellStrike] = useState('')
+  const [buyStrike, setBuyStrike] = useState(
+    initialBuyStrike != null ? String(initialBuyStrike) : '',
+  )
+  const [sellStrike, setSellStrike] = useState(
+    initialSellStrike != null ? String(initialSellStrike) : '',
+  )
   const [premium, setPremium] = useState('')
-  const [expiry, setExpiry] = useState('')
+  const [expiry, setExpiry] = useState(
+    initialExpiry ? String(initialExpiry) : '',
+  )
   const [result, setResult] = useState(null)
   const [expanded, setExpanded] = useState(true)
   const [showExplainer, setShowExplainer] = useState(false)
