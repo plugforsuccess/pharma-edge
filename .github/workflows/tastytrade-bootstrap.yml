@@ -60,6 +60,16 @@ jobs:
             exit 1
           fi
 
+          # Length check (never prints values). Expected:
+          #   client_id     = 36 chars (UUID format with 4 dashes)
+          #   client_secret = 40 chars (hex)
+          #   auth_code     = 36 chars (UUID with 4 dashes)
+          # Mismatched lengths usually mean whitespace/newline in the GH secret.
+          echo "client_id length:     ${#CLIENT_ID} (expected 36)"
+          echo "client_secret length: ${#CLIENT_SECRET} (expected 40)"
+          echo "auth_code length:     ${#AUTH_CODE} (expected 36)"
+          echo "redirect_uri:         ${REDIRECT_URI}"
+
           response=$(curl -sS -w "\n%{http_code}" -X POST \
             https://api.tastyworks.com/oauth/token \
             -H "Content-Type: application/x-www-form-urlencoded" \
