@@ -284,7 +284,7 @@ export default function Markets() {
                 key={`fav-${sym}`}
                 onClick={() => setTicker(sym)}
                 className={
-                  'shrink-0 inline-flex items-center gap-1 px-3 py-1.5 rounded-full border text-xs font-medium transition ' +
+                  'tap-spring chip-pop-in shrink-0 inline-flex items-center gap-1 px-3 py-1.5 rounded-full border text-xs font-medium ' +
                   (active
                     ? 'bg-amber-400 text-bg border-amber-400'
                     : 'bg-card text-fg border-amber-400/40 hover:border-amber-400/70')

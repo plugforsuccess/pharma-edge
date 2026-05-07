@@ -231,6 +231,90 @@ body {
     text-transform: uppercase;
     color: var(--color-subtle);
   }
+
+  /* ─── Microinteractions ─────────────────────────────────────────
+     Small motion primitives applied across the app to make taps and
+     saves feel kinetic without blowing the perf budget. Each rule
+     respects prefers-reduced-motion via the global media query at
+     the bottom of this file. */
+
+  /* Spring on tap — universal active-press affordance for buttons.
+     The 0.97 scale + cubic-bezier overshoot reads as "received the
+     tap" without crossing into bouncy/childish. Apply via class
+     instead of touching every button so we can A/B the curve later. */
+  .tap-spring {
+    transition:
+      transform 120ms cubic-bezier(0.4, 0, 0.2, 1),
+      filter 120ms ease;
+    will-change: transform;
+  }
+  .tap-spring:active {
+    transform: scale(0.97);
+  }
+
+  /* Bigger spring — for FAB / hero CTAs where the press is the action,
+     not just a navigation. 0.94 is more pronounced; the bounce-back
+     uses a heavier spring curve so the button "settles" into place. */
+  .tap-bounce {
+    transition:
+      transform 200ms cubic-bezier(0.34, 1.56, 0.64, 1),
+      box-shadow 200ms ease;
+    will-change: transform;
+  }
+  .tap-bounce:active {
+    transform: scale(0.94);
+  }
+
+  /* Save / success flash — momentary green wash on a save button so
+     the user gets confirmation without a blocking toast. Pair with
+     a state flag that adds .is-saved for ~1.5s, then removes. */
+  @keyframes save-flash {
+    0% { background-color: var(--color-win); transform: scale(1); }
+    25% { transform: scale(1.02); }
+    100% { background-color: inherit; transform: scale(1); }
+  }
+  .save-flash {
+    animation: save-flash 1.4s ease-out;
+  }
+
+  /* Chip pop — when a ticker is starred / un-starred, the chip pulses
+     in or out. Drives the perception that the favorites list is
+     "alive" rather than a stale data-bound list. */
+  @keyframes chip-pop-in {
+    0% { transform: scale(0.6); opacity: 0; }
+    60% { transform: scale(1.08); opacity: 1; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  .chip-pop-in {
+    animation: chip-pop-in 220ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  /* Number tick — when a stat updates (e.g. cumulative P&L %, win
+     rate), the new value briefly highlights amber before settling.
+     Cheap way to draw the eye to a value that just changed without
+     adding a separate "↑" indicator. */
+  @keyframes number-tick {
+    0% { color: var(--color-brand-hi); transform: translateY(-1px); }
+    100% { color: inherit; transform: translateY(0); }
+  }
+  .number-tick {
+    animation: number-tick 600ms ease-out;
+  }
+}
+
+/* Reduced motion — every animation above gets disabled in one block.
+   prefers-reduced-motion is the OS-level accessibility setting; users
+   who disable motion (vestibular disorders, etc.) shouldn't have to
+   tolerate our springs and pops. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* Selection */
