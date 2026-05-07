@@ -158,6 +158,21 @@ export default function LogSignal() {
   // allowCustom=true so users can commit a symbol that isn't in the
   // curated universe (newly-IPO'd, OTC, etc.).
   const [tickerDrawerOpen, setTickerDrawerOpen] = useState(false)
+  // Verification modal for the entry POP. Fires before submit when the
+  // user manually entered or modified a POP value — the calibration
+  // chain is only credible if the user explicitly confirms the number
+  // they're locking into the public hash.
+  const [popVerifyOpen, setPopVerifyOpen] = useState(false)
+  // The POP value that came in from prefill (suggested-play handoff or
+  // calculator output). We capture it once at mount so we can detect
+  // whether the user has typed a different value at submit time. Auto-
+  // computed POPs that the user left alone don't need a verification
+  // modal — the lognormal Black-Scholes math is mechanical, not a
+  // judgement call.
+  const prefilledPopBp =
+    prefill.entry_pop_bp != null && Number.isFinite(Number(prefill.entry_pop_bp))
+      ? Math.round(Number(prefill.entry_pop_bp))
+      : null
   // The structure Claude originally suggested for this signal, if the
   // user arrived here via Suggested Plays. Used to render a "Suggested"
   // badge while the prefilled choice is selected, and a "Modified from
@@ -892,6 +907,11 @@ export default function LogSignal() {
             />
             <Row label="Type" value={form.trade_type.toUpperCase()} />
             <Row label="Confidence" value={`${form.confidence_score}/10`} />
+            <PopRow
+              valueBp={form.entry_pop_bp}
+              prefilledBp={prefilledPopBp}
+              onChange={(v) => update('entry_pop_bp', v)}
+            />
           </div>
 
           <div className="bg-card border border-border rounded-xl p-4">
@@ -928,7 +948,18 @@ export default function LogSignal() {
             </button>
             <button
               type="button"
-              onClick={submitSignal}
+              onClick={() => {
+                // POP changed from prefill OR was set fresh by the user
+                // → fire the verification modal. Untouched auto-POPs
+                // skip the modal (deterministic math, nothing to verify).
+                const submittedPop = form.entry_pop_bp ?? null
+                const userModifiedPop = submittedPop !== prefilledPopBp
+                if (submittedPop != null && userModifiedPop) {
+                  setPopVerifyOpen(true)
+                } else {
+                  submitSignal()
+                }
+              }}
               disabled={loading}
               className="flex-1 bg-red-600 hover:bg-red-500 disabled:bg-red-900 text-white font-semibold rounded-xl py-3 text-sm transition-colors"
             >
@@ -936,6 +967,16 @@ export default function LogSignal() {
             </button>
           </div>
       </div>
+
+      <PopVerificationModal
+        open={popVerifyOpen}
+        popBp={form.entry_pop_bp}
+        onCancel={() => setPopVerifyOpen(false)}
+        onConfirm={() => {
+          setPopVerifyOpen(false)
+          submitSignal()
+        }}
+      />
 
       <TickerDrawer
         open={tickerDrawerOpen}
@@ -988,6 +1029,125 @@ function Row({ label, value, highlight }) {
       <p className={clsx('text-xs font-semibold text-right', highlight ? 'text-red-400' : 'text-white')}>
         {value}
       </p>
+    </div>
+  )
+}
+
+// Entry POP input row. Editable for everyone — the user can override
+// an auto-computed value (e.g. they think the chain's IV is unreliable
+// and want to use their own probability) or supply one fresh on a
+// manual log. Validation: integer 0-100. Stored as basis points
+// (×100) so the integer never has a decimal point in the hash payload.
+//
+// "Auto" badge appears when the value matches what came in from prefill
+// AND prefill is non-null — signals "we computed this from the chain;
+// you can change it if you disagree." Once the user types a new value,
+// the badge disappears, marking it as their judgement.
+function PopRow({ valueBp, prefilledBp, onChange }) {
+  const valuePct =
+    valueBp != null && Number.isFinite(Number(valueBp))
+      ? Math.round(Number(valueBp) / 100)
+      : ''
+  const isAuto = prefilledBp != null && valueBp === prefilledBp
+  return (
+    <div className="flex items-start justify-between gap-4 pt-1">
+      <div className="flex-1">
+        <p className="text-subtle text-xs">
+          Entry POP
+          {isAuto && (
+            <span className="ml-2 text-[9px] uppercase tracking-wider text-green-400/80">
+              Auto
+            </span>
+          )}
+        </p>
+        <p className="text-muted text-[10px] leading-snug mt-0.5">
+          Locked into the v2 signal hash. Honest probability that this
+          trade hits its breakeven by expiration.
+        </p>
+      </div>
+      <div className="flex items-center gap-1">
+        <input
+          type="number"
+          min="0"
+          max="100"
+          step="1"
+          value={valuePct}
+          onChange={(e) => {
+            const raw = e.target.value
+            if (raw === '') {
+              onChange(null)
+              return
+            }
+            const n = Math.round(Number(raw))
+            if (!Number.isFinite(n)) return
+            const clamped = Math.max(0, Math.min(100, n))
+            onChange(clamped * 100)
+          }}
+          className="w-14 bg-bg-elev border border-border rounded-md px-2 py-1 text-right text-sm font-mono-tab tabular-nums text-white focus:outline-none focus:border-amber-400/40"
+          placeholder="—"
+        />
+        <span className="text-subtle text-xs">%</span>
+      </div>
+    </div>
+  )
+}
+
+// Verification modal — fires before submit when the user has manually
+// entered or modified the entry POP. The hash chain only carries
+// credibility if the user explicitly accepts the number they're
+// locking. Untouched auto-computed values skip this modal (the
+// lognormal math is deterministic, nothing to verify).
+function PopVerificationModal({ open, popBp, onCancel, onConfirm }) {
+  if (!open) return null
+  const pct = popBp != null ? Math.round(Number(popBp) / 100) : '—'
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+    >
+      <div
+        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+        onClick={onCancel}
+      />
+      <div className="relative w-full max-w-sm bg-bg-elev border border-amber-400/40 rounded-2xl p-5 space-y-4">
+        <div>
+          <p className="text-amber-400 text-[10px] uppercase tracking-wider font-semibold">
+            Verify entry POP
+          </p>
+          <h2 className="text-white text-lg font-semibold mt-1">
+            Lock {pct}% into the public record?
+          </h2>
+        </div>
+        <p className="text-subtle text-sm leading-relaxed">
+          This number is part of the SHA-256 signal hash — once
+          submitted it can't be revised. It will appear on your
+          public track record at <span className="font-mono text-zinc-300">/r/:slug</span>{' '}
+          alongside the actual outcome, and rolls into your
+          calibration stats on the Record page.
+        </p>
+        <p className="text-muted text-xs leading-relaxed">
+          Confirm <span className="text-white font-semibold">{pct}%</span>{' '}
+          reflects your honest entry-time probability that this trade
+          hits its breakeven. If you're unsure, cancel and revise.
+        </p>
+        <div className="flex gap-2 pt-1">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="flex-1 bg-card border border-border text-subtle font-semibold rounded-xl py-2.5 text-sm hover:text-fg transition"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="flex-1 bg-amber-400 hover:bg-amber-300 text-bg font-semibold rounded-xl py-2.5 text-sm transition"
+          >
+            Lock {pct}% &amp; submit
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
