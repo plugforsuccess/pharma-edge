@@ -10,6 +10,7 @@ import OpenPositions from '../components/OpenPositions'
 import SuggestedPlays from '../components/SuggestedPlays'
 import MarketPulse from '../components/MarketPulse'
 import TapeTickerRow from '../components/TapeTickerRow'
+import OnboardingModal, { shouldShowOnboarding } from '../components/OnboardingModal'
 import PullToRefreshIndicator from '../components/PullToRefreshIndicator'
 import usePullToRefresh from '../hooks/usePullToRefresh'
 import clsx from 'clsx'
@@ -38,12 +39,24 @@ export default function Dashboard() {
   const [watchlistCandidates, setWatchlistCandidates] = useState(0)
   const [loading, setLoading] = useState(true)
   const [activeTicker, setActiveTicker] = useState(loadInitialTicker)
+  const [showOnboarding, setShowOnboarding] = useState(false)
 
   // Persist the active ticker so it survives navigation away and back.
   useEffect(() => {
     if (typeof window === 'undefined' || !activeTicker) return
     try { window.localStorage.setItem(TAPE_TICKER_STORAGE_KEY, activeTicker) } catch { /* */ }
   }, [activeTicker])
+
+  // First-time-user walkthrough — fires once per user per browser.
+  // Defer the check to the next tick after auth resolves so we don't
+  // flash the modal during route transitions.
+  useEffect(() => {
+    if (!user?.id) return
+    const id = setTimeout(() => {
+      if (shouldShowOnboarding(user.id)) setShowOnboarding(true)
+    }, 250)
+    return () => clearTimeout(id)
+  }, [user?.id])
 
   useEffect(() => {
     if (!user) return
@@ -135,6 +148,12 @@ export default function Dashboard() {
         refreshing={refreshing}
         threshold={threshold}
       />
+      {showOnboarding && (
+        <OnboardingModal
+          userId={user?.id}
+          onClose={() => setShowOnboarding(false)}
+        />
+      )}
       {/* Compact header — date eyebrow + bell + settings. The big
           "Cash Moves" wordmark was eating prime above-the-fold real
           estate; the brand identity is already established in the
