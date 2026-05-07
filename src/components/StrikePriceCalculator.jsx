@@ -384,11 +384,8 @@ export default function StrikePriceCalculator({
           : null
 
       const dteWarning = computeDteWarning(catalystDate, expiry)
-      const dte = expiry
-        ? Math.max(1, Math.round(
-            (new Date(`${expiry}T00:00:00Z`).getTime() - Date.now()) / 86_400_000,
-          ))
-        : null
+      const dte = computeDte(expiry)
+      const expiryDteWarning = computeExpiryDteWarning(dte)
       const popBp =
         iv != null && Number(iv) > 0 && dte != null
           ? computeProfitProbabilityBp({
@@ -396,13 +393,24 @@ export default function StrikePriceCalculator({
               sigma: Number(iv),
               dte,
               structure: 'IRON_CONDOR',
-              longStrike: shortPut,           // not used by condor branch
-              shortStrike: shortCall,          // not used by condor branch
-              inner_call_strike: shortCall,
-              inner_put_strike: shortPut,
-              net_credit: prem,
+              innerCallStrike: shortCall,
+              innerPutStrike: shortPut,
+              netCredit: prem,
             })
           : null
+      const breakevenPopBp =
+        maxGainPerContract + maxLossPerContract > 0
+          ? Math.round(
+              (maxLossPerContract / (maxGainPerContract + maxLossPerContract)) * 10000,
+            )
+          : null
+      const evPerContract =
+        popBp != null
+          ? (popBp / 10000) * maxGainPerContract -
+            (1 - popBp / 10000) * maxLossPerContract
+          : null
+      const evEdgeBp =
+        popBp != null && breakevenPopBp != null ? popBp - breakevenPopBp : null
       const totalCostNum =
         contracts != null ? contracts * maxLossPerContract : null
       // For condors, BP comparison against max-loss-per-position makes
@@ -455,7 +463,16 @@ export default function StrikePriceCalculator({
         // the spread's mark-to-market price (not the underlying).
         stopLoss: { triggerValue: (prem * 2).toFixed(2) },
         dteWarning,
+        dte,
+        expiryDteWarning,
         entry_pop_bp: popBp,
+        breakeven_pop_bp: breakevenPopBp,
+        ev_per_contract: evPerContract,
+        ev_edge_bp: evEdgeBp,
+        premium_per_contract_pct:
+          effectiveAccount && effectiveAccount > 0
+            ? (maxLossPerContract / effectiveAccount) * 100
+            : null,
         account_size_source: liveNlv != null ? 'broker' : 'manual',
         account_size_used: effectiveAccount,
         live_buying_power: liveBp,
@@ -491,15 +508,12 @@ export default function StrikePriceCalculator({
         : null
 
     const dteWarning = computeDteWarning(catalystDate, expiry)
+    const dte = expiry ? computeDte(expiry) : null
+    const expiryDteWarning = computeExpiryDteWarning(dte)
 
     // Probability of Profit at Expiration. Only computed when we have
     // an IV from the chain — the calculator never fabricates a default
     // sigma, since a fake POP is worse than no POP for calibration.
-    const dte = expiry
-      ? Math.max(1, Math.round(
-          (new Date(`${expiry}T00:00:00Z`).getTime() - Date.now()) / 86_400_000,
-        ))
-      : null
     const popBp =
       iv != null && Number(iv) > 0 && dte != null
         ? computeProfitProbabilityBp({
@@ -509,14 +523,31 @@ export default function StrikePriceCalculator({
             structure: config.popType,
             longStrike: buy,
             shortStrike: sell,
-            net_debit: config.isCredit ? undefined : prem,
-            net_credit: config.isCredit ? prem : undefined,
-            // Calculator doesn't currently model condors, but pass the
-            // fields in case popType is ever switched to IRON_CONDOR.
-            inner_call_strike: undefined,
-            inner_put_strike: undefined,
+            netDebit: config.isCredit ? undefined : prem,
+            netCredit: config.isCredit ? prem : undefined,
           })
         : null
+
+    // Breakeven PoP — the win-rate the trade needs to be +EV at all.
+    //   breakevenPoP = max_loss / (max_loss + max_win)
+    // Expected Value (dollars per contract):
+    //   EV = PoP × max_win − (1 − PoP) × max_loss
+    // PoP comes back in basis points; we divide by 10000 for the
+    // probability. EV is null when PoP is null (no IV) — the user
+    // shouldn't see a fabricated EV.
+    const breakevenPopBp =
+      maxGainPerContract + maxLossPerContract > 0
+        ? Math.round(
+            (maxLossPerContract / (maxGainPerContract + maxLossPerContract)) * 10000,
+          )
+        : null
+    const evPerContract =
+      popBp != null
+        ? (popBp / 10000) * maxGainPerContract -
+          (1 - popBp / 10000) * maxLossPerContract
+        : null
+    const evEdgeBp =
+      popBp != null && breakevenPopBp != null ? popBp - breakevenPopBp : null
 
     // Buying-power guard: if the broker reports BP and the proposed
     // total cost exceeds it, surface the gap so the user catches it
@@ -581,6 +612,22 @@ export default function StrikePriceCalculator({
       },
       stopLoss: { triggerValue: (prem * 0.5).toFixed(2) },
       dteWarning,
+      // EV bundle: the +EV calculation is the single most important
+      // thing the calculator can tell you. R/R alone is a half-truth —
+      // a 1:5 R/R at 10% PoP is −EV, a 1:1 at 60% is +EV.
+      dte,
+      expiryDteWarning,
+      breakeven_pop_bp: breakevenPopBp,
+      ev_per_contract: evPerContract,
+      ev_edge_bp: evEdgeBp,
+      // 2%-rule contract violation — when even 1 contract exceeds 2%
+      // of effective account, the rule says skip. UI surfaces a
+      // distinct "skip the trade" copy in this case rather than just
+      // showing 0 contracts.
+      premium_per_contract_pct:
+        effectiveAccount && effectiveAccount > 0
+          ? (maxLossPerContract / effectiveAccount) * 100
+          : null,
     }
     setResult(calc)
     onCalculationComplete?.(calc)
@@ -870,6 +917,14 @@ export default function StrikePriceCalculator({
 
 function ResultPanel({ result, config, expiry, sellStrike, buyStrike, premium }) {
   const rr = Number(result.riskReward)
+  const popBp = result.entry_pop_bp
+  const bePopBp = result.breakeven_pop_bp
+  const evPc = result.ev_per_contract
+  const evEdgeBp = result.ev_edge_bp
+  const popPct = popBp != null ? Math.round(popBp / 100) : null
+  const bePopPct = bePopBp != null ? Math.round(bePopBp / 100) : null
+  const evPositive = evPc != null && evPc > 0
+  const evNegative = evPc != null && evPc < 0
   return (
     <div className="space-y-3 pt-2 border-t border-border">
       <div className="grid grid-cols-2 gap-3">
@@ -899,25 +954,95 @@ function ResultPanel({ result, config, expiry, sellStrike, buyStrike, premium })
         />
       </div>
 
-      {result.contracts != null && (
+      {/* Probability + EV block — the +EV calculation is the single
+          most important thing this calculator can tell you. R/R alone
+          is a half-truth: a 1:5 R/R at 10% PoP is −EV; a 1:1 at 60%
+          is +EV. We surface PoP, the breakeven PoP the trade needs to
+          be neutral, and the dollar EV per contract. */}
+      {(popBp != null || bePopBp != null) && (
         <div className="bg-bg border border-border rounded-xl p-4">
           <p className="text-muted text-[10px] uppercase tracking-wider mb-3">
-            Your Position (2% rule)
+            Probability &amp; expected value
           </p>
           <div className="grid grid-cols-3 gap-3 text-center">
             <div>
-              <p className="text-white font-bold text-xl">{result.contracts}</p>
-              <p className="text-muted text-[10px]">Contracts</p>
+              <p
+                className={clsx(
+                  'font-bold text-lg',
+                  popBp == null
+                    ? 'text-muted'
+                    : evEdgeBp != null && evEdgeBp >= 0
+                      ? 'text-green-400'
+                      : 'text-yellow-400',
+                )}
+              >
+                {popPct != null ? `${popPct}%` : '—'}
+              </p>
+              <p className="text-muted text-[10px]">Estimated PoP</p>
+              <p className="text-muted text-[10px] mt-0.5">
+                {popPct != null ? 'from IV' : 'no IV available'}
+              </p>
             </div>
             <div>
-              <p className="text-red-400 font-bold text-xl">${result.totalCost}</p>
-              <p className="text-muted text-[10px]">Total Cost</p>
+              <p className="text-white font-bold text-lg">
+                {bePopPct != null ? `${bePopPct}%` : '—'}
+              </p>
+              <p className="text-muted text-[10px]">Breakeven PoP</p>
+              <p className="text-muted text-[10px] mt-0.5">trade needs</p>
             </div>
             <div>
-              <p className="text-green-400 font-bold text-xl">${result.totalMaxGain}</p>
-              <p className="text-muted text-[10px]">Max Gain</p>
+              <p
+                className={clsx(
+                  'font-bold text-lg',
+                  evPositive ? 'text-green-400' : evNegative ? 'text-red-400' : 'text-muted',
+                )}
+              >
+                {evPc != null ? `${evPc >= 0 ? '+' : '−'}$${Math.abs(evPc).toFixed(0)}` : '—'}
+              </p>
+              <p className="text-muted text-[10px]">EV / contract</p>
+              <p className="text-muted text-[10px] mt-0.5">
+                {evPc != null ? (evPositive ? '+EV trade' : '−EV trade') : 'needs PoP'}
+              </p>
             </div>
           </div>
+          {popBp != null && evEdgeBp != null && (
+            <p className="text-[10px] text-muted mt-3 leading-relaxed">
+              {evEdgeBp >= 0 ? (
+                <>
+                  Estimated PoP beats breakeven by{' '}
+                  <span className="text-green-400 font-semibold">
+                    {(evEdgeBp / 100).toFixed(1)} pts
+                  </span>
+                  . The market is pricing this trade favourably given the IV.
+                </>
+              ) : (
+                <>
+                  Estimated PoP is{' '}
+                  <span className="text-red-400 font-semibold">
+                    {(Math.abs(evEdgeBp) / 100).toFixed(1)} pts
+                  </span>{' '}
+                  short of breakeven. R/R looks attractive but the IV says this
+                  trade loses money on average — skip or restructure.
+                </>
+              )}
+            </p>
+          )}
+        </div>
+      )}
+
+      <SizingPanel result={result} />
+
+      {result.expiryDteWarning && (
+        <div
+          className={clsx(
+            'rounded-xl p-3 border flex items-start gap-2 text-[10px] leading-relaxed',
+            result.expiryDteWarning.kind === 'block'
+              ? 'bg-red-950/20 border-red-900/40 text-red-400'
+              : 'bg-yellow-950/20 border-yellow-900/40 text-yellow-400',
+          )}
+        >
+          <AlertTriangle size={12} className="mt-0.5 flex-shrink-0" />
+          <span>{result.expiryDteWarning.text}</span>
         </div>
       )}
 
@@ -960,6 +1085,16 @@ function ResultPanel({ result, config, expiry, sellStrike, buyStrike, premium })
           </p>
           <p>
             Expiry: <span className="text-white">{expiry || '—'}</span>
+            {result.dte != null && (
+              <span
+                className={clsx(
+                  'ml-2',
+                  result.dte < 21 ? 'text-yellow-400' : 'text-muted',
+                )}
+              >
+                {result.dte} DTE
+              </span>
+            )}
           </p>
           <p>
             Contracts:{' '}
@@ -981,6 +1116,87 @@ function ResultPanel({ result, config, expiry, sellStrike, buyStrike, premium })
             Stop Loss:{' '}
             <span className="text-red-400">Spread @ ${result.stopLoss.triggerValue}</span>
           </p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Sizing panel — replaces the old 3-cell box. Splits behaviour by
+// whether the 2% rule lets the user size at all:
+//   - violatesRule: per-contract risk > 2% of account → show plain
+//     "Skip this trade" copy (no contracts can be entered safely)
+//   - contracts === 0: 2% allows nothing without violating, same UX
+//   - contracts >= 1: standard breakdown, with a "X% of account" tag
+//     so the user always sees how much sizing they're consuming
+function SizingPanel({ result }) {
+  const acct = result.account_size_used
+  const pct = result.premium_per_contract_pct
+  const violatesRule = pct != null && pct > 2
+  if (acct == null) {
+    return (
+      <div className="bg-bg border border-border rounded-xl p-4">
+        <p className="text-muted text-[10px] uppercase tracking-wider mb-1.5">
+          Position sizing
+        </p>
+        <p className="text-subtle text-xs">
+          Set Account Size or sync the broker for 2%-rule contract recommendations.
+        </p>
+      </div>
+    )
+  }
+  if (violatesRule) {
+    return (
+      <div className="bg-red-950/20 border border-red-900/40 rounded-xl p-4">
+        <p className="text-red-400 text-[10px] uppercase tracking-wider font-bold mb-1.5">
+          Skip this trade
+        </p>
+        <p className="text-red-400 text-xs leading-relaxed">
+          One contract risks ${Number(result.maxLossPerContract).toFixed(0)} —{' '}
+          <span className="font-semibold">{pct.toFixed(1)}% of your ${Math.round(acct)} account</span>.
+          The 2% rule mathematically forbids any size at this strike/premium.
+          Widen the spread or wait for a smaller candidate.
+        </p>
+      </div>
+    )
+  }
+  if (result.contracts === 0 || result.contracts == null) {
+    return (
+      <div className="bg-yellow-950/20 border border-yellow-900/40 rounded-xl p-4">
+        <p className="text-yellow-400 text-[10px] uppercase tracking-wider font-bold mb-1.5">
+          0 contracts at 2% rule
+        </p>
+        <p className="text-yellow-400 text-xs leading-relaxed">
+          Account too small for this trade as configured. Reduce premium, widen
+          the spread, or pick a cheaper underlying.
+        </p>
+      </div>
+    )
+  }
+  return (
+    <div className="bg-bg border border-border rounded-xl p-4">
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-muted text-[10px] uppercase tracking-wider">
+          Your position (2% rule)
+        </p>
+        {pct != null && (
+          <span className="text-[10px] text-subtle">
+            {(pct * result.contracts).toFixed(1)}% of account
+          </span>
+        )}
+      </div>
+      <div className="grid grid-cols-3 gap-3 text-center">
+        <div>
+          <p className="text-white font-bold text-xl">{result.contracts}</p>
+          <p className="text-muted text-[10px]">Contracts</p>
+        </div>
+        <div>
+          <p className="text-red-400 font-bold text-xl">${result.totalCost}</p>
+          <p className="text-muted text-[10px]">Total Cost</p>
+        </div>
+        <div>
+          <p className="text-green-400 font-bold text-xl">${result.totalMaxGain}</p>
+          <p className="text-muted text-[10px]">Max Gain</p>
         </div>
       </div>
     </div>
@@ -1109,7 +1325,31 @@ function computeDteWarning(catalystDate, expiryDate) {
   if (Number.isNaN(cat.getTime()) || Number.isNaN(exp.getTime())) return null
   const daysAfter = Math.floor((exp.getTime() - cat.getTime()) / 86_400_000)
   if (daysAfter < 21) {
-    return { kind: 'warn', text: `⚠️ Only ${daysAfter} days past catalyst — buy a longer expiry (rule: 30–45 days past).` }
+    return { kind: 'warn', text: `Only ${daysAfter} days past catalyst — buy a longer expiry (rule: 30–45 days past).` }
   }
-  return { kind: 'ok', text: `✓ ${daysAfter} days past catalyst` }
+  return { kind: 'ok', text: `${daysAfter} days past catalyst` }
+}
+
+// DTE = today → expiry, in calendar days. Floors at 1 to keep PoP math
+// (which divides by sqrt(t)) finite when the user picks an expiry today
+// or in the past.
+function computeDte(expiryDate) {
+  if (!expiryDate) return null
+  const exp = new Date(`${expiryDate}T00:00:00Z`).getTime()
+  if (Number.isNaN(exp)) return null
+  return Math.max(1, Math.round((exp - Date.now()) / 86_400_000))
+}
+
+// "Never enter under 21 DTE" — the rule is about absolute DTE on entry,
+// independent of catalyst date. Returns null if DTE is unknown or
+// already comfortable (≥ 21).
+function computeExpiryDteWarning(dte) {
+  if (dte == null) return null
+  if (dte < 7) {
+    return { kind: 'block', text: `${dte} DTE — far below the 21 DTE rule. Gamma/theta will eat this trade in days.` }
+  }
+  if (dte < 21) {
+    return { kind: 'warn', text: `${dte} DTE violates the 21 DTE rule. Roll out to a later expiry.` }
+  }
+  return null
 }
