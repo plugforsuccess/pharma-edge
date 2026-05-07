@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Bell, BellOff, Check, Copy, ExternalLink, Link2, LogOut, Plus, Trash2, Zap } from 'lucide-react'
+import { Bell, BellOff, Check, Copy, ExternalLink, Link2, LogOut, Plus, Share2, Trash2, Zap } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { useSubscription } from '../hooks/useSubscription'
@@ -26,6 +26,7 @@ export default function Settings() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [copied, setCopied] = useState(false)
+  const [shareCopied, setShareCopied] = useState(false)
   const [savedFlash, setSavedFlash] = useState(false)
 
   useEffect(() => {
@@ -38,28 +39,28 @@ export default function Settings() {
 
   const slugDraft = slugify(form.public_slug)
   const publicUrl = slugDraft ? `${window.location.origin}/r/${slugDraft}` : ''
-  const accountSizeNum = form.account_size === '' ? null : Number(form.account_size)
-  const accountSizeValid =
-    accountSizeNum === null || (Number.isFinite(accountSizeNum) && accountSizeNum >= 0)
-  const positionPct = Number(form.max_position_pct)
-  const sectorPct = Number(form.max_sector_pct)
 
   async function save() {
     if (!user?.id) return
-    if (!accountSizeValid) {
-      setError('Account size must be a positive number')
-      return
-    }
     setError('')
     setSaving(true)
 
+    // Concat first + last back into the legacy display_name column.
+    // Risk-management fields (account_size, max_position_pct,
+    // max_sector_pct) are no longer surfaced — account size now syncs
+    // from Tastytrade NLV automatically, and the 2% / 20% sector caps
+    // are project-policy constants enforced in calculator + signal
+    // logic. Existing values on the profile row are preserved by
+    // omission from this update.
+    const displayName =
+      [form.first_name, form.last_name]
+        .map((s) => (s || '').trim())
+        .filter(Boolean)
+        .join(' ') || null
     const update = {
-      display_name: form.display_name.trim() || null,
+      display_name: displayName,
       public_slug: slugDraft || null,
       is_public: !!form.is_public,
-      account_size: accountSizeNum,
-      max_position_pct: Number.isFinite(positionPct) ? positionPct : 2,
-      max_sector_pct: Number.isFinite(sectorPct) ? sectorPct : 20,
     }
 
     const { error: updateError } = await supabase
@@ -102,12 +103,20 @@ export default function Settings() {
       <SubscriptionSection tier={tier} isPro={isPro} />
 
       <Section title="Profile">
-        <Input
-          label="Display Name"
-          value={form.display_name}
-          onChange={(v) => update('display_name', v)}
-          placeholder="Cameron W."
-        />
+        <div className="grid grid-cols-2 gap-2">
+          <Input
+            label="First Name"
+            value={form.first_name}
+            onChange={(v) => update('first_name', v)}
+            placeholder="Cameron"
+          />
+          <Input
+            label="Last Name"
+            value={form.last_name}
+            onChange={(v) => update('last_name', v)}
+            placeholder="Wiley"
+          />
+        </div>
         <Input
           label="Public URL Slug"
           value={form.public_slug}
@@ -118,6 +127,44 @@ export default function Settings() {
           <p className="text-muted text-[10px]">
             Will be saved as <span className="font-mono text-zinc-400">{slugDraft || '(empty)'}</span>
           </p>
+        )}
+
+        {/* Share button — convenience surface so the user can drop their
+            /r/:slug link into iMessage / X / etc. without navigating to
+            the public record page first. Same native-share-then-clipboard
+            fallback as the hero card on PublicRecord. */}
+        {profile?.public_slug && profile?.is_public && (
+          <button
+            type="button"
+            onClick={async () => {
+              const url = `${window.location.origin}/r/${profile.public_slug}`
+              const display =
+                [form.first_name, form.last_name].filter(Boolean).join(' ').trim() ||
+                'My Cash Moves track record'
+              const text = `${display} — verifiable Cash Moves track record`
+              if (typeof navigator.share === 'function') {
+                try {
+                  await navigator.share({ title: text, text, url })
+                  return
+                } catch (e) {
+                  if (e?.name === 'AbortError') return
+                }
+              }
+              try {
+                await navigator.clipboard.writeText(url)
+                setShareCopied(true)
+                setTimeout(() => setShareCopied(false), 2000)
+              } catch { /* swallow */ }
+            }}
+            className={clsx(
+              'mt-1 w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl border text-sm font-semibold transition',
+              shareCopied
+                ? 'border-green-700 bg-green-950/40 text-green-400'
+                : 'border-amber-400/40 bg-amber-400/10 text-amber-400 hover:bg-amber-400/20',
+            )}
+          >
+            {shareCopied ? <><Check size={14} /> Link copied</> : <><Share2 size={14} /> Share my track record</>}
+          </button>
         )}
       </Section>
 
@@ -170,60 +217,15 @@ export default function Settings() {
 
       <PushSection userId={user?.id} />
 
-      <WatchlistSection userId={user?.id} />
 
       <BrokerSection />
 
-      <Section title="Risk Management">
-        <Input
-          label="Account Size"
-          value={form.account_size}
-          onChange={(v) => update('account_size', v)}
-          type="number"
-              inputMode="decimal"
-          prefix="$"
-          step="any"
-          min="0"
-        />
-        <Input
-          label="Max Position Size"
-          value={form.max_position_pct}
-          onChange={(v) => update('max_position_pct', v)}
-          type="number"
-              inputMode="decimal"
-          suffix="%"
-          step="any"
-          min="0"
-        />
-        <Input
-          label="Max Sector Exposure"
-          value={form.max_sector_pct}
-          onChange={(v) => update('max_sector_pct', v)}
-          type="number"
-              inputMode="decimal"
-          suffix="%"
-          step="any"
-          min="0"
-        />
-
-        {accountSizeNum != null && accountSizeValid && (
-          <div className="bg-bg border border-border rounded-xl p-3">
-            <p className="text-muted text-[10px] uppercase tracking-wider mb-2">
-              Calculated Limits
-            </p>
-            <CalcRow
-              label={`Max per trade (${positionPct || 0}%)`}
-              value={`$${((accountSizeNum * (positionPct || 0)) / 100).toLocaleString()}`}
-              valueClass="text-red-400"
-            />
-            <CalcRow
-              label={`Max sector total (${sectorPct || 0}%)`}
-              value={`$${((accountSizeNum * (sectorPct || 0)) / 100).toLocaleString()}`}
-              valueClass="text-yellow-400"
-            />
-          </div>
-        )}
-      </Section>
+      {/* Risk Management section removed: account size now syncs
+          live from Tastytrade NLV inside the calculator, and the
+          2% per-trade / 20% per-sector caps are project-policy
+          constants — no need to expose them as user-editable
+          settings. The DB columns stay; their values are still used
+          where set, but new users default to the constants. */}
 
       {error && (
         <div className="bg-red-950/30 border border-red-900/50 rounded-lg p-3">
@@ -257,13 +259,20 @@ export default function Settings() {
 }
 
 function initialForm(profile) {
+  // Split the legacy display_name into first/last on first read so
+  // existing rows render in the new two-field UI without a migration.
+  // Saved on submit by re-concatenating: display_name = `${first} ${last}`.
+  // Single-name profiles (display_name="Cameron W.") put everything
+  // before the first space into first_name and the rest into last_name.
+  const dn = (profile?.display_name ?? '').trim()
+  const firstSpace = dn.indexOf(' ')
+  const first = firstSpace === -1 ? dn : dn.slice(0, firstSpace)
+  const last = firstSpace === -1 ? '' : dn.slice(firstSpace + 1)
   return {
-    display_name: profile?.display_name ?? '',
+    first_name: first,
+    last_name: last,
     public_slug: profile?.public_slug ?? '',
     is_public: profile?.is_public ?? true,
-    account_size: profile?.account_size != null ? String(profile.account_size) : '',
-    max_position_pct: profile?.max_position_pct != null ? String(profile.max_position_pct) : '2',
-    max_sector_pct: profile?.max_sector_pct != null ? String(profile.max_sector_pct) : '20',
   }
 }
 
