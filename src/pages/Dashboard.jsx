@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Activity, ChevronRight, Cpu, Eye, Plus, Settings as SettingsIcon, Sparkles, TrendingUp } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import { useSubscription } from '../hooks/useSubscription'
 import { daysUntil } from '../utils/dates'
 import { catalystLabel, directionLabel } from '../lib/design'
 import NotificationCenter from '../components/NotificationCenter'
@@ -32,6 +33,7 @@ function loadInitialTicker() {
 
 export default function Dashboard() {
   const { user } = useAuth()
+  const { isPro } = useSubscription()
   const navigate = useNavigate()
   const [signals, setSignals] = useState([])
   const [stats, setStats] = useState({ wins: 0, losses: 0, open: 0, winRate: 0, total: 0 })
@@ -195,7 +197,7 @@ export default function Dashboard() {
             Open in Markets →
           </button>
         </div>
-        <SuggestedPlays ticker={activeTicker} isPro={false} />
+        <SuggestedPlays ticker={activeTicker} isPro={isPro} />
       </section>
 
       {/* Two-column layout for personal state + Live Moves below the
