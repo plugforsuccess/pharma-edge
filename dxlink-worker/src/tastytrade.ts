@@ -148,6 +148,58 @@ export async function fetchNestedChain(
     .filter((e) => e.expirationDate && e.strikes.length > 0)
 }
 
+// Tastytrade `/market-metrics` returns market summary data (OI, IV
+// rank, beta, etc.) for up to ~100 symbols per call. We use it to
+// snapshot open_interest for every option in the subscription plan
+// — the dxFeed Summary frames that should also carry OI are
+// unreliable as a first-time seed (they're snapshot-on-change,
+// missing on quiet symbols), so this REST snapshot is the
+// reliable source.
+//
+// Returns a Map<OCC symbol, openInterest>. Symbols with no OI on
+// file (illiquid wing strikes) are absent from the map; callers
+// should treat absent as "unknown" not "zero".
+//
+// Rate-limited: call at chain-refresh cadence (every 4h), not on
+// every Quote frame. With ~16k option symbols across the streamed
+// universe and ~100 per request, that's ~160 requests per refresh —
+// well under any sane rate limit.
+const MARKET_METRICS_BATCH = 100
+
+export async function fetchOpenInterestMap(
+  session: SessionAuth,
+  occSymbols: string[],
+): Promise<Map<string, number>> {
+  const result = new Map<string, number>()
+  if (occSymbols.length === 0) return result
+
+  for (let i = 0; i < occSymbols.length; i += MARKET_METRICS_BATCH) {
+    const batch = occSymbols.slice(i, i + MARKET_METRICS_BATCH)
+    const url = `${BASE}/market-metrics?symbols=${batch.map(encodeURIComponent).join(',')}`
+    try {
+      const resp = await fetch(url, {
+        headers: { Authorization: `Bearer ${session.sessionToken}` },
+      })
+      if (!resp.ok) {
+        // Don't blow up the whole snapshot on a single batch failure;
+        // log + skip so the worker still gets partial OI coverage.
+        console.warn(`[market-metrics] batch ${i / MARKET_METRICS_BATCH} → ${resp.status}`)
+        continue
+      }
+      const body = await resp.json()
+      const items = (body?.data?.items ?? []) as Array<Record<string, unknown>>
+      for (const item of items) {
+        const sym = String(item['symbol'] ?? '')
+        const oi = Number(item['option-open-interest'])
+        if (sym && Number.isFinite(oi)) result.set(sym, oi)
+      }
+    } catch (e) {
+      console.warn(`[market-metrics] batch fetch failed:`, e)
+    }
+  }
+  return result
+}
+
 // Equity quote streamer symbol is the bare ticker prefixed with nothing
 // — but option streamer symbols are dxFeed-style, e.g. ".AAPL240517C150".
 // fetchNestedChain returns both fields so we can subscribe correctly.

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useMemo } from 'react'
 
 // 2D heatmap: strikes (rows) × expirations (columns).
 //
@@ -98,54 +98,6 @@ export default function GexMatrix({ data, liveSpot = null }) {
     return strikes.length - 1
   }, [strikes, spot])
 
-  // Sub-strike fraction: 0 means "at this strike", 1 means "at the
-  // next-higher strike". With integer-spaced strikes and spot ticking
-  // in pennies, this is the difference between a frozen-looking
-  // cursor and one that visibly moves with every quote.
-  const subStrikeFraction = useMemo(() => {
-    if (spot == null || spotStrikeIndex < 0 || strikes.length === 0) return 0
-    const here = strikes[spotStrikeIndex]
-    const above = spotStrikeIndex > 0 ? strikes[spotStrikeIndex - 1] : here + 1
-    const below = spotStrikeIndex < strikes.length - 1 ? strikes[spotStrikeIndex + 1] : here - 1
-    if (spot >= here) {
-      const span = above - here
-      if (span <= 0) return 0
-      return Math.max(0, Math.min(1, (spot - here) / span))
-    }
-    // spot below this strike — interpolate downward (fraction is negative)
-    const span = here - below
-    if (span <= 0) return 0
-    return -Math.max(0, Math.min(1, (here - spot) / span))
-  }, [spot, spotStrikeIndex, strikes])
-
-  // Refs for measuring row positions in pixels. Row heights are
-  // uniform but tailwind's `py-1.5` + line-height can shift slightly
-  // on different DPRs / font fallbacks, so we measure rather than
-  // hard-code 28px.
-  const bodyRef = useRef(null)
-  const rowRefs = useRef([])
-  const [cursorTopPx, setCursorTopPx] = useState(null)
-
-  useLayoutEffect(() => {
-    if (spotStrikeIndex < 0) {
-      setCursorTopPx(null)
-      return
-    }
-    const body = bodyRef.current
-    const row = rowRefs.current[spotStrikeIndex]
-    if (!body || !row) return
-    const bodyRect = body.getBoundingClientRect()
-    const rowRect = row.getBoundingClientRect()
-    const rowHeight = rowRect.height
-    // Y origin = top of the strike row. fraction>0 means spot is
-    // ABOVE this strike → cursor moves UP (smaller y) by `fraction *
-    // rowHeight` (toward the next-higher strike row, which is the
-    // previous index because strikes sort descending).
-    const top =
-      rowRect.top - bodyRect.top + (1 - subStrikeFraction) * rowHeight - 1
-    setCursorTopPx(top)
-  }, [spotStrikeIndex, subStrikeFraction, strikes.length, expirations.length])
-
   if (strikes.length === 0 || expirations.length === 0) {
     return (
       <div className="text-center text-subtle text-sm py-8">
@@ -179,31 +131,11 @@ export default function GexMatrix({ data, liveSpot = null }) {
           ))}
         </div>
 
-        <div ref={bodyRef} className="relative">
-          {/* Sub-strike cursor line — moves up/down continuously as
-              spot ticks. Sits on top of the row grid via absolute
-              positioning. We keep the row-level highlight too so the
-              user gets both: the discrete "your spot is in this row"
-              indicator AND the continuous "spot is moving" feel. */}
-          {cursorTopPx != null && Number.isFinite(liveSpot) && liveSpot > 0 && (
-            <div
-              aria-hidden
-              className="pointer-events-none absolute left-0 right-0 z-20 transition-[top] duration-[1500ms] ease-linear"
-              style={{ top: `${cursorTopPx}px` }}
-            >
-              <div className="h-px bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]" />
-              <div className="absolute -top-2 left-2 px-1.5 py-0.5 rounded-md bg-amber-400 text-bg text-[10px] font-bold tabular-nums shadow-md">
-                ${Number(liveSpot).toFixed(2)}
-              </div>
-            </div>
-          )}
-
-          {strikes.map((strike, i) => {
+        {strikes.map((strike, i) => {
           const isSpotRow = i === spotStrikeIndex
           return (
             <div
               key={strike}
-              ref={(el) => { rowRefs.current[i] = el }}
               className={
                 'grid ' +
                 (isSpotRow
@@ -255,7 +187,6 @@ export default function GexMatrix({ data, liveSpot = null }) {
             </div>
           )
         })}
-        </div>
       </div>
     </div>
   )
