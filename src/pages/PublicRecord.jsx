@@ -4,6 +4,7 @@ import { Check, ExternalLink, Share2, Shield } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import Sparkline from '../components/Sparkline'
 import Spinner from '../components/Spinner'
+import InfoTip from '../components/InfoTip'
 import clsx from 'clsx'
 
 const REPO = import.meta.env.VITE_PUBLIC_RECORD_REPO || ''
@@ -401,8 +402,14 @@ function HeroStatsCard({ stats, profile }) {
       {stats.popN > 0 ? (
         <div className="bg-bg-elev/40 border border-border rounded-lg p-3">
           <div className="flex items-baseline justify-between mb-1">
-            <p className="text-[10px] uppercase tracking-wider text-amber-400 font-semibold">
+            <p className="text-[10px] uppercase tracking-wider text-amber-400 font-semibold inline-flex items-center gap-1">
               Calibration · n={stats.popN}
+              <InfoTip label="What is calibration?">
+                Did the trader's predicted probabilities match the
+                actual hit rate? Avg predicted vs actual on resolved
+                signals where POP was hash-locked at entry. Δ pts =
+                actual − predicted; closer to 0 = better calibrated.
+              </InfoTip>
             </p>
             {stats.calibrationDelta != null && (
               <p className={clsx('text-xs font-mono-tab font-semibold', calibrationTone)}>
