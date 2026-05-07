@@ -414,7 +414,7 @@ function PlayCard({ play, onLogSignal }) {
         </p>
       )}
 
-      <div className="grid grid-cols-4 gap-2 text-[11px]">
+      <div className="grid grid-cols-3 gap-2 text-[11px]">
         <Stat
           label="Risk/spread"
           value={`$${formatNum(play.max_loss_per_spread)}`}
@@ -430,11 +430,26 @@ function PlayCard({ play, onLogSignal }) {
           value={`${play.contracts}c`}
           tip="Suggested contract count, sized to keep max loss within 2% of your account."
         />
+      </div>
+
+      {/* Probability + EV row. R/R alone is a half-truth — a 1:5 R/R
+          at 10% PoP is −EV, a 1:1 at 60% is +EV. Surface both PoPs
+          and the edge between them so the user sees WHY the play is
+          good, not just that it has high R/R. The server already
+          filtered out −EV plays so the edge here is always >= 0
+          when present. */}
+      <div className="grid grid-cols-3 gap-2 text-[11px]">
         <Stat
-          label="POP"
+          label="PoP"
           value={formatPopFromBp(play.entry_pop_bp)}
-          tip="Probability of Profit at expiration. Computed from spot, breakeven, IV, and DTE under Black-Scholes lognormal."
+          tip="Estimated probability of profit at expiration, from current IV."
         />
+        <Stat
+          label="Breakeven"
+          value={formatPopFromBp(play.breakeven_pop_bp)}
+          tip="Win rate this trade structurally needs to break even (max_loss / (max_loss + max_win))."
+        />
+        <EdgeStat edgeBp={play.ev_edge_bp} />
       </div>
 
       <p className="text-[11px] text-subtle leading-relaxed">
@@ -481,6 +496,40 @@ function Stat({ label, value, tip }) {
       </div>
       <div className="font-mono-tab tabular-nums text-fg font-medium">
         {value}
+      </div>
+    </div>
+  )
+}
+
+// EV edge gets its own colored cell — green when the IV-implied PoP
+// beats the breakeven PoP (i.e. the trade is +EV), neutral when
+// edge is unknown (no IV), red would only appear if the server
+// filter let through a -EV play (it shouldn't). The label flips to
+// "+EV" / "−EV" so it's scannable without the user having to do
+// the basis-point math.
+function EdgeStat({ edgeBp }) {
+  const known = edgeBp != null && Number.isFinite(Number(edgeBp))
+  const positive = known && Number(edgeBp) >= 0
+  const tone = !known
+    ? 'bg-bg-elev/60 border-border text-muted'
+    : positive
+      ? 'bg-green-950/30 border-green-900/50 text-green-400'
+      : 'bg-red-950/30 border-red-900/50 text-red-400'
+  const valueText = !known
+    ? '—'
+    : `${positive ? '+' : '−'}${Math.abs(Math.round(Number(edgeBp) / 100))}pt`
+  return (
+    <div className={`border rounded px-2 py-1 ${tone}`}>
+      <div className="text-[10px] uppercase tracking-wider inline-flex items-center gap-1 opacity-80">
+        {known ? (positive ? '+EV edge' : '−EV edge') : 'EV edge'}
+        <InfoTip label="What is EV edge?">
+          Estimated PoP minus Breakeven PoP. Positive means the market's
+          IV-implied probability beats what the structure needs to be
+          break-even — a +EV trade.
+        </InfoTip>
+      </div>
+      <div className="font-mono-tab tabular-nums font-medium">
+        {valueText}
       </div>
     </div>
   )

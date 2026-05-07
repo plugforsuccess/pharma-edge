@@ -644,6 +644,53 @@ serve(async (req) => {
         net_debit: netDebit,
         net_credit: netCredit,
       })
+
+      // Breakeven PoP — the win rate this trade structurally needs to
+      // be EV-neutral, regardless of IV. = max_loss / (max_loss + max_win)
+      // expressed in basis points to match entry_pop_bp.
+      const maxLoss = Number(p.max_loss_per_spread)
+      const maxWin = Number(p.max_profit_per_spread)
+      p.breakeven_pop_bp =
+        Number.isFinite(maxLoss) && Number.isFinite(maxWin) && maxLoss + maxWin > 0
+          ? Math.round((maxLoss / (maxLoss + maxWin)) * 10000)
+          : null
+      // EV edge: estimated PoP minus breakeven PoP. Positive = the
+      // market's IV-implied probability beats what the structure
+      // needs. The single most useful number for ranking plays.
+      p.ev_edge_bp =
+        p.entry_pop_bp != null && p.breakeven_pop_bp != null
+          ? p.entry_pop_bp - p.breakeven_pop_bp
+          : null
+    }
+
+    // Quality gate: enforce the same rules the calculator and logging
+    // checklist enforce, so a play that would be flagged "Skip" downstream
+    // never lands in this list. Two cutoffs:
+    //   1. R/R >= 1.5 (the project rule — calculator's premium-of-width
+    //      caps are mathematically equivalent)
+    //   2. EV edge >= 0 (no negative-expected-value plays — even if R/R
+    //      passes, a negative edge means the IV says this trade loses
+    //      money on average)
+    // Plays without an entry_pop_bp (no IV at the strike — yahoo
+    // fallback / worker offline) bypass the EV cutoff so the user
+    // still sees something during data outages, with the UI surfacing
+    // PoP=— so the gap is honest.
+    const beforeCount = parsed.plays.length
+    parsed.plays = parsed.plays
+      .filter((p) => Number(p.risk_reward) >= 1.5)
+      .filter((p) => p.ev_edge_bp == null || p.ev_edge_bp >= 0)
+      .sort((a, b) => {
+        // Rank by EV edge descending; nulls (no IV) go last.
+        const ae = a.ev_edge_bp ?? -Infinity
+        const be = b.ev_edge_bp ?? -Infinity
+        return be - ae
+      })
+      .slice(0, 3)
+    if (parsed.plays.length < beforeCount) {
+      console.log(
+        `[suggest-plays] filtered ${beforeCount - parsed.plays.length} plays ` +
+          `(R/R < 1.5 or -EV); ${parsed.plays.length} survive`,
+      )
     }
   }
 
