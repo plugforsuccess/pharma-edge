@@ -24,6 +24,13 @@ on:
     # half of 13:00 (35, 40, 45, 50, 55) and 14:00–20:55 every 5min.
     - cron: '35,40,45,50,55 13 * * 1-5'
     - cron: '*/5 14-20 * * 1-5'
+    # EOD close snapshot — fires at 20:30 UTC EDT (4:30pm ET) and 21:30
+    # UTC EST (also 4:30pm ET) so we capture the close-of-day matrix
+    # regardless of DST. OPRA's EOD OI update lands ~4:15pm ET, so by
+    # 4:30 we have fresh OI to compute against. This is the snapshot
+    # compute-gex's overnight EOD fallback reads from.
+    - cron: '30 20 * * 1-5'
+    - cron: '30 21 * * 1-5'
   workflow_dispatch:
 
 concurrency:
@@ -45,17 +52,20 @@ jobs:
           # The hot ticker list is duplicated here so the cron doesn't
           # need to read TS files. Keep synced with HOT_TICKERS in
           # src/lib/tickerUniverse.js and TRACKED_TICKERS in
-          # dxlink-worker/src/tickers.ts.
+          # dxlink-worker/src/tickers.ts. Last sync 2026-05-07.
           TICKERS=(
             SPY QQQ IWM DIA
             GLD SLV TLT USO
             AAPL MSFT NVDA GOOGL AMZN META TSLA
             AMD AVGO INTC ORCL CRM ADBE NFLX
-            MU WDC
+            TSM ASML AMAT LRCX QCOM MRVL
+            MU WDC SNDK
+            VRT DLR EQIX CRWV NBIS IREN SMCI ANET
             JPM GS BAC WFC
             LLY NVO PFE MRK JNJ UNH ABBV
             WMT COST HD MCD NKE DIS
             XOM CVX COP
+            VST CEG NEE SMR OKLO CCJ
             COIN PLTR UBER ARM BABA GME
           )
 

@@ -325,16 +325,18 @@ function MatrixFreshness({ computedAt, source, spot, dominantExp }) {
     hour: 'numeric',
     minute: '2-digit',
   })
-  const isLive = source === 'dxlink'
+  const sourceLabel =
+    source === 'dxlink' ? { text: 'LIVE', tone: 'text-green-400' }
+    : source === 'yahoo' ? { text: '15M DELAYED', tone: 'text-amber-400' }
+    : source === 'eod' ? { text: 'EOD CLOSE', tone: 'text-yellow-400' }
+    : { text: source, tone: 'text-amber-400' }
   return (
     <div className="bg-bg-elev/50 border border-border/60 rounded-lg px-3 py-2 text-[10px] text-subtle leading-relaxed">
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-muted">Matrix as of</span>
         <span className="font-mono-tab tabular-nums text-fg">{time}</span>
         <span className="text-muted">·</span>
-        <span className={isLive ? 'text-green-400' : 'text-amber-400'}>
-          {isLive ? 'LIVE' : '15M DELAYED'}
-        </span>
+        <span className={sourceLabel.tone}>{sourceLabel.text}</span>
         <span className="text-muted">({source})</span>
         <span className="text-muted">· {ageLabel} ago</span>
       </div>
