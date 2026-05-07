@@ -63,7 +63,7 @@ export default function Layout() {
           <button
             type="button"
             onClick={() => navigate('/log')}
-            className="mb-2 inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-bg font-semibold text-sm transition-colors"
+            className="tap-spring mb-2 inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-bg font-semibold text-sm"
           >
             <Plus size={15} strokeWidth={2.5} />
             Log a Move
@@ -154,7 +154,7 @@ export default function Layout() {
               type="button"
               onClick={() => navigate('/log')}
               aria-label="Log a Move"
-              className="absolute -top-7 w-14 h-14 rounded-full bg-amber-400 hover:bg-amber-300 active:scale-95 text-bg shadow-[0_4px_16px_rgba(232,181,88,0.45)] transition-all flex items-center justify-center"
+              className="tap-bounce absolute -top-7 w-14 h-14 rounded-full bg-amber-400 hover:bg-amber-300 text-bg shadow-[0_4px_16px_rgba(232,181,88,0.45)] hover:shadow-[0_6px_22px_rgba(232,181,88,0.55)] flex items-center justify-center"
             >
               <Plus size={22} strokeWidth={2.5} />
             </button>
