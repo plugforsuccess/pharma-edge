@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowLeft, RefreshCw, Activity, Star, Lock, ChevronDown, Clock, BookOpen, Search } from 'lucide-react'
 import clsx from 'clsx'
+import { isWithinRth } from '../utils/marketHours'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
@@ -626,23 +627,6 @@ function SourceBadge({ source, eodAt }) {
     )
   }
   return null
-}
-
-function isWithinRth() {
-  const fmt = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/New_York',
-    weekday: 'short',
-    hour: 'numeric',
-    minute: 'numeric',
-    hour12: false,
-  })
-  const parts = fmt.formatToParts(new Date())
-  const wd = parts.find((p) => p.type === 'weekday')?.value
-  const hour = Number(parts.find((p) => p.type === 'hour')?.value)
-  const minute = Number(parts.find((p) => p.type === 'minute')?.value)
-  if (wd === 'Sat' || wd === 'Sun') return false
-  const t = hour * 60 + minute
-  return t >= 9 * 60 + 30 && t < 16 * 60
 }
 
 function formatCacheAge(ms) {
