@@ -397,11 +397,14 @@ function QueueCard({ icon: Icon, tone, title, sub, count, onClick }) {
 }
 
 function SignalCard({ signal, onClick }) {
-  // GEX trades use expiry_date as the urgency clock; biotech uses catalyst_date.
-  // catalyst_date may be null on gex_flow rows (no scheduled event), and
-  // expiry_date may be null on biotech rows where the user hasn't picked one yet.
-  const isGex = signal.signal_source === 'gex_flow'
-  const clockDate = isGex ? signal.expiry_date : signal.catalyst_date
+  // Single unified card for every Move regardless of signal_source. The
+  // urgency clock falls back through the dates that might be set:
+  // expiry_date wins because it's the trade's actual deadline; catalyst_date
+  // is the backup for biotech rows that pre-date the GEX pivot. Source
+  // label and source-specific fields (drug/indication, catalyst type) are
+  // shown on the detail page, not here — keeps the card scan-readable.
+  const clockDate = signal.expiry_date || signal.catalyst_date
+  const clockLabel = signal.expiry_date ? 'to expiry' : 'to catalyst'
   const daysTo = daysUntil(clockDate) ?? 0
   const isUrgent = daysTo <= 7
   const isSoon = daysTo > 7 && daysTo <= 14
@@ -419,6 +422,10 @@ function SignalCard({ signal, onClick }) {
       ? 'text-green-400 bg-green-500/10 border-green-500/35'
       : 'text-subtle bg-white/[0.03] border-border'
 
+  const sourceLabel =
+    signal.signal_source === 'gex_flow'
+      ? 'GEX Flow'
+      : catalystLabel(signal.catalyst_type) || 'Catalyst'
   const confidence = signal.confidence_score ?? 0
 
   return (
@@ -439,7 +446,7 @@ function SignalCard({ signal, onClick }) {
         }}
       />
 
-      <div className="flex items-start justify-between mb-2">
+      <div className="flex items-start justify-between mb-2.5">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-mono-tab text-fg font-semibold text-[15px] tracking-tight">
             {signal.ticker}
@@ -465,41 +472,12 @@ function SignalCard({ signal, onClick }) {
               {daysTo}
               <span className="text-[10px] font-sans ml-0.5 opacity-70">d</span>
             </p>
-            <p className="eyebrow text-[8px] mt-1">{isGex ? 'to expiry' : 'to catalyst'}</p>
+            <p className="eyebrow text-[8px] mt-1">{clockLabel}</p>
           </div>
         )}
       </div>
 
-      {/* Sub-line: biotech shows drug · indication; GEX shows the structure
-          (strikes / spread shape) when available, otherwise just "GEX play". */}
-      {isGex ? (
-        <p className="text-subtle text-[12px] mb-2.5 truncate">
-          <span className="text-fg/90 font-medium">GEX play</span>
-          {signal.expiry_date && (
-            <>
-              <span className="text-muted"> · </span>
-              {new Date(signal.expiry_date).toLocaleDateString('en-US', {
-                month: 'short',
-                day: 'numeric',
-              })}{' '}
-              expiry
-            </>
-          )}
-        </p>
-      ) : (
-        (signal.drug_name || signal.indication) && (
-          <p className="text-subtle text-[12px] mb-2.5 truncate">
-            {signal.drug_name && (
-              <span className="text-fg/90 font-medium">{signal.drug_name}</span>
-            )}
-            {signal.drug_name && signal.indication && (
-              <span className="text-muted"> · </span>
-            )}
-            {signal.indication}
-          </p>
-        )
-      )}
-
+      {/* Thesis is the only body text — same for every Move type. */}
       <div className="flex items-center justify-between gap-3">
         <p className="text-subtle text-[12px] line-clamp-1 flex-1 italic font-display">
           {signal.thesis?.slice(0, 90)}…
@@ -509,9 +487,7 @@ function SignalCard({ signal, onClick }) {
 
       <div className="hairline mt-3 mb-2.5 opacity-60" />
       <div className="flex items-center justify-between">
-        <span className="eyebrow text-[9px]">
-          {isGex ? 'GEX Flow' : catalystLabel(signal.catalyst_type)}
-        </span>
+        <span className="eyebrow text-[9px]">{sourceLabel}</span>
         {clockDate && (
           <span className="font-mono-tab text-[10px] text-muted">
             {new Date(clockDate).toLocaleDateString('en-US', {
