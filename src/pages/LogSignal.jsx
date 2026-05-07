@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext'
 import AnalyzeFilingPanel from '../components/AnalyzeFilingPanel'
 import StrikePriceCalculator from '../components/StrikePriceCalculator'
 import TickerDrawer from '../components/TickerDrawer'
+import Modal from '../components/Modal'
 import { TICKER_UNIVERSE } from '../lib/tickerUniverse'
 import { directionLabelLong } from '../lib/design'
 import clsx from 'clsx'
@@ -1139,56 +1140,45 @@ function PopRow({ valueBp, prefilledBp, onChange }) {
 // locking. Untouched auto-computed values skip this modal (the
 // lognormal math is deterministic, nothing to verify).
 function PopVerificationModal({ open, popBp, onCancel, onConfirm }) {
-  if (!open) return null
   const pct = popBp != null ? Math.round(Number(popBp) / 100) : '—'
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      role="dialog"
-      aria-modal="true"
-    >
-      <div
-        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-        onClick={onCancel}
-      />
-      <div className="relative w-full max-w-sm bg-bg-elev border border-amber-400/40 rounded-2xl p-5 space-y-4">
-        <div>
-          <p className="text-amber-400 text-[10px] uppercase tracking-wider font-semibold">
-            Verify entry POP
-          </p>
-          <h2 className="text-white text-lg font-semibold mt-1">
-            Lock {pct}% into the public record?
-          </h2>
-        </div>
-        <p className="text-subtle text-sm leading-relaxed">
-          This number is part of the SHA-256 signal hash — once
-          submitted it can't be revised. It will appear on your
-          public track record at <span className="font-mono text-zinc-300">/r/:slug</span>{' '}
-          alongside the actual outcome, and rolls into your
-          calibration stats on the Record page.
+    <Modal open={open} onClose={onCancel} ariaLabel="Verify entry POP">
+      <div>
+        <p className="text-amber-400 text-[10px] uppercase tracking-wider font-semibold">
+          Verify entry POP
         </p>
-        <p className="text-muted text-xs leading-relaxed">
-          Confirm <span className="text-white font-semibold">{pct}%</span>{' '}
-          reflects your honest entry-time probability that this trade
-          hits its breakeven. If you're unsure, cancel and revise.
-        </p>
-        <div className="flex gap-2 pt-1">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="flex-1 bg-card border border-border text-subtle font-semibold rounded-xl py-2.5 text-sm hover:text-fg transition"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={onConfirm}
-            className="flex-1 bg-amber-400 hover:bg-amber-300 text-bg font-semibold rounded-xl py-2.5 text-sm transition"
-          >
-            Lock {pct}% &amp; submit
-          </button>
-        </div>
+        <h2 className="text-white text-lg font-semibold mt-1">
+          Lock {pct}% into the public record?
+        </h2>
       </div>
-    </div>
+      <p className="text-subtle text-sm leading-relaxed">
+        This number is part of the SHA-256 signal hash — once
+        submitted it can't be revised. It will appear on your
+        public track record at <span className="font-mono text-zinc-300">/r/:slug</span>{' '}
+        alongside the actual outcome, and rolls into your
+        calibration stats on the Record page.
+      </p>
+      <p className="text-muted text-xs leading-relaxed">
+        Confirm <span className="text-white font-semibold">{pct}%</span>{' '}
+        reflects your honest entry-time probability that this trade
+        hits its breakeven. If you're unsure, cancel and revise.
+      </p>
+      <div className="flex gap-2 pt-1">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="tap-spring flex-1 bg-card border border-border text-subtle font-semibold rounded-xl py-2.5 text-sm hover:text-fg"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={onConfirm}
+          className="tap-spring flex-1 bg-amber-400 hover:bg-amber-300 text-bg font-semibold rounded-xl py-2.5 text-sm"
+        >
+          Lock {pct}% &amp; submit
+        </button>
+      </div>
+    </Modal>
   )
 }
