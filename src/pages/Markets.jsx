@@ -16,6 +16,7 @@ import UpgradeNotice from '../components/UpgradeNotice'
 import LiveDataStatus from '../components/LiveDataStatus'
 import PullToRefreshIndicator from '../components/PullToRefreshIndicator'
 import usePullToRefresh from '../hooks/usePullToRefresh'
+import useLiveSpot from '../hooks/useLiveSpot'
 
 // HOT_TICKERS = the ~50 names the dxlink-worker actually streams
 // (see dxlink-worker/src/tickers.ts). The pill row at the top of the
@@ -194,6 +195,13 @@ export default function Markets() {
     () => load(ticker, { refresh: true }),
     { disabled: replayActive },
   )
+
+  // Live spot polling. The matrix snapshot's `spot` is server-cached
+  // for 5 min; without this the GEX cursor row sits stuck on whatever
+  // spot was when compute-gex last ran. Polls dxlink_quotes for the
+  // equity row every 2s; null in replay mode (we want the historical
+  // cursor to stay where it was at snapshot time).
+  const { spot: liveSpot } = useLiveSpot(replayActive ? null : ticker)
 
   return (
     <div className="px-4 lg:px-6 py-5 space-y-4 max-w-md mx-auto lg:max-w-7xl">
@@ -460,7 +468,10 @@ export default function Markets() {
           )}
 
         {!loading && !error && (
-          <GexMatrix data={replayActive && replaySnapshot ? replaySnapshot : data} />
+          <GexMatrix
+            data={replayActive && replaySnapshot ? replaySnapshot : data}
+            liveSpot={replayActive ? null : liveSpot}
+          />
         )}
       </div>
 

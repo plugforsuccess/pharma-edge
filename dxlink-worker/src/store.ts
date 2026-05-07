@@ -76,8 +76,18 @@ export function applyEvent(symbol: string, patch: Partial<QuoteRow>) {
     }
     return
   }
+  // dxFeed sends sparse frames — Summary in particular often carries
+  // openInterest=null when the field hasn't changed since the last
+  // tick. Naive `{ ...existing, ...patch }` would overwrite a
+  // previously-good OI with null and leave the matrix's per-strike
+  // GEX cell blank. Only apply patch fields whose value is non-null;
+  // bid/ask/last/mid/iv/Greeks all follow the same convention.
+  const merged: QuoteRow = { ...existing }
+  for (const k of Object.keys(patch) as (keyof QuoteRow)[]) {
+    const v = patch[k]
+    if (v != null) (merged as unknown as Record<string, unknown>)[k] = v
+  }
   // mid is computed from bid+ask if dxFeed didn't send it explicitly
-  const merged = { ...existing, ...patch }
   if (
     (patch.bid != null || patch.ask != null) &&
     Number.isFinite(merged.bid) && Number.isFinite(merged.ask) &&

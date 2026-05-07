@@ -56,11 +56,15 @@ function gexColor(gex, maxAbs) {
   return `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`
 }
 
-export default function GexMatrix({ data }) {
+export default function GexMatrix({ data, liveSpot = null }) {
   const expirations = data?.expirations ?? []
   const strikes = data?.strikes ?? []
   const cells = data?.cells ?? []
-  const spot = data?.spot ?? null
+  // The matrix snapshot's `spot` is from when compute-gex ran (cached
+  // 5 min server-side). For the cursor row to actually look live the
+  // way the LIVE badge implies, we accept an optional `liveSpot`
+  // override polled from dxlink_quotes — falls back to snapshot spot.
+  const spot = Number.isFinite(liveSpot) && liveSpot > 0 ? liveSpot : data?.spot ?? null
   const largest = data?.largest ?? null
 
   const maxAbs = useMemo(() => {
