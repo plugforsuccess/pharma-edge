@@ -18,12 +18,42 @@ jobs:
       - name: Checkout main repo
         uses: actions/checkout@v4
 
-      - name: Checkout public-record repo
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ vars.PUBLIC_RECORD_REPO }}
-          token: ${{ secrets.GH_PAT }}
-          path: public-record
+      # Cold-start tolerant: if the public-record repo is empty (no
+      # `main` branch yet) actions/checkout fails with "couldn't find
+      # remote ref". We do the clone manually so we can fall back to
+      # `git init` + bootstrap commit on main, then continue.
+      - name: Checkout public-record repo (init if empty)
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          REPO: ${{ vars.PUBLIC_RECORD_REPO }}
+        run: |
+          set -e
+          if git clone --depth 1 -b main \
+              "https://x-access-token:${GH_PAT}@github.com/${REPO}.git" \
+              public-record 2>/dev/null; then
+            echo "Cloned existing main"
+          else
+            echo "main branch missing — initializing public-record repo"
+            mkdir -p public-record
+            cd public-record
+            git init -b main
+            git remote add origin \
+              "https://x-access-token:${GH_PAT}@github.com/${REPO}.git"
+            mkdir -p anchors
+            cat > README.md <<'EOF'
+          # Cash Moves Public Record
+
+          Daily SHA-256 anchors of locked signals from cashmoves.io.
+          Each commit corresponds to a signal hash; the chain is
+          immutable by construction.
+          EOF
+            touch anchors/.gitkeep
+            git config user.email "pharma-edge-bot@users.noreply.github.com"
+            git config user.name "Cash Moves Bot"
+            git add README.md anchors/.gitkeep
+            git commit -m "init public record"
+            git push -u origin main
+          fi
 
       - name: Set up Python
         uses: actions/setup-python@v5
