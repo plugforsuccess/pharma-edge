@@ -10,10 +10,13 @@ import clsx from 'clsx'
 import { supabase } from '../lib/supabase'
 import { computeProfitProbabilityBp, formatPopBp } from '../utils/pop'
 
-// Premium cap is 40% of spread width — keeps R/R >= 1:1.5 (the rule).
+// Premium cap (debit) is 40% of spread width — keeps R/R >= 1:1.5 (the rule).
+// For credit structures the rule inverts: max_gain = premium, max_loss =
+// width - premium, so R/R >= 1:1.5 requires premium >= 60% of width.
 // Naked options are intentionally absent: the pre-trade checklist requires
 // a spread, so the calculator UI shouldn't normalise a rule violation.
 const PREMIUM_PCT_CAP = 0.4
+const CREDIT_PREMIUM_PCT_FLOOR = 0.6
 
 // Four vertical-spread structures, two debit and two credit. Iron
 // condor is intentionally NOT in the calculator yet — it needs four
@@ -320,9 +323,18 @@ export default function StrikePriceCalculator({
   const liveSpread = config.isCondor
     ? condorMaxWidth(longPutStrike, shortPutStrike, shortCallStrike, longCallStrike)
     : liveSpreadWidth(structure, buyStrike, sellStrike)
+  // Credit structures (incl. iron condor) require premium >= 60% of width.
+  // Debit structures require premium <= 40% of width. Both enforce the
+  // same R/R >= 1:1.5 rule from the opposite side of the trade.
+  const isCreditStructure = config.isCredit || config.isCondor
+  const premiumThreshold = liveSpread != null
+    ? liveSpread * (isCreditStructure ? CREDIT_PREMIUM_PCT_FLOOR : PREMIUM_PCT_CAP)
+    : null
   const premiumValid =
-    liveSpread != null && toNumOrNull(premium) != null
-      ? toNumOrNull(premium) <= liveSpread * PREMIUM_PCT_CAP
+    premiumThreshold != null && toNumOrNull(premium) != null
+      ? isCreditStructure
+        ? toNumOrNull(premium) >= premiumThreshold
+        : toNumOrNull(premium) <= premiumThreshold
       : null
 
   function calculate() {
@@ -420,8 +432,8 @@ export default function StrikePriceCalculator({
         totalCost: totalCostNum != null ? totalCostNum.toFixed(2) : null,
         totalMaxGain:
           contracts != null ? (contracts * maxGainPerContract).toFixed(2) : null,
-        premiumValid: prem <= maxWingWidth * PREMIUM_PCT_CAP,
-        premiumCap: (maxWingWidth * PREMIUM_PCT_CAP).toFixed(2),
+        premiumValid: prem >= maxWingWidth * CREDIT_PREMIUM_PCT_FLOOR,
+        premiumCap: (maxWingWidth * CREDIT_PREMIUM_PCT_FLOOR).toFixed(2),
         profitTargets: {
           // Half-credit = 50% profit target (industry-standard condor exit).
           exit50pct: { spreadValue: (prem * 0.5).toFixed(2) },
@@ -529,7 +541,9 @@ export default function StrikePriceCalculator({
         contracts != null ? (contracts * maxLossPerContract).toFixed(2) : null,
       totalMaxGain:
         contracts != null ? (contracts * maxGainPerContract).toFixed(2) : null,
-      premiumValid: prem <= spreadWidth * PREMIUM_PCT_CAP,
+      premiumValid: config.isCredit
+        ? prem >= spreadWidth * CREDIT_PREMIUM_PCT_FLOOR
+        : prem <= spreadWidth * PREMIUM_PCT_CAP,
       // POP gets passed back through onCalculationComplete so LogSignal
       // can stamp it onto the signal at insert time (entry_pop_bp).
       entry_pop_bp: popBp,
@@ -539,7 +553,7 @@ export default function StrikePriceCalculator({
       account_size_used: effectiveAccount,
       live_buying_power: liveBp,
       bp_insufficient: bpInsufficient,
-      premiumCap: (spreadWidth * PREMIUM_PCT_CAP).toFixed(2),
+      premiumCap: (spreadWidth * (config.isCredit ? CREDIT_PREMIUM_PCT_FLOOR : PREMIUM_PCT_CAP)).toFixed(2),
       profitTargets: {
         exit100pct: {
           spreadValue: Math.min(prem * 2, spreadWidth).toFixed(2),
@@ -780,16 +794,29 @@ export default function StrikePriceCalculator({
             <div className="bg-red-950/20 border border-red-900/40 rounded-xl p-3 flex items-start gap-2">
               <AlertTriangle size={12} className="text-red-400 mt-0.5 flex-shrink-0" />
               <p className="text-red-400 text-[10px] leading-relaxed">
-                Premium ${premium} exceeds the 40% spread cap (
-                ${(liveSpread * PREMIUM_PCT_CAP).toFixed(2)}). R/R falls below 1:1.5.
-                Widen the spread or skip the trade.
+                {isCreditStructure ? (
+                  <>
+                    Credit ${premium} is below the 60% floor (
+                    ${(liveSpread * CREDIT_PREMIUM_PCT_FLOOR).toFixed(2)}) on a
+                    ${liveSpread.toFixed(2)}-wide spread. R/R falls below 1:1.5.
+                    Tighten the strikes or skip the trade.
+                  </>
+                ) : (
+                  <>
+                    Premium ${premium} exceeds the 40% spread cap (
+                    ${(liveSpread * PREMIUM_PCT_CAP).toFixed(2)}). R/R falls below 1:1.5.
+                    Widen the spread or skip the trade.
+                  </>
+                )}
               </p>
             </div>
           )}
           {premiumValid === true && (
             <div className="bg-green-950/10 border border-green-900/20 rounded-xl p-2">
               <p className="text-green-600 text-[10px]">
-                ✓ Premium within the 40% cap (R/R ≥ 1:1.5)
+                {isCreditStructure
+                  ? '✓ Credit ≥ 60% of width (R/R ≥ 1:1.5)'
+                  : '✓ Premium within the 40% cap (R/R ≥ 1:1.5)'}
               </p>
             </div>
           )}
