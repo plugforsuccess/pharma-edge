@@ -301,7 +301,7 @@ function PublicSignalRow({ signal }) {
         )}
       </div>
 
-      <div className="grid grid-cols-3 gap-2 mb-3">
+      <div className="grid grid-cols-4 gap-2 mb-3">
         <Detail
           label="Logged"
           value={new Date(signal.logged_at).toLocaleDateString('en-US', {
@@ -321,6 +321,14 @@ function PublicSignalRow({ signal }) {
         <Detail
           label="Confidence"
           value={signal.confidence_score != null ? `${signal.confidence_score}/10` : '—'}
+        />
+        <Detail
+          label="Entry POP"
+          value={
+            signal.entry_pop_bp != null
+              ? `${Math.round(signal.entry_pop_bp / 100)}%`
+              : '—'
+          }
         />
       </div>
 

@@ -201,6 +201,55 @@ export default function TrackRecord() {
             </div>
           </div>
 
+          {stats.calibrationN > 0 && (
+            <div className="bg-card border border-border rounded-xl p-4 mb-4">
+              <h3 className="text-subtle text-xs font-semibold uppercase tracking-wider mb-1">
+                Calibration
+              </h3>
+              <p className="text-[10px] text-muted leading-relaxed mb-3">
+                How often plays we predicted as winners actually hit. Calculated
+                only on signals with a hash-locked entry POP — n={stats.calibrationN}.
+              </p>
+              <div className="grid grid-cols-3 gap-3 text-center">
+                <div>
+                  <p className="text-white font-bold text-xl">{stats.predictedAvgPct}%</p>
+                  <p className="text-muted text-[10px]">Predicted</p>
+                </div>
+                <div>
+                  <p
+                    className={clsx(
+                      'font-bold text-xl',
+                      stats.actualHitRatePct >= stats.predictedAvgPct
+                        ? 'text-green-400'
+                        : 'text-yellow-400',
+                    )}
+                  >
+                    {stats.actualHitRatePct}%
+                  </p>
+                  <p className="text-muted text-[10px]">Actual</p>
+                </div>
+                <div>
+                  <p
+                    className={clsx(
+                      'font-bold text-xl',
+                      stats.calibrationDelta >= 0 ? 'text-green-400' : 'text-red-400',
+                    )}
+                  >
+                    {stats.calibrationDelta >= 0 ? '+' : ''}
+                    {stats.calibrationDelta}
+                  </p>
+                  <p className="text-muted text-[10px]">Δ pts</p>
+                </div>
+              </div>
+              {stats.calibrationN < 30 && (
+                <p className="text-[10px] text-muted mt-3 leading-relaxed">
+                  Δ becomes meaningful around n=30. Below that the actual
+                  rate has too much noise to trust as a calibration signal.
+                </p>
+              )}
+            </div>
+          )}
+
           {Object.keys(stats.bySignalType).length > 0 && (
             <div className="bg-card border border-border rounded-xl p-4 mb-4">
               <h3 className="text-subtle text-xs font-semibold uppercase tracking-wider mb-3">
@@ -327,6 +376,28 @@ function computeStats(rows) {
   })
   const cumPnlPct = equityCurve.length ? equityCurve[equityCurve.length - 1] : 0
 
+  // Calibration: average predicted POP across resolved signals vs the
+  // actual hit rate. If the model is well-calibrated the two converge
+  // as n grows. Only counts signals with a non-null entry_pop_bp
+  // (post-2026-05-07 v2 hash signals; older v1 rows are excluded).
+  const calibratable = resolved.filter(
+    (o) => o.signals?.entry_pop_bp != null,
+  )
+  const calibrationN = calibratable.length
+  const predictedAvg = calibrationN
+    ? calibratable.reduce(
+        (s, o) => s + Number(o.signals.entry_pop_bp) / 10000,
+        0,
+      ) / calibrationN
+    : null
+  const actualHitRate = calibrationN
+    ? calibratable.filter((o) => o.thesis_correct).length / calibrationN
+    : null
+  const calibrationDelta =
+    predictedAvg != null && actualHitRate != null
+      ? Math.round((actualHitRate - predictedAvg) * 100)
+      : null
+
   return {
     total: resolved.length,
     wins: wins.length,
@@ -345,6 +416,10 @@ function computeStats(rows) {
     bySignalType,
     equityCurve,
     cumPnlPct,
+    calibrationN,
+    predictedAvgPct: predictedAvg != null ? Math.round(predictedAvg * 100) : null,
+    actualHitRatePct: actualHitRate != null ? Math.round(actualHitRate * 100) : null,
+    calibrationDelta,
   }
 }
 
