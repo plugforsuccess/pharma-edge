@@ -59,7 +59,7 @@ export default function TickerDrawer({
 
   return (
     <div
-      className={`fixed inset-0 z-50 flex items-end justify-center transition ${
+      className={`fixed inset-0 z-[60] flex items-end justify-center transition ${
         open ? 'pointer-events-auto' : 'pointer-events-none'
       }`}
       role="dialog"
