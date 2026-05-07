@@ -300,25 +300,14 @@ function HeroStatsCard({ stats, profile }) {
         ? `Predicted ${stats.avgPredictedPop}% / Actual ${stats.avgPredictedPop + stats.calibrationDelta}% over ${stats.popN} hash-anchored trades. Verifiable on Cash Moves.`
         : `${stats.winRate}% hit rate over ${stats.resolved} hash-anchored trades. Verifiable on Cash Moves.`
 
-    // Native share sheet first (iOS / Android / mobile Chrome) —
-    // gives the OS-level share UX that's the recruitment vector.
-    // Fall back to clipboard for desktop browsers where navigator.share
-    // is undefined or doesn't accept the payload.
     if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
       try {
         await navigator.share({ title, text, url })
-        // Some platforms swallow share-cancelled as success; either
-        // way we don't surface a "copied" badge after navigator.share
-        // because the OS already gave its own feedback.
         return
       } catch (e) {
-        // User-cancelled is normal; only fall back on real errors.
         if (e?.name === 'AbortError') return
       }
     }
-    // Clipboard fallback. Some older browsers don't expose
-    // navigator.clipboard outside HTTPS — surface that as a soft
-    // error rather than throwing.
     try {
       if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(url)
