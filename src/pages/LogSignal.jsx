@@ -760,6 +760,7 @@ export default function LogSignal() {
             form.direction !== 'watch' && (
             <StrikePriceCalculator
               direction={form.direction}
+              lockedStructure={form.structure}
               accountSize={profile?.account_size}
               initialStockPrice={form.stock_price_at_signal}
               initialBuyStrike={form.long_strike || undefined}
