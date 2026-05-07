@@ -276,6 +276,13 @@ function PlayCard({ play, onOpenCalculator, onLogSignal }) {
         Short ${play.short_strike} {isCallSpread ? 'C' : 'P'}
       </div>
 
+      {play.market_view && (
+        <p className="text-[11px] text-fg/85 leading-snug">
+          <span className="eyebrow text-[9px] text-muted mr-1.5">View</span>
+          {play.market_view}
+        </p>
+      )}
+
       <div className="grid grid-cols-3 gap-2 text-[11px]">
         <Stat label="Risk/spread" value={`$${formatNum(play.max_loss_per_spread)}`} />
         <Stat label="R/R" value={`1:${(play.risk_reward || 0).toFixed(1)}`} />

@@ -83,6 +83,7 @@ OUTPUT — STRICT JSON, NO PROSE:
       "max_profit_per_spread": <number, dollars>,
       "risk_reward": <number, e.g. 1.5>,
       "contracts": <integer, sized to account_size with the 2% rule>,
+      "market_view": "1 short sentence stating the EXACT forecast this trade requires to be profitable. Be precise about what the underlying must do — most spreads are not generic 'bullish' or 'bearish'; they each require a specific outcome. Examples: 'PLTR closes below $130 by May 29' (debit put spread — needs an actual move), 'PLTR fails to reclaim $140' (bear call credit — only needs the wall to hold; flat or mild drift up still wins), 'NVDA pins between $138 and $145' (iron condor — needs sideways), 'AAPL closes above $185 by Jun 20' (bull call debit — needs a move up). Never use the same market_view for two plays in the same response — if two plays collapse to the same forecast, drop the lower-conviction one.",
       "rationale": "1-2 sentences citing specific GEX numbers (call wall at $X, flip at $Y, etc.)",
       "what_invalidates": "1 sentence — what move or event kills this thesis"
     }
