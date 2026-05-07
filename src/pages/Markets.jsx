@@ -202,16 +202,18 @@ export default function Markets() {
         </div>
         <button
           onClick={() => setReplayActive((v) => !v)}
-          className={
-            'p-2 transition ' +
-            (replayActive
-              ? 'text-amber-400'
-              : 'text-subtle hover:text-fg')
-          }
-          aria-label="Replay mode"
-          title="Replay today's GEX"
+          className={clsx(
+            'tap-spring inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-semibold transition',
+            replayActive
+              ? 'border-amber-400 bg-amber-400/15 text-amber-400'
+              : 'border-border text-subtle hover:text-fg hover:border-border-hover',
+          )}
+          aria-label={replayActive ? 'Exit replay' : 'Enter replay mode'}
+          aria-pressed={replayActive}
+          title={replayActive ? 'Showing historical snapshot — tap to return to live' : "Scrub today's GEX evolution"}
         >
-          <Clock size={18} />
+          <Clock size={13} />
+          {replayActive ? 'Live' : 'Replay'}
         </button>
         <button
           onClick={() => navigate('/glossary')}
@@ -492,16 +494,21 @@ export default function Markets() {
             }}
           />
         ) : (
+          /* Discoverable hint card on BOTH mobile and desktop now —
+             previously hidden behind lg:flex. The replay feature is
+             non-obvious; without surfacing it on the page itself,
+             nobody finds the clock-icon entry. */
           <button
             type="button"
             onClick={() => setReplayActive(true)}
-            className="hidden lg:flex w-full items-center gap-2 px-4 py-3 bg-card border border-border rounded-xl text-left hover:border-amber-400/40 transition group"
+            className="tap-spring w-full flex items-center gap-2 px-4 py-3 bg-card border border-border rounded-xl text-left hover:border-amber-400/40 transition group"
           >
             <Clock size={14} className="text-amber-400/80 group-hover:text-amber-400" />
             <div className="flex-1 min-w-0">
               <div className="text-xs font-semibold text-fg">Replay today's GEX</div>
               <div className="text-[10px] text-muted">
-                Scrub through 5-min snapshots
+                Scrub 5-min snapshots from open → now to see how the
+                wall built up.
               </div>
             </div>
           </button>
