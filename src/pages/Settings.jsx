@@ -660,7 +660,26 @@ function BrokerSection() {
     setResult(null)
     try {
       const { data, error: fnError } = await supabase.functions.invoke('get-account')
-      if (fnError) throw fnError
+      if (fnError) {
+        // supabase-js wraps non-2xx responses in a generic FunctionsHttpError
+        // ("Edge Function returned a non-2xx status code") but the response
+        // body has the real failure reason — usually a Tastytrade OAuth
+        // error when this fails. Read the body so the user sees something
+        // actionable instead of a generic wrapper message.
+        let detail = fnError.message || 'request failed'
+        try {
+          const ctx = fnError.context
+          if (ctx && typeof ctx.json === 'function') {
+            const body = await ctx.json()
+            if (body?.error) detail = body.error
+            if (body?.detail) {
+              const sub = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail)
+              detail += ` — ${sub.slice(0, 200)}`
+            }
+          }
+        } catch { /* keep the generic message */ }
+        throw new Error(detail)
+      }
       if (!data?.success) {
         setError(data?.error || 'Connection failed')
       } else {
