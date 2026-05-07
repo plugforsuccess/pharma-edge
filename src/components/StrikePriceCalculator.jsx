@@ -246,6 +246,11 @@ export default function StrikePriceCalculator({
   const [liveNlv, setLiveNlv] = useState(null)
   const [liveBp, setLiveBp] = useState(null)
   const [liveAcctNumber, setLiveAcctNumber] = useState(null)
+  // True when the synced account came from the Tastytrade SANDBOX
+  // (api.cert.tastyworks.com). The sandbox returns a fake $100K NLV
+  // by default, which would silently mislead 2%-rule sizing if we
+  // didn't flag it. Surfaced as a red banner the user can't miss.
+  const [liveIsSandbox, setLiveIsSandbox] = useState(false)
   const [nlvSyncedAt, setNlvSyncedAt] = useState(null)
   const [nlvSyncError, setNlvSyncError] = useState(null)
   const [nlvLoading, setNlvLoading] = useState(false)
@@ -290,11 +295,17 @@ export default function StrikePriceCalculator({
       accounts.sort((a, b) => Number(b.net_liquidating_value ?? 0) - Number(a.net_liquidating_value ?? 0))
       const primary = accounts.find((a) => !a.is_paper) || accounts[0]
       if (!primary) throw new Error('no broker accounts on file')
+      // Prefer the response-level is_sandbox flag (set by get-account
+      // based on TASTYTRADE_BASE_URL). Fall back to the per-account
+      // is_paper as a hint. Either way: if it's sandbox, the $100K
+      // NLV is fake and we MUST NOT size against it silently.
+      const sandbox = Boolean(data.is_sandbox ?? primary.is_sandbox ?? primary.is_paper)
       const nlv = Number(primary.net_liquidating_value)
       const bp = Number(primary.buying_power)
-      setLiveNlv(Number.isFinite(nlv) ? nlv : null)
-      setLiveBp(Number.isFinite(bp) ? bp : null)
+      setLiveNlv(sandbox ? null : (Number.isFinite(nlv) ? nlv : null))
+      setLiveBp(sandbox ? null : (Number.isFinite(bp) ? bp : null))
       setLiveAcctNumber(primary.account_number || null)
+      setLiveIsSandbox(sandbox)
       setNlvSyncedAt(Date.now())
     } catch (e) {
       setNlvSyncError(e.message || 'sync failed')
@@ -897,15 +908,41 @@ export default function StrikePriceCalculator({
                 note={
                   nlvSyncError
                     ? `Sync failed: ${nlvSyncError}`
-                    : maxPositionDollars != null
-                      ? liveBp != null
-                        ? `Max trade: $${maxPositionDollars.toFixed(0)} · BP $${liveBp.toFixed(0)}`
-                        : `Max trade: $${maxPositionDollars.toFixed(0)}`
-                      : 'Set in Settings or sync broker'
+                    : liveIsSandbox
+                      ? 'Sandbox — set TASTYTRADE_BASE_URL secret'
+                      : maxPositionDollars != null
+                        ? liveBp != null
+                          ? `Max trade: $${maxPositionDollars.toFixed(0)} · BP $${liveBp.toFixed(0)}`
+                          : `Max trade: $${maxPositionDollars.toFixed(0)}`
+                        : 'Set in Settings or sync broker'
                 }
               />
             </div>
           </div>
+
+          {/* Sandbox warning — when get-account is hitting the
+              Tastytrade cert/sandbox URL, the returned $100K NLV is
+              fake demo data and would silently mislead the 2%-rule
+              sizing. Render a loud red banner so this can never be
+              missed; reject the live-NLV value upstream so sizing
+              falls back to the manual profile.account_size. */}
+          {liveIsSandbox && (
+            <div className="bg-red-950/30 border border-red-900/60 rounded-xl p-3 flex items-start gap-2">
+              <AlertTriangle size={12} className="text-red-400 mt-0.5 flex-shrink-0" />
+              <div className="text-[11px] text-red-300 leading-relaxed">
+                <p className="font-semibold text-red-400">Sandbox account — sizing disabled</p>
+                <p className="mt-1">
+                  Broker is returning a fake $100K balance from Tastytrade's
+                  sandbox. To pull your real NLV, set the{' '}
+                  <code className="font-mono-tab text-red-200">TASTYTRADE_BASE_URL</code>{' '}
+                  Supabase secret to{' '}
+                  <code className="font-mono-tab text-red-200">https://api.tastyworks.com</code>{' '}
+                  and redeploy <code className="font-mono-tab">get-account</code> +{' '}
+                  <code className="font-mono-tab">place-order</code>.
+                </p>
+              </div>
+            </div>
+          )}
 
           {config.isCondor ? (
             <div className="space-y-2">
