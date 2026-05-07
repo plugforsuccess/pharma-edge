@@ -370,6 +370,13 @@ function PlayCard({ play, onOpenCalculator, onLogSignal }) {
         </p>
       )}
 
+      {play.gamma_rolloff_risk && play.rolloff_note && (
+        <p className="text-[10px] text-muted leading-relaxed border-l-2 border-orange-500/50 pl-2">
+          <strong className="text-orange-400">Roll-off risk:</strong>{' '}
+          {play.rolloff_note}
+        </p>
+      )}
+
       <div className="flex gap-2 pt-1">
         <button
           onClick={onOpenCalculator}
