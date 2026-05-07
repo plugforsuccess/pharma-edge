@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Sparkles, FileText, AlertCircle, Lock } from 'lucide-react'
+import InfoTip from './InfoTip'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
@@ -414,10 +415,26 @@ function PlayCard({ play, onLogSignal }) {
       )}
 
       <div className="grid grid-cols-4 gap-2 text-[11px]">
-        <Stat label="Risk/spread" value={`$${formatNum(play.max_loss_per_spread)}`} />
-        <Stat label="R/R" value={`1:${(play.risk_reward || 0).toFixed(1)}`} />
-        <Stat label="Size" value={`${play.contracts}c`} />
-        <Stat label="POP" value={formatPopFromBp(play.entry_pop_bp)} />
+        <Stat
+          label="Risk/spread"
+          value={`$${formatNum(play.max_loss_per_spread)}`}
+          tip="Max loss per contract if the trade goes fully against you. Sized × contracts to stay within the 2% account rule."
+        />
+        <Stat
+          label="R/R"
+          value={`1:${(play.risk_reward || 0).toFixed(1)}`}
+          tip="Risk/reward ratio — max gain divided by max loss. Project rule requires ≥ 1:1.5."
+        />
+        <Stat
+          label="Size"
+          value={`${play.contracts}c`}
+          tip="Suggested contract count, sized to keep max loss within 2% of your account."
+        />
+        <Stat
+          label="POP"
+          value={formatPopFromBp(play.entry_pop_bp)}
+          tip="Probability of Profit at expiration. Computed from spot, breakeven, IV, and DTE under Black-Scholes lognormal."
+        />
       </div>
 
       <p className="text-[11px] text-subtle leading-relaxed">
@@ -455,11 +472,12 @@ function PlayCard({ play, onLogSignal }) {
   )
 }
 
-function Stat({ label, value }) {
+function Stat({ label, value, tip }) {
   return (
     <div className="bg-bg-elev/60 border border-border rounded px-2 py-1">
-      <div className="text-[10px] uppercase tracking-wider text-muted">
+      <div className="text-[10px] uppercase tracking-wider text-muted inline-flex items-center gap-1">
         {label}
+        {tip && <InfoTip label={`What is ${label}?`}>{tip}</InfoTip>}
       </div>
       <div className="font-mono-tab tabular-nums text-fg font-medium">
         {value}
