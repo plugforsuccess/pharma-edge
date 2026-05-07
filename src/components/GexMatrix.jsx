@@ -154,7 +154,15 @@ export default function GexMatrix({ data, liveSpot = null }) {
                     ▶
                   </span>
                 )}
-                {formatStrike(strike)}
+                <span>{formatStrike(strike)}</span>
+                {/* Live spot label inside the cursor row — strikes are
+                    integer-stepped, so the row stays put as spot ticks
+                    sub-dollar; the user expects "live" to look live. */}
+                {isSpotRow && Number.isFinite(liveSpot) && liveSpot > 0 && (
+                  <span className="ml-1 text-[10px] font-normal text-amber-300/80 tabular-nums">
+                    · ${Number(liveSpot).toFixed(2)}
+                  </span>
+                )}
               </div>
               {cells[i].map((v, j) => {
                 const isLargest =

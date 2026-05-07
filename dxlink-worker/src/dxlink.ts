@@ -96,9 +96,21 @@ export class DxLinkClient {
 
   // Splits subscription frames into chunks of SUBSCRIPTION_BATCH_SIZE.
   // Only the first frame carries reset=true; subsequent frames append.
+  //
+  // Summary (and Profile) are snapshot-on-change events — without
+  // `fromTime: 0` dxFeed only pushes a frame when something actually
+  // changes, so symbols whose OI/volume hasn't moved since the last
+  // session never get a frame and stay null forever. Quote/Greeks/
+  // Trade are time-series and don't need fromTime; the server pushes
+  // the latest immediately on subscribe.
   private sendSubscriptionBatches(specs: SubSpec[], reset: boolean) {
-    for (let i = 0; i < specs.length; i += SUBSCRIPTION_BATCH_SIZE) {
-      const chunk = specs.slice(i, i + SUBSCRIPTION_BATCH_SIZE)
+    const enriched = specs.map((s) =>
+      s.type === 'Summary' || s.type === 'Profile'
+        ? { ...s, fromTime: 0 }
+        : s,
+    )
+    for (let i = 0; i < enriched.length; i += SUBSCRIPTION_BATCH_SIZE) {
+      const chunk = enriched.slice(i, i + SUBSCRIPTION_BATCH_SIZE)
       this.sendFrame({
         type: 'FEED_SUBSCRIPTION',
         channel: FEED_CHANNEL,
