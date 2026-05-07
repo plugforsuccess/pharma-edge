@@ -54,6 +54,19 @@ export default function PublicRecord() {
     setSignals(list)
     setStats(computeStats(list))
     setLoading(false)
+
+    // Update document meta tags so JS-aware crawlers (Google,
+    // modern Twitter, Discord cache-bust) pick up the per-user
+    // share preview pointing at /api/og/<slug>. Vercel serves the
+    // OG endpoint with a 5-min CDN cache, so re-shares are cheap.
+    setMetaTags({
+      title: `${profileData.display_name || slug} on Cash Moves`,
+      description: `${profileData.display_name || slug}'s public trading record — every prediction hash-locked, every outcome on the tape.`,
+      url: typeof window !== 'undefined' ? window.location.href : '',
+      image: typeof window !== 'undefined'
+        ? `${window.location.origin}/api/og/${encodeURIComponent(slug)}`
+        : '',
+    })
   }
 
   if (loading) return <LoadingPage />
@@ -625,4 +638,43 @@ function NotFoundPage() {
       </a>
     </div>
   )
+}
+
+// Updates the document head's title + OG/Twitter meta tags at runtime
+// so the share preview reflects the active profile. Crawlers that
+// execute JS (Google, modern Twitter card validator, Discord's cache
+// refresher) pick this up; the rest fall back to the static index.html
+// defaults. Full crawler-side SSR is out of scope for the SPA shell;
+// when you tweet a link, run it through the Twitter Card Validator
+// once to seed Twitter's cache with the dynamic preview.
+function setMetaTags({ title, description, url, image }) {
+  if (typeof document === 'undefined') return
+  if (title) document.title = title
+  upsertMeta({ name: 'description', content: description })
+  upsertMeta({ property: 'og:title', content: title })
+  upsertMeta({ property: 'og:description', content: description })
+  upsertMeta({ property: 'og:type', content: 'profile' })
+  upsertMeta({ property: 'og:url', content: url })
+  upsertMeta({ property: 'og:image', content: image })
+  upsertMeta({ property: 'og:image:width', content: '1200' })
+  upsertMeta({ property: 'og:image:height', content: '630' })
+  upsertMeta({ name: 'twitter:card', content: 'summary_large_image' })
+  upsertMeta({ name: 'twitter:title', content: title })
+  upsertMeta({ name: 'twitter:description', content: description })
+  upsertMeta({ name: 'twitter:image', content: image })
+}
+
+function upsertMeta({ name, property, content }) {
+  if (!content) return
+  const selector = name
+    ? `meta[name="${name}"]`
+    : `meta[property="${property}"]`
+  let tag = document.head.querySelector(selector)
+  if (!tag) {
+    tag = document.createElement('meta')
+    if (name) tag.setAttribute('name', name)
+    if (property) tag.setAttribute('property', property)
+    document.head.appendChild(tag)
+  }
+  tag.setAttribute('content', content)
 }
