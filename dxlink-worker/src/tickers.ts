@@ -52,9 +52,10 @@ export const TRACKED_TICKERS: string[] = [
   'LRCX',
   'QCOM',
   'MRVL',
-  // Memory / DRAM
+  // Memory / DRAM / NAND
   'MU',
   'WDC',
+  'SNDK',
   // AI infrastructure (data center, GPU cloud, networking, servers)
   'VRT',
   'DLR',
