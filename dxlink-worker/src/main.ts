@@ -23,13 +23,13 @@
 import {
   equityStreamerSymbol,
   fetchNestedChain,
-  fetchOpenInterestMap,
   getStreamerAuth,
   login,
   type ChainExpiration,
   type SessionAuth,
   type StreamerAuth,
 } from './tastytrade.ts'
+import { fetchYahooChain } from './yahoo.ts'
 import { DxLinkClient, type SubSpec } from './dxlink.ts'
 import { applyEvent, registerSymbol, seedShadowFromDb, startFlushLoop } from './store.ts'
 import {
@@ -262,30 +262,15 @@ async function main() {
   ]
   await seedShadowFromDb(allSymbols)
 
-  // Authoritative OI snapshot from Tastytrade REST. dxFeed Summary
+  // Authoritative OI snapshot from Yahoo Finance. dxFeed Summary
   // frames are unreliable as a first-time seed (snapshot-on-change
   // semantics — symbols whose OI hasn't moved since session start
-  // never get a frame). We pull /market-metrics for every option's
-  // OCC symbol on boot, then map back to the dxFeed streamer symbol
-  // and apply OI to the shadow Map. Result: matrix is dense from
-  // tick zero, regardless of whether Summary frames arrive.
-  try {
-    const occSymbols = options.map((o) => o.occ).filter(Boolean)
-    const occToStreamer = new Map(options.map((o) => [o.occ, o.streamer]))
-    console.log(`[main] fetching OI snapshot for ${occSymbols.length} options`)
-    const oiMap = await fetchOpenInterestMap(session, occSymbols)
-    let applied = 0
-    for (const [occ, oi] of oiMap) {
-      const streamer = occToStreamer.get(occ)
-      if (streamer && Number.isFinite(oi)) {
-        applyEvent(streamer, { open_interest: oi })
-        applied++
-      }
-    }
-    console.log(`[main] OI snapshot applied to ${applied}/${oiMap.size} symbols`)
-  } catch (e) {
-    console.warn('[main] OI snapshot failed (non-fatal):', e)
-  }
+  // never get a frame). We tried Tastytrade /market-metrics here
+  // first; that endpoint is underlying-level and doesn't return
+  // per-option OI in a usable shape. Yahoo's /v7/finance/options
+  // works (we already use it as the compute-gex Yahoo fallback) and
+  // returns the full chain per call with per-strike OI.
+  await seedOpenInterestFromYahoo(options)
 
   const CHUNK = 500
   for (let i = 0; i < allSpecs.length; i += CHUNK) {
@@ -353,27 +338,12 @@ async function main() {
         console.log(`[main] subscribed to ${newSpecs.length} new symbols`)
       }
 
-      // Refresh the OI snapshot for the full universe (new + existing
-      // strikes) — OI changes intraday as positions open and close,
-      // so a 4h refresh keeps the matrix accurate. We call this even
-      // if no new strikes were added, since it picks up OI drift on
-      // existing legs.
-      try {
-        const occSymbols = options.map((o) => o.occ).filter(Boolean)
-        const occToStreamer = new Map(options.map((o) => [o.occ, o.streamer]))
-        const oiMap = await fetchOpenInterestMap(session, occSymbols)
-        let applied = 0
-        for (const [occ, oi] of oiMap) {
-          const streamer = occToStreamer.get(occ)
-          if (streamer && Number.isFinite(oi)) {
-            applyEvent(streamer, { open_interest: oi })
-            applied++
-          }
-        }
-        console.log(`[main] OI snapshot refreshed for ${applied}/${oiMap.size} symbols`)
-      } catch (e) {
-        console.warn('[main] OI snapshot refresh failed (non-fatal):', e)
-      }
+      // Refresh the OI snapshot for the full universe — OI drifts
+      // intraday as positions open and close, so a 4h refresh keeps
+      // the matrix accurate. Also catches OI for any newly-added
+      // strikes (e.g. when spot moves and the chain plan picks up
+      // strikes outside the prior subscription window).
+      await seedOpenInterestFromYahoo(options)
     } catch (e) {
       console.error('[main] plan refresh failed:', e)
     }
@@ -386,6 +356,64 @@ async function main() {
     client.stop()
     Deno.exit(0)
   })
+}
+
+// Seed open_interest into the shadow Map by pulling chain data from
+// Yahoo. We hit one Yahoo call per (ticker, expiration) pair — that's
+// ~70 tickers × 2 expirations = ~140 calls per refresh, well under
+// Yahoo's tolerance with the cookie+crumb auth. Per-call sequential
+// to avoid hammering Yahoo, but fast enough that the full sweep
+// completes in <2 min on boot.
+async function seedOpenInterestFromYahoo(opts: OptionMeta[]) {
+  if (opts.length === 0) return
+  // Build a lookup: ticker → set of expiration dates we care about,
+  // and ticker|expiration|strike|type → streamer symbol.
+  const wantedExps = new Map<string, Set<string>>()
+  const streamerLookup = new Map<string, string>()
+  for (const o of opts) {
+    if (!o.ticker || !o.expirationDate || !o.streamer) continue
+    let exps = wantedExps.get(o.ticker)
+    if (!exps) {
+      exps = new Set()
+      wantedExps.set(o.ticker, exps)
+    }
+    exps.add(o.expirationDate)
+    const key = `${o.ticker}|${o.expirationDate}|${o.strike}|${o.optionType}`
+    streamerLookup.set(key, o.streamer)
+  }
+
+  let totalApplied = 0
+  let totalFetched = 0
+  for (const [ticker, exps] of wantedExps) {
+    for (const exp of exps) {
+      try {
+        const chain = await fetchYahooChain(ticker, 0, exp)
+        totalFetched += chain.strikes.length * 2
+        for (const s of chain.strikes) {
+          const callKey = `${ticker}|${exp}|${s.strike}|C`
+          const putKey = `${ticker}|${exp}|${s.strike}|P`
+          const callStreamer = streamerLookup.get(callKey)
+          const putStreamer = streamerLookup.get(putKey)
+          if (callStreamer && Number.isFinite(s.callOI) && s.callOI > 0) {
+            applyEvent(callStreamer, { open_interest: s.callOI })
+            totalApplied++
+          }
+          if (putStreamer && Number.isFinite(s.putOI) && s.putOI > 0) {
+            applyEvent(putStreamer, { open_interest: s.putOI })
+            totalApplied++
+          }
+        }
+      } catch (e) {
+        // Yahoo can rate-limit or transiently fail — log per-ticker
+        // but keep going so a bad ticker doesn't poison the whole sweep.
+        console.warn(`[yahoo-oi] ${ticker} ${exp}: ${e instanceof Error ? e.message : e}`)
+      }
+    }
+  }
+  console.log(
+    `[yahoo-oi] seeded OI for ${totalApplied} legs across ` +
+      `${wantedExps.size} tickers (${totalFetched} legs fetched)`,
+  )
 }
 
 function numOrNull(v: unknown): number | null {
