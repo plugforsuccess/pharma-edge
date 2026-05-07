@@ -35,7 +35,23 @@ export default function Markets() {
   const navigate = useNavigate()
   const { user } = useAuth()
   const { isPro, limits } = useSubscription()
-  const [ticker, setTicker] = useState(TICKERS[0].symbol)
+  // Persisted ticker — survives navigation away (e.g. user clicks
+  // "Log Signal" on a suggested play, then back-navs here). Without
+  // this we'd snap to TICKERS[0] and lose the user's place, which
+  // also blanks SuggestedPlays since its localStorage cache is keyed
+  // by ticker.
+  const [ticker, setTicker] = useState(() => {
+    if (typeof window === 'undefined') return TICKERS[0].symbol
+    try {
+      const saved = window.localStorage.getItem('pe_markets_ticker')
+      if (saved && /^[A-Z][A-Z0-9.\-]{0,9}$/.test(saved)) return saved
+    } catch { /* private mode */ }
+    return TICKERS[0].symbol
+  })
+  useEffect(() => {
+    if (typeof window === 'undefined' || !ticker) return
+    try { window.localStorage.setItem('pe_markets_ticker', ticker) } catch { /* */ }
+  }, [ticker])
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)

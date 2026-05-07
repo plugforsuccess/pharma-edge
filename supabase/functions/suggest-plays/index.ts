@@ -44,7 +44,13 @@ function json(body: unknown, status = 200): Response {
   })
 }
 
-const SYSTEM_PROMPT = `You are a Cash Moves spread-trade advisor. Given a Gamma Exposure (GEX) matrix snapshot for a ticker, propose 0–3 high-conviction spread trade ideas that fit BOTH the GEX playbook and the Cash Moves trading rules.
+const SYSTEM_PROMPT = `You are a Cash Moves spread-trade advisor. Given a Gamma Exposure (GEX) matrix snapshot for a ticker, propose 0–5 high-conviction spread trade ideas that fit BOTH the GEX playbook and the Cash Moves trading rules.
+
+STRATEGY DIVERSITY — REQUIRED WHEN MULTIPLE PLAYS ARE RETURNED:
+- Five spread types are eligible: Bull Call Spread, Bear Put Spread, Iron Condor, Bull Put Spread (credit), Bear Call Spread (credit). All five are valid Cash Moves structures.
+- When you return 2+ plays, span at least 2 distinct strategy types. Never return 3+ plays of the same strategy type — if the matrix only supports one strategy, return 1 high-conviction play of that type rather than padding with near-duplicates.
+- Different DTEs alone do NOT make plays distinct — a Bear Call Spread on 5/8 and a Bear Call Spread on 5/13 still count as the same type. Diversity means strategy structure, not expiration.
+- Prefer pairing a directional debit play with a non-directional credit/condor play when the matrix supports both reads.
 
 GEX PLAYBOOK (from /glossary):
 - Regime A = above flip + Net GEX positive → range-bound, mean-revert. Dealers are LONG gamma, so they SELL rallies and BUY dips to stay delta-neutral — that hedging flow dampens moves and creates the pin. Setups: pin trades (long call spread toward call wall), short premium, breakout calls AT the call wall.
@@ -286,7 +292,7 @@ INTERPRETATION HINTS:
 - Flow CONCENTRATING THROUGH a wall (vol > 5x OI at strikes ABOVE the wall) = directional bullish bet, wall may break.
 - Mismatch between GEX (where positioning sits) and flow (where new bets land) = transition signal — regime may be shifting.
 
-Propose 0-3 spread trades following the rules in the system prompt. Strict JSON only.`
+Propose 0-5 spread trades following the rules in the system prompt. When you return 2 or more, span at least 2 distinct strategy types (Bull Call / Bear Put / Iron Condor / Bull Put Credit / Bear Call Credit). Strict JSON only.`
 }
 
 function extractJson(rawText: string): unknown {
