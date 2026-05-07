@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { ExternalLink, Shield } from 'lucide-react'
+import { Check, ExternalLink, Share2, Shield } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import Sparkline from '../components/Sparkline'
 import clsx from 'clsx'
@@ -86,7 +86,7 @@ export default function PublicRecord() {
       </div>
 
       {stats && stats.resolved > 0 && (
-        <HeroStatsCard stats={stats} />
+        <HeroStatsCard stats={stats} profile={profile} />
       )}
 
       {stats && stats.equityCurve.length >= 2 && (
@@ -287,7 +287,42 @@ function computeStats(rows) {
 // number nobody else in the category can show because nobody else
 // hash-locks the prediction at entry. Everything else (win rate,
 // cumulative %) is supporting context.
-function HeroStatsCard({ stats }) {
+function HeroStatsCard({ stats, profile }) {
+  const [shareState, setShareState] = useState('idle') // idle | copied | error
+
+  async function handleShare() {
+    const url = typeof window !== 'undefined' ? window.location.href : ''
+    const title = profile?.display_name
+      ? `${profile.display_name} — Cash Moves track record`
+      : 'Cash Moves track record'
+    const text =
+      stats.calibrationDelta != null
+        ? `Predicted ${stats.avgPredictedPop}% / Actual ${stats.avgPredictedPop + stats.calibrationDelta}% over ${stats.popN} hash-anchored trades. Verifiable on Cash Moves.`
+        : `${stats.winRate}% hit rate over ${stats.resolved} hash-anchored trades. Verifiable on Cash Moves.`
+
+    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+      try {
+        await navigator.share({ title, text, url })
+        return
+      } catch (e) {
+        if (e?.name === 'AbortError') return
+      }
+    }
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url)
+        setShareState('copied')
+        setTimeout(() => setShareState('idle'), 2000)
+      } else {
+        setShareState('error')
+        setTimeout(() => setShareState('idle'), 2500)
+      }
+    } catch {
+      setShareState('error')
+      setTimeout(() => setShareState('idle'), 2500)
+    }
+  }
+
   const winRateTone =
     stats.winRate >= 60 ? 'text-green-400' : stats.winRate >= 50 ? 'text-yellow-400' : 'text-red-400'
   const calibrationTone =
@@ -309,6 +344,38 @@ function HeroStatsCard({ stats }) {
           : ''
   return (
     <div className="bg-card border border-border rounded-xl p-4 mb-3 space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-muted text-[10px] uppercase tracking-wider">
+          Track record
+        </p>
+        <button
+          type="button"
+          onClick={handleShare}
+          className={clsx(
+            'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition',
+            shareState === 'copied'
+              ? 'border-green-700 bg-green-950/40 text-green-400'
+              : shareState === 'error'
+                ? 'border-red-700 bg-red-950/40 text-red-400'
+                : 'border-amber-400/40 bg-amber-400/10 text-amber-400 hover:bg-amber-400/20',
+          )}
+          aria-label="Share this trader's track record"
+        >
+          {shareState === 'copied' ? (
+            <>
+              <Check size={12} />
+              Copied
+            </>
+          ) : shareState === 'error' ? (
+            <>Copy failed</>
+          ) : (
+            <>
+              <Share2 size={12} />
+              Share
+            </>
+          )}
+        </button>
+      </div>
       <div className="grid grid-cols-2 gap-3">
         <Stat
           label="Hit rate"
