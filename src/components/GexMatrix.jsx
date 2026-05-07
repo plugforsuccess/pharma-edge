@@ -151,7 +151,7 @@ export default function GexMatrix({ data, liveSpot = null }) {
                     ? 'text-amber-400 bg-amber-400/10'
                     : 'text-fg bg-bg-elev/40')
                 }
-                title={isSpotRow ? `Spot ${formatStrike(spot)}` : undefined}
+                title={isSpotRow && Number.isFinite(liveSpot) ? `Spot $${Number(liveSpot).toFixed(2)}` : isSpotRow ? `Spot ${formatStrike(spot)}` : undefined}
               >
                 {isSpotRow && (
                   <span className="text-amber-400 text-[10px]" aria-hidden>
@@ -159,14 +159,6 @@ export default function GexMatrix({ data, liveSpot = null }) {
                   </span>
                 )}
                 <span>{formatStrike(strike)}</span>
-                {/* Live spot label inside the cursor row — strikes are
-                    integer-stepped, so the row stays put as spot ticks
-                    sub-dollar; the user expects "live" to look live. */}
-                {isSpotRow && Number.isFinite(liveSpot) && liveSpot > 0 && (
-                  <span className="ml-1 text-[10px] font-normal text-amber-300/80 tabular-nums">
-                    · ${Number(liveSpot).toFixed(2)}
-                  </span>
-                )}
               </div>
               {cells[i].map((v, j) => {
                 const isLargest =
