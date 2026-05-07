@@ -85,6 +85,10 @@ export default function PublicRecord() {
         </div>
       </div>
 
+      {stats && stats.resolved > 0 && (
+        <HeroStatsCard stats={stats} />
+      )}
+
       {stats && stats.equityCurve.length >= 2 && (
         <div className="bg-card border border-border rounded-xl p-4 mb-3">
           <div className="flex items-baseline justify-between mb-2">
@@ -202,6 +206,9 @@ function computeStats(rows) {
       equityCurve: [],
       cumPnl: 0,
       lastUpdated: null,
+      avgPredictedPop: null,
+      popN: 0,
+      calibrationDelta: null,
     }
   }
   const resolved = rows.filter((s) => s.thesis_correct !== null && s.thesis_correct !== undefined)
@@ -213,6 +220,27 @@ function computeStats(rows) {
   const avgPnl = withPnl.length
     ? Math.round(withPnl.reduce((sum, s) => sum + Number(s.pnl_percent), 0) / withPnl.length)
     : null
+
+  // Average predicted POP across resolved signals where the user
+  // hash-locked an entry_pop_bp at signal creation. v1 (legacy)
+  // signals have null and are excluded — we don't fabricate a
+  // probability for unsigned predictions. The calibrationDelta
+  // pairs predicted with actual so viewers see whether the trader
+  // is well-calibrated, over-confident, or under-confident.
+  const withPop = resolved.filter((s) => s.entry_pop_bp != null)
+  const avgPredictedPopBp = withPop.length
+    ? withPop.reduce((sum, s) => sum + Number(s.entry_pop_bp), 0) / withPop.length
+    : null
+  const avgPredictedPop = avgPredictedPopBp != null
+    ? Math.round(avgPredictedPopBp / 100)
+    : null
+  const actualHitRateOnPop = withPop.length
+    ? Math.round((withPop.filter((s) => s.thesis_correct).length / withPop.length) * 100)
+    : null
+  const calibrationDelta =
+    avgPredictedPop != null && actualHitRateOnPop != null
+      ? actualHitRateOnPop - avgPredictedPop
+      : null
 
   // Cumulative running % of resolved P&L in chronological order. Same
   // approximation as TrackRecord — equal-sized signals — enough to read
@@ -248,7 +276,124 @@ function computeStats(rows) {
     equityCurve,
     cumPnl,
     lastUpdated,
+    avgPredictedPop,
+    popN: withPop.length,
+    calibrationDelta,
   }
+}
+
+// Hero stats panel for the public profile. Headline metric is the
+// calibration line: "Predicted X% / Actual Y% (n=Z)" — that's the
+// number nobody else in the category can show because nobody else
+// hash-locks the prediction at entry. Everything else (win rate,
+// cumulative %) is supporting context.
+function HeroStatsCard({ stats }) {
+  const winRateTone =
+    stats.winRate >= 60 ? 'text-green-400' : stats.winRate >= 50 ? 'text-yellow-400' : 'text-red-400'
+  const calibrationTone =
+    stats.calibrationDelta == null
+      ? 'text-muted'
+      : Math.abs(stats.calibrationDelta) <= 5
+        ? 'text-green-400'
+        : Math.abs(stats.calibrationDelta) <= 15
+          ? 'text-yellow-400'
+          : 'text-red-400'
+  const cumTone = stats.cumPnl >= 0 ? 'text-green-400' : 'text-red-400'
+  const realMixLabel =
+    stats.real > 0 && stats.paper > 0
+      ? `${stats.real} real · ${stats.paper} paper`
+      : stats.real > 0
+        ? `${stats.real} real`
+        : stats.paper > 0
+          ? `${stats.paper} paper`
+          : ''
+  return (
+    <div className="bg-card border border-border rounded-xl p-4 mb-3 space-y-4">
+      <div className="grid grid-cols-2 gap-3">
+        <Stat
+          label="Hit rate"
+          value={`${stats.winRate}%`}
+          sub={`${stats.resolved} resolved`}
+          tone={winRateTone}
+        />
+        <Stat
+          label="Cumulative"
+          value={`${stats.cumPnl >= 0 ? '+' : ''}${stats.cumPnl.toFixed(0)}%`}
+          sub={stats.avgPnl != null ? `avg ${stats.avgPnl >= 0 ? '+' : ''}${stats.avgPnl}%/trade` : '—'}
+          tone={cumTone}
+        />
+      </div>
+
+      {/* Calibration: the line that's unique to Cash Moves' record.
+          Predicted POP came from the user at hash time; actual hit
+          rate comes from the same set of resolved signals. Δ tells
+          viewers whether the trader is well-calibrated, over-
+          confident (positive avg POP, lower actual hit rate), or
+          under-confident (lower avg POP, higher actual hit rate). */}
+      {stats.popN > 0 ? (
+        <div className="bg-bg-elev/40 border border-border rounded-lg p-3">
+          <div className="flex items-baseline justify-between mb-1">
+            <p className="text-[10px] uppercase tracking-wider text-amber-400 font-semibold">
+              Calibration · n={stats.popN}
+            </p>
+            {stats.calibrationDelta != null && (
+              <p className={clsx('text-xs font-mono-tab font-semibold', calibrationTone)}>
+                Δ {stats.calibrationDelta >= 0 ? '+' : ''}
+                {stats.calibrationDelta} pts
+              </p>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-3 text-center">
+            <div>
+              <p className="text-white font-bold text-lg font-mono-tab">
+                {stats.avgPredictedPop}%
+              </p>
+              <p className="text-muted text-[10px]">Avg predicted</p>
+            </div>
+            <div>
+              <p className="text-white font-bold text-lg font-mono-tab">
+                {stats.calibrationDelta != null
+                  ? stats.avgPredictedPop + stats.calibrationDelta
+                  : '—'}
+                %
+              </p>
+              <p className="text-muted text-[10px]">Actual hit rate</p>
+            </div>
+          </div>
+          {stats.popN < 30 && (
+            <p className="text-[10px] text-muted mt-2 leading-relaxed">
+              Δ stabilises around n=30. Below that the actual rate has
+              too much sample noise to read as a calibration signal.
+            </p>
+          )}
+        </div>
+      ) : (
+        <p className="text-[10px] text-muted leading-relaxed">
+          Calibration tracking requires hash-locked entry POP on resolved
+          signals. Older v1 signals are excluded — calibration becomes
+          visible as new signals resolve.
+        </p>
+      )}
+
+      {realMixLabel && (
+        <p className="text-[10px] text-muted text-center">
+          {realMixLabel}
+        </p>
+      )}
+    </div>
+  )
+}
+
+function Stat({ label, value, sub, tone }) {
+  return (
+    <div className="bg-bg-elev/40 border border-border rounded-lg p-3">
+      <p className="text-muted text-[10px] uppercase tracking-wider">{label}</p>
+      <p className={clsx('text-2xl font-bold font-mono-tab mt-0.5', tone || 'text-white')}>
+        {value}
+      </p>
+      {sub && <p className="text-muted text-[10px] mt-0.5">{sub}</p>}
+    </div>
+  )
 }
 
 function PublicSignalRow({ signal }) {
