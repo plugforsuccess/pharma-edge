@@ -6,9 +6,13 @@
 // versa. (Deno workers can't import from src/lib so we duplicate.)
 //
 // We subscribe to the front-month + next-month chain for each ticker.
-// At ~50 tickers × 2 expirations × ~50 strikes × 2 sides × 3 event
-// types we hit ~30,000 dxFeed subscriptions — well under any per-
-// connection cap. Memory footprint stays under 200MB on the Fly VM.
+// At ~70 tickers × 2 expirations × ~50 strikes × 2 sides × 3 event
+// types we hit ~42,000 dxFeed subscriptions — well under any per-
+// connection cap. Memory footprint stays under 250MB on the Fly VM.
+// (List grew 2026-05-07: added 6 semis, 8 AI-infra names, 6 power
+// names. Run `fly deploy` from dxlink-worker/ to pick up the chain
+// plan refresh — until then those tickers fall back to Yahoo's
+// 15-min delayed feed.)
 //
 // Tickers not in this list still work in /markets — compute-gex falls
 // back to Yahoo's 15-min delayed feed so users can pull GEX for any
@@ -41,9 +45,26 @@ export const TRACKED_TICKERS: string[] = [
   'CRM',
   'ADBE',
   'NFLX',
-  // Memory / DRAM
+  // Semis (foundry / equipment / mobile / networking-silicon)
+  'TSM',
+  'ASML',
+  'AMAT',
+  'LRCX',
+  'QCOM',
+  'MRVL',
+  // Memory / DRAM / NAND
   'MU',
   'WDC',
+  'SNDK',
+  // AI infrastructure (data center, GPU cloud, networking, servers)
+  'VRT',
+  'DLR',
+  'EQIX',
+  'CRWV',
+  'NBIS',
+  'IREN',
+  'SMCI',
+  'ANET',
   // Banks
   'JPM',
   'GS',
@@ -64,10 +85,17 @@ export const TRACKED_TICKERS: string[] = [
   'MCD',
   'NKE',
   'DIS',
-  // Energy
+  // Energy (oil majors)
   'XOM',
   'CVX',
   'COP',
+  // AI power / nuclear renaissance
+  'VST',
+  'CEG',
+  'NEE',
+  'SMR',
+  'OKLO',
+  'CCJ',
   // Liquid retail / meme / fintech
   'COIN',
   'PLTR',

@@ -43,9 +43,26 @@ export const HOT_TICKERS = [
   { symbol: 'CRM',   label: 'Salesforce' },
   { symbol: 'ADBE',  label: 'Adobe' },
   { symbol: 'NFLX',  label: 'Netflix' },
-  // Memory / DRAM
+  // Semis (foundry / equipment / mobile-silicon / networking-silicon)
+  { symbol: 'TSM',   label: 'Taiwan Semi' },
+  { symbol: 'ASML',  label: 'ASML' },
+  { symbol: 'AMAT',  label: 'Applied Materials' },
+  { symbol: 'LRCX',  label: 'Lam Research' },
+  { symbol: 'QCOM',  label: 'Qualcomm' },
+  { symbol: 'MRVL',  label: 'Marvell' },
+  // Memory / DRAM / NAND
   { symbol: 'MU',    label: 'Micron' },
   { symbol: 'WDC',   label: 'Western Digital' },
+  { symbol: 'SNDK',  label: 'SanDisk' },
+  // AI infrastructure (data center, GPU cloud, networking, servers)
+  { symbol: 'VRT',   label: 'Vertiv' },
+  { symbol: 'DLR',   label: 'Digital Realty' },
+  { symbol: 'EQIX',  label: 'Equinix' },
+  { symbol: 'CRWV',  label: 'CoreWeave' },
+  { symbol: 'NBIS',  label: 'Nebius' },
+  { symbol: 'IREN',  label: 'Iris Energy' },
+  { symbol: 'SMCI',  label: 'Super Micro' },
+  { symbol: 'ANET',  label: 'Arista' },
   // Banks
   { symbol: 'JPM',   label: 'JPMorgan' },
   { symbol: 'GS',    label: 'Goldman Sachs' },
@@ -66,10 +83,18 @@ export const HOT_TICKERS = [
   { symbol: 'MCD',   label: "McDonald's" },
   { symbol: 'NKE',   label: 'Nike' },
   { symbol: 'DIS',   label: 'Disney' },
-  // Energy
+  // Energy (oil majors)
   { symbol: 'XOM',   label: 'ExxonMobil' },
   { symbol: 'CVX',   label: 'Chevron' },
   { symbol: 'COP',   label: 'ConocoPhillips' },
+  // AI power / nuclear renaissance — power demand is the AI buildout's
+  // chokepoint, these names move on data-center contract announcements.
+  { symbol: 'VST',   label: 'Vistra' },
+  { symbol: 'CEG',   label: 'Constellation' },
+  { symbol: 'NEE',   label: 'NextEra Energy' },
+  { symbol: 'SMR',   label: 'NuScale' },
+  { symbol: 'OKLO',  label: 'Oklo' },
+  { symbol: 'CCJ',   label: 'Cameco' },
   // Liquid retail / meme / fintech
   { symbol: 'COIN',  label: 'Coinbase' },
   { symbol: 'PLTR',  label: 'Palantir' },

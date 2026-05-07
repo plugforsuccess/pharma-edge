@@ -27,6 +27,34 @@ const DEFAULT_STRUCTURE = {
   watch: 'watch',
 }
 
+// All Cash Moves spread structures the user can log. Each entry
+// captures BOTH the structure value (DB-side enum) AND the directional
+// bias the signal carries — credit spreads are built from puts/calls
+// but the underlying thesis is still long_call (bullish) or long_put
+// (bearish). Iron condors are neutral, encoded as 'watch' on the
+// direction column to avoid extending the direction enum.
+//
+// Order matches the suggest-plays prompt's strategy list so that when
+// a user clicks Log Signal on a suggested play, the prefilled choice
+// lands in a predictable spot in the picker.
+const STRATEGY_OPTIONS = [
+  { structure: 'bull_call_spread',  direction: 'long_call', label: 'Bull Call',     color: 'border-green-500 bg-green-950/30 text-green-400' },
+  { structure: 'bear_put_spread',   direction: 'long_put',  label: 'Bear Put',      color: 'border-red-500 bg-red-950/30 text-red-400' },
+  { structure: 'iron_condor',       direction: 'watch',     label: 'Iron Condor',   color: 'border-purple-500 bg-purple-950/30 text-purple-400' },
+  { structure: 'bull_put_credit',   direction: 'long_call', label: 'Bull Put (cr)', color: 'border-emerald-500 bg-emerald-950/30 text-emerald-400' },
+  { structure: 'bear_call_credit',  direction: 'long_put',  label: 'Bear Call (cr)',color: 'border-rose-500 bg-rose-950/30 text-rose-400' },
+  { structure: 'watch',             direction: 'watch',     label: 'Watch only',    color: 'border-zinc-500 bg-zinc-900 text-zinc-400' },
+]
+
+// Map from suggest-plays' play.type to the matching STRATEGY_OPTIONS row.
+const SUGGESTED_TYPE_TO_STRUCTURE = {
+  BULL_CALL: 'bull_call_spread',
+  BEAR_PUT: 'bear_put_spread',
+  IRON_CONDOR: 'iron_condor',
+  BULL_PUT_CREDIT: 'bull_put_credit',
+  BEAR_CALL_CREDIT: 'bear_call_credit',
+}
+
 const today = () => new Date().toISOString().slice(0, 10)
 
 // localStorage-backed draft persistence keyed by candidate_id, so leaving
@@ -124,6 +152,16 @@ export default function LogSignal() {
   const [step, setStep] = useState(1)
   const [loading, setLoading] = useState(false)
   const [submitError, setSubmitError] = useState('')
+  // The structure Claude originally suggested for this signal, if the
+  // user arrived here via Suggested Plays. Used to render a "Suggested"
+  // badge while the prefilled choice is selected, and a "Modified from
+  // suggestion" hint if they pick something else. Stays in component
+  // state — doesn't write to the DB; the audit trail lives in the
+  // signal's thesis text and the linked candidate row.
+  const suggestedStructure =
+    prefill.structure ||
+    SUGGESTED_TYPE_TO_STRUCTURE[prefill.suggested_play_type] ||
+    null
   // Synchronous hydrate from localStorage so first paint is instant.
   // The DB fetch below overrides if a newer cross-device draft exists.
   const [analysis, setAnalysis] = useState(() => loadDraftAnalysis(candidateId))
@@ -157,10 +195,20 @@ export default function LogSignal() {
       (prefill.signal_source === 'gex_flow' ? 'other' : 'pdufa'),
     catalyst_date: prefill.catalyst_date || '',
     catalyst_date_precision: prefill.catalyst_date_precision || 'day',
-    direction: prefill.direction || 'long_put',
+    // Resolve direction + structure together. When the prefill came
+    // from a Suggested Play we get a play.type string ("BEAR_CALL_CREDIT"
+    // etc.) which uniquely determines both. Otherwise fall back to the
+    // legacy debit-spread default.
+    direction:
+      prefill.direction ||
+      STRATEGY_OPTIONS.find((o) => o.structure === SUGGESTED_TYPE_TO_STRUCTURE[prefill.suggested_play_type])?.direction ||
+      'long_put',
     trade_type: 'paper',
     structure:
-      DEFAULT_STRUCTURE[prefill.direction] || DEFAULT_STRUCTURE.long_put,
+      prefill.structure ||
+      SUGGESTED_TYPE_TO_STRUCTURE[prefill.suggested_play_type] ||
+      DEFAULT_STRUCTURE[prefill.direction] ||
+      DEFAULT_STRUCTURE.long_put,
     entry_price: '',
     // Prefer an explicit prefill.expiry_date (Suggested Plays sends one),
     // otherwise default expiry to catalyst_date + 35 days (mid of 30–45
@@ -553,27 +601,53 @@ export default function LogSignal() {
           )}
 
           <div>
-            <label className="text-muted text-xs uppercase tracking-wider block mb-1">
-              Direction
-            </label>
-            <div className="grid grid-cols-3 gap-2">
-              {[
-                { value: 'long_put', label: 'Bear Put Spread', color: 'border-red-500 bg-red-950/30 text-red-400' },
-                { value: 'long_call', label: 'Bull Call Spread', color: 'border-green-500 bg-green-950/30 text-green-400' },
-                { value: 'watch', label: 'Watch', color: 'border-zinc-500 bg-zinc-900 text-zinc-400' },
-              ].map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => updateDirection(opt.value)}
-                  className={clsx(
-                    'py-2 rounded-xl border text-xs font-semibold transition-colors',
-                    form.direction === opt.value ? opt.color : 'border-border text-subtle',
-                  )}
-                >
-                  {opt.label}
-                </button>
-              ))}
+            <div className="flex items-baseline justify-between mb-1">
+              <label className="text-muted text-xs uppercase tracking-wider">
+                Strategy
+              </label>
+              {suggestedStructure && form.structure === suggestedStructure && (
+                <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-400/15 text-amber-400 border border-amber-400/40">
+                  Suggested
+                </span>
+              )}
+              {suggestedStructure && form.structure !== suggestedStructure && (
+                <span className="text-[9px] uppercase tracking-wider text-muted">
+                  Modified from suggestion
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {STRATEGY_OPTIONS.map((opt) => {
+                const active = form.structure === opt.structure
+                const wasSuggested = suggestedStructure === opt.structure
+                return (
+                  <button
+                    key={opt.structure}
+                    type="button"
+                    onClick={() => {
+                      setForm((prev) => ({
+                        ...prev,
+                        direction: opt.direction,
+                        structure: opt.structure,
+                      }))
+                    }}
+                    className={clsx(
+                      'relative py-2 rounded-xl border text-xs font-semibold transition-colors',
+                      active ? opt.color : 'border-border text-subtle',
+                    )}
+                  >
+                    {opt.label}
+                    {wasSuggested && !active && (
+                      <span
+                        aria-hidden
+                        className="absolute top-0.5 right-1 text-[8px] text-amber-400/70"
+                      >
+                        ★
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
             </div>
           </div>
 

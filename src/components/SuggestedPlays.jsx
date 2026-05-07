@@ -149,11 +149,7 @@ export default function SuggestedPlays({ ticker, isPro }) {
           </p>
         )}
 
-        {loading && (
-          <p className="text-xs text-subtle py-4">
-            Claude is reading the matrix…
-          </p>
-        )}
+        {loading && <ThinkingState />}
 
         {error && (
           <div className="flex items-start gap-2 text-xs text-crimson">
@@ -190,6 +186,19 @@ export default function SuggestedPlays({ ticker, isPro }) {
           </div>
         )}
 
+        {/* Matrix freshness row — lets the user tell whether re-analyze
+            drift came from a data change (matrix moved) or model
+            variance. computed_at = when the server built this payload;
+            source = dxlink (live) vs yahoo (15-min delayed). */}
+        {data && data._computed_at && (
+          <MatrixFreshness
+            computedAt={data._computed_at}
+            source={data.source}
+            spot={data.spot}
+            dominantExp={data.dominant_gex_expiration}
+          />
+        )}
+
         {data && Array.isArray(data.plays) && data.plays.length === 0 && (
           <p className="text-xs text-subtle leading-relaxed py-2">
             <strong className="text-fg">No high-conviction setups</strong>{' '}
@@ -217,6 +226,126 @@ export default function SuggestedPlays({ ticker, isPro }) {
             before placing. GEX informs probability, not certainty —
             walls fail and regimes flip intraday.
           </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Animated "Claude is thinking" state — cycles through stage labels
+// that mirror what the suggest-plays prompt actually does, plus two
+// shimmer placeholder cards in the shape of real PlayCards. Each
+// stage holds for ~1.8s; full cycle is ~14s which lines up with a
+// typical Claude Sonnet response on this prompt. If the call takes
+// longer the messages just loop, which is fine — the perception is
+// still "the system is working," not "the system has hung."
+const THINKING_STAGES = [
+  'Reading the GEX matrix…',
+  'Locating call & put walls…',
+  'Checking today\'s flow against the walls…',
+  'Identifying regime (A or B)…',
+  'Drafting spread setups…',
+  'Sizing positions to the 2% rule…',
+  'Verifying R/R caps & DTE rules…',
+  'Locking strikes to your matrix…',
+]
+
+function ThinkingState() {
+  const [stage, setStage] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => {
+      setStage((s) => (s + 1) % THINKING_STAGES.length)
+    }, 1800)
+    return () => clearInterval(id)
+  }, [])
+  return (
+    <div className="space-y-3 py-1">
+      <div className="flex items-center gap-2 text-xs">
+        <Sparkles
+          size={14}
+          className="text-amber-400 shrink-0 animate-pulse"
+          style={{ animationDuration: '1.4s' }}
+        />
+        <span
+          key={stage}
+          className="text-subtle animate-[fadeIn_0.4s_ease-out]"
+          style={{ animation: 'fadeIn 0.4s ease-out' }}
+        >
+          {THINKING_STAGES[stage]}
+        </span>
+      </div>
+      <SkeletonPlayCard accent="border-red-800/40 bg-red-950/10" />
+      <SkeletonPlayCard accent="border-green-800/40 bg-green-950/10" />
+      <style>{`
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(2px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
+    </div>
+  )
+}
+
+function SkeletonPlayCard({ accent }) {
+  return (
+    <div className={`border rounded-lg p-3 space-y-2 animate-pulse ${accent}`}>
+      <div className="flex items-baseline justify-between gap-2">
+        <div className="h-3 w-24 bg-bg-elev rounded" />
+        <div className="h-2.5 w-16 bg-bg-elev rounded" />
+      </div>
+      <div className="h-4 w-44 bg-bg-elev rounded" />
+      <div className="h-3 w-32 bg-bg-elev rounded" />
+      <div className="grid grid-cols-3 gap-2">
+        <div className="h-7 bg-bg-elev rounded" />
+        <div className="h-7 bg-bg-elev rounded" />
+        <div className="h-7 bg-bg-elev rounded" />
+      </div>
+      <div className="h-2.5 w-full bg-bg-elev rounded" />
+      <div className="h-2.5 w-3/4 bg-bg-elev rounded" />
+    </div>
+  )
+}
+
+// Renders the input-side context the suggestions were built from:
+// when the matrix was read, what feed it came from, the spot price
+// it saw, and which expiration was anchoring the regime. Lets the
+// user tell at a glance whether two different re-analyses saw the
+// same world or not — i.e. is the new answer because the matrix
+// moved, or because the model drifted? Re-renders every 30s so the
+// "as of" text stays honest.
+function MatrixFreshness({ computedAt, source, spot, dominantExp }) {
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000)
+    return () => clearInterval(id)
+  }, [])
+  const ageMs = Math.max(0, now - computedAt)
+  const ageLabel = formatMs(ageMs)
+  const time = new Date(computedAt).toLocaleTimeString([], {
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+  const isLive = source === 'dxlink'
+  return (
+    <div className="bg-bg-elev/50 border border-border/60 rounded-lg px-3 py-2 text-[10px] text-subtle leading-relaxed">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-muted">Matrix as of</span>
+        <span className="font-mono-tab tabular-nums text-fg">{time}</span>
+        <span className="text-muted">·</span>
+        <span className={isLive ? 'text-green-400' : 'text-amber-400'}>
+          {isLive ? 'LIVE' : '15M DELAYED'}
+        </span>
+        <span className="text-muted">({source})</span>
+        <span className="text-muted">· {ageLabel} ago</span>
+      </div>
+      <div className="text-muted mt-0.5">
+        Spot ${spot != null ? Number(spot).toFixed(2) : '—'}
+        {dominantExp && (
+          <>
+            <span className="mx-1.5">·</span>
+            Dominant gamma at{' '}
+            <span className="text-fg font-mono-tab tabular-nums">{dominantExp}</span>
+          </>
         )}
       </div>
     </div>
@@ -276,6 +405,13 @@ function PlayCard({ play, onOpenCalculator, onLogSignal }) {
         Short ${play.short_strike} {isCallSpread ? 'C' : 'P'}
       </div>
 
+      {play.market_view && (
+        <p className="text-[11px] text-fg/85 leading-snug">
+          <span className="eyebrow text-[9px] text-muted mr-1.5">View</span>
+          {play.market_view}
+        </p>
+      )}
+
       <div className="grid grid-cols-3 gap-2 text-[11px]">
         <Stat label="Risk/spread" value={`$${formatNum(play.max_loss_per_spread)}`} />
         <Stat label="R/R" value={`1:${(play.risk_reward || 0).toFixed(1)}`} />
@@ -290,6 +426,13 @@ function PlayCard({ play, onOpenCalculator, onLogSignal }) {
         <p className="text-[10px] text-muted leading-relaxed border-l-2 border-amber-400/40 pl-2">
           <strong className="text-amber-400">Invalidates:</strong>{' '}
           {play.what_invalidates}
+        </p>
+      )}
+
+      {play.gamma_rolloff_risk && play.rolloff_note && (
+        <p className="text-[10px] text-muted leading-relaxed border-l-2 border-orange-500/50 pl-2">
+          <strong className="text-orange-400">Roll-off risk:</strong>{' '}
+          {play.rolloff_note}
         </p>
       )}
 
@@ -351,7 +494,20 @@ function openInCalculator(navigate, play, ticker, spot) {
   })
 }
 
+// All 5 spread structures the user can be deep-linked into. Direction
+// here is the THESIS direction (a Bear Call Credit is bearish even
+// though it's built from calls). LogSignal owns the structure→direction
+// mapping internally too; passing both here just removes a hop.
+const PLAY_TYPE_TO_PREFILL = {
+  BULL_CALL:        { direction: 'long_call', structure: 'bull_call_spread' },
+  BEAR_PUT:         { direction: 'long_put',  structure: 'bear_put_spread' },
+  IRON_CONDOR:      { direction: 'watch',     structure: 'iron_condor' },
+  BULL_PUT_CREDIT:  { direction: 'long_call', structure: 'bull_put_credit' },
+  BEAR_CALL_CREDIT: { direction: 'long_put',  structure: 'bear_call_credit' },
+}
+
 function logAsSignal(navigate, play, ticker, spot) {
+  const mapped = PLAY_TYPE_TO_PREFILL[play.type] || PLAY_TYPE_TO_PREFILL.BEAR_PUT
   navigate('/log', {
     state: {
       prefill: {
@@ -359,7 +515,11 @@ function logAsSignal(navigate, play, ticker, spot) {
         ticker,
         stock_price_at_signal: String(spot),
         catalyst_type: 'other',
-        direction: play.type === 'BULL_CALL' ? 'long_call' : 'long_put',
+        direction: mapped.direction,
+        structure: mapped.structure,
+        // suggested_play_type lets LogSignal render the Suggested /
+        // Modified-from-suggestion badge on the strategy picker.
+        suggested_play_type: play.type,
         thesis: `GEX-driven setup: ${play.rationale}`,
         long_strike: play.long_strike,
         short_strike: play.short_strike,

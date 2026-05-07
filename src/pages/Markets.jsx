@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, RefreshCw, Activity, Star, Lock, ChevronDown, Clock, BookOpen } from 'lucide-react'
+import { ArrowLeft, RefreshCw, Activity, Star, Lock, ChevronDown, Clock, BookOpen, Search } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
@@ -35,7 +35,23 @@ export default function Markets() {
   const navigate = useNavigate()
   const { user } = useAuth()
   const { isPro, limits } = useSubscription()
-  const [ticker, setTicker] = useState(TICKERS[0].symbol)
+  // Persisted ticker — survives navigation away (e.g. user clicks
+  // "Log Signal" on a suggested play, then back-navs here). Without
+  // this we'd snap to TICKERS[0] and lose the user's place, which
+  // also blanks SuggestedPlays since its localStorage cache is keyed
+  // by ticker.
+  const [ticker, setTicker] = useState(() => {
+    if (typeof window === 'undefined') return TICKERS[0].symbol
+    try {
+      const saved = window.localStorage.getItem('pe_markets_ticker')
+      if (saved && /^[A-Z][A-Z0-9.\-]{0,9}$/.test(saved)) return saved
+    } catch { /* private mode */ }
+    return TICKERS[0].symbol
+  })
+  useEffect(() => {
+    if (typeof window === 'undefined' || !ticker) return
+    try { window.localStorage.setItem('pe_markets_ticker', ticker) } catch { /* */ }
+  }, [ticker])
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -164,15 +180,16 @@ export default function Markets() {
           </p>
         </div>
         {/* Density picker — controls how many strikes/expirations the
-            heatmap fetches. Compact = Skylit-default; expand for further
-            OTM strikes or deeper-dated expirations. */}
-        <div className="hidden md:flex items-center gap-1 border border-border rounded-lg p-0.5 bg-card">
+            heatmap fetches. Compact = Skylit-default (4×30); Wide = 6×50;
+            Extra = 8×80. Visible on mobile too — users on the Gamma Map
+            page on phones need this lever as much as desktop users. */}
+        <div className="flex items-center gap-1 border border-border rounded-lg p-0.5 bg-card shrink-0">
           {(['compact', 'wide', 'extra']).map((d) => (
             <button
               key={d}
               onClick={() => setDensity(d)}
               className={
-                'px-2.5 py-1 text-[10px] font-semibold rounded-md transition uppercase tracking-wider ' +
+                'px-2 md:px-2.5 py-1 text-[10px] font-semibold rounded-md transition uppercase tracking-wider ' +
                 (density === d
                   ? 'bg-amber-400 text-bg'
                   : 'text-subtle hover:text-fg')
@@ -297,6 +314,17 @@ export default function Markets() {
               </button>
             )
           })}
+          {/* Search-anything pill — same drawer the title button opens.
+              Sits at the end of the curated chip row so users in the
+              chip-tapping mental model still discover the full-universe
+              search. */}
+          <button
+            onClick={() => setDrawerOpen(true)}
+            className="shrink-0 inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-dashed border-border text-xs font-medium text-subtle hover:text-fg hover:border-border-hover transition"
+          >
+            <Search size={11} />
+            Search any ticker
+          </button>
         </div>
       </div>
 
@@ -314,15 +342,19 @@ export default function Markets() {
         <div className="lg:hidden bg-card border border-border rounded-xl p-4 space-y-3">
           <div className="flex items-baseline justify-between">
             <div>
+              {/* Title-as-search-trigger. The chip carousel above already
+                  switches between streamed tickers; the magnifying-glass
+                  here signals that tapping opens the full ~500-name
+                  universe search drawer, not just the chip set. */}
               <button
                 type="button"
                 onClick={() => setDrawerOpen(true)}
                 className="inline-flex items-baseline gap-1.5 text-2xl font-display tracking-tight
                            hover:text-amber-400 transition-colors"
-                aria-label="Pick a different ticker"
+                aria-label="Search any ticker"
               >
                 {data.ticker}
-                <ChevronDown size={16} className="text-subtle" />
+                <Search size={14} className="text-subtle self-center" />
               </button>
               <div className="text-xs text-subtle flex items-center gap-2 flex-wrap">
                 <span>

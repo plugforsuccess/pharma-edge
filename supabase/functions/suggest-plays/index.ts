@@ -44,13 +44,24 @@ function json(body: unknown, status = 200): Response {
   })
 }
 
-const SYSTEM_PROMPT = `You are a Cash Moves spread-trade advisor. Given a Gamma Exposure (GEX) matrix snapshot for a ticker, propose 0–3 high-conviction spread trade ideas that fit BOTH the GEX playbook and the Cash Moves trading rules.
+const SYSTEM_PROMPT = `You are a Cash Moves spread-trade advisor. Given a Gamma Exposure (GEX) matrix snapshot for a ticker, propose 0–5 high-conviction spread trade ideas that fit BOTH the GEX playbook and the Cash Moves trading rules.
+
+STRATEGY DIVERSITY — REQUIRED WHEN MULTIPLE PLAYS ARE RETURNED:
+- Five spread types are eligible: Bull Call Spread, Bear Put Spread, Iron Condor, Bull Put Spread (credit), Bear Call Spread (credit). All five are valid Cash Moves structures.
+- When you return 2+ plays, span at least 2 distinct strategy types. Never return 3+ plays of the same strategy type — if the matrix only supports one strategy, return 1 high-conviction play of that type rather than padding with near-duplicates.
+- Different DTEs alone do NOT make plays distinct — a Bear Call Spread on 5/8 and a Bear Call Spread on 5/13 still count as the same type. Diversity means strategy structure, not expiration.
+- Prefer pairing a directional debit play with a non-directional credit/condor play when the matrix supports both reads.
 
 GEX PLAYBOOK (from /glossary):
-- Regime A = above flip + Net GEX positive → range-bound, mean-revert. Setups: pin trades (long call spread toward call wall), short premium, breakout calls AT the call wall.
-- Regime B = below flip + Net GEX negative → trending, volatile. Setups: long premium (straddles), breakdown puts AT the put wall, vol expansion.
+- Regime A = above flip + Net GEX positive → range-bound, mean-revert. Dealers are LONG gamma, so they SELL rallies and BUY dips to stay delta-neutral — that hedging flow dampens moves and creates the pin. Setups: pin trades (long call spread toward call wall), short premium, breakout calls AT the call wall.
+- Regime B = below flip + Net GEX negative → trending, volatile. Dealers are SHORT gamma, so they BUY rallies and SELL dips to stay delta-neutral — that hedging flow accelerates moves in whichever direction price is already going (this is what creates the gravitational pull toward put walls and the gamma-squeeze risk above call walls). Setups: long premium (straddles), breakdown puts AT the put wall, vol expansion.
 - Call wall = strike with the largest positive GEX cell (★ in the matrix). Acts as resistance / magnet.
 - Put wall = strike with the largest negative GEX cell. Acts as support / magnet.
+
+DEALER-FLOW DIRECTION — DO NOT INVERT THIS IN ANY RATIONALE:
+- Positive (long) gamma → dealers sell rallies, buy dips → dampens moves.
+- Negative (short) gamma → dealers buy rallies, sell dips → amplifies moves.
+If you write a rationale that says negative-gamma dealers "sell rallies and buy dips," that is wrong and will be rejected.
 
 FLOW DATA (when present): you will see today's per-strike volume and premium, plus a "NOTABLE" section flagging strikes where today's volume is ≥5× standing OI (likely directional bets, not hedging). Use flow to confirm or contradict the GEX read. If flow concentrates at a call wall, the wall is being reinforced. If flow concentrates ABOVE the call wall (out-of-the-money calls running 5x OI), traders expect a breakout — favour breakout call spreads. If flow is heavy on puts at strikes near the put wall, position for support. Mismatch between dealer positioning (GEX) and trader bets (flow) = transition signal; reduce conviction or pick the side flow is on.
 
@@ -61,10 +72,18 @@ CASH MOVES RULES — NEVER VIOLATE:
 - Position size = floor(account * 2% / max_loss_per_spread). Always include this in the response.
 - 30–45 days past any catalyst for catalyst-driven plays.
 
+GAMMA ROLL-OFF RISK — MUST FLAG:
+- The user prompt will include a "DOMINANT GEX EXPIRATION" line — the single expiration that holds the largest share of total |GEX| in the matrix. That expiration is what's anchoring the current pinning / regime behavior.
+- Once it expires, dealer hedges roll off, positioning resets, and the regime can shift (freer price discovery, larger moves, less suppression). Plays whose expiration is AFTER the dominant one are inheriting a thesis that may not survive the roll-off.
+- For each play, set "gamma_rolloff_risk" = true if play.expiration > dominant_gex_expiration. Otherwise false.
+- When true, include a "rolloff_note" of one short sentence describing the specific risk for THIS structure (e.g. "Condor expires after the May 8 wall cluster rolls off — the pinning regime anchoring this thesis ends mid-trade.").
+- When the dominant expiration also satisfies the trade's other constraints (DTE rules, sufficient strike spread), PREFER it over later expirations.
+
 OUTPUT — STRICT JSON, NO PROSE:
 {
   "regime": "A" | "B" | "mixed",
   "regime_explanation": "one sentence",
+  "dominant_gex_expiration": "YYYY-MM-DD",
   "plays": [
     {
       "strategy": "Bull Call Spread" | "Bear Put Spread" | "Iron Condor" | "Bull Put Spread (credit)" | "Bear Call Spread (credit)",
@@ -78,8 +97,11 @@ OUTPUT — STRICT JSON, NO PROSE:
       "max_profit_per_spread": <number, dollars>,
       "risk_reward": <number, e.g. 1.5>,
       "contracts": <integer, sized to account_size with the 2% rule>,
+      "market_view": "1 short sentence stating the EXACT forecast this trade requires to be profitable. Be precise about what the underlying must do — most spreads are not generic 'bullish' or 'bearish'; they each require a specific outcome. Examples: 'PLTR closes below $130 by May 29' (debit put spread — needs an actual move), 'PLTR fails to reclaim $140' (bear call credit — only needs the wall to hold; flat or mild drift up still wins), 'NVDA pins between $138 and $145' (iron condor — needs sideways), 'AAPL closes above $185 by Jun 20' (bull call debit — needs a move up). Never use the same market_view for two plays in the same response — if two plays collapse to the same forecast, drop the lower-conviction one.",
       "rationale": "1-2 sentences citing specific GEX numbers (call wall at $X, flip at $Y, etc.)",
-      "what_invalidates": "1 sentence — what move or event kills this thesis"
+      "what_invalidates": "1 sentence — what move or event kills this thesis",
+      "gamma_rolloff_risk": <boolean>,
+      "rolloff_note": "<string, REQUIRED when gamma_rolloff_risk=true; empty string otherwise>"
     }
   ]
 }
@@ -202,6 +224,23 @@ function buildUserPrompt(matrix: MatrixData, accountSize: number, flow: FlowRow[
     .sort((a, b) => (a.gex as number) - (b.gex as number))
     .slice(0, 5)
 
+  // Dominant GEX expiration — sum |gex| per expiration column, pick the
+  // one with the largest share. This is the expiry that's anchoring the
+  // current regime; structures expiring AFTER it inherit gamma roll-off
+  // risk because dealer hedges around the dominant strikes vanish at
+  // that expiry. Surfaced explicitly so Claude doesn't have to guess.
+  const expAbsGex = new Map<string, number>()
+  for (const c of flat) {
+    if (c.gex == null) continue
+    expAbsGex.set(c.expiration, (expAbsGex.get(c.expiration) ?? 0) + Math.abs(c.gex))
+  }
+  const totalAbs = Array.from(expAbsGex.values()).reduce((s, v) => s + v, 0)
+  const expRanked = Array.from(expAbsGex.entries()).sort((a, b) => b[1] - a[1])
+  const dominantExp = expRanked[0]?.[0] ?? null
+  const dominantSharePct = totalAbs > 0 && expRanked[0]
+    ? Math.round((expRanked[0][1] / totalAbs) * 100)
+    : 0
+
   // OI lookup keyed (strike|expiration|side) — used for the "vol/OI"
   // notable detection. Only call-side OI is in cells (OI per side is
   // collapsed into gex_net), so this is approximate; for the unusual
@@ -242,6 +281,9 @@ ${top5neg.length > 0
 
 LARGEST ABSOLUTE WALL (★): ${matrix.largest ? `${matrix.largest.strike} @ ${matrix.largest.expiration} = $${(matrix.largest.gex_net / 1e6).toFixed(1)}M` : 'none'}
 
+DOMINANT GEX EXPIRATION: ${dominantExp ? `${dominantExp} (${dominantSharePct}% of total |GEX| in this matrix)` : 'unknown'}
+GAMMA ROLL-OFF NOTE: any play with expiration > ${dominantExp ?? 'the dominant expiration above'} MUST set gamma_rolloff_risk=true and explain it in rolloff_note. The pinning/regime behavior driving the thesis ends when the dominant expiry rolls off.
+
 ${formatFlowSection(flow, chainOI)}
 
 INTERPRETATION HINTS:
@@ -250,7 +292,7 @@ INTERPRETATION HINTS:
 - Flow CONCENTRATING THROUGH a wall (vol > 5x OI at strikes ABOVE the wall) = directional bullish bet, wall may break.
 - Mismatch between GEX (where positioning sits) and flow (where new bets land) = transition signal — regime may be shifting.
 
-Propose 0-3 spread trades following the rules in the system prompt. Strict JSON only.`
+Propose 0-5 spread trades following the rules in the system prompt. When you return 2 or more, span at least 2 distinct strategy types (Bull Call / Bear Put / Iron Condor / Bull Put Credit / Bear Call Credit). Strict JSON only.`
 }
 
 function extractJson(rawText: string): unknown {
@@ -270,6 +312,8 @@ function validatePlays(parsed: any, matrix: MatrixData): any {
   if (!parsed?.plays || !Array.isArray(parsed.plays)) return parsed
   const strikeSet = new Set(matrix.strikes)
   const expDates = new Set(matrix.expirations.map((e) => e.date))
+  const dominantExp: string | null =
+    typeof parsed.dominant_gex_expiration === 'string' ? parsed.dominant_gex_expiration : null
   parsed.plays = parsed.plays.filter((p: any) => {
     if (!strikeSet.has(p.long_strike) || !strikeSet.has(p.short_strike)) {
       console.warn(`[validate] dropped play: strike not in matrix`, p)
@@ -281,6 +325,19 @@ function validatePlays(parsed: any, matrix: MatrixData): any {
     }
     return true
   })
+  // Backstop the roll-off flag server-side: even if Claude forgot to set
+  // it, we know the dominant expiration and can fill in the boolean
+  // ourselves. The rolloff_note still needs Claude — we don't try to
+  // synthesize one here, we just leave a generic fallback.
+  for (const p of parsed.plays) {
+    if (typeof p.gamma_rolloff_risk !== 'boolean') {
+      p.gamma_rolloff_risk = dominantExp != null && p.expiration > dominantExp
+    }
+    if (p.gamma_rolloff_risk && (!p.rolloff_note || typeof p.rolloff_note !== 'string')) {
+      p.rolloff_note = `Expires after the dominant gamma expiration (${dominantExp ?? 'n/a'}); the pinning regime anchoring this thesis rolls off mid-trade.`
+    }
+    if (!p.gamma_rolloff_risk) p.rolloff_note = ''
+  }
   return parsed
 }
 
@@ -387,6 +444,13 @@ serve(async (req) => {
     body: JSON.stringify({
       model: CLAUDE_MODEL,
       max_tokens: MAX_TOKENS,
+      // Pinned low so the same matrix returns essentially the same
+      // answer across re-analyses — the matrix itself evolves intraday
+      // (OI rolls, walls shift), and we want the user to be able to
+      // tell whether a different suggestion came from a data change
+      // or just model drift. 0.2 keeps a sliver of variance for
+      // tie-breaking when two plays score nearly identically.
+      temperature: 0.2,
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: buildUserPrompt(matrix, accountSize, flow) }],
     }),
