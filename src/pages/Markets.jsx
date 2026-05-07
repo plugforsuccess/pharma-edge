@@ -361,13 +361,6 @@ export default function Markets() {
               </button>
             )
           })}
-          <button
-            onClick={() => setDrawerOpen(true)}
-            className="shrink-0 inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-dashed border-border text-xs font-medium text-subtle hover:text-fg hover:border-border-hover transition"
-          >
-            <Search size={11} />
-            Add ticker
-          </button>
         </div>
       </div>
 
