@@ -41,9 +41,13 @@ export default function SignalDetail() {
 
   async function fetchSignal() {
     setLoading(true)
+    // Pull the open_position alongside the signal so we have the
+    // actual long/short strikes for spread trades. Signals only
+    // store `strike_price` (single value); spread leg detail lives
+    // on open_positions joined by signal_id.
     const { data } = await supabase
       .from('signals')
-      .select('*, outcomes(*)')
+      .select('*, outcomes(*), open_positions(long_strike, short_strike, contracts, entry_debit_per_spread, expiration, strategy_type)')
       .eq('id', id)
       .eq('user_id', user.id)
       .maybeSingle()
@@ -106,11 +110,7 @@ export default function SignalDetail() {
           <InfoItem label="Catalyst" value={catalystLabel(signal.catalyst_type)} />
           <InfoItem
             label="Date"
-            value={new Date(signal.catalyst_date).toLocaleDateString('en-US', {
-              month: 'short',
-              day: 'numeric',
-              year: 'numeric',
-            })}
+            value={formatYmdLocal(signal.catalyst_date, { format: 'long' })}
           />
           <InfoItem label="Market Cap" value={formatMarketCap(signal.market_cap)} />
           <InfoItem
@@ -218,7 +218,7 @@ export default function SignalDetail() {
           />
           <InfoItem
             label="Expiry"
-            value={signal.expiry_date ? new Date(signal.expiry_date).toLocaleDateString() : '—'}
+            value={formatYmdLocal(signal.expiry_date)}
           />
         </div>
       </div>
@@ -227,9 +227,19 @@ export default function SignalDetail() {
         <>
           <StrikePriceCalculator
             direction={signal.direction}
+            lockedStructure={signal.structure}
             ticker={signal.ticker}
             accountSize={profile?.account_size}
             initialStockPrice={signal.stock_price_at_signal}
+            // Real strikes / premium / expiry from the open_position
+            // attached to this signal. Without these the calculator
+            // would render structure defaults (~12% OTM long, ~35% OTM
+            // short, $0.50 premium, expiry 30+45d ahead) instead of
+            // the trade the user actually made.
+            initialBuyStrike={signal.open_positions?.[0]?.long_strike}
+            initialSellStrike={signal.open_positions?.[0]?.short_strike}
+            initialPremium={signal.open_positions?.[0]?.entry_debit_per_spread ?? signal.entry_price}
+            initialExpiry={signal.expiry_date}
             catalystDate={signal.catalyst_date}
             onCalculationComplete={(calc) => setTradeCalc(calc)}
           />
@@ -375,6 +385,23 @@ function InfoItem({ label, value }) {
       <p className="text-white text-xs font-medium mt-0.5">{value}</p>
     </div>
   )
+}
+
+// Formats a YYYY-MM-DD string as a local date without going through
+// `new Date(s).toLocaleDateString()`. The latter parses the string
+// as UTC midnight, then displays it in the local timezone — so a
+// `2026-05-08` stored expiry renders as "5/7/2026" in any timezone
+// behind UTC. Splitting + formatting manually keeps the calendar
+// day intact.
+function formatYmdLocal(ymd, { format = 'short' } = {}) {
+  if (!ymd || typeof ymd !== 'string' || !/^\d{4}-\d{2}-\d{2}/.test(ymd)) return '—'
+  const [y, m, d] = ymd.slice(0, 10).split('-').map(Number)
+  if (!y || !m || !d) return '—'
+  if (format === 'long') {
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    return `${months[m - 1]} ${d}, ${y}`
+  }
+  return `${m}/${d}/${y}`
 }
 
 function OutcomeResult({ outcome }) {
