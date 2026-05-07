@@ -205,6 +205,17 @@ export default function SuggestedPlays({ ticker, isPro }) {
             in the current matrix. Cash Moves only surfaces plays that
             clear the rules — no padding. Check back when the chain has
             firmed up (typically late-morning + post-1pm ET).
+            {data.rejection_summary?.by_reason?.rr_below_minimum > 0 && (
+              <>
+                {' '}
+                <span className="text-subtle">
+                  ({data.rejection_summary.by_reason.rr_below_minimum} candidate
+                  {data.rejection_summary.by_reason.rr_below_minimum === 1 ? '' : 's'}{' '}
+                  filtered for R/R below 1:1.5 — common on liquid index ETFs at
+                  short DTE.)
+                </span>
+              </>
+            )}
           </p>
         )}
 

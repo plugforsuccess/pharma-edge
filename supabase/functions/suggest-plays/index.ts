@@ -14,7 +14,11 @@
 // Hard rules baked into the prompt — NOT optional:
 //   - Spreads only, no naked options (Cash Moves rule)
 //   - Min 21 DTE (Cash Moves entry rule, except 0DTE pin trades)
-//   - Max 40% premium / spread width (sizing rule)
+//   - R/R >= 1:1.5 (Cash Moves rule). Equivalent thresholds:
+//       Debit:  net_debit  <= 40% of width
+//       Credit: net_credit >= 60% of width
+//     Server-side filter drops anything below 1.5; an empty response is
+//     correct on days where no structure clears the bar.
 //   - Position size = floor(account * 2% / max_loss_per_spread)
 //   - Refuse if no high-conviction setup exists (return empty)
 
@@ -68,7 +72,14 @@ FLOW DATA (when present): you will see today's per-strike volume and premium, pl
 CASH MOVES RULES — NEVER VIOLATE:
 - SPREADS ONLY. No naked options.
 - Min 21 DTE on entry, except explicit 0–7 DTE pin trades.
-- Max 40% of spread width in net debit (R/R cap).
+- R/R >= 1:1.5 on every play (target 1:2). Equivalent thresholds:
+    Debit (Bull Call, Bear Put):       net_debit  <= 40% of width
+    Credit (Bull Put cr, Bear Call cr): net_credit >= 60% of width
+    Iron Condor:                       net_credit >= 60% of widest wing
+  The server WILL filter out plays with risk_reward < 1.5; do not propose
+  them. If no structure on the chain meets this bar, return zero plays
+  rather than relax the rule. An empty response is the correct answer on
+  efficient-pricing days (most short-DTE SPY/QQQ credits).
 - Position size = floor(account * 2% / max_loss_per_spread). Always include this in the response.
 - 30–45 days past any catalyst for catalyst-driven plays.
 
@@ -429,26 +440,102 @@ function extractJson(rawText: string): unknown {
   return JSON.parse(stripped.slice(first, last + 1))
 }
 
+// Cash Moves R/R floor — every play must clear 1:1.5. Same threshold
+// as the StrikePriceCalculator (DEBIT_PREMIUM_MAX_PCT 0.4 /
+// CREDIT_PREMIUM_MIN_PCT 0.6). Keeping these constants in lockstep with
+// the frontend is intentional: the suggester and the calculator should
+// never disagree about whether a play is rule-clean.
+const MIN_RISK_REWARD = 1.5
+
+// Trust the dollar fields, not the self-reported risk_reward — Claude
+// occasionally reports an R/R that contradicts its own max_profit /
+// max_loss. When dollars are present, derive R/R from them; otherwise
+// fall back to the declared field. Returns null if neither is usable.
+function effectiveRiskReward(p: any): number | null {
+  const mp = Number(p?.max_profit_per_spread)
+  const ml = Number(p?.max_loss_per_spread)
+  if (Number.isFinite(mp) && Number.isFinite(ml) && ml > 0) return mp / ml
+  const declared = Number(p?.risk_reward)
+  return Number.isFinite(declared) ? declared : null
+}
+
 // Validate the plays match the matrix's strikes + expirations exactly so
 // we don't deep-link the user into the calculator with a strike that
-// doesn't trade.
-function validatePlays(parsed: any, matrix: MatrixData): any {
-  if (!parsed?.plays || !Array.isArray(parsed.plays)) return parsed
+// doesn't trade. Also enforces the R/R >= 1.5 rule the rest of the app
+// (StrikePriceCalculator, pre-trade checklist) already enforces — without
+// this filter the suggester contradicts the calculator on the same play.
+//
+// Returns { parsed, rejection_summary } so callers can surface telemetry
+// to the response payload. Each rejection also emits a structured
+// console.warn so 4-week aggregate rates are queryable from Edge Function
+// logs (search "[validate] dropped").
+function validatePlays(parsed: any, matrix: MatrixData): {
+  parsed: any
+  rejection_summary: {
+    total_proposed: number
+    total_kept: number
+    total_rejected: number
+    by_reason: Record<string, number>
+    by_structure: Record<string, number>
+  }
+} {
+  const summary = {
+    total_proposed: 0,
+    total_kept: 0,
+    total_rejected: 0,
+    by_reason: {} as Record<string, number>,
+    by_structure: {} as Record<string, number>,
+  }
+  if (!parsed?.plays || !Array.isArray(parsed.plays)) {
+    return { parsed, rejection_summary: summary }
+  }
+  summary.total_proposed = parsed.plays.length
   const strikeSet = new Set(matrix.strikes)
   const expDates = new Set(matrix.expirations.map((e) => e.date))
   const dominantExp: string | null =
     typeof parsed.dominant_gex_expiration === 'string' ? parsed.dominant_gex_expiration : null
+
+  const reject = (p: any, reason: string) => {
+    summary.total_rejected++
+    summary.by_reason[reason] = (summary.by_reason[reason] ?? 0) + 1
+    const struct = typeof p?.type === 'string' ? p.type : 'UNKNOWN'
+    summary.by_structure[struct] = (summary.by_structure[struct] ?? 0) + 1
+    // Structured prefix so logs are grep-able for retroactive rate calc.
+    console.warn('[validate] dropped', JSON.stringify({
+      reason,
+      ticker: matrix.ticker,
+      type: p?.type,
+      long_strike: p?.long_strike,
+      short_strike: p?.short_strike,
+      expiration: p?.expiration,
+      risk_reward: p?.risk_reward,
+      effective_rr: effectiveRiskReward(p),
+      max_profit_per_spread: p?.max_profit_per_spread,
+      max_loss_per_spread: p?.max_loss_per_spread,
+    }))
+  }
+
   parsed.plays = parsed.plays.filter((p: any) => {
     if (!strikeSet.has(p.long_strike) || !strikeSet.has(p.short_strike)) {
-      console.warn(`[validate] dropped play: strike not in matrix`, p)
+      reject(p, 'strike_not_in_matrix')
       return false
     }
     if (!expDates.has(p.expiration)) {
-      console.warn(`[validate] dropped play: expiration not in matrix`, p)
+      reject(p, 'expiration_not_in_matrix')
+      return false
+    }
+    const rr = effectiveRiskReward(p)
+    if (rr == null) {
+      reject(p, 'rr_unknown')
+      return false
+    }
+    if (rr < MIN_RISK_REWARD) {
+      reject(p, 'rr_below_minimum')
       return false
     }
     return true
   })
+  summary.total_kept = parsed.plays.length
   // Backstop the roll-off flag server-side: even if Claude forgot to set
   // it, we know the dominant expiration and can fill in the boolean
   // ourselves. The rolloff_note still needs Claude — we don't try to
@@ -462,7 +549,7 @@ function validatePlays(parsed: any, matrix: MatrixData): any {
     }
     if (!p.gamma_rolloff_risk) p.rolloff_note = ''
   }
-  return parsed
+  return { parsed, rejection_summary: summary }
 }
 
 serve(async (req) => {
@@ -594,7 +681,20 @@ serve(async (req) => {
   try { parsed = extractJson(text) } catch (e) {
     return json({ success: false, error: e instanceof Error ? e.message : 'parse error', raw: text.slice(0, 300) }, 502)
   }
-  parsed = validatePlays(parsed, matrix)
+  const validated = validatePlays(parsed, matrix)
+  parsed = validated.parsed
+  const rejectionSummary = validated.rejection_summary
+  // One aggregate line per request — easier to scan in Edge Function logs
+  // than the per-play `[validate] dropped` warnings when computing daily
+  // rejection rate. Search "[suggest-plays] summary" to aggregate.
+  console.log('[suggest-plays] summary', JSON.stringify({
+    ticker: matrix.ticker,
+    proposed: rejectionSummary.total_proposed,
+    kept: rejectionSummary.total_kept,
+    rejected: rejectionSummary.total_rejected,
+    by_reason: rejectionSummary.by_reason,
+    by_structure: rejectionSummary.by_structure,
+  }))
 
   // Compute per-play Probability of Profit at Expiration (POP) so the
   // user sees an entry probability on each card AND the value can be
@@ -661,6 +761,10 @@ serve(async (req) => {
     source: matrix.source,
     account_size: accountSize,
     ...parsed,
+    // Per-request rejection telemetry — kept in the cached payload so a
+    // 4-week analysis can read counts off `play_suggestions.payload`
+    // without needing to retain Edge Function logs that long.
+    rejection_summary: rejectionSummary,
     computed_at: new Date().toISOString(),
   }
   adminClient.from('play_suggestions').upsert(
