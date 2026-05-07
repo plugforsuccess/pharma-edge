@@ -11,9 +11,19 @@
 # doesn't expose HTTP — Fly's health check just verifies the process
 # is alive via the [services] block being absent.
 #
-# `auto_stop_machines = false` is critical: this is a long-running
-# WebSocket worker, NOT a request-handling app. Fly's default would
-# spin it down on idle and we'd miss every quote frame.
+# Memory: 1GB. The 256MB cap was too tight — V8's baseline (~80MB) +
+# 64k active dxFeed subscriptions + WebSocket frame buffers + the
+# in-memory shadow Map keyed by streamer symbol pushes resident
+# memory close to 200MB during the subscription burst, and Linux
+# OOM-killed the process at 138MB resident (cgroup accounting
+# punishes V8's 34GB virtual reservation). 1GB gives headroom for
+# growth + GC overhead without ballooning the bill (shared-cpu-1x
+# at 1GB is still cents/day).
+#
+# auto_stop_machines/auto_start_machines/min_machines_running locked
+# in explicitly so a Fly host event or transient crash doesn't leave
+# us flying blind for hours. The [[restart]] policy ensures Deno
+# fatal-exits (e.g. token refresh failure) re-launch automatically.
 
 app = "pharma-edge"
 primary_region = "iad"
@@ -27,13 +37,24 @@ primary_region = "iad"
 
 [[vm]]
   size = "shared-cpu-1x"
-  memory = "256mb"
+  memory = "1gb"
+
+[[restart]]
+  policy = "always"
+  retries = 10
 
 # No [[services]] block — the worker doesn't accept incoming HTTP.
 # Fly will use the process check (is the container running?) as health.
 
 [deploy]
   strategy = "immediate"  # one instance, no rolling
+
+# Long-running WebSocket worker, NOT a request-handling app — never
+# auto-stop on idle, always keep one machine running, auto-start on
+# Fly-side restarts.
+auto_stop_machines = "off"
+auto_start_machines = true
+min_machines_running = 1
 
 # No [mounts] section — the worker is stateless; all state lives in
 # Supabase. (An empty [mounts] table makes Fly try to bind a volume
