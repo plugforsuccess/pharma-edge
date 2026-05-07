@@ -43,8 +43,8 @@ const STRATEGY_OPTIONS = [
   { structure: 'bull_call_spread',  direction: 'long_call', label: 'Bull Call',     color: 'border-green-500 bg-green-950/30 text-green-400' },
   { structure: 'bear_put_spread',   direction: 'long_put',  label: 'Bear Put',      color: 'border-red-500 bg-red-950/30 text-red-400' },
   { structure: 'iron_condor',       direction: 'watch',     label: 'Iron Condor',   color: 'border-purple-500 bg-purple-950/30 text-purple-400' },
-  { structure: 'bull_put_credit',   direction: 'long_call', label: 'Bull Put (cr)', color: 'border-emerald-500 bg-emerald-950/30 text-emerald-400' },
-  { structure: 'bear_call_credit',  direction: 'long_put',  label: 'Bear Call (cr)',color: 'border-rose-500 bg-rose-950/30 text-rose-400' },
+  { structure: 'bull_put_credit',   direction: 'long_call', label: 'Bull Put Credit', color: 'border-emerald-500 bg-emerald-950/30 text-emerald-400' },
+  { structure: 'bear_call_credit',  direction: 'long_put',  label: 'Bear Call Credit',color: 'border-rose-500 bg-rose-950/30 text-rose-400' },
   { structure: 'watch',             direction: 'watch',     label: 'Watch only',    color: 'border-zinc-500 bg-zinc-900 text-zinc-400' },
 ]
 
@@ -706,16 +706,6 @@ export default function LogSignal() {
                 </button>
               ))}
             </div>
-            {form.trade_type === 'real' &&
-              paperDaysRemaining(profile?.paper_trading_started_at) > 0 && (
-                <p className="text-amber-400 text-[11px] leading-relaxed mt-2">
-                  ⚠ You're <strong>{paperDaysRemaining(profile?.paper_trading_started_at)} days</strong>{' '}
-                  into the 90-day paper-trading window. Cash Moves rules say
-                  no real-money trades until 90+ paper signals are resolved
-                  with a positive edge — switch back to <strong>Paper</strong>{' '}
-                  unless you're consciously overriding the rule.
-                </p>
-              )}
           </div>
 
           <button
