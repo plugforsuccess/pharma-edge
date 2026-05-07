@@ -75,11 +75,20 @@ export default function TickerDrawer({
 
       <div
         className={`relative w-full max-w-md bg-bg-elev border-t border-border
-                    rounded-t-2xl max-h-[85vh] flex flex-col
+                    rounded-t-2xl flex flex-col
                     transition-transform duration-200 ease-out ${
                       open ? 'translate-y-0' : 'translate-y-full'
                     }`}
-        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+        style={{
+          // dvh (dynamic viewport height) shrinks when the iOS
+          // keyboard opens; vh does not. Without this the drawer
+          // sat anchored to the full-viewport bottom while the
+          // keyboard covered the search input + result list.
+          // Capping at 85dvh keeps the backdrop visible at the top
+          // and gives the drawer a hard ceiling on tall screens.
+          maxHeight: '85dvh',
+          paddingBottom: 'env(safe-area-inset-bottom)',
+        }}
       >
         {/* Drag handle for affordance — not draggable, just a visual cue */}
         <div className="pt-2 pb-1 flex justify-center">
