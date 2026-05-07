@@ -149,11 +149,7 @@ export default function SuggestedPlays({ ticker, isPro }) {
           </p>
         )}
 
-        {loading && (
-          <p className="text-xs text-subtle py-4">
-            Claude is reading the matrix…
-          </p>
-        )}
+        {loading && <ThinkingState />}
 
         {error && (
           <div className="flex items-start gap-2 text-xs text-crimson">
@@ -219,6 +215,80 @@ export default function SuggestedPlays({ ticker, isPro }) {
           </p>
         )}
       </div>
+    </div>
+  )
+}
+
+// Animated "Claude is thinking" state — cycles through stage labels
+// that mirror what the suggest-plays prompt actually does, plus two
+// shimmer placeholder cards in the shape of real PlayCards. Each
+// stage holds for ~1.8s; full cycle is ~14s which lines up with a
+// typical Claude Sonnet response on this prompt. If the call takes
+// longer the messages just loop, which is fine — the perception is
+// still "the system is working," not "the system has hung."
+const THINKING_STAGES = [
+  'Reading the GEX matrix…',
+  'Locating call & put walls…',
+  'Checking today\'s flow against the walls…',
+  'Identifying regime (A or B)…',
+  'Drafting spread setups…',
+  'Sizing positions to the 2% rule…',
+  'Verifying R/R caps & DTE rules…',
+  'Locking strikes to your matrix…',
+]
+
+function ThinkingState() {
+  const [stage, setStage] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => {
+      setStage((s) => (s + 1) % THINKING_STAGES.length)
+    }, 1800)
+    return () => clearInterval(id)
+  }, [])
+  return (
+    <div className="space-y-3 py-1">
+      <div className="flex items-center gap-2 text-xs">
+        <Sparkles
+          size={14}
+          className="text-amber-400 shrink-0 animate-pulse"
+          style={{ animationDuration: '1.4s' }}
+        />
+        <span
+          key={stage}
+          className="text-subtle animate-[fadeIn_0.4s_ease-out]"
+          style={{ animation: 'fadeIn 0.4s ease-out' }}
+        >
+          {THINKING_STAGES[stage]}
+        </span>
+      </div>
+      <SkeletonPlayCard accent="border-red-800/40 bg-red-950/10" />
+      <SkeletonPlayCard accent="border-green-800/40 bg-green-950/10" />
+      <style>{`
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(2px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
+    </div>
+  )
+}
+
+function SkeletonPlayCard({ accent }) {
+  return (
+    <div className={`border rounded-lg p-3 space-y-2 animate-pulse ${accent}`}>
+      <div className="flex items-baseline justify-between gap-2">
+        <div className="h-3 w-24 bg-bg-elev rounded" />
+        <div className="h-2.5 w-16 bg-bg-elev rounded" />
+      </div>
+      <div className="h-4 w-44 bg-bg-elev rounded" />
+      <div className="h-3 w-32 bg-bg-elev rounded" />
+      <div className="grid grid-cols-3 gap-2">
+        <div className="h-7 bg-bg-elev rounded" />
+        <div className="h-7 bg-bg-elev rounded" />
+        <div className="h-7 bg-bg-elev rounded" />
+      </div>
+      <div className="h-2.5 w-full bg-bg-elev rounded" />
+      <div className="h-2.5 w-3/4 bg-bg-elev rounded" />
     </div>
   )
 }
