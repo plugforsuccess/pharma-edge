@@ -1,10 +1,11 @@
 import { Suspense } from 'react'
-import { Outlet, NavLink } from 'react-router-dom'
+import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import {
   Activity,
   BarChart2,
   Flame,
   Home,
+  Plus,
   Settings,
 } from 'lucide-react'
 import InstallPrompt from './InstallPrompt'
@@ -18,20 +19,28 @@ import clsx from 'clsx'
 //   /record  → "Record"
 //   /settings→ "Settings"
 //
-// Scanner (/scanner) is intentionally NOT in primary nav anymore —
-// it remains routable for Pro users via Settings or direct URL, but
-// the catalyst-scanner queue is a secondary surface in the GEX-first
-// product. Keeps the primary tab bar at 5 items, which fits cleanly
-// on small phones without crowding.
-const nav = [
+// Mobile bottom nav has 4 tabs split 2/2 around a center FAB:
+//   [Tape] [Gamma] (LOG FAB) [Flow] [Record]
+// Settings moves to the desktop sidebar + tape header avatar so it
+// frees up bottom-bar real estate. The Log FAB is the primary action
+// (writing a signal); making it visually dominant matches the
+// "log first, place second" workflow CLAUDE.md describes.
+const navLeft = [
   { to: '/', icon: Home, label: 'Tape' },
   { to: '/markets', icon: Activity, label: 'Gamma' },
+]
+const navRight = [
   { to: '/flow', icon: Flame, label: 'Flow' },
   { to: '/record', icon: BarChart2, label: 'Record' },
+]
+const navFull = [
+  ...navLeft,
+  ...navRight,
   { to: '/settings', icon: Settings, label: 'Settings' },
 ]
 
 export default function Layout() {
+  const navigate = useNavigate()
   return (
     <div className="min-h-screen flex">
       {/* Desktop sidebar — visible at lg: and up. Mirrors the bottom-nav
@@ -48,7 +57,18 @@ export default function Layout() {
           </div>
         </div>
         <nav className="flex flex-col gap-1">
-          {nav.map(({ to, icon: Icon, label }) => (
+          {/* Desktop: surface a primary "Log a Move" CTA at the top so
+              the most-frequent action is always one click away,
+              matching the mobile FAB pattern. */}
+          <button
+            type="button"
+            onClick={() => navigate('/log')}
+            className="mb-2 inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-bg font-semibold text-sm transition-colors"
+          >
+            <Plus size={15} strokeWidth={2.5} />
+            Log a Move
+          </button>
+          {navFull.map(({ to, icon: Icon, label }) => (
             <NavLink
               key={to}
               to={to}
@@ -114,65 +134,87 @@ export default function Layout() {
 
       <InstallPrompt />
 
-      {/* Mobile-only bottom nav. Hidden on lg+ where the sidebar covers
-          navigation. */}
+      {/* Mobile-only bottom nav. 4 tabs split 2/2 around a center FAB
+          that routes to /log. Settings moves to the desktop sidebar
+          (still reachable via direct URL or from the Tape avatar
+          area) — frees up bottom real estate so the primary action
+          (writing a signal) gets the visual prominence it deserves. */}
       <nav
         className="lg:hidden fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md
                    glass border-t border-border/80 px-2 pt-2 z-50"
         style={{ paddingBottom: 'calc(0.6rem + env(safe-area-inset-bottom))' }}
         aria-label="Primary"
       >
-        <div className="flex justify-around relative">
-          {nav.map(({ to, icon: Icon, label }) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={to === '/'}
-              className={({ isActive }) =>
-                clsx(
-                  'group relative flex flex-col items-center gap-1 px-2 py-1.5 rounded-lg transition-all min-w-11',
-                  isActive
-                    ? 'text-fg'
-                    : 'text-muted hover:text-subtle',
-                )
-              }
+        <div className="grid grid-cols-5 items-end relative">
+          {navLeft.map(({ to, icon: Icon, label }) => (
+            <BottomTab key={to} to={to} icon={Icon} label={label} />
+          ))}
+          <div className="flex justify-center relative">
+            <button
+              type="button"
+              onClick={() => navigate('/log')}
+              aria-label="Log a Move"
+              className="absolute -top-7 w-14 h-14 rounded-full bg-amber-400 hover:bg-amber-300 active:scale-95 text-bg shadow-[0_4px_16px_rgba(232,181,88,0.45)] transition-all flex items-center justify-center"
             >
-              {({ isActive }) => (
-                <>
-                  {isActive && (
-                    <span
-                      aria-hidden
-                      className="absolute -top-2 left-1/2 -translate-x-1/2 w-7 h-[2px] rounded-full"
-                      style={{
-                        background:
-                          'linear-gradient(90deg, transparent, #e8b558 50%, transparent)',
-                        boxShadow: '0 0 12px rgba(232,181,88,0.65)',
-                      }}
-                    />
-                  )}
-                  <Icon
-                    size={19}
-                    strokeWidth={isActive ? 2.2 : 1.7}
-                    className={clsx(
-                      'transition-transform',
-                      isActive && 'drop-shadow-[0_0_8px_rgba(232,181,88,0.35)]',
-                    )}
-                  />
-                  <span
-                    className={clsx(
-                      'text-[10px] font-medium tracking-wide',
-                      isActive ? 'text-fg' : 'text-muted',
-                    )}
-                  >
-                    {label}
-                  </span>
-                </>
-              )}
-            </NavLink>
+              <Plus size={22} strokeWidth={2.5} />
+            </button>
+            <span className="text-[10px] font-medium tracking-wide text-muted mt-7">
+              Log
+            </span>
+          </div>
+          {navRight.map(({ to, icon: Icon, label }) => (
+            <BottomTab key={to} to={to} icon={Icon} label={label} />
           ))}
         </div>
       </nav>
     </div>
+  )
+}
+
+function BottomTab({ to, icon: Icon, label }) {
+  return (
+    <NavLink
+      to={to}
+      end={to === '/'}
+      className={({ isActive }) =>
+        clsx(
+          'group relative flex flex-col items-center gap-1 px-1 py-1.5 rounded-lg transition-all',
+          isActive ? 'text-fg' : 'text-muted hover:text-subtle',
+        )
+      }
+    >
+      {({ isActive }) => (
+        <>
+          {isActive && (
+            <span
+              aria-hidden
+              className="absolute -top-2 left-1/2 -translate-x-1/2 w-7 h-[2px] rounded-full"
+              style={{
+                background:
+                  'linear-gradient(90deg, transparent, #e8b558 50%, transparent)',
+                boxShadow: '0 0 12px rgba(232,181,88,0.65)',
+              }}
+            />
+          )}
+          <Icon
+            size={19}
+            strokeWidth={isActive ? 2.2 : 1.7}
+            className={clsx(
+              'transition-transform',
+              isActive && 'drop-shadow-[0_0_8px_rgba(232,181,88,0.35)]',
+            )}
+          />
+          <span
+            className={clsx(
+              'text-[10px] font-medium tracking-wide',
+              isActive ? 'text-fg' : 'text-muted',
+            )}
+          >
+            {label}
+          </span>
+        </>
+      )}
+    </NavLink>
   )
 }
 
