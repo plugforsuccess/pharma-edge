@@ -9,6 +9,8 @@ import NotificationCenter from '../components/NotificationCenter'
 import OpenPositions from '../components/OpenPositions'
 import LiveGexStrip from '../components/LiveGexStrip'
 import SuggestedPlays from '../components/SuggestedPlays'
+import PullToRefreshIndicator from '../components/PullToRefreshIndicator'
+import usePullToRefresh from '../hooks/usePullToRefresh'
 import clsx from 'clsx'
 
 // The default ticker for the Tape's Suggested Plays card. Users will be
@@ -96,6 +98,14 @@ export default function Dashboard() {
     pendingCandidates === 0 &&
     watchlistCandidates === 0
 
+  // Pull-to-refresh re-runs the same fetch as initial load, so the
+  // user can drag-down to pick up a freshly-promoted candidate or a
+  // new outcome logged from another tab.
+  const { pullDistance, refreshing, threshold } = usePullToRefresh(
+    () => user && fetchDashboardData(),
+    { disabled: !user },
+  )
+
   // The Tape uses a two-column layout on desktop: dealer-positioning
   // surfaces (LiveGexStrip, SuggestedPlays, Live Moves feed) on the left
   // where the eye lands, and personal-state surfaces (OpenPositions,
@@ -103,6 +113,11 @@ export default function Dashboard() {
   // column ordered for trader-priority: GEX → Positions → Plays → Moves.
   return (
     <div className="px-5 lg:px-8 pt-7 pb-6 mx-auto lg:max-w-7xl w-full">
+      <PullToRefreshIndicator
+        pullDistance={pullDistance}
+        refreshing={refreshing}
+        threshold={threshold}
+      />
       {/* Header */}
       <header className="flex items-start justify-between mb-6">
         <div>
