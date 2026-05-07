@@ -444,6 +444,13 @@ serve(async (req) => {
     body: JSON.stringify({
       model: CLAUDE_MODEL,
       max_tokens: MAX_TOKENS,
+      // Pinned low so the same matrix returns essentially the same
+      // answer across re-analyses — the matrix itself evolves intraday
+      // (OI rolls, walls shift), and we want the user to be able to
+      // tell whether a different suggestion came from a data change
+      // or just model drift. 0.2 keeps a sliver of variance for
+      // tie-breaking when two plays score nearly identically.
+      temperature: 0.2,
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: buildUserPrompt(matrix, accountSize, flow) }],
     }),

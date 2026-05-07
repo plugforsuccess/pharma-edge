@@ -186,6 +186,19 @@ export default function SuggestedPlays({ ticker, isPro }) {
           </div>
         )}
 
+        {/* Matrix freshness row — lets the user tell whether re-analyze
+            drift came from a data change (matrix moved) or model
+            variance. computed_at = when the server built this payload;
+            source = dxlink (live) vs yahoo (15-min delayed). */}
+        {data && data._computed_at && (
+          <MatrixFreshness
+            computedAt={data._computed_at}
+            source={data.source}
+            spot={data.spot}
+            dominantExp={data.dominant_gex_expiration}
+          />
+        )}
+
         {data && Array.isArray(data.plays) && data.plays.length === 0 && (
           <p className="text-xs text-subtle leading-relaxed py-2">
             <strong className="text-fg">No high-conviction setups</strong>{' '}
@@ -289,6 +302,52 @@ function SkeletonPlayCard({ accent }) {
       </div>
       <div className="h-2.5 w-full bg-bg-elev rounded" />
       <div className="h-2.5 w-3/4 bg-bg-elev rounded" />
+    </div>
+  )
+}
+
+// Renders the input-side context the suggestions were built from:
+// when the matrix was read, what feed it came from, the spot price
+// it saw, and which expiration was anchoring the regime. Lets the
+// user tell at a glance whether two different re-analyses saw the
+// same world or not — i.e. is the new answer because the matrix
+// moved, or because the model drifted? Re-renders every 30s so the
+// "as of" text stays honest.
+function MatrixFreshness({ computedAt, source, spot, dominantExp }) {
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000)
+    return () => clearInterval(id)
+  }, [])
+  const ageMs = Math.max(0, now - computedAt)
+  const ageLabel = formatMs(ageMs)
+  const time = new Date(computedAt).toLocaleTimeString([], {
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+  const isLive = source === 'dxlink'
+  return (
+    <div className="bg-bg-elev/50 border border-border/60 rounded-lg px-3 py-2 text-[10px] text-subtle leading-relaxed">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-muted">Matrix as of</span>
+        <span className="font-mono-tab tabular-nums text-fg">{time}</span>
+        <span className="text-muted">·</span>
+        <span className={isLive ? 'text-green-400' : 'text-amber-400'}>
+          {isLive ? 'LIVE' : '15M DELAYED'}
+        </span>
+        <span className="text-muted">({source})</span>
+        <span className="text-muted">· {ageLabel} ago</span>
+      </div>
+      <div className="text-muted mt-0.5">
+        Spot ${spot != null ? Number(spot).toFixed(2) : '—'}
+        {dominantExp && (
+          <>
+            <span className="mx-1.5">·</span>
+            Dominant gamma at{' '}
+            <span className="text-fg font-mono-tab tabular-nums">{dominantExp}</span>
+          </>
+        )}
+      </div>
     </div>
   )
 }
