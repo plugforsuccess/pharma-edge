@@ -97,20 +97,18 @@ export class DxLinkClient {
   // Splits subscription frames into chunks of SUBSCRIPTION_BATCH_SIZE.
   // Only the first frame carries reset=true; subsequent frames append.
   //
-  // Summary (and Profile) are snapshot-on-change events — without
-  // `fromTime: 0` dxFeed only pushes a frame when something actually
-  // changes, so symbols whose OI/volume hasn't moved since the last
-  // session never get a frame and stay null forever. Quote/Greeks/
-  // Trade are time-series and don't need fromTime; the server pushes
-  // the latest immediately on subscribe.
+  // Earlier we tried adding `fromTime: 0` to Summary/Profile specs to
+  // force snapshot-on-subscribe (so OI seeds for symbols whose value
+  // hasn't changed since session start). dxFeed appears to reject
+  // that frame shape and close the connection, sending the worker
+  // into a reconnect loop with zero writes. Reverted until we can
+  // verify the right protocol form against dxFeed docs / test
+  // against the live endpoint. OI seeding will go via a different
+  // path (REST snapshot from Tastytrade per chain refresh, or
+  // carrying forward existing dxlink_quotes OI on boot).
   private sendSubscriptionBatches(specs: SubSpec[], reset: boolean) {
-    const enriched = specs.map((s) =>
-      s.type === 'Summary' || s.type === 'Profile'
-        ? { ...s, fromTime: 0 }
-        : s,
-    )
-    for (let i = 0; i < enriched.length; i += SUBSCRIPTION_BATCH_SIZE) {
-      const chunk = enriched.slice(i, i + SUBSCRIPTION_BATCH_SIZE)
+    for (let i = 0; i < specs.length; i += SUBSCRIPTION_BATCH_SIZE) {
+      const chunk = specs.slice(i, i + SUBSCRIPTION_BATCH_SIZE)
       this.sendFrame({
         type: 'FEED_SUBSCRIPTION',
         channel: FEED_CHANNEL,

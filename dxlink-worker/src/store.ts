@@ -65,6 +65,54 @@ export function registerSymbol(meta: SymbolMeta) {
   }
 }
 
+// On boot, seed the in-memory shadow with the last-known
+// open_interest / iv / Greeks values from dxlink_quotes for the
+// symbols we're about to subscribe to. Without this, the matrix's
+// per-strike GEX cell goes blank for any symbol whose current
+// session hasn't yet received a Summary frame with non-null OI —
+// which can be ~80% of strikes during low-churn periods. Carrying
+// forward the last-known values across worker restarts is the
+// cheapest way to keep the matrix dense.
+//
+// Only fields the dxFeed subscription rarely refreshes are seeded
+// here: open_interest, prev_close, day_volume (all from Summary),
+// and the Greeks. Bid/ask/mid get refreshed every Quote frame so
+// there's no point seeding stale prices.
+export async function seedShadowFromDb(symbols: string[]) {
+  if (symbols.length === 0) return
+  // Chunk to keep the IN clause manageable on the pgrest side.
+  const CHUNK = 500
+  let seeded = 0
+  for (let i = 0; i < symbols.length; i += CHUNK) {
+    const batch = symbols.slice(i, i + CHUNK)
+    const { data, error } = await supabase
+      .from('dxlink_quotes')
+      .select('symbol, open_interest, prev_close, day_volume, iv, gamma, delta, theta, vega')
+      .in('symbol', batch)
+    if (error) {
+      console.warn('[store] seed batch failed', error.message)
+      continue
+    }
+    for (const row of data ?? []) {
+      const existing = shadow.get(row.symbol)
+      if (!existing) continue
+      const merged: QuoteRow = { ...existing }
+      for (const k of [
+        'open_interest', 'prev_close', 'day_volume',
+        'iv', 'gamma', 'delta', 'theta', 'vega',
+      ] as const) {
+        const v = (row as unknown as Record<string, unknown>)[k]
+        if (v != null && Number.isFinite(Number(v))) {
+          ;(merged as unknown as Record<string, unknown>)[k] = Number(v)
+        }
+      }
+      shadow.set(row.symbol, merged)
+      seeded++
+    }
+  }
+  console.log(`[store] seeded shadow with prior values for ${seeded}/${symbols.length} symbols`)
+}
+
 export function applyEvent(symbol: string, patch: Partial<QuoteRow>) {
   const existing = shadow.get(symbol)
   if (!existing) {
