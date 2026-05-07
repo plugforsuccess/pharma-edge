@@ -75,7 +75,7 @@ export default function TickerDrawer({
 
       <div
         className={`relative w-full max-w-md bg-bg-elev border-t border-border
-                    rounded-t-2xl max-h-[85vh] flex flex-col
+                    rounded-t-2xl h-[85dvh] flex flex-col
                     transition-transform duration-200 ease-out ${
                       open ? 'translate-y-0' : 'translate-y-full'
                     }`}
