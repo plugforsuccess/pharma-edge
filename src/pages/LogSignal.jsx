@@ -247,6 +247,12 @@ export default function LogSignal() {
     long_strike: prefill.long_strike != null ? String(prefill.long_strike) : '',
     short_strike:
       prefill.short_strike != null ? String(prefill.short_strike) : '',
+    // Per-share premium from a Suggested Play prefill — surfaced to the
+    // calculator below as initialPremium so the form lands on a fully-
+    // populated state and auto-runs calculate(). Stored on the form so
+    // it survives step navigation.
+    prefill_premium:
+      prefill.premium != null ? String(prefill.premium) : '',
     // Filled by StrikePriceCalculator's onCalculationComplete callback so
     // we can auto-create the open_positions row after the signal locks.
     contracts: '1',
@@ -762,6 +768,7 @@ export default function LogSignal() {
               initialStockPrice={form.stock_price_at_signal}
               initialBuyStrike={form.long_strike || undefined}
               initialSellStrike={form.short_strike || undefined}
+              initialPremium={form.prefill_premium || undefined}
               initialExpiry={
                 isGexFlow ? form.expiry_date : form.expiry_date || undefined
               }
