@@ -227,6 +227,7 @@ export default function SignalDetail() {
         <>
           <StrikePriceCalculator
             direction={signal.direction}
+            ticker={signal.ticker}
             accountSize={profile?.account_size}
             initialStockPrice={signal.stock_price_at_signal}
             catalystDate={signal.catalyst_date}

@@ -761,6 +761,7 @@ export default function LogSignal() {
             <StrikePriceCalculator
               direction={form.direction}
               lockedStructure={form.structure}
+              ticker={form.ticker}
               accountSize={profile?.account_size}
               initialStockPrice={form.stock_price_at_signal}
               initialBuyStrike={form.long_strike || undefined}

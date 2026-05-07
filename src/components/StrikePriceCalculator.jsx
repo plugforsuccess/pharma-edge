@@ -171,6 +171,11 @@ export default function StrikePriceCalculator({
   // re-type the premium that already came from the model.
   initialPremium,
   catalystDate,
+  // Optional ticker for live-quote lookups. When set, the calculator
+  // can pull bid/ask/mid for each leg from dxlink_quotes and compute
+  // the net premium so the user doesn't have to type it. Without a
+  // ticker the live-mid affordance is hidden.
+  ticker,
   buyStrikeOtmPct,
   sellStrikeOtmPct,
   // Optional: implied volatility at the strike (decimal, e.g. 0.42 = 42%).
@@ -243,6 +248,14 @@ export default function StrikePriceCalculator({
   const [nlvSyncedAt, setNlvSyncedAt] = useState(null)
   const [nlvSyncError, setNlvSyncError] = useState(null)
   const [nlvLoading, setNlvLoading] = useState(false)
+  // Live-quote prefill state. Holds the per-leg quote payload returned
+  // by the last successful fetch so the UI can surface bid/ask + the
+  // staleness of the rows. `quoteLoading` gates the button's spinner;
+  // `quoteError` holds the most recent failure reason (e.g. "leg not
+  // streamed", "row stale", "no rows for ticker").
+  const [legQuotes, setLegQuotes] = useState(null)
+  const [quoteLoading, setQuoteLoading] = useState(false)
+  const [quoteError, setQuoteError] = useState(null)
 
   const config = STRUCTURE_CONFIG[structure]
   // Manual accountSize from props is the fallback. If we successfully
@@ -295,6 +308,123 @@ export default function StrikePriceCalculator({
     fetchBrokerAccount()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Pulls live mid prices for each leg of the configured spread from
+  // dxlink_quotes, then computes the net premium and populates the
+  // Premium field. Skips when required inputs are missing. Returns
+  // early without writing if any leg is unsubscribed/stale so the
+  // user knows to type manually instead of trusting a partial fill.
+  async function fetchLivePremium() {
+    setQuoteLoading(true)
+    setQuoteError(null)
+    setLegQuotes(null)
+    try {
+      if (!ticker) throw new Error('No ticker — open the calculator from a signal flow.')
+      if (!expiry) throw new Error('Pick an expiry first.')
+      const legs = config.isCondor
+        ? [
+            { side: 'longPut', strike: toNumOrNull(longPutStrike), type: 'P', action: 'BUY' },
+            { side: 'shortPut', strike: toNumOrNull(shortPutStrike), type: 'P', action: 'SELL' },
+            { side: 'shortCall', strike: toNumOrNull(shortCallStrike), type: 'C', action: 'SELL' },
+            { side: 'longCall', strike: toNumOrNull(longCallStrike), type: 'C', action: 'BUY' },
+          ]
+        : [
+            { side: 'long', strike: toNumOrNull(buyStrike), type: config.optionType, action: 'BUY' },
+            { side: 'short', strike: toNumOrNull(sellStrike), type: config.optionType, action: 'SELL' },
+          ]
+      if (legs.some((l) => !(l.strike > 0))) throw new Error('Fill in all strikes first.')
+
+      // One round-trip: pull every option row for this underlying +
+      // expiration that matches any of our strikes/types, then fan out
+      // locally. Cheaper than N SELECTs and lets us use the upper bound
+      // of the strike set as a single IN clause.
+      const strikes = legs.map((l) => l.strike)
+      const types = Array.from(new Set(legs.map((l) => l.type)))
+      const { data, error } = await supabase
+        .from('dxlink_quotes')
+        .select('symbol, strike, option_type, expiration_date, bid, ask, mid, updated_at')
+        .eq('underlying', ticker.toUpperCase())
+        .eq('expiration_date', expiry)
+        .in('strike', strikes)
+        .in('option_type', types)
+      if (error) throw new Error(error.message || 'quote query failed')
+      const rows = data ?? []
+      if (rows.length === 0) {
+        throw new Error(
+          `No live quotes for ${ticker} ${expiry}. The dxlink-worker may not be streaming this expiry.`,
+        )
+      }
+
+      const STALE_MS = 60_000
+      const now = Date.now()
+      const enriched = legs.map((leg) => {
+        const match = rows.find(
+          (r) =>
+            Number(r.strike) === leg.strike &&
+            r.option_type === leg.type,
+        )
+        if (!match) return { ...leg, missing: true }
+        const updated = new Date(match.updated_at).getTime()
+        const age = now - updated
+        const stale = age > STALE_MS
+        // Prefer the worker's mid; fall back to (bid+ask)/2 if mid
+        // is null but bid/ask are populated. Tastytrade's DXLink
+        // sometimes drops Quote.mid frames during low-liquidity
+        // intervals.
+        let mid = Number(match.mid)
+        if (!Number.isFinite(mid) && Number.isFinite(Number(match.bid)) && Number.isFinite(Number(match.ask))) {
+          mid = (Number(match.bid) + Number(match.ask)) / 2
+        }
+        return {
+          ...leg,
+          symbol: match.symbol,
+          bid: Number(match.bid),
+          ask: Number(match.ask),
+          mid: Number.isFinite(mid) ? mid : null,
+          age_ms: age,
+          stale,
+        }
+      })
+
+      const missing = enriched.filter((l) => l.missing)
+      if (missing.length > 0) {
+        throw new Error(
+          `Missing quotes for ${missing.length} leg(s). The strike(s) may not be in the dxlink subscription window.`,
+        )
+      }
+      const stale = enriched.filter((l) => l.stale)
+      if (stale.length === enriched.length) {
+        throw new Error(
+          'All quote rows are stale (> 60s). dxlink-worker may be down — check Markets page status.',
+        )
+      }
+
+      // Net premium from per-leg mids:
+      //   debit  → buy mids − sell mids (we pay)
+      //   credit → sell mids − buy mids (we collect)
+      //   condor → (sell mids) − (buy mids), always credit
+      const buyMids = enriched
+        .filter((l) => l.action === 'BUY')
+        .reduce((acc, l) => acc + (l.mid ?? 0), 0)
+      const sellMids = enriched
+        .filter((l) => l.action === 'SELL')
+        .reduce((acc, l) => acc + (l.mid ?? 0), 0)
+      const net = config.isCondor || config.isCredit ? sellMids - buyMids : buyMids - sellMids
+      if (!(net > 0)) {
+        throw new Error(
+          `Computed net premium is non-positive (${net.toFixed(2)}). Check strike order or wait for fresh quotes.`,
+        )
+      }
+
+      setLegQuotes(enriched)
+      setPremium(net.toFixed(2))
+      setResult(null)
+    } catch (e) {
+      setQuoteError(e.message || 'live-quote pull failed')
+    } finally {
+      setQuoteLoading(false)
+    }
+  }
 
   // Auto-populate strikes + suggest expiry when stock price, structure, or
   // catalyst date change. Only writes empty fields so we don't clobber
@@ -858,23 +988,59 @@ export default function StrikePriceCalculator({
           )}
 
           <div className="grid grid-cols-2 gap-3">
-            <CalcInput
-              label={config.premiumLabel}
-              value={premium}
-              onChange={(v) => {
-                setPremium(v)
-                setResult(null)
-              }}
-              prefix="$"
-              placeholder="0.50"
-              note={config.premiumHelp}
-            />
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-muted text-[10px] uppercase tracking-wider">
+                  {config.premiumLabel}
+                </label>
+                {ticker && (
+                  <button
+                    type="button"
+                    onClick={fetchLivePremium}
+                    disabled={quoteLoading}
+                    className={clsx(
+                      'inline-flex items-center gap-1 text-[10px] uppercase tracking-wider transition',
+                      quoteLoading
+                        ? 'text-muted cursor-wait'
+                        : legQuotes
+                          ? 'text-green-400 hover:text-green-300'
+                          : 'text-subtle hover:text-fg',
+                    )}
+                    title="Pull live mid prices for each leg from dxlink_quotes"
+                  >
+                    <RefreshCw size={9} className={quoteLoading ? 'animate-spin' : ''} />
+                    {legQuotes ? 'Live mid' : 'Live'}
+                  </button>
+                )}
+              </div>
+              <CalcInput
+                label=""
+                value={premium}
+                onChange={(v) => {
+                  setPremium(v)
+                  setResult(null)
+                  setLegQuotes(null)
+                }}
+                prefix="$"
+                placeholder="0.50"
+                note={
+                  quoteError
+                    ? quoteError
+                    : legQuotes
+                      ? legQuotes
+                          .map((l) => `${l.action[0]}${l.type}${l.strike}: $${(l.mid ?? 0).toFixed(2)}${l.stale ? ' ⚠' : ''}`)
+                          .join('  ')
+                      : config.premiumHelp
+                }
+              />
+            </div>
             <CalcInput
               label="Expiry Date"
               value={expiry}
               onChange={(v) => {
                 setExpiry(v)
                 setResult(null)
+                setLegQuotes(null)
               }}
               type="date"
             />
