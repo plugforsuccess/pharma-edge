@@ -30,7 +30,7 @@ import {
   type StreamerAuth,
 } from './tastytrade.ts'
 import { DxLinkClient, type SubSpec } from './dxlink.ts'
-import { applyEvent, registerSymbol, startFlushLoop } from './store.ts'
+import { applyEvent, registerSymbol, seedShadowFromDb, startFlushLoop } from './store.ts'
 import {
   applyTrade,
   registerOption as registerOptionForFlow,
@@ -250,6 +250,17 @@ async function main() {
     allSpecs.push({ type: 'Summary', symbol: opt.streamer })
     allSpecs.push({ type: 'Trade', symbol: opt.streamer })
   }
+  // Seed the shadow Map with last-known OI / Greeks from previous
+  // session(s) before subscribing — this keeps the matrix dense
+  // immediately on boot, even for symbols whose Summary frame won't
+  // arrive until the value next changes (which during low-churn
+  // hours can be never).
+  const allSymbols = [
+    ...equity,
+    ...options.map((o) => o.streamer),
+  ]
+  await seedShadowFromDb(allSymbols)
+
   const CHUNK = 500
   for (let i = 0; i < allSpecs.length; i += CHUNK) {
     await client.subscribe(allSpecs.slice(i, i + CHUNK))
