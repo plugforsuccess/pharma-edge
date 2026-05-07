@@ -720,9 +720,29 @@ export default function LogSignal() {
       </div>
 
       <div className={clsx('space-y-4', step !== 2 && 'hidden')}>
-        <h2 className="text-white font-semibold">
-          {isGexFlow ? 'Strike & Thesis' : 'Filing Analysis'}
-        </h2>
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-white font-semibold">
+            {isGexFlow ? 'Strike & Thesis' : 'Filing Analysis'}
+          </h2>
+          {(() => {
+            const opt = STRATEGY_OPTIONS.find((o) => o.structure === form.structure)
+            if (!opt) return null
+            return (
+              <button
+                type="button"
+                onClick={() => setStep(1)}
+                className={clsx(
+                  'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-semibold transition-colors',
+                  opt.color,
+                )}
+                title="Tap to change strategy"
+              >
+                <span className="opacity-70 text-[10px] uppercase tracking-wider">Strategy</span>
+                <span>{opt.label}</span>
+              </button>
+            )
+          })()}
+        </div>
           {!isGexFlow && (
             <p className="text-subtle text-xs">
               Paste public filing text for the AI analyst to score, or write your thesis manually.
