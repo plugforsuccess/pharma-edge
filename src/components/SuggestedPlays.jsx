@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Sparkles, ExternalLink, FileText, AlertCircle, Lock } from 'lucide-react'
+import { Sparkles, FileText, AlertCircle, Lock } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
@@ -215,16 +215,15 @@ export default function SuggestedPlays({ ticker, isPro }) {
               key={i}
               play={play}
               ticker={ticker}
-              onOpenCalculator={() => openInCalculator(navigate, play, ticker, data.spot)}
               onLogSignal={() => logAsSignal(navigate, play, ticker, data.spot)}
             />
           ))}
 
         {data && (
           <p className="text-[10px] text-muted leading-relaxed pt-2 border-t border-border">
-            Suggestions, not advice. Verify pricing in the Calculator
-            before placing. GEX informs probability, not certainty —
-            walls fail and regimes flip intraday.
+            Suggestions, not advice. Verify pricing on Tap Log Signal →
+            calculator step before placing. GEX informs probability,
+            not certainty — walls fail and regimes flip intraday.
           </p>
         )}
       </div>
@@ -385,7 +384,7 @@ function formatMs(ms) {
   return `${Math.round(s / 60)}m`
 }
 
-function PlayCard({ play, onOpenCalculator, onLogSignal }) {
+function PlayCard({ play, onLogSignal }) {
   const isCallSpread = play.type === 'BULL_CALL' || play.type === 'BEAR_CALL_CREDIT'
   const isBullish = play.type === 'BULL_CALL' || play.type === 'BULL_PUT_CREDIT'
   const accentClass = isBullish
@@ -439,22 +438,19 @@ function PlayCard({ play, onOpenCalculator, onLogSignal }) {
         </p>
       )}
 
-      <div className="flex gap-2 pt-1">
-        <button
-          onClick={onOpenCalculator}
-          className="flex-1 inline-flex items-center justify-center gap-1.5 bg-bg-elev hover:bg-card border border-border text-fg text-xs font-medium rounded-md py-1.5 transition"
-        >
-          <ExternalLink size={11} />
-          Calculator
-        </button>
-        <button
-          onClick={onLogSignal}
-          className="flex-1 inline-flex items-center justify-center gap-1.5 bg-amber-400 hover:bg-amber-300 text-bg text-xs font-semibold rounded-md py-1.5 transition"
-        >
-          <FileText size={11} />
-          Log Signal
-        </button>
-      </div>
+      {/* Calculator button removed: the standalone /calculator page
+          was missing structure-specific UI (credit spreads + condors)
+          and silently lost the suggested play's premium / structure /
+          POP. LogSignal step 2 IS the calculator with full prefill,
+          so the cleaner path is direct → log. Users still hit the
+          standalone /calculator from primary nav for what-if work. */}
+      <button
+        onClick={onLogSignal}
+        className="w-full inline-flex items-center justify-center gap-1.5 bg-amber-400 hover:bg-amber-300 text-bg text-xs font-semibold rounded-md py-2 transition"
+      >
+        <FileText size={11} />
+        Log Signal
+      </button>
     </div>
   )
 }
@@ -486,23 +482,6 @@ function formatNum(v) {
 function formatPopFromBp(bp) {
   if (bp == null || !Number.isFinite(Number(bp))) return '—'
   return `${Math.round(Number(bp) / 100)}%`
-}
-
-// Deep-link helpers — both pages already accept route state for
-// prefilling form fields.
-function openInCalculator(navigate, play, ticker, spot) {
-  navigate('/calculator', {
-    state: {
-      prefill: {
-        ticker,
-        stock_price: spot,
-        long_strike: play.long_strike,
-        short_strike: play.short_strike,
-        expiration_date: play.expiration,
-        direction: play.type === 'BULL_CALL' ? 'long_call' : 'long_put',
-      },
-    },
-  })
 }
 
 // All 5 spread structures the user can be deep-linked into. Direction
