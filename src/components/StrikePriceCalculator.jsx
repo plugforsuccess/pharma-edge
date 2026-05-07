@@ -10,10 +10,33 @@ import clsx from 'clsx'
 import { supabase } from '../lib/supabase'
 import { computeProfitProbabilityBp, formatPopBp } from '../utils/pop'
 
-// Premium cap is 40% of spread width — keeps R/R >= 1:1.5 (the rule).
-// Naked options are intentionally absent: the pre-trade checklist requires
-// a spread, so the calculator UI shouldn't normalise a rule violation.
-const PREMIUM_PCT_CAP = 0.4
+// Premium-of-width thresholds keeping R/R >= 1:1.5 (the rule):
+//
+//   Debit spreads:
+//     premium PAID ≤ 40% of width → max_loss ≤ 0.4 × width,
+//     max_gain ≥ 0.6 × width → R/R ≥ 1.5
+//
+//   Credit spreads (incl. iron condor):
+//     premium COLLECTED ≥ 60% of width → max_gain ≥ 0.6 × width,
+//     max_loss ≤ 0.4 × width → R/R ≥ 1.5
+//
+// The math inverts because for credits the premium IS the max gain
+// (not the max loss). Same rule, opposite inequality.
+//
+// Naked options are intentionally absent: the pre-trade checklist
+// requires a spread, so the calculator UI shouldn't normalise a rule
+// violation.
+const DEBIT_PREMIUM_MAX_PCT = 0.4
+const CREDIT_PREMIUM_MIN_PCT = 0.6
+
+// Helper: given a structure config + width + premium, return whether
+// the premium passes the rule. Wraps the debit-vs-credit branch so
+// callers don't have to reach into config every place they validate.
+function premiumWithinRule(config, width, premium) {
+  if (!(width > 0) || !(premium > 0)) return null
+  if (config.isCredit) return premium >= width * CREDIT_PREMIUM_MIN_PCT
+  return premium <= width * DEBIT_PREMIUM_MAX_PCT
+}
 
 // Four vertical-spread structures, two debit and two credit. Iron
 // condor is intentionally NOT in the calculator yet — it needs four
@@ -322,7 +345,7 @@ export default function StrikePriceCalculator({
     : liveSpreadWidth(structure, buyStrike, sellStrike)
   const premiumValid =
     liveSpread != null && toNumOrNull(premium) != null
-      ? toNumOrNull(premium) <= liveSpread * PREMIUM_PCT_CAP
+      ? premiumWithinRule(config, liveSpread, toNumOrNull(premium))
       : null
 
   function calculate() {
@@ -420,8 +443,9 @@ export default function StrikePriceCalculator({
         totalCost: totalCostNum != null ? totalCostNum.toFixed(2) : null,
         totalMaxGain:
           contracts != null ? (contracts * maxGainPerContract).toFixed(2) : null,
-        premiumValid: prem <= maxWingWidth * PREMIUM_PCT_CAP,
-        premiumCap: (maxWingWidth * PREMIUM_PCT_CAP).toFixed(2),
+        // Condor is credit-style: credit collected ≥ 60% of widest wing.
+        premiumValid: prem >= maxWingWidth * CREDIT_PREMIUM_MIN_PCT,
+        premiumFloor: (maxWingWidth * CREDIT_PREMIUM_MIN_PCT).toFixed(2),
         profitTargets: {
           // Half-credit = 50% profit target (industry-standard condor exit).
           exit50pct: { spreadValue: (prem * 0.5).toFixed(2) },
@@ -529,7 +553,10 @@ export default function StrikePriceCalculator({
         contracts != null ? (contracts * maxLossPerContract).toFixed(2) : null,
       totalMaxGain:
         contracts != null ? (contracts * maxGainPerContract).toFixed(2) : null,
-      premiumValid: prem <= spreadWidth * PREMIUM_PCT_CAP,
+      // Premium-of-width rule branches by isCredit:
+      //   debit  → premium ≤ 40% of width  (cap on cost)
+      //   credit → premium ≥ 60% of width  (floor on collected)
+      premiumValid: premiumWithinRule(config, spreadWidth, prem),
       // POP gets passed back through onCalculationComplete so LogSignal
       // can stamp it onto the signal at insert time (entry_pop_bp).
       entry_pop_bp: popBp,
@@ -539,7 +566,11 @@ export default function StrikePriceCalculator({
       account_size_used: effectiveAccount,
       live_buying_power: liveBp,
       bp_insufficient: bpInsufficient,
-      premiumCap: (spreadWidth * PREMIUM_PCT_CAP).toFixed(2),
+      // For debits this is a cap (max premium); for credits this is
+      // a floor (min credit). UI labels accordingly.
+      premiumCap: config.isCredit
+        ? (spreadWidth * CREDIT_PREMIUM_MIN_PCT).toFixed(2)
+        : (spreadWidth * DEBIT_PREMIUM_MAX_PCT).toFixed(2),
       profitTargets: {
         exit100pct: {
           spreadValue: Math.min(prem * 2, spreadWidth).toFixed(2),
@@ -780,16 +811,30 @@ export default function StrikePriceCalculator({
             <div className="bg-red-950/20 border border-red-900/40 rounded-xl p-3 flex items-start gap-2">
               <AlertTriangle size={12} className="text-red-400 mt-0.5 flex-shrink-0" />
               <p className="text-red-400 text-[10px] leading-relaxed">
-                Premium ${premium} exceeds the 40% spread cap (
-                ${(liveSpread * PREMIUM_PCT_CAP).toFixed(2)}). R/R falls below 1:1.5.
-                Widen the spread or skip the trade.
+                {config.isCredit ? (
+                  <>
+                    Credit ${premium} is below the 60% floor (
+                    ${(liveSpread * CREDIT_PREMIUM_MIN_PCT).toFixed(2)}).
+                    R/R falls below 1:1.5. Move the short strike closer
+                    to spot, narrow the wing, or skip the trade.
+                  </>
+                ) : (
+                  <>
+                    Premium ${premium} exceeds the 40% spread cap (
+                    ${(liveSpread * DEBIT_PREMIUM_MAX_PCT).toFixed(2)}).
+                    R/R falls below 1:1.5. Widen the spread or skip the
+                    trade.
+                  </>
+                )}
               </p>
             </div>
           )}
           {premiumValid === true && (
             <div className="bg-green-950/10 border border-green-900/20 rounded-xl p-2">
               <p className="text-green-600 text-[10px]">
-                ✓ Premium within the 40% cap (R/R ≥ 1:1.5)
+                {config.isCredit
+                  ? '✓ Credit clears the 60% floor (R/R ≥ 1:1.5)'
+                  : '✓ Premium within the 40% cap (R/R ≥ 1:1.5)'}
               </p>
             </div>
           )}
@@ -1045,7 +1090,7 @@ function liveSpreadWidth(structure, buy, sell) {
 }
 
 // Live max-wing width for a condor while the user is still typing —
-// drives the premium-cap badge and PREMIUM_PCT_CAP gate. Returns null
+// drives the premium-cap / premium-floor badge and the R/R gate. Returns null
 // until all 4 strikes are populated and ordered correctly.
 function condorMaxWidth(longPut, shortPut, shortCall, longCall) {
   const lp = toNumOrNull(longPut)
