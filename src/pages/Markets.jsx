@@ -21,6 +21,16 @@ import LiveDataStatus from '../components/LiveDataStatus'
 // Yahoo's 15-min delayed feed via compute-gex's fallback path).
 const TICKERS = HOT_TICKERS
 
+// Heatmap density presets. compact mirrors the Skylit default. wide
+// and extra trade horizontal/vertical scroll for more strikes and
+// further-out expirations. Bounded server-side by *_LIMIT constants
+// in compute-gex.
+const DENSITY_PRESETS = {
+  compact: { maxExpirations: 4, maxStrikes: 30, strikeWindowPct: 0.05, label: 'Compact' },
+  wide:    { maxExpirations: 6, maxStrikes: 50, strikeWindowPct: 0.10, label: 'Wide' },
+  extra:   { maxExpirations: 8, maxStrikes: 80, strikeWindowPct: 0.20, label: 'Extra' },
+}
+
 export default function Markets() {
   const navigate = useNavigate()
   const { user } = useAuth()
@@ -39,6 +49,10 @@ export default function Markets() {
   // by load(). Toggling off clears the snapshot and we go back to live.
   const [replayActive, setReplayActive] = useState(false)
   const [replaySnapshot, setReplaySnapshot] = useState(null)
+  // Matrix density: 'compact' is the Skylit default (4×30 strikes,
+  // ATM ±5%); 'wide' and 'extra' progressively expand both axes for
+  // users who want to see further-OTM strikes or more expirations.
+  const [density, setDensity] = useState('compact')
   // User's watchlist tickers, shown as a separate section in the picker
   // so a biotech a user is tracking shows up here without needing to be
   // hardcoded into TICKERS.
@@ -82,14 +96,22 @@ export default function Markets() {
     }
   }, [user?.id])
 
-  async function load(sym, { refresh = false } = {}) {
+  async function load(sym, { refresh = false, withDensity = density } = {}) {
     setLoading(true)
     setError(null)
     setData(null)
     try {
       // matrix:true asks compute-gex for the strikes×expirations grid
       // (Skylit-style heatmap) instead of the single-expiration shape.
-      const body = { ticker: sym, refresh, matrix: true }
+      const dims = DENSITY_PRESETS[withDensity] ?? DENSITY_PRESETS.compact
+      const body = {
+        ticker: sym,
+        refresh,
+        matrix: true,
+        matrix_max_expirations: dims.maxExpirations,
+        matrix_max_strikes: dims.maxStrikes,
+        matrix_strike_window_pct: dims.strikeWindowPct,
+      }
       const { data: result, error: invokeErr } = await supabase.functions.invoke(
         'compute-gex',
         { body },
@@ -121,9 +143,9 @@ export default function Markets() {
   }
 
   useEffect(() => {
-    load(ticker)
+    load(ticker, { withDensity: density })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ticker])
+  }, [ticker, density])
 
   return (
     <div className="px-4 lg:px-6 py-5 space-y-4 max-w-md mx-auto lg:max-w-7xl">
@@ -140,6 +162,26 @@ export default function Markets() {
           <p className="text-xs lg:text-sm text-subtle">
             Where dealer hedging flow concentrates by strike.
           </p>
+        </div>
+        {/* Density picker — controls how many strikes/expirations the
+            heatmap fetches. Compact = Skylit-default; expand for further
+            OTM strikes or deeper-dated expirations. */}
+        <div className="hidden md:flex items-center gap-1 border border-border rounded-lg p-0.5 bg-card">
+          {(['compact', 'wide', 'extra']).map((d) => (
+            <button
+              key={d}
+              onClick={() => setDensity(d)}
+              className={
+                'px-2.5 py-1 text-[10px] font-semibold rounded-md transition uppercase tracking-wider ' +
+                (density === d
+                  ? 'bg-amber-400 text-bg'
+                  : 'text-subtle hover:text-fg')
+              }
+              title={`${DENSITY_PRESETS[d].maxExpirations} expirations · ${DENSITY_PRESETS[d].maxStrikes} strikes · ATM ±${Math.round(DENSITY_PRESETS[d].strikeWindowPct * 100)}%`}
+            >
+              {DENSITY_PRESETS[d].label}
+            </button>
+          ))}
         </div>
         <button
           onClick={() => setReplayActive((v) => !v)}
@@ -265,74 +307,71 @@ export default function Markets() {
         />
       )}
 
-      {/* On lg+: 2-column grid. Stats card + replay slider + suggested
-          plays stack in the left rail (col-span-4) so the empty space
-          under the stats card fills with useful content. Heatmap takes
-          the wide right column and row-spans whatever the left rail
-          needs. On mobile the items stack linearly in source order:
-          stats → heatmap → replay → plays. */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        {/* Header stats — left col, row 1 */}
-        {data && (
-          <div className="lg:col-span-4 lg:row-start-1 bg-card border border-border rounded-xl p-4 space-y-3">
-            <div className="flex items-baseline justify-between">
-              <div>
-                <button
-                  type="button"
-                  onClick={() => setDrawerOpen(true)}
-                  className="inline-flex items-baseline gap-1.5 text-2xl font-display tracking-tight
-                             hover:text-amber-400 transition-colors"
-                  aria-label="Pick a different ticker"
-                >
-                  {data.ticker}
-                  <ChevronDown size={16} className="text-subtle" />
-                </button>
-                <div className="text-xs text-subtle flex items-center gap-2 flex-wrap">
-                  <span>
-                    {data.expirations?.length ?? 0} expirations · {data.strikes?.length ?? 0} strikes
+      {/* Mobile: stats card stacks above heatmap. Desktop: stats are
+          inlined into the centered bottom ticker bar instead, so the
+          heatmap can fill the available viewport (Skylit-style). */}
+      {data && (
+        <div className="lg:hidden bg-card border border-border rounded-xl p-4 space-y-3">
+          <div className="flex items-baseline justify-between">
+            <div>
+              <button
+                type="button"
+                onClick={() => setDrawerOpen(true)}
+                className="inline-flex items-baseline gap-1.5 text-2xl font-display tracking-tight
+                           hover:text-amber-400 transition-colors"
+                aria-label="Pick a different ticker"
+              >
+                {data.ticker}
+                <ChevronDown size={16} className="text-subtle" />
+              </button>
+              <div className="text-xs text-subtle flex items-center gap-2 flex-wrap">
+                <span>
+                  {data.expirations?.length ?? 0} expirations · {data.strikes?.length ?? 0} strikes
+                </span>
+                <SourceBadge source={data.source} />
+                {data.from_cache && (
+                  <span className="text-muted">
+                    · cached {formatCacheAge(data.cache_age_ms)} ago
                   </span>
-                  <SourceBadge source={data.source} />
-                  {data.from_cache && (
-                    <span className="text-muted">
-                      · cached {formatCacheAge(data.cache_age_ms)} ago
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div className="text-right">
-                <div className="text-xl font-mono-tab tabular-nums">
-                  ${formatNumber(data.spot)}
-                </div>
-                <div className="text-[10px] uppercase tracking-wider text-subtle">
-                  spot
-                </div>
+                )}
               </div>
             </div>
-
-            {data.largest && (
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <Stat
-                  label="Largest wall"
-                  value={`$${formatNumber(data.largest.strike)}`}
-                  tone={data.largest.gex_net >= 0 ? 'pos' : 'neg'}
-                />
-                <Stat
-                  label="Wall expires"
-                  value={data.largest.expiration}
-                  tone="neutral"
-                />
+            <div className="text-right">
+              <div className="text-xl font-mono-tab tabular-nums">
+                ${formatNumber(data.spot)}
               </div>
-            )}
+              <div className="text-[10px] uppercase tracking-wider text-subtle">
+                spot
+              </div>
+            </div>
           </div>
-        )}
 
-        {/* Heatmap card — right col, spans down so the row reflows
-            cleanly even with replay + plays stacked on the left */}
-        <div className={(data ? 'lg:col-span-8 ' : 'lg:col-span-12 ') + 'lg:row-start-1 lg:row-span-3 bg-card border border-border rounded-xl p-4 min-h-[280px] lg:min-h-[420px]'}>
-          <div className="flex items-center gap-2 mb-3">
-            <Activity size={14} className="text-brand" />
-            <h2 className="text-sm font-semibold">GEX by strike</h2>
-          </div>
+          {data.largest && (
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <Stat
+                label="Largest wall"
+                value={`$${formatNumber(data.largest.strike)}`}
+                tone={data.largest.gex_net >= 0 ? 'pos' : 'neg'}
+              />
+              <Stat
+                label="Wall expires"
+                value={data.largest.expiration}
+                tone="neutral"
+              />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Heatmap card — full width on desktop, fills most of viewport.
+          The min-h-[calc(100vh-13rem)] reserves vertical space for the
+          top toolbar + bottom ticker bar so the matrix dominates the
+          screen the way it does in Skylit. */}
+      <div className="bg-card border border-border rounded-xl p-4 min-h-[280px] lg:min-h-[calc(100vh-15rem)]">
+        <div className="flex items-center gap-2 mb-3">
+          <Activity size={14} className="text-brand" />
+          <h2 className="text-sm font-semibold">GEX by strike</h2>
+        </div>
 
           {loading && (
             <div className="space-y-2 py-2 animate-pulse" aria-label="Loading GEX matrix">
@@ -366,49 +405,79 @@ export default function Markets() {
             </div>
           )}
 
-          {!loading && !error && (
-            <GexMatrix data={replayActive && replaySnapshot ? replaySnapshot : data} />
-          )}
-        </div>
-
-        {/* Replay slider — left col, row 2. Hidden until user toggles
-            replay mode via the clock icon in the header. Inactive state
-            shows a discoverable hint card so users know it exists. */}
-        <div className="lg:col-span-4 lg:row-start-2">
-          {replayActive ? (
-            <ReplaySlider
-              ticker={ticker}
-              active={replayActive}
-              onSnapshot={setReplaySnapshot}
-              onClose={() => {
-                setReplayActive(false)
-                setReplaySnapshot(null)
-              }}
-            />
-          ) : (
-            <button
-              type="button"
-              onClick={() => setReplayActive(true)}
-              className="hidden lg:flex w-full items-center gap-2 px-4 py-3 bg-card border border-border rounded-xl text-left hover:border-amber-400/40 transition group"
-            >
-              <Clock size={14} className="text-amber-400/80 group-hover:text-amber-400" />
-              <div className="flex-1 min-w-0">
-                <div className="text-xs font-semibold text-fg">Replay today's GEX</div>
-                <div className="text-[10px] text-muted">
-                  Scrub through 5-min snapshots
-                </div>
-              </div>
-            </button>
-          )}
-        </div>
-
-        {/* Suggested plays — left col, row 3 */}
-        <div className="lg:col-span-4 lg:row-start-3">
-          <SuggestedPlays ticker={ticker} isPro={isPro} />
-        </div>
+        {!loading && !error && (
+          <GexMatrix data={replayActive && replaySnapshot ? replaySnapshot : data} />
+        )}
       </div>
 
-      <p className="text-[10px] text-muted leading-relaxed px-1">
+      {/* Desktop-only bottom ticker bar — centered Skylit-style. Click
+          the ticker name to open the full ticker drawer. Source badge
+          (LIVE / 15M DELAYED / AFTER HOURS) sits inline. */}
+      {data && (
+        <div className="hidden lg:flex items-center justify-center gap-4 bg-card border border-border rounded-xl px-6 py-3">
+          <button
+            type="button"
+            onClick={() => setDrawerOpen(true)}
+            className="inline-flex items-baseline gap-1.5 text-xl font-display tracking-tight
+                       hover:text-amber-400 transition-colors"
+            aria-label="Pick a different ticker"
+          >
+            {data.ticker}
+            <ChevronDown size={14} className="text-subtle" />
+          </button>
+          <div className="text-2xl font-mono-tab tabular-nums text-fg">
+            ${formatNumber(data.spot)}
+          </div>
+          <SourceBadge source={data.source} />
+          {data.largest && (
+            <div className="text-xs text-subtle">
+              <span className="text-muted uppercase tracking-wider mr-1">Wall</span>
+              <span className={data.largest.gex_net >= 0 ? 'text-green-400' : 'text-red-400'}>
+                ${formatNumber(data.largest.strike)}
+              </span>
+              <span className="text-muted ml-1">· {data.largest.expiration}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Replay slider — flows below the ticker bar. Inactive state
+          shows a discoverable hint card on desktop so users know it
+          exists; the clock icon in the top toolbar still works. */}
+      <div className="lg:max-w-md lg:mx-auto">
+        {replayActive ? (
+          <ReplaySlider
+            ticker={ticker}
+            active={replayActive}
+            onSnapshot={setReplaySnapshot}
+            onClose={() => {
+              setReplayActive(false)
+              setReplaySnapshot(null)
+            }}
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setReplayActive(true)}
+            className="hidden lg:flex w-full items-center gap-2 px-4 py-3 bg-card border border-border rounded-xl text-left hover:border-amber-400/40 transition group"
+          >
+            <Clock size={14} className="text-amber-400/80 group-hover:text-amber-400" />
+            <div className="flex-1 min-w-0">
+              <div className="text-xs font-semibold text-fg">Replay today's GEX</div>
+              <div className="text-[10px] text-muted">
+                Scrub through 5-min snapshots
+              </div>
+            </div>
+          </button>
+        )}
+      </div>
+
+      {/* Suggested plays */}
+      <div className="lg:max-w-2xl lg:mx-auto">
+        <SuggestedPlays ticker={ticker} isPro={isPro} />
+      </div>
+
+      <p className="text-[10px] text-muted leading-relaxed px-1 lg:text-center">
         Live data via Tastytrade DXLink streaming when available; falls
         back to delayed Yahoo data otherwise. Convention: dealers are
         net short calls / long puts to retail, so call-side OI shows

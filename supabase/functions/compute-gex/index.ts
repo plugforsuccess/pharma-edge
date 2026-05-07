@@ -40,11 +40,29 @@ const CACHE_TTL_MS = 5 * 60 * 1000
 // rather than serve stale data.
 const DXLINK_FRESH_MS = 30 * 1000
 
-// Matrix mode constants. Skylit-style 2D heatmap shows ~4 expirations
-// across and ~25 strikes deep, all clustered tight to ATM.
-const MATRIX_MAX_EXPIRATIONS = 4
-const MATRIX_MAX_STRIKES = 30
-const MATRIX_STRIKE_WINDOW_PCT = 0.05  // ATM ± 5%
+// Matrix mode defaults. Skylit-style 2D heatmap. Caller can override
+// via the `matrix_max_expirations`, `matrix_max_strikes`, and
+// `matrix_strike_window_pct` body params (see MatrixOpts below).
+const MATRIX_MAX_EXPIRATIONS_DEFAULT = 4
+const MATRIX_MAX_STRIKES_DEFAULT = 30
+const MATRIX_STRIKE_WINDOW_PCT_DEFAULT = 0.05  // ATM ± 5%
+// Hard caps so a buggy/malicious caller can't ask for a 1000-strike
+// matrix that pegs the edge function memory.
+const MATRIX_MAX_EXPIRATIONS_LIMIT = 12
+const MATRIX_MAX_STRIKES_LIMIT = 100
+const MATRIX_STRIKE_WINDOW_PCT_LIMIT = 0.25
+
+interface MatrixOpts {
+  maxExpirations: number
+  maxStrikes: number
+  strikeWindowPct: number
+}
+
+const DEFAULT_MATRIX_OPTS: MatrixOpts = {
+  maxExpirations: MATRIX_MAX_EXPIRATIONS_DEFAULT,
+  maxStrikes: MATRIX_MAX_STRIKES_DEFAULT,
+  strikeWindowPct: MATRIX_STRIKE_WINDOW_PCT_DEFAULT,
+}
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -57,6 +75,14 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   })
+}
+
+// Clamp a number into [min, max], falling back to fallback when the
+// input is NaN or non-finite. Used to bound caller-controlled matrix
+// dimension params.
+function clamp(n: number, min: number, max: number, fallback: number): number {
+  if (!Number.isFinite(n)) return fallback
+  return Math.max(min, Math.min(max, n))
 }
 
 // ─── Black-Scholes gamma (used only by the Yahoo fallback) ──────
@@ -335,6 +361,7 @@ function todayDateStr(): string {
 async function computeMatrixFromDxLink(
   supabase: ReturnType<typeof createClient>,
   ticker: string,
+  opts: MatrixOpts = DEFAULT_MATRIX_OPTS,
 ): Promise<{ matrix?: MatrixOutput; error?: string }> {
   const { data: rows, error } = await supabase
     .from('dxlink_quotes')
@@ -384,7 +411,7 @@ async function computeMatrixFromDxLink(
   const futureExps = Array.from(byExp.keys())
     .filter((e) => e >= today)
     .sort()
-    .slice(0, MATRIX_MAX_EXPIRATIONS)
+    .slice(0, opts.maxExpirations)
   if (futureExps.length === 0) return { error: 'no future expirations in cache' }
 
   return buildMatrix(ticker, spot, 'dxlink', futureExps, (exp, strike) => {
@@ -395,11 +422,12 @@ async function computeMatrixFromDxLink(
     return callContribution - putContribution
   }, (exp) => {
     return Array.from(byExp.get(exp)?.keys() ?? [])
-  })
+  }, opts)
 }
 
 async function computeMatrixFromYahoo(
   ticker: string,
+  opts: MatrixOpts = DEFAULT_MATRIX_OPTS,
 ): Promise<{ matrix?: MatrixOutput; error?: string }> {
   // First call gives us the chain for the nearest expiry plus the full
   // expirations list. Then fan out parallel calls for the next N-1.
@@ -416,7 +444,7 @@ async function computeMatrixFromYahoo(
   const todayUnix = Math.floor(Date.now() / 1000)
   const futureUnixes = expiryUnixes
     .filter((u) => u >= todayUnix)
-    .slice(0, MATRIX_MAX_EXPIRATIONS)
+    .slice(0, opts.maxExpirations)
   if (futureUnixes.length === 0) return { error: 'no future expirations from yahoo' }
 
   // Format unix → YYYY-MM-DD; same as fetchYahooChain's date format.
@@ -461,7 +489,7 @@ async function computeMatrixFromYahoo(
     }
     byExp.set(date, strikeMap)
   }
-  const futureExps = Array.from(byExp.keys()).sort().slice(0, MATRIX_MAX_EXPIRATIONS)
+  const futureExps = Array.from(byExp.keys()).sort().slice(0, opts.maxExpirations)
   if (futureExps.length === 0) return { error: 'no chains came back from yahoo' }
 
   return buildMatrix(ticker, spot, 'yahoo', futureExps, (exp, strike) => {
@@ -479,7 +507,7 @@ async function computeMatrixFromYahoo(
     return gexCall + gexPut
   }, (exp) => {
     return Array.from(byExp.get(exp)?.keys() ?? [])
-  }, dteByExp)
+  }, opts, dteByExp)
 }
 
 // Common builder — picks the strike window centered on spot, applies
@@ -491,12 +519,13 @@ function buildMatrix(
   expirations: string[],
   gexFor: (exp: string, strike: number) => number | null,
   strikesIn: (exp: string) => number[],
+  opts: MatrixOpts,
   dteByExp?: Map<string, number>,
 ): { matrix?: MatrixOutput; error?: string } {
   // Strike union across all expirations, trimmed to ATM ± window,
-  // capped to MATRIX_MAX_STRIKES centered on spot, descending order.
-  const lo = spot * (1 - MATRIX_STRIKE_WINDOW_PCT)
-  const hi = spot * (1 + MATRIX_STRIKE_WINDOW_PCT)
+  // capped to opts.maxStrikes centered on spot, descending order.
+  const lo = spot * (1 - opts.strikeWindowPct)
+  const hi = spot * (1 + opts.strikeWindowPct)
   const strikeSet = new Set<number>()
   for (const exp of expirations) {
     for (const k of strikesIn(exp)) {
@@ -504,12 +533,12 @@ function buildMatrix(
     }
   }
   let strikes = Array.from(strikeSet).sort((a, b) => b - a)
-  if (strikes.length > MATRIX_MAX_STRIKES) {
+  if (strikes.length > opts.maxStrikes) {
     let centerIdx = strikes.findIndex((s) => s <= spot)
     if (centerIdx < 0) centerIdx = strikes.length - 1
-    const half = Math.floor(MATRIX_MAX_STRIKES / 2)
-    const start = Math.max(0, Math.min(strikes.length - MATRIX_MAX_STRIKES, centerIdx - half))
-    strikes = strikes.slice(start, start + MATRIX_MAX_STRIKES)
+    const half = Math.floor(opts.maxStrikes / 2)
+    const start = Math.max(0, Math.min(strikes.length - opts.maxStrikes, centerIdx - half))
+    strikes = strikes.slice(start, start + opts.maxStrikes)
   }
   if (strikes.length === 0) return { error: 'no strikes within window' }
 
@@ -658,11 +687,39 @@ serve(async (req) => {
   // matrix=true since replay is matrix-only.
   const archive = body.archive === true
 
+  // Matrix dimensions can be widened/narrowed by the caller. Each
+  // is bounded by the corresponding _LIMIT constant so a malicious
+  // body can't OOM the function. Falls back to the default when the
+  // body field is missing or invalid.
+  const matrixOpts: MatrixOpts = {
+    maxExpirations: clamp(
+      Number(body.matrix_max_expirations),
+      1,
+      MATRIX_MAX_EXPIRATIONS_LIMIT,
+      MATRIX_MAX_EXPIRATIONS_DEFAULT,
+    ),
+    maxStrikes: clamp(
+      Number(body.matrix_max_strikes),
+      5,
+      MATRIX_MAX_STRIKES_LIMIT,
+      MATRIX_MAX_STRIKES_DEFAULT,
+    ),
+    strikeWindowPct: clamp(
+      Number(body.matrix_strike_window_pct),
+      0.01,
+      MATRIX_STRIKE_WINDOW_PCT_LIMIT,
+      MATRIX_STRIKE_WINDOW_PCT_DEFAULT,
+    ),
+  }
+
   const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-  // Cache key includes mode + expiration override so different views
-  // of the same ticker don't trample each other in the snapshot.
+  // Cache key includes mode + matrix dimensions + expiration override
+  // so different views of the same ticker don't trample each other.
+  const matrixDimsKey = matrixMode
+    ? `e${matrixOpts.maxExpirations}s${matrixOpts.maxStrikes}w${Math.round(matrixOpts.strikeWindowPct * 1000)}`
+    : ''
   const cacheKey = matrixMode
-    ? `${ticker}|matrix|${metric}`
+    ? `${ticker}|matrix|${metric}|${matrixDimsKey}`
     : (expirationOverride ? `${ticker}|${expirationOverride}` : ticker)
 
   if (!forceRefresh) {
@@ -688,7 +745,7 @@ serve(async (req) => {
     let matrix: MatrixOutput | null = null
     let dxErr: string | null = null
     try {
-      const dx = await computeMatrixFromDxLink(adminClient, ticker)
+      const dx = await computeMatrixFromDxLink(adminClient, ticker, matrixOpts)
       if (dx.matrix) matrix = dx.matrix
       else dxErr = dx.error ?? 'dxlink unknown error'
     } catch (e) {
@@ -696,7 +753,7 @@ serve(async (req) => {
     }
     if (!matrix) {
       try {
-        const y = await computeMatrixFromYahoo(ticker)
+        const y = await computeMatrixFromYahoo(ticker, matrixOpts)
         if (y.matrix) matrix = y.matrix
         else {
           return json(
