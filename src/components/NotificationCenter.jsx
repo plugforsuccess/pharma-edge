@@ -195,7 +195,7 @@ export default function NotificationCenter() {
 
       {open && (
         <div
-          className="fixed inset-0 z-50"
+          className="fixed inset-0 z-[60]"
           role="presentation"
           onClick={() => setOpen(false)}
         >
