@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import GexMatrix from './GexMatrix'
+import Spinner from './Spinner'
 
 // 3-ticker side-by-side comparison view (Skylit's "Trinity" mode).
 // Renders three full GexMatrix components in a horizontal-scroll
@@ -83,7 +84,12 @@ function TrinityColumn({ ticker, onSwap }) {
                 ${formatNum(data.spot)} · {data.expirations?.length ?? 0} exp
               </>
             )}
-            {loading && !data && <>loading…</>}
+            {loading && !data && (
+              <span className="inline-flex items-center gap-1.5 text-muted">
+                <Spinner size="sm" />
+                Loading…
+              </span>
+            )}
           </div>
         </div>
         <button

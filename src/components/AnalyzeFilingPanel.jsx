@@ -7,6 +7,7 @@ import {
   Sparkles,
 } from 'lucide-react'
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from '../lib/supabase'
+import Spinner from './Spinner'
 import clsx from 'clsx'
 
 const MIN_FILING_CHARS = 200
@@ -238,7 +239,7 @@ export default function AnalyzeFilingPanel({
                 >
                   {fetching ? (
                     <>
-                      <div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" />
+                      <Spinner size="sm" tone="neutral" />
                       Fetching…
                     </>
                   ) : (
@@ -292,7 +293,7 @@ Good sources:
                 >
                   {loading ? (
                     <>
-                      <div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" />
+                      <Spinner size="sm" tone="neutral" />
                       Analyzing…
                     </>
                   ) : (

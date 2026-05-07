@@ -9,6 +9,7 @@ import {
   Settings,
 } from 'lucide-react'
 import InstallPrompt from './InstallPrompt'
+import Spinner from './Spinner'
 import clsx from 'clsx'
 
 // Bottom nav (mobile) + sidebar nav (desktop). Naming conventions per
@@ -221,13 +222,7 @@ function BottomTab({ to, icon: Icon, label }) {
 function PageLoader() {
   return (
     <div className="min-h-[40vh] flex items-center justify-center">
-      <div className="relative w-8 h-8">
-        <div className="absolute inset-0 rounded-full border border-border" />
-        <div
-          className="absolute inset-0 rounded-full border-2 border-transparent animate-spin"
-          style={{ borderTopColor: '#e8b558' }}
-        />
-      </div>
+      <Spinner size="lg" tone="amber" label="Loading page" />
     </div>
   )
 }
