@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowLeft, RefreshCw, Activity, Star, Lock, ChevronDown, Clock, BookOpen, Search } from 'lucide-react'
+import clsx from 'clsx'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
@@ -92,8 +93,8 @@ export default function Markets() {
       .eq('user_id', user.id)
       .then(({ data }) => {
         if (cancelled || !data) return
-        const seen = new Set(TICKERS.map((t) => t.symbol))
         const unique = []
+        const seen = new Set()
         for (const row of data) {
           const sym = String(row.ticker || '').toUpperCase()
           if (sym && !seen.has(sym)) {
@@ -107,6 +108,30 @@ export default function Markets() {
       cancelled = true
     }
   }, [user?.id])
+
+  // Toggle the current ticker's favorite status. Watchlist table is
+  // RLS-scoped to user_id so any signed-in user can only touch their
+  // own row. Optimistic update on success — keeps the star UI snappy
+  // even on a slow connection. Silent failure on the network call;
+  // refresh restores canonical state from the DB.
+  async function toggleFavorite(sym) {
+    if (!user || !sym) return
+    const symbol = sym.toUpperCase()
+    const isCurrentlyFav = watchlist.includes(symbol)
+    if (isCurrentlyFav) {
+      setWatchlist((cur) => cur.filter((t) => t !== symbol))
+      await supabase
+        .from('watchlist')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('ticker', symbol)
+    } else {
+      setWatchlist((cur) => [...cur, symbol])
+      await supabase
+        .from('watchlist')
+        .insert({ user_id: user.id, ticker: symbol })
+    }
+  }
 
   async function load(sym, { refresh = false } = {}) {
     setLoading(true)
@@ -240,64 +265,42 @@ export default function Markets() {
 
       {view === 'gex' && (<>
 
-      {/* Ticker picker — horizontal scroll keeps the grid mobile-friendly.
-          Watchlist tickers come first (with a star) so the user's own picks
-          are reachable without scrolling past the curated list. Pro-only
-          tickers render with a lock affordance so free users see what
-          they'd unlock rather than the list silently being shorter. */}
+      {/* Ticker picker — favorites-only chip row. The full ~500-name
+          universe lives in the search drawer; the chip row is just the
+          user's curated set. Empty state surfaces a hint to star a
+          ticker. The "+ Add" pill at the end opens the same search
+          drawer the title-button opens. */}
       <div className="lg:hidden -mx-4 px-4 overflow-x-auto">
-        <div className="flex gap-2 pb-1">
-          {isPro &&
-            watchlist.map((sym) => (
+        <div className="flex gap-2 pb-1 items-center">
+          {watchlist.length === 0 && (
+            <span className="shrink-0 text-[10px] text-muted px-2 py-1.5">
+              ⭐ Tap the star next to a ticker to favorite it
+            </span>
+          )}
+          {watchlist.map((sym) => {
+            const active = ticker === sym
+            return (
               <button
-                key={`wl-${sym}`}
+                key={`fav-${sym}`}
                 onClick={() => setTicker(sym)}
                 className={
                   'shrink-0 inline-flex items-center gap-1 px-3 py-1.5 rounded-full border text-xs font-medium transition ' +
-                  (ticker === sym
-                    ? 'bg-brand text-bg border-brand'
+                  (active
+                    ? 'bg-amber-400 text-bg border-amber-400'
                     : 'bg-card text-fg border-amber-400/40 hover:border-amber-400/70')
                 }
               >
                 <Star size={11} className="fill-current" />
                 {sym}
               </button>
-            ))}
-          {isPro && watchlist.length > 0 && (
-            <div className="shrink-0 w-px bg-border mx-1" aria-hidden />
-          )}
-          {(isPro ? TICKERS : [...visibleCuratedTickers, ...TICKERS.slice(limits.marketsTickerCap)]).map((t) => {
-            const gated = gatedTickers.has(t.symbol)
-            const active = ticker === t.symbol
-            return (
-              <button
-                key={t.symbol}
-                onClick={() => (gated ? navigate('/settings') : setTicker(t.symbol))}
-                className={
-                  'shrink-0 inline-flex items-center gap-1 px-3 py-1.5 rounded-full border text-xs font-medium transition ' +
-                  (active
-                    ? 'bg-brand text-bg border-brand'
-                    : gated
-                      ? 'bg-card text-muted border-border hover:text-subtle'
-                      : 'bg-card text-subtle border-border hover:text-fg hover:border-border-hover')
-                }
-                title={gated ? 'Upgrade to Pro to unlock' : t.label}
-              >
-                {gated && <Lock size={10} />}
-                {t.symbol}
-              </button>
             )
           })}
-          {/* Search-anything pill — same drawer the title button opens.
-              Sits at the end of the curated chip row so users in the
-              chip-tapping mental model still discover the full-universe
-              search. */}
           <button
             onClick={() => setDrawerOpen(true)}
             className="shrink-0 inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-dashed border-border text-xs font-medium text-subtle hover:text-fg hover:border-border-hover transition"
           >
             <Search size={11} />
-            Search any ticker
+            Add ticker
           </button>
         </div>
       </div>
@@ -320,16 +323,42 @@ export default function Markets() {
                   switches between streamed tickers; the magnifying-glass
                   here signals that tapping opens the full ~500-name
                   universe search drawer, not just the chip set. */}
-              <button
-                type="button"
-                onClick={() => setDrawerOpen(true)}
-                className="inline-flex items-baseline gap-1.5 text-2xl font-display tracking-tight
-                           hover:text-amber-400 transition-colors"
-                aria-label="Search any ticker"
-              >
-                {data.ticker}
-                <Search size={14} className="text-subtle self-center" />
-              </button>
+              <div className="inline-flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDrawerOpen(true)}
+                  className="inline-flex items-baseline gap-1.5 text-2xl font-display tracking-tight
+                             hover:text-amber-400 transition-colors"
+                  aria-label="Search any ticker"
+                >
+                  {data.ticker}
+                  <Search size={14} className="text-subtle self-center" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => toggleFavorite(data.ticker)}
+                  aria-label={
+                    watchlist.includes(data.ticker.toUpperCase())
+                      ? `Remove ${data.ticker} from favorites`
+                      : `Favorite ${data.ticker}`
+                  }
+                  className={clsx(
+                    'p-1 rounded-full transition',
+                    watchlist.includes(data.ticker.toUpperCase())
+                      ? 'text-amber-400 hover:text-amber-300'
+                      : 'text-subtle hover:text-amber-400',
+                  )}
+                >
+                  <Star
+                    size={16}
+                    className={
+                      watchlist.includes(data.ticker.toUpperCase())
+                        ? 'fill-current'
+                        : ''
+                    }
+                  />
+                </button>
+              </div>
               <div className="text-xs text-subtle flex items-center gap-2 flex-wrap">
                 <span>
                   {data.expirations?.length ?? 0} expirations · {data.strikes?.length ?? 0} strikes
