@@ -9,6 +9,7 @@ import {
 import clsx from 'clsx'
 import { supabase } from '../lib/supabase'
 import { computeProfitProbabilityBp, formatPopBp } from '../utils/pop'
+import CalcGexStrip from './CalcGexStrip'
 
 // Premium-of-width thresholds keeping R/R >= 1:1.5 (the rule):
 //
@@ -1076,6 +1077,33 @@ export default function StrikePriceCalculator({
                   : '✓ Premium within the 40% cap (R/R ≥ 1:1.5)'}
               </p>
             </div>
+          )}
+
+          {ticker && expiry && (
+            <CalcGexStrip
+              ticker={ticker}
+              expiry={expiry}
+              shortStrike={
+                config.isCondor
+                  ? config.isCredit
+                    ? shortCallStrike  // worst case for upside breach
+                    : shortPutStrike
+                  : sellStrike
+              }
+              longStrike={
+                config.isCondor
+                  ? config.isCredit
+                    ? longCallStrike
+                    : longPutStrike
+                  : buyStrike
+              }
+              isCredit={config.isCredit}
+              popPct={
+                result?.entry_pop_bp != null
+                  ? Math.round(Number(result.entry_pop_bp) / 100)
+                  : null
+              }
+            />
           )}
 
           <button
