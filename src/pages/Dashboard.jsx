@@ -8,7 +8,15 @@ import { catalystLabel, directionLabel } from '../lib/design'
 import NotificationCenter from '../components/NotificationCenter'
 import OpenPositions from '../components/OpenPositions'
 import PaperTradingStatus from '../components/PaperTradingStatus'
+import LiveGexStrip from '../components/LiveGexStrip'
+import SuggestedPlays from '../components/SuggestedPlays'
 import clsx from 'clsx'
+
+// The default ticker for the Tape's Suggested Plays card. Users will be
+// able to pin their preferred ticker once Cash Moves Pro lands; for now
+// SPY is the most-traded underlying and the safest default for the GEX
+// pivot's primary use case (0DTE/short-DTE directional plays).
+const TAPE_DEFAULT_TICKER = 'SPY'
 
 export default function Dashboard() {
   const { user } = useAuth()
@@ -82,13 +90,22 @@ export default function Dashboard() {
     day: 'numeric',
   })
 
+  const isFirstRun =
+    !loading &&
+    stats.total === 0 &&
+    stats.open === 0 &&
+    pendingCandidates === 0 &&
+    watchlistCandidates === 0
+
+  // The Tape uses a two-column layout on desktop: dealer-positioning
+  // surfaces (LiveGexStrip, SuggestedPlays, Live Moves feed) on the left
+  // where the eye lands, and personal-state surfaces (OpenPositions,
+  // PaperTradingStatus) on the right rail. Mobile collapses to a single
+  // column ordered for trader-priority: GEX → Positions → Plays → Moves.
   return (
-    <div className="px-5 lg:px-6 pt-7 pb-6 mx-auto lg:max-w-6xl w-full">
-      {/* Wordmark — gold "Cash" + white "Moves". Italic dropped with
-          the Space Grotesk swap (it has no true italic; browser-
-          synthesized obliques on a wordmark read as "almost" instead
-          of intentional). Weight contrast carries the rhythm. */}
-      <header className="flex items-start justify-between mb-7">
+    <div className="px-5 lg:px-8 pt-7 pb-6 mx-auto lg:max-w-7xl w-full">
+      {/* Header */}
+      <header className="flex items-start justify-between mb-6">
         <div>
           <p className="eyebrow">{dateStr} · The Tape</p>
           <h1 className="font-display text-[2rem] leading-[1.05] mt-1.5 tracking-tight">
@@ -99,8 +116,9 @@ export default function Dashboard() {
         <NotificationCenter />
       </header>
 
-      {/* Stat strip — editorial, no boxes */}
-      <section className="surface rounded-2xl px-2 py-3 mb-5">
+      {/* Thin stats strip — full-width across both columns. Was the page's
+          eyebrow before the GEX pivot; now it's a status line. */}
+      <section className="surface rounded-xl px-2 py-2 mb-5">
         <div className="grid grid-cols-4">
           <Stat label="Open" value={stats.open} />
           <Stat label="Wins" value={stats.wins} tone="green" divider />
@@ -114,95 +132,129 @@ export default function Dashboard() {
         </div>
       </section>
 
-      <PaperTradingStatus stats={stats} />
-
-      {/* First-run guidance — fades out the moment the user has any
-          surface they could be working from (signal, scanner pick, or
-          a watchlist hit). Avoids the "what do I do next" beat that
-          a new login otherwise lands on. */}
-      {!loading &&
-        stats.total === 0 &&
-        stats.open === 0 &&
-        pendingCandidates === 0 &&
-        watchlistCandidates === 0 && <OnboardingCard navigate={navigate} />}
-
-      <OpenPositions />
-
-      {/* Queue cards */}
-      <div className="space-y-2 mb-5">
-        {watchlistCandidates > 0 && (
-          <QueueCard
-            icon={Eye}
-            tone="amber"
-            title="Watchlist Activity"
-            sub="New filings on your tracked tickers"
-            count={watchlistCandidates}
-            onClick={() => navigate('/scanner')}
-          />
-        )}
-        {pendingCandidates > 0 && (
-          <QueueCard
-            icon={Cpu}
-            tone="crimson"
-            title="Scanner Candidates"
-            sub="Top broad-scan picks from this morning"
-            count={pendingCandidates}
-            onClick={() => navigate('/scanner')}
-          />
-        )}
-      </div>
-
-      {/* Moves header — naming convention: a "move" is one signal /
-          alert; plural "Moves" becomes the cross-page noun. */}
-      <div className="flex items-end justify-between mb-3">
-        <div>
-          <p className="eyebrow">Live Theses</p>
-          <h2 className="font-display text-xl text-fg mt-0.5">Live Moves</h2>
+      {/* Mobile order: GEX strip → Open Positions → (Onboarding / Queue) →
+          Suggested Plays → Log CTA → Live Moves → Paper Trading.
+          Desktop two-column: dealer-positioning + plays + moves on the left,
+          personal state (positions, paper trading) on the right rail.
+          Single mount per component — order classes control mobile flow,
+          col-start controls desktop placement. */}
+      <div className="flex flex-col lg:grid lg:grid-cols-[2fr_1fr] lg:gap-x-6 lg:gap-y-5">
+        <div className="order-1 lg:col-start-1 lg:row-start-1 min-w-0">
+          <LiveGexStrip />
         </div>
-        <button
-          onClick={() => navigate('/log')}
-          className="btn-primary inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-lg"
-        >
-          <Plus size={13} strokeWidth={2.5} />
-          Log Move
-        </button>
-      </div>
 
-      <div className="space-y-2.5">
-        {loading ? (
-          Array(3)
-            .fill(0)
-            .map((_, i) => (
-              <div
-                key={i}
-                className="surface rounded-2xl p-4 animate-pulse"
-              >
-                <div className="h-4 bg-white/5 rounded w-1/3 mb-2" />
-                <div className="h-3 bg-white/5 rounded w-2/3" />
+        <div className="order-2 lg:col-start-2 lg:row-start-1 mb-5 lg:mb-0">
+          <OpenPositions />
+        </div>
+
+        <div className="order-3 lg:col-start-1 lg:row-start-2 min-w-0">
+          {isFirstRun && <OnboardingCard navigate={navigate} />}
+
+          {/* Queue cards — biotech surfaces, kept for now until the sunset PR
+              ships. Naturally hidden when counts are zero. */}
+          {(watchlistCandidates > 0 || pendingCandidates > 0) && (
+            <div className="space-y-2 mb-5">
+              {watchlistCandidates > 0 && (
+                <QueueCard
+                  icon={Eye}
+                  tone="amber"
+                  title="Watchlist Activity"
+                  sub="New filings on your tracked tickers"
+                  count={watchlistCandidates}
+                  onClick={() => navigate('/scanner')}
+                />
+              )}
+              {pendingCandidates > 0 && (
+                <QueueCard
+                  icon={Cpu}
+                  tone="crimson"
+                  title="Scanner Candidates"
+                  sub="Top broad-scan picks from this morning"
+                  count={pendingCandidates}
+                  onClick={() => navigate('/scanner')}
+                />
+              )}
+            </div>
+          )}
+
+          {/* Suggested plays for the default ticker. Embedded directly so
+              the Tape becomes the action surface — no need to bounce to
+              Markets to see what's tradable right now. */}
+          <section className="mb-5">
+            <div className="flex items-end justify-between mb-2.5">
+              <div>
+                <p className="eyebrow">Claude · {TAPE_DEFAULT_TICKER}</p>
+                <h2 className="font-display text-base text-fg mt-0.5">Suggested Plays</h2>
               </div>
-            ))
-        ) : signals.length === 0 ? (
-          <div className="surface rounded-2xl p-10 text-center">
-            <TrendingUp
-              size={28}
-              strokeWidth={1.5}
-              className="mx-auto mb-3 text-muted"
-            />
-            <p className="font-display text-lg text-fg">No moves on the tape</p>
-            <p className="text-subtle text-xs mt-1">
-              Log your first thesis to start the public record.
-            </p>
+              <button
+                onClick={() => navigate(`/markets?ticker=${TAPE_DEFAULT_TICKER}`)}
+                className="text-[11px] text-subtle hover:text-fg transition-colors"
+              >
+                Open in Markets →
+              </button>
+            </div>
+            <SuggestedPlays ticker={TAPE_DEFAULT_TICKER} isPro={false} />
+          </section>
+
+          {/* Log Move — primary CTA, full-width pill above the Live Moves feed. */}
+          <button
+            onClick={() => navigate('/log')}
+            className="btn-primary w-full inline-flex items-center justify-center gap-2 text-sm font-semibold px-4 py-3 rounded-xl mb-4"
+          >
+            <Plus size={15} strokeWidth={2.5} />
+            Log a Move
+          </button>
+
+          {/* Moves feed */}
+          <div className="flex items-end justify-between mb-3">
+            <div>
+              <p className="eyebrow">Live Theses</p>
+              <h2 className="font-display text-xl text-fg mt-0.5">Live Moves</h2>
+            </div>
           </div>
-        ) : (
-          signals.map((signal) => (
-            <SignalCard
-              key={signal.id}
-              signal={signal}
-              daysTo={daysUntil(signal.catalyst_date) ?? 0}
-              onClick={() => navigate(`/signal/${signal.id}`)}
-            />
-          ))
-        )}
+
+          <div className="space-y-2.5">
+            {loading ? (
+              Array(3)
+                .fill(0)
+                .map((_, i) => (
+                  <div
+                    key={i}
+                    className="surface rounded-2xl p-4 animate-pulse"
+                  >
+                    <div className="h-4 bg-white/5 rounded w-1/3 mb-2" />
+                    <div className="h-3 bg-white/5 rounded w-2/3" />
+                  </div>
+                ))
+            ) : signals.length === 0 ? (
+              <div className="surface rounded-2xl p-10 text-center">
+                <TrendingUp
+                  size={28}
+                  strokeWidth={1.5}
+                  className="mx-auto mb-3 text-muted"
+                />
+                <p className="font-display text-lg text-fg">No moves on the tape</p>
+                <p className="text-subtle text-xs mt-1">
+                  Log your first thesis to start the public record.
+                </p>
+              </div>
+            ) : (
+              signals.map((signal) => (
+                <SignalCard
+                  key={signal.id}
+                  signal={signal}
+                  onClick={() => navigate(`/signal/${signal.id}`)}
+                />
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* PaperTradingStatus — last on mobile (low-freq widget), bottom of
+            the right rail on desktop. */}
+        <div className="order-4 lg:col-start-2 lg:row-start-2 mt-4 lg:mt-0">
+          <PaperTradingStatus stats={stats} />
+        </div>
       </div>
     </div>
   )
@@ -212,22 +264,22 @@ function OnboardingCard({ navigate }) {
   const steps = [
     {
       icon: Activity,
-      title: 'Open the Markets tab',
-      sub: 'See the live GEX matrix for SPY, QQQ, AAPL, and ~50 other names.',
+      title: 'Read the tape',
+      sub: 'Spot, Flip, and Wall for SPY/QQQ/NVDA and the rest of the watched universe — live during RTH.',
       cta: 'Markets',
       onClick: () => navigate('/markets'),
     },
     {
       icon: Sparkles,
-      title: 'Generate Suggested Plays',
-      sub: 'Claude reads the matrix and proposes 0–3 spread setups that fit your account.',
+      title: 'Get a suggested play',
+      sub: 'Claude reads dealer positioning and proposes 0–3 setups (spread or single-leg long) that fit your account.',
       cta: 'Generate',
       onClick: () => navigate('/markets'),
     },
     {
       icon: Plus,
-      title: 'Log a signal',
-      sub: 'Lock the thesis with an immutable SHA-256 hash so it counts toward your record.',
+      title: 'Log a Move',
+      sub: 'Lock the thesis with an immutable SHA-256 hash so it counts toward your public record.',
       cta: 'Log',
       onClick: () => navigate('/log'),
     },
@@ -344,7 +396,13 @@ function QueueCard({ icon: Icon, tone, title, sub, count, onClick }) {
   )
 }
 
-function SignalCard({ signal, daysTo, onClick }) {
+function SignalCard({ signal, onClick }) {
+  // GEX trades use expiry_date as the urgency clock; biotech uses catalyst_date.
+  // catalyst_date may be null on gex_flow rows (no scheduled event), and
+  // expiry_date may be null on biotech rows where the user hasn't picked one yet.
+  const isGex = signal.signal_source === 'gex_flow'
+  const clockDate = isGex ? signal.expiry_date : signal.catalyst_date
+  const daysTo = daysUntil(clockDate) ?? 0
   const isUrgent = daysTo <= 7
   const isSoon = daysTo > 7 && daysTo <= 14
 
@@ -398,23 +456,49 @@ function SignalCard({ signal, daysTo, onClick }) {
             {signal.trade_type === 'paper' ? 'Paper' : 'Real'}
           </span>
         </div>
-        <div className="text-right shrink-0 ml-2">
-          <p
-            className="font-display num-tab text-lg leading-none"
-            style={{ color: accent.color }}
-          >
-            {daysTo}
-            <span className="text-[10px] font-sans ml-0.5 opacity-70">d</span>
-          </p>
-          <p className="eyebrow text-[8px] mt-1">to catalyst</p>
-        </div>
+        {clockDate && (
+          <div className="text-right shrink-0 ml-2">
+            <p
+              className="font-display num-tab text-lg leading-none"
+              style={{ color: accent.color }}
+            >
+              {daysTo}
+              <span className="text-[10px] font-sans ml-0.5 opacity-70">d</span>
+            </p>
+            <p className="eyebrow text-[8px] mt-1">{isGex ? 'to expiry' : 'to catalyst'}</p>
+          </div>
+        )}
       </div>
 
-      <p className="text-subtle text-[12px] mb-2.5 truncate">
-        <span className="text-fg/90 font-medium">{signal.drug_name}</span>
-        <span className="text-muted"> · </span>
-        {signal.indication}
-      </p>
+      {/* Sub-line: biotech shows drug · indication; GEX shows the structure
+          (strikes / spread shape) when available, otherwise just "GEX play". */}
+      {isGex ? (
+        <p className="text-subtle text-[12px] mb-2.5 truncate">
+          <span className="text-fg/90 font-medium">GEX play</span>
+          {signal.expiry_date && (
+            <>
+              <span className="text-muted"> · </span>
+              {new Date(signal.expiry_date).toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric',
+              })}{' '}
+              expiry
+            </>
+          )}
+        </p>
+      ) : (
+        (signal.drug_name || signal.indication) && (
+          <p className="text-subtle text-[12px] mb-2.5 truncate">
+            {signal.drug_name && (
+              <span className="text-fg/90 font-medium">{signal.drug_name}</span>
+            )}
+            {signal.drug_name && signal.indication && (
+              <span className="text-muted"> · </span>
+            )}
+            {signal.indication}
+          </p>
+        )
+      )}
 
       <div className="flex items-center justify-between gap-3">
         <p className="text-subtle text-[12px] line-clamp-1 flex-1 italic font-display">
@@ -425,14 +509,18 @@ function SignalCard({ signal, daysTo, onClick }) {
 
       <div className="hairline mt-3 mb-2.5 opacity-60" />
       <div className="flex items-center justify-between">
-        <span className="eyebrow text-[9px]">{catalystLabel(signal.catalyst_type)}</span>
-        <span className="font-mono-tab text-[10px] text-muted">
-          {new Date(signal.catalyst_date).toLocaleDateString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric',
-          })}
+        <span className="eyebrow text-[9px]">
+          {isGex ? 'GEX Flow' : catalystLabel(signal.catalyst_type)}
         </span>
+        {clockDate && (
+          <span className="font-mono-tab text-[10px] text-muted">
+            {new Date(clockDate).toLocaleDateString('en-US', {
+              month: 'short',
+              day: 'numeric',
+              year: 'numeric',
+            })}
+          </span>
+        )}
       </div>
     </button>
   )
