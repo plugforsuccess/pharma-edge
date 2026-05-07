@@ -141,6 +141,12 @@ export default function StrikePriceCalculator({
   initialBuyStrike,
   initialSellStrike,
   initialExpiry,
+  // Per-share premium prefill — Suggested Plays passes this derived
+  // from max_loss_per_spread (debit) or max_profit_per_spread (credit)
+  // so the calculator lands on a fully-populated form when the user
+  // clicks Log Signal on a suggested play. Without it the user has to
+  // re-type the premium that already came from the model.
+  initialPremium,
   catalystDate,
   buyStrikeOtmPct,
   sellStrikeOtmPct,
@@ -170,7 +176,9 @@ export default function StrikePriceCalculator({
   const [shortPutStrike, setShortPutStrike] = useState('')
   const [shortCallStrike, setShortCallStrike] = useState('')
   const [longCallStrike, setLongCallStrike] = useState('')
-  const [premium, setPremium] = useState('')
+  const [premium, setPremium] = useState(
+    initialPremium != null ? String(initialPremium) : '',
+  )
   const [expiry, setExpiry] = useState(
     initialExpiry ? String(initialExpiry) : '',
   )
@@ -271,6 +279,31 @@ export default function StrikePriceCalculator({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stockPrice, structure, catalystDate, buyStrikeOtmPct, sellStrikeOtmPct])
+
+  // Auto-fire the calculation once every required field is populated
+  // AND the result hasn't been produced yet — so when a user lands
+  // on this page from a Suggested Play (full prefill) they see the
+  // R/R / position-size / POP output without having to click
+  // Calculate manually. Once result exists, edits clear it via the
+  // existing onChange→setResult(null) handlers and re-fire here.
+  useEffect(() => {
+    if (result != null) return
+    if (!inputsReady) return
+    calculate()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    result,
+    stockPrice,
+    buyStrike,
+    sellStrike,
+    longPutStrike,
+    shortPutStrike,
+    shortCallStrike,
+    longCallStrike,
+    premium,
+    expiry,
+    structure,
+  ])
 
   const inputsReady = config.isCondor
     ? toNumOrNull(stockPrice) != null &&

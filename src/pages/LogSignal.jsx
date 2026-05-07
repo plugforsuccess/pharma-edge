@@ -247,6 +247,12 @@ export default function LogSignal() {
     long_strike: prefill.long_strike != null ? String(prefill.long_strike) : '',
     short_strike:
       prefill.short_strike != null ? String(prefill.short_strike) : '',
+    // Per-share premium from a Suggested Play prefill — surfaced to the
+    // calculator below as initialPremium so the form lands on a fully-
+    // populated state and auto-runs calculate(). Stored on the form so
+    // it survives step navigation.
+    prefill_premium:
+      prefill.premium != null ? String(prefill.premium) : '',
     // Filled by StrikePriceCalculator's onCalculationComplete callback so
     // we can auto-create the open_positions row after the signal locks.
     contracts: '1',
@@ -367,7 +373,12 @@ export default function LogSignal() {
       stock_price_at_signal: num(form.stock_price_at_signal),
       your_probability: num(form.your_probability),
       market_implied_probability: num(form.market_implied_probability),
-      thesis: form.thesis.trim(),
+      // The thesis textarea was removed from step 2 — Suggested Plays
+      // prefills a rationale-derived thesis, and manual logs without a
+      // typed thesis fall back to a structure-derived auto-thesis so
+      // the NOT NULL DB constraint is honored without forcing the user
+      // to write copy that adds no signal.
+      thesis: form.thesis.trim() || autoThesis(form, ticker),
       claude_analysis: analysis?.claude_analysis ?? null,
       claude_analysis_full: analysis ?? null,
       confidence_score: form.confidence_score,
@@ -762,6 +773,7 @@ export default function LogSignal() {
               initialStockPrice={form.stock_price_at_signal}
               initialBuyStrike={form.long_strike || undefined}
               initialSellStrike={form.short_strike || undefined}
+              initialPremium={form.prefill_premium || undefined}
               initialExpiry={
                 isGexFlow ? form.expiry_date : form.expiry_date || undefined
               }
@@ -790,30 +802,56 @@ export default function LogSignal() {
             />
           )}
 
-          <div>
-            <label className="text-muted text-xs uppercase tracking-wider block mb-1">
-              Your Thesis {analysis && '(prefilled from analysis — edit freely)'}
-            </label>
-            <textarea
-              value={form.thesis}
-              onChange={(e) => update('thesis', e.target.value)}
-              placeholder="Why do you think this catalyst will be negative/positive?"
-              rows={4}
-              className="w-full bg-card border border-border text-white placeholder-zinc-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-red-500 resize-none"
-            />
-          </div>
-
-          <div>
-            <label className="text-muted text-xs uppercase tracking-wider block mb-1">
-              Source URLs (one per line)
-            </label>
-            <textarea
-              value={form.source_urls}
-              onChange={(e) => update('source_urls', e.target.value)}
-              placeholder="https://clinicaltrials.gov/..."
-              rows={3}
-              className="w-full bg-card border border-border text-white placeholder-zinc-700 rounded-xl px-4 py-3 text-xs focus:outline-none focus:border-red-500 resize-none font-mono"
-            />
+          {/* POP input lives on step 2 alongside the calculator output
+              so the user can dial in their entry probability while
+              still looking at strikes / breakeven / max-loss. The
+              field is the same hash-locked entry POP that appears on
+              the step 4 confirmation summary; editing here is what
+              feeds the verification modal at submit time. */}
+          <div className="bg-card border border-border rounded-xl p-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex-1">
+                <p className="text-muted text-xs uppercase tracking-wider">
+                  Entry POP
+                  {form.entry_pop_bp != null && form.entry_pop_bp === prefilledPopBp && (
+                    <span className="ml-2 text-[9px] text-green-400/80 font-semibold">
+                      AUTO
+                    </span>
+                  )}
+                </p>
+                <p className="text-muted text-[11px] leading-snug mt-1">
+                  Honest probability this trade hits its breakeven by
+                  expiration. Locked into the v2 signal hash —
+                  reviewable on the Confirm step.
+                </p>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value={
+                    form.entry_pop_bp != null && Number.isFinite(Number(form.entry_pop_bp))
+                      ? Math.round(Number(form.entry_pop_bp) / 100)
+                      : ''
+                  }
+                  onChange={(e) => {
+                    const raw = e.target.value
+                    if (raw === '') {
+                      update('entry_pop_bp', null)
+                      return
+                    }
+                    const n = Math.round(Number(raw))
+                    if (!Number.isFinite(n)) return
+                    update('entry_pop_bp', Math.max(0, Math.min(100, n)) * 100)
+                  }}
+                  className="w-16 bg-bg-elev border border-border rounded-md px-2 py-1.5 text-right text-base font-mono-tab tabular-nums text-white focus:outline-none focus:border-amber-400/40"
+                  placeholder="—"
+                />
+                <span className="text-subtle text-sm">%</span>
+              </div>
+            </div>
           </div>
 
           <div className="flex gap-3">
@@ -827,7 +865,6 @@ export default function LogSignal() {
             <button
               type="button"
               onClick={() => setStep(3)}
-              disabled={!form.thesis.trim()}
               className="flex-1 bg-red-600 hover:bg-red-500 disabled:bg-red-950 disabled:text-red-900 text-white font-semibold rounded-xl py-3 text-sm transition-colors"
             >
               Next: Checklist
@@ -995,6 +1032,20 @@ export default function LogSignal() {
 // Returns days remaining in the 90-day paper-trading window. 0 if the
 // user is past the window (or hasn't started — the Dashboard widget
 // stamps paper_trading_started_at on first render).
+// Auto-generated thesis when the user didn't type one. The DB column
+// is NOT NULL, but typed-thesis copy adds no signal for GEX-flow
+// trades — the structure + ticker + expiration captures the bet
+// completely. This produces a deterministic, machine-readable string
+// that can later be re-parsed if needed.
+function autoThesis(form, ticker) {
+  const structure = (form.structure || '').replace(/_/g, ' ')
+  const target = form.expiry_date || form.catalyst_date || ''
+  if (form.signal_source === 'gex_flow') {
+    return `GEX-flow ${structure} on ${ticker} · expires ${target}`
+  }
+  return `${ticker} ${form.catalyst_type || 'event'} catalyst on ${target}`
+}
+
 function paperDaysRemaining(startedAt) {
   if (!startedAt) return 0
   const start = new Date(`${startedAt}T00:00:00Z`).getTime()

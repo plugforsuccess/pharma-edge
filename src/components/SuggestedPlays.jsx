@@ -519,6 +519,20 @@ const PLAY_TYPE_TO_PREFILL = {
 
 function logAsSignal(navigate, play, ticker, spot) {
   const mapped = PLAY_TYPE_TO_PREFILL[play.type] || PLAY_TYPE_TO_PREFILL.BEAR_PUT
+  // Derive a per-share premium from suggest-plays' dollar-denominated
+  // max-loss / max-profit fields so the calculator opens with EVERY
+  // field already populated — no re-typing. Convention:
+  //   * debit  → premium = max_loss_per_spread / 100  (cost per share)
+  //   * credit → premium = max_profit_per_spread / 100 (credit per share)
+  //   * condor → same as credit (premium collected = max profit)
+  const isDebit = play.type === 'BULL_CALL' || play.type === 'BEAR_PUT'
+  const dollarBasis = isDebit
+    ? Number(play.max_loss_per_spread)
+    : Number(play.max_profit_per_spread)
+  const premiumPerShare =
+    Number.isFinite(dollarBasis) && dollarBasis > 0
+      ? (dollarBasis / 100).toFixed(2)
+      : null
   navigate('/log', {
     state: {
       prefill: {
@@ -539,6 +553,10 @@ function logAsSignal(navigate, play, ticker, spot) {
         long_strike: play.long_strike,
         short_strike: play.short_strike,
         expiry_date: play.expiration,
+        // Premium per share — feeds the calculator's premium input so
+        // the user lands on a fully-populated form, not one with three
+        // fields still blank.
+        premium: premiumPerShare,
       },
     },
   })
