@@ -719,7 +719,7 @@ serve(async (req) => {
     ? `e${matrixOpts.maxExpirations}s${matrixOpts.maxStrikes}w${Math.round(matrixOpts.strikeWindowPct * 1000)}`
     : ''
   const cacheKey = matrixMode
-    ? `${ticker}|matrix|${metric}|${matrixDimsKey}`
+    ? `${ticker}|matrix|${matrixDimsKey}`
     : (expirationOverride ? `${ticker}|${expirationOverride}` : ticker)
 
   if (!forceRefresh) {
