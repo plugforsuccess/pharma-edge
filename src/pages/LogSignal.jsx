@@ -242,6 +242,15 @@ export default function LogSignal() {
     thesis: prefill.thesis || '',
     source_urls: '',
     confidence_score: 7,
+    // entry_pop_bp: integer 0-10000, nullable. Locked into the v2
+    // signal_hash at insert time. We DO NOT expose this as a typeable
+    // field — it's populated from the suggested-play prefill or
+    // computed inline by StrikePriceCalculator from live IV. Letting
+    // users edit it would defeat the calibration-tracking purpose.
+    entry_pop_bp:
+      prefill.entry_pop_bp != null && Number.isFinite(Number(prefill.entry_pop_bp))
+        ? Math.round(Number(prefill.entry_pop_bp))
+        : null,
     ...Object.fromEntries(CHECKLIST_ITEMS.map((i) => [i.key, false])),
   }))
 
@@ -347,6 +356,13 @@ export default function LogSignal() {
       claude_analysis: analysis?.claude_analysis ?? null,
       claude_analysis_full: analysis ?? null,
       confidence_score: form.confidence_score,
+      // entry_pop_bp + hash_version: the DB column default for hash_version
+      // is 2 (set in migration 20260507000002), so omitting it here would
+      // also work — but explicit > implicit when the column is in the
+      // signal_hash payload. New signals inserted from the app are ALWAYS
+      // v2; hash_version=1 is a backfill marker for pre-2026-05-07 rows.
+      entry_pop_bp: form.entry_pop_bp,
+      hash_version: 2,
       enrollment_signal: analysis?.signal_scores?.enrollment_signal ?? 0,
       fda_precedent_signal: analysis?.signal_scores?.fda_precedent_signal ?? 0,
       protocol_amendment_signal: analysis?.signal_scores?.protocol_amendment_signal ?? 0,

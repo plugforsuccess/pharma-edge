@@ -162,6 +162,21 @@ export default function SignalDetail() {
               />
             </div>
           )}
+          {signal.entry_pop_bp != null && (
+            <div className="border-t border-border pt-3 flex items-center justify-between">
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-muted">
+                  Predicted POP at entry
+                </div>
+                <div className="text-[10px] text-subtle leading-snug mt-0.5">
+                  Locked into the v2 signal hash; can't be revised post-entry.
+                </div>
+              </div>
+              <div className="font-mono-tab tabular-nums text-2xl text-amber-400">
+                {Math.round(signal.entry_pop_bp / 100)}%
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

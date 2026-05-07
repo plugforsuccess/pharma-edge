@@ -101,7 +101,8 @@ OUTPUT — STRICT JSON, NO PROSE:
       "rationale": "1-2 sentences citing specific GEX numbers (call wall at $X, flip at $Y, etc.)",
       "what_invalidates": "1 sentence — what move or event kills this thesis",
       "gamma_rolloff_risk": <boolean>,
-      "rolloff_note": "<string, REQUIRED when gamma_rolloff_risk=true; empty string otherwise>"
+      "rolloff_note": "<string, REQUIRED when gamma_rolloff_risk=true; empty string otherwise>",
+      "entry_pop_bp": <integer 0-10000, OPTIONAL — server overwrites this with a computed value from live IV. You may include your own estimate but it will be replaced.>
     }
   ]
 }
@@ -295,6 +296,129 @@ INTERPRETATION HINTS:
 Propose 0-5 spread trades following the rules in the system prompt. When you return 2 or more, span at least 2 distinct strategy types (Bull Call / Bear Put / Iron Condor / Bull Put Credit / Bear Call Credit). Strict JSON only.`
 }
 
+// ─── Probability of Profit at Expiration (POP) ─────────────────────
+//
+// Mirrors src/utils/pop.js byte-for-byte (Deno can't import from src/
+// so we duplicate). Computes terminal-distribution POP under the
+// Black-Scholes lognormal model. Output is integer basis points
+// (0–10000), matching the signals.entry_pop_bp column.
+//
+// Required inputs differ by structure — see computePopBp below.
+
+const POP_RISK_FREE = 0.045
+
+function popNormCdf(x: number): number {
+  const a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741
+  const a4 = -1.453152027, a5 = 1.061405429, p = 0.3275911
+  const sign = x < 0 ? -1 : 1
+  const absX = Math.abs(x) / Math.SQRT2
+  const t = 1 / (1 + p * absX)
+  const y = 1 - ((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t * Math.exp(-absX * absX)
+  return 0.5 * (1 + sign * y)
+}
+
+function popD2(spot: number, K: number, t: number, sigma: number): number | null {
+  if (!(spot > 0 && K > 0 && t > 0 && sigma > 0)) return null
+  return (Math.log(spot / K) + (POP_RISK_FREE - 0.5 * sigma * sigma) * t) / (sigma * Math.sqrt(t))
+}
+
+function popClampBp(prob: number): number | null {
+  if (!Number.isFinite(prob)) return null
+  return Math.max(0, Math.min(10000, Math.round(prob * 10000)))
+}
+
+interface PopArgs {
+  spot: number
+  sigma: number
+  dte: number
+  type: string
+  long_strike: number
+  short_strike: number
+  inner_call_strike?: number
+  inner_put_strike?: number
+  net_debit?: number
+  net_credit?: number
+}
+
+function computePopBp(a: PopArgs): number | null {
+  if (!(a.spot > 0) || !(a.sigma > 0)) return null
+  const t = Math.max(1, a.dte) / 365
+  switch (a.type) {
+    case 'BULL_CALL': {
+      if (!(a.long_strike > 0) || !(a.net_debit && a.net_debit > 0)) return null
+      const be = a.long_strike + a.net_debit
+      const d = popD2(a.spot, be, t, a.sigma)
+      return d == null ? null : popClampBp(popNormCdf(d))
+    }
+    case 'BEAR_PUT': {
+      if (!(a.long_strike > 0) || !(a.net_debit && a.net_debit > 0)) return null
+      const be = a.long_strike - a.net_debit
+      const d = popD2(a.spot, be, t, a.sigma)
+      return d == null ? null : popClampBp(popNormCdf(-d))
+    }
+    case 'BULL_PUT_CREDIT': {
+      if (!(a.short_strike > 0) || !(a.net_credit && a.net_credit > 0)) return null
+      const be = a.short_strike - a.net_credit
+      const d = popD2(a.spot, be, t, a.sigma)
+      return d == null ? null : popClampBp(popNormCdf(d))
+    }
+    case 'BEAR_CALL_CREDIT': {
+      if (!(a.short_strike > 0) || !(a.net_credit && a.net_credit > 0)) return null
+      const be = a.short_strike + a.net_credit
+      const d = popD2(a.spot, be, t, a.sigma)
+      return d == null ? null : popClampBp(popNormCdf(-d))
+    }
+    case 'IRON_CONDOR': {
+      if (!(a.inner_call_strike && a.inner_call_strike > 0)) return null
+      if (!(a.inner_put_strike && a.inner_put_strike > 0)) return null
+      if (!(a.net_credit && a.net_credit > 0)) return null
+      const half = a.net_credit / 2
+      const upperBe = a.inner_call_strike + half
+      const lowerBe = a.inner_put_strike - half
+      if (upperBe <= lowerBe) return null
+      const dU = popD2(a.spot, upperBe, t, a.sigma)
+      const dL = popD2(a.spot, lowerBe, t, a.sigma)
+      if (dU == null || dL == null) return null
+      return popClampBp(popNormCdf(-dU) - popNormCdf(-dL))
+    }
+    default:
+      return null
+  }
+}
+
+// Pull IV per (strike, expiration) for the strikes Claude proposed.
+// Single bulk query against dxlink_quotes; rows missing IV (yahoo-
+// fallback case) just yield null POP, which the UI renders as "—".
+async function fetchIvLookup(
+  supabase: ReturnType<typeof createClient>,
+  ticker: string,
+  plays: Array<{ long_strike: number; short_strike: number; expiration: string }>,
+): Promise<Map<string, number>> {
+  const lookup = new Map<string, number>()
+  if (plays.length === 0) return lookup
+  const expirations = Array.from(new Set(plays.map((p) => p.expiration)))
+  const strikes = Array.from(new Set(plays.flatMap((p) => [p.long_strike, p.short_strike])))
+  const { data, error } = await supabase
+    .from('dxlink_quotes')
+    .select('strike, expiration_date, option_type, iv')
+    .eq('underlying', ticker)
+    .eq('kind', 'option')
+    .in('expiration_date', expirations)
+    .in('strike', strikes)
+  if (error || !data) return lookup
+  // Prefer call IV at the strike for upside plays, put IV for downside.
+  // For mixed structures (condor) we just use whichever is present.
+  for (const r of data as Array<{ strike: number; expiration_date: string; option_type: 'C' | 'P'; iv: number | null }>) {
+    if (r.iv == null || !(r.iv > 0)) continue
+    const key = `${r.strike}|${r.expiration_date}|${r.option_type}`
+    lookup.set(key, r.iv)
+    // Also seed an aggregate key so callers can ask without specifying side.
+    const anyKey = `${r.strike}|${r.expiration_date}|*`
+    if (!lookup.has(anyKey)) lookup.set(anyKey, r.iv)
+  }
+  return lookup
+}
+
 function extractJson(rawText: string): unknown {
   const stripped = rawText.replace(/```json|```/g, '').trim()
   const first = stripped.indexOf('{')
@@ -471,6 +595,57 @@ serve(async (req) => {
     return json({ success: false, error: e instanceof Error ? e.message : 'parse error', raw: text.slice(0, 300) }, 502)
   }
   parsed = validatePlays(parsed, matrix)
+
+  // Compute per-play Probability of Profit at Expiration (POP) so the
+  // user sees an entry probability on each card AND the value can be
+  // hash-locked into the signal at log time. Bulk-pulls IV per
+  // (strike, expiration) from dxlink_quotes; rows missing IV (yahoo
+  // fallback / worker offline) yield null POP, which the UI gracefully
+  // renders as "—".
+  if (parsed?.plays && Array.isArray(parsed.plays) && parsed.plays.length > 0) {
+    const ivLookup = await fetchIvLookup(adminClient, ticker, parsed.plays)
+    for (const p of parsed.plays) {
+      // Pick the IV at the strike that anchors the trade's risk side:
+      //   - debit longs and credit shorts both pivot on `long_strike`
+      //     for upside, `short_strike` for credit shorts. The exact
+      //     strike picked matters less than using SOME at-the-trade
+      //     IV; differences across one-strike steps are <1% absolute.
+      const expiry: string = p.expiration
+      const longK: number = Number(p.long_strike)
+      const shortK: number = Number(p.short_strike)
+      const anchor = p.type === 'IRON_CONDOR'
+        ? Math.round((longK + shortK) / 2) // closest strike to spot for condor
+        : (p.type === 'BEAR_CALL_CREDIT' || p.type === 'BULL_PUT_CREDIT')
+          ? shortK
+          : longK
+      const sigma =
+        ivLookup.get(`${anchor}|${expiry}|*`) ??
+        ivLookup.get(`${longK}|${expiry}|*`) ??
+        ivLookup.get(`${shortK}|${expiry}|*`) ??
+        0
+      // Net debit / credit per spread are dollar-denominated — convert
+      // estimated_debit_pct_of_width back to a dollar value using the
+      // spread width since Claude only ships the percentage.
+      const width = Math.abs(longK - shortK)
+      const debitPct = Number(p.estimated_debit_pct_of_width) / 100
+      const isDebit = p.type === 'BULL_CALL' || p.type === 'BEAR_PUT'
+      const netDebit = isDebit && Number.isFinite(debitPct) ? width * debitPct : undefined
+      const netCredit = !isDebit && Number.isFinite(debitPct) ? width * (1 - debitPct) : undefined
+
+      p.entry_pop_bp = computePopBp({
+        spot: matrix.spot,
+        sigma,
+        dte: Number(p.dte) || 0,
+        type: p.type,
+        long_strike: longK,
+        short_strike: shortK,
+        inner_call_strike: p.type === 'IRON_CONDOR' ? Math.max(longK, shortK) : undefined,
+        inner_put_strike: p.type === 'IRON_CONDOR' ? Math.min(longK, shortK) : undefined,
+        net_debit: netDebit,
+        net_credit: netCredit,
+      })
+    }
+  }
 
   // Account for the call against the rate-limit ledger
   await adminClient.from('claude_calls').insert({

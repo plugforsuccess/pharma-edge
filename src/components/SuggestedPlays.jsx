@@ -414,10 +414,11 @@ function PlayCard({ play, onOpenCalculator, onLogSignal }) {
         </p>
       )}
 
-      <div className="grid grid-cols-3 gap-2 text-[11px]">
+      <div className="grid grid-cols-4 gap-2 text-[11px]">
         <Stat label="Risk/spread" value={`$${formatNum(play.max_loss_per_spread)}`} />
         <Stat label="R/R" value={`1:${(play.risk_reward || 0).toFixed(1)}`} />
         <Stat label="Size" value={`${play.contracts}c`} />
+        <Stat label="POP" value={formatPopFromBp(play.entry_pop_bp)} />
       </div>
 
       <p className="text-[11px] text-subtle leading-relaxed">
@@ -479,6 +480,14 @@ function formatNum(v) {
   return n.toFixed(0)
 }
 
+// POP comes back as integer basis points (0–10000). Render as a
+// 2-digit percent — "70%" reads cleaner than "70.35%" on a card
+// where the user is scanning, not making fine-grained comparisons.
+function formatPopFromBp(bp) {
+  if (bp == null || !Number.isFinite(Number(bp))) return '—'
+  return `${Math.round(Number(bp) / 100)}%`
+}
+
 // Deep-link helpers — both pages already accept route state for
 // prefilling form fields.
 function openInCalculator(navigate, play, ticker, spot) {
@@ -522,6 +531,10 @@ function logAsSignal(navigate, play, ticker, spot) {
         // suggested_play_type lets LogSignal render the Suggested /
         // Modified-from-suggestion badge on the strategy picker.
         suggested_play_type: play.type,
+        // POP from suggest-plays. Locks into the v2 signal_hash at
+        // insert time so the prediction becomes part of the immutable
+        // public record. Null is OK — DB column is nullable.
+        entry_pop_bp: play.entry_pop_bp ?? null,
         thesis: `GEX-driven setup: ${play.rationale}`,
         long_strike: play.long_strike,
         short_strike: play.short_strike,
