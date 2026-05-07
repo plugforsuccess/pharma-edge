@@ -435,7 +435,20 @@ function openInCalculator(navigate, play, ticker, spot) {
   })
 }
 
+// All 5 spread structures the user can be deep-linked into. Direction
+// here is the THESIS direction (a Bear Call Credit is bearish even
+// though it's built from calls). LogSignal owns the structure→direction
+// mapping internally too; passing both here just removes a hop.
+const PLAY_TYPE_TO_PREFILL = {
+  BULL_CALL:        { direction: 'long_call', structure: 'bull_call_spread' },
+  BEAR_PUT:         { direction: 'long_put',  structure: 'bear_put_spread' },
+  IRON_CONDOR:      { direction: 'watch',     structure: 'iron_condor' },
+  BULL_PUT_CREDIT:  { direction: 'long_call', structure: 'bull_put_credit' },
+  BEAR_CALL_CREDIT: { direction: 'long_put',  structure: 'bear_call_credit' },
+}
+
 function logAsSignal(navigate, play, ticker, spot) {
+  const mapped = PLAY_TYPE_TO_PREFILL[play.type] || PLAY_TYPE_TO_PREFILL.BEAR_PUT
   navigate('/log', {
     state: {
       prefill: {
@@ -443,7 +456,11 @@ function logAsSignal(navigate, play, ticker, spot) {
         ticker,
         stock_price_at_signal: String(spot),
         catalyst_type: 'other',
-        direction: play.type === 'BULL_CALL' ? 'long_call' : 'long_put',
+        direction: mapped.direction,
+        structure: mapped.structure,
+        // suggested_play_type lets LogSignal render the Suggested /
+        // Modified-from-suggestion badge on the strategy picker.
+        suggested_play_type: play.type,
         thesis: `GEX-driven setup: ${play.rationale}`,
         long_strike: play.long_strike,
         short_strike: play.short_strike,
