@@ -232,10 +232,21 @@ export default function Dashboard() {
                   strokeWidth={1.5}
                   className="mx-auto mb-3 text-muted"
                 />
-                <p className="font-display text-lg text-fg">No moves on the tape</p>
-                <p className="text-subtle text-xs mt-1">
-                  Log your first thesis to start the public record.
+                <p className="font-display text-lg text-fg">The tape is quiet</p>
+                <p className="text-subtle text-xs mt-1.5 leading-relaxed max-w-xs mx-auto">
+                  No moves logged yet. Tap the
+                  {' '}<span className="text-amber-400 font-semibold">+</span>{' '}
+                  in the nav to write your first thesis — every signal
+                  hashes into the public record at lock time.
                 </p>
+                <button
+                  type="button"
+                  onClick={() => navigate('/log')}
+                  className="tap-spring mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-bg font-semibold text-sm"
+                >
+                  <Plus size={14} strokeWidth={2.5} />
+                  Log your first move
+                </button>
               </div>
             ) : (
               signals.map((signal) => (

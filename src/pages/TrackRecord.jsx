@@ -317,9 +317,16 @@ export default function TrackRecord() {
               />
             ))}
             {filtered.length === 0 && (
-              <p className="text-subtle text-xs text-center py-6">
-                No outcomes match this filter.
-              </p>
+              <div className="text-center py-10 px-4 space-y-2">
+                <p className="text-fg text-sm font-display">
+                  Nothing matches this filter
+                </p>
+                <p className="text-subtle text-xs leading-relaxed max-w-xs mx-auto">
+                  Try a different filter, or check back after your next
+                  outcome resolves — calibration data accumulates with
+                  every closed trade.
+                </p>
+              </div>
             )}
           </div>
         </>
@@ -518,10 +525,21 @@ function LoadingSkeleton() {
 
 function EmptyState() {
   return (
-    <div className="bg-card border border-border rounded-xl p-8 text-center">
-      <p className="text-subtle text-sm">No resolved signals yet</p>
-      <p className="text-muted text-xs mt-1">
-        Log signals and outcomes to build your track record
+    <div className="bg-card border border-border rounded-xl p-10 text-center space-y-3">
+      <div className="text-3xl">📓</div>
+      <p className="text-fg text-base font-display">
+        No resolved signals yet
+      </p>
+      <p className="text-subtle text-xs leading-relaxed max-w-xs mx-auto">
+        Your record fills in as outcomes resolve. Log a move from
+        Suggested Plays, mark its outcome when the catalyst hits,
+        and the calibration story builds itself — predicted POP vs
+        actual hit rate, n by n.
+      </p>
+      <p className="text-muted text-[10px] leading-relaxed pt-2 border-t border-border max-w-xs mx-auto">
+        Calibration becomes meaningful around n=30 resolved trades.
+        Below that the actual hit rate has too much sample noise to
+        read as a real signal.
       </p>
     </div>
   )

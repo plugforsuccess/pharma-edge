@@ -3,6 +3,7 @@ import { ArrowUpCircle, ArrowDownCircle, Flame, Filter } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useSubscription } from '../hooks/useSubscription'
 import LiveDataStatus from '../components/LiveDataStatus'
+import { isWithinRth } from '../utils/marketHours'
 
 // Options flow page — today's per-strike volume + premium + UOA
 // (unusual options activity) across the full streamed universe.
@@ -167,14 +168,26 @@ export default function Flow() {
       )}
 
       {!loading && !error && rows.length === 0 && (
-        <div className="bg-card border border-border rounded-xl p-6 text-center space-y-2">
-          <Filter size={20} className="text-muted mx-auto" />
-          <p className="text-sm text-fg font-medium">No flow captured today</p>
-          <p className="text-xs text-subtle leading-relaxed">
-            Either US markets are closed, or the dxlink-worker hasn't
-            seen prints yet for {tickerFilter ? tickerFilter : 'any tracked ticker'}.
-            Worker only captures Trade events during regular trading hours
-            (M-F, 9:30am-4pm ET).
+        <div className="bg-card border border-border rounded-xl p-8 text-center space-y-3">
+          <Filter size={22} className="text-muted mx-auto" />
+          <p className="text-base text-fg font-display">
+            {isWithinRth() ? 'No prints yet' : 'Markets are closed'}
+          </p>
+          <p className="text-xs text-subtle leading-relaxed max-w-sm mx-auto">
+            {isWithinRth() ? (
+              <>
+                The dxlink worker hasn't logged any large prints for{' '}
+                <span className="text-fg">{tickerFilter || 'tracked tickers'}</span>{' '}
+                today. Flow data fills in throughout the session — check
+                back after the open settles or once a UOA hits.
+              </>
+            ) : (
+              <>
+                Flow only ticks during regular hours (M–F, 9:30am–4pm ET).
+                Come back when the bell rings — we'll have prints
+                streaming within the first 30 seconds.
+              </>
+            )}
           </p>
         </div>
       )}
