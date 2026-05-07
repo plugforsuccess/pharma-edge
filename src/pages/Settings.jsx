@@ -227,6 +227,28 @@ export default function Settings() {
           settings. The DB columns stay; their values are still used
           where set, but new users default to the constants. */}
 
+      <Section title="Appearance">
+        <div className="flex items-center justify-between">
+          <div className="flex-1 pr-4">
+            <p className="text-white text-sm font-medium">Theme</p>
+            <p className="text-subtle text-xs mt-0.5">
+              Cash Moves is dark-mode only — the saturation reads
+              right against the green/red P&L palette in low-light
+              trading conditions.
+            </p>
+          </div>
+          <span className="shrink-0 px-2.5 py-1 rounded-full border border-border bg-bg-elev text-subtle text-[10px] uppercase tracking-wider font-semibold">
+            Dark
+          </span>
+        </div>
+        <p className="text-muted text-[10px] leading-relaxed">
+          Light mode isn't on the roadmap. If your environment requires
+          one, increase OS-level brightness or use system-level reader
+          extensions — the contrast tokens here aren't designed to
+          flip cleanly.
+        </p>
+      </Section>
+
       {error && (
         <div className="bg-red-950/30 border border-red-900/50 rounded-lg p-3">
           <p className="text-red-400 text-xs" role="alert">
