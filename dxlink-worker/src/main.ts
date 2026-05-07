@@ -74,8 +74,13 @@ async function rougheSpot(ticker: string): Promise<number | null> {
 }
 
 function pickExpirations(chain: ChainExpiration[], n: number): ChainExpiration[] {
+  // Include today's 0DTE expiration. The previous strict `> 0` filter
+  // skipped today's column entirely, leaving the matrix's front
+  // expiration blank — exactly the period when the most flow concentrates
+  // and the gamma profile matters most. Today's options are still
+  // tradable until 16:00 ET; only filter strictly-past-dated entries.
   return chain
-    .filter((e) => e.daysToExpiration > 0)
+    .filter((e) => e.daysToExpiration >= 0)
     .sort((a, b) => a.daysToExpiration - b.daysToExpiration)
     .slice(0, n)
 }
