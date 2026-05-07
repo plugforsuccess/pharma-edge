@@ -73,6 +73,23 @@ export default function GexMatrix({ data }) {
     return m
   }, [cells])
 
+  // Find the index of the strike closest to spot. Strikes are sorted
+  // descending, so we pick the first one at or below spot — that's the
+  // row Skylit-style highlights with a ▶ marker. Falls back to the
+  // closest absolute distance if the list is unusual.
+  const spotStrikeIndex = useMemo(() => {
+    if (spot == null || strikes.length === 0) return -1
+    for (let i = 0; i < strikes.length; i++) {
+      if (strikes[i] <= spot) {
+        if (i > 0 && Math.abs(strikes[i - 1] - spot) < Math.abs(strikes[i] - spot)) {
+          return i - 1
+        }
+        return i
+      }
+    }
+    return strikes.length - 1
+  }, [strikes, spot])
+
   if (strikes.length === 0 || expirations.length === 0) {
     return (
       <div className="text-center text-subtle text-sm py-8">
@@ -102,52 +119,50 @@ export default function GexMatrix({ data }) {
       </div>
 
       {strikes.map((strike, i) => {
-        const next = strikes[i + 1]
-        const showSpotAfter =
-          spot != null && strike >= spot && (next == null || next < spot)
+        const isSpotRow = i === spotStrikeIndex
         return (
-          <div key={strike}>
+          <div
+            key={strike}
+            className={
+              'grid ' +
+              (isSpotRow
+                ? 'ring-1 ring-amber-400/40 bg-amber-400/5'
+                : '')
+            }
+            style={gridCols(expirations.length)}
+          >
             <div
-              className="grid"
-              style={gridCols(expirations.length)}
+              className={
+                'px-2 py-1.5 font-semibold tabular-nums flex items-center gap-1 ' +
+                (isSpotRow
+                  ? 'text-amber-400 bg-amber-400/10'
+                  : 'text-fg bg-bg-elev/40')
+              }
+              title={isSpotRow ? `Spot ${formatStrike(spot)}` : undefined}
             >
-              <div className="px-2 py-1.5 text-fg font-semibold tabular-nums bg-bg-elev/40">
-                {formatStrike(strike)}
-              </div>
-              {cells[i].map((v, j) => {
-                const isLargest =
-                  largest &&
-                  largest.strike_index === i &&
-                  largest.expiration_index === j
-                return (
-                  <div
-                    key={j}
-                    className="px-2 py-1.5 text-right tabular-nums text-fg flex items-center justify-end gap-1"
-                    style={{ backgroundColor: gexColor(v, maxAbs) }}
-                  >
-                    {isLargest && <span className="text-[10px]">★</span>}
-                    <span>{formatGex(v)}</span>
-                  </div>
-                )
-              })}
+              {isSpotRow && (
+                <span className="text-amber-400 text-[10px]" aria-hidden>
+                  ▶
+                </span>
+              )}
+              {formatStrike(strike)}
             </div>
-
-            {showSpotAfter && (
-              <div
-                className="grid bg-bg border-y border-amber-400/30 my-px"
-                style={gridCols(expirations.length)}
-              >
-                <div className="px-2 py-1 text-amber-400 font-semibold tabular-nums">
-                  ▶ {formatStrike(spot)}
-                </div>
+            {cells[i].map((v, j) => {
+              const isLargest =
+                largest &&
+                largest.strike_index === i &&
+                largest.expiration_index === j
+              return (
                 <div
-                  className="px-2 py-1 text-right text-amber-400 text-[9px] uppercase tracking-wider"
-                  style={{ gridColumn: `span ${expirations.length}` }}
+                  key={j}
+                  className="px-2 py-1.5 text-right tabular-nums text-fg flex items-center justify-end gap-1"
+                  style={{ backgroundColor: gexColor(v, maxAbs) }}
                 >
-                  spot
+                  {isLargest && <span className="text-[10px]">★</span>}
+                  <span>{formatGex(v)}</span>
                 </div>
-              </div>
-            )}
+              )
+            })}
           </div>
         )
       })}
