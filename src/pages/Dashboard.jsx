@@ -7,17 +7,27 @@ import { daysUntil } from '../utils/dates'
 import { catalystLabel, directionLabel } from '../lib/design'
 import NotificationCenter from '../components/NotificationCenter'
 import OpenPositions from '../components/OpenPositions'
-import LiveGexStrip from '../components/LiveGexStrip'
 import SuggestedPlays from '../components/SuggestedPlays'
+import MarketPulse from '../components/MarketPulse'
+import TapeTickerRow from '../components/TapeTickerRow'
 import PullToRefreshIndicator from '../components/PullToRefreshIndicator'
 import usePullToRefresh from '../hooks/usePullToRefresh'
 import clsx from 'clsx'
 
-// The default ticker for the Tape's Suggested Plays card. Users will be
-// able to pin their preferred ticker once Cash Moves Pro lands; for now
-// SPY is the most-traded underlying and the safest default for the GEX
-// pivot's primary use case (0DTE/short-DTE directional plays).
+// Default starting ticker for the Tape's multi-ticker surfaces.
+// Persisted to localStorage so a user who lives in QQQ doesn't get
+// snapped back to SPY every time they open the app.
 const TAPE_DEFAULT_TICKER = 'SPY'
+const TAPE_TICKER_STORAGE_KEY = 'pe_tape_ticker'
+
+function loadInitialTicker() {
+  if (typeof window === 'undefined') return TAPE_DEFAULT_TICKER
+  try {
+    const v = window.localStorage.getItem(TAPE_TICKER_STORAGE_KEY)
+    if (v && /^[A-Z][A-Z0-9.\-]{0,9}$/.test(v)) return v
+  } catch { /* private mode */ }
+  return TAPE_DEFAULT_TICKER
+}
 
 export default function Dashboard() {
   const { user } = useAuth()
@@ -27,6 +37,13 @@ export default function Dashboard() {
   const [pendingCandidates, setPendingCandidates] = useState(0)
   const [watchlistCandidates, setWatchlistCandidates] = useState(0)
   const [loading, setLoading] = useState(true)
+  const [activeTicker, setActiveTicker] = useState(loadInitialTicker)
+
+  // Persist the active ticker so it survives navigation away and back.
+  useEffect(() => {
+    if (typeof window === 'undefined' || !activeTicker) return
+    try { window.localStorage.setItem(TAPE_TICKER_STORAGE_KEY, activeTicker) } catch { /* */ }
+  }, [activeTicker])
 
   useEffect(() => {
     if (!user) return
@@ -118,23 +135,15 @@ export default function Dashboard() {
         refreshing={refreshing}
         threshold={threshold}
       />
-      {/* Header */}
-      <header className="flex items-start justify-between mb-6">
-        <div>
-          <p className="eyebrow">{dateStr} · The Tape</p>
-          <h1 className="font-display text-[2rem] leading-[1.05] mt-1.5 tracking-tight">
-            <span className="brand-text font-bold">Cash</span>{' '}
-            <span className="text-fg font-light">Moves</span>
-          </h1>
-        </div>
+      {/* Compact header — date eyebrow + bell + settings. The big
+          "Cash Moves" wordmark was eating prime above-the-fold real
+          estate; the brand identity is already established in the
+          nav, so the Tape can spend that space on actual market
+          information. */}
+      <header className="flex items-center justify-between mb-4">
+        <p className="eyebrow">{dateStr} · The Tape</p>
         <div className="flex items-center gap-2">
           <NotificationCenter />
-          {/* Settings entry point on mobile. Bottom nav was trimmed
-              to 4 tabs + Log FAB so Settings doesn't fit there;
-              this gear icon next to the bell is the canonical
-              entry on mobile. Desktop already has Settings in the
-              sidebar. lg:hidden so we don't duplicate on big
-              screens. */}
           <button
             type="button"
             onClick={() => navigate('/settings')}
@@ -146,38 +155,39 @@ export default function Dashboard() {
         </div>
       </header>
 
-      {/* Thin stats strip — full-width across both columns. Was the page's
-          eyebrow before the GEX pivot; now it's a status line. */}
-      <section className="surface rounded-xl px-2 py-2 mb-5">
-        <div className="grid grid-cols-4">
-          <Stat label="Open" value={stats.open} />
-          <Stat label="Wins" value={stats.wins} tone="green" divider />
-          <Stat label="Losses" value={stats.losses} tone="red" divider />
-          <Stat
-            label="Win Rate"
-            value={`${stats.winRate}%`}
-            tone={stats.winRate >= 55 ? 'green' : stats.winRate > 0 ? 'amber' : 'neutral'}
-            divider
-          />
+      {/* Hero band — the new top-of-page anchor.
+          Mobile: ticker row → Pulse → Plays. The two surfaces share the
+          activeTicker so flipping a chip flips both.
+          Desktop: hero spans the full content width above the two-column
+          split below. */}
+      <TapeTickerRow active={activeTicker} onSelect={setActiveTicker} />
+      <MarketPulse ticker={activeTicker} />
+
+      <section className="mb-5">
+        <div className="flex items-end justify-between mb-2.5">
+          <div>
+            <p className="eyebrow">Gamma · {activeTicker}</p>
+            <h2 className="font-display text-base text-fg mt-0.5">Suggested Plays</h2>
+          </div>
+          <button
+            onClick={() => navigate(`/markets?ticker=${activeTicker}`)}
+            className="text-[11px] text-subtle hover:text-fg transition-colors"
+          >
+            Open in Markets →
+          </button>
         </div>
+        <SuggestedPlays ticker={activeTicker} isPro={false} />
       </section>
 
-      {/* Mobile order: GEX strip → Open Positions → (Onboarding / Queue) →
-          Suggested Plays → Log CTA → Live Moves → Paper Trading.
-          Desktop two-column: dealer-positioning + plays + moves on the left,
-          personal state (positions, paper trading) on the right rail.
-          Single mount per component — order classes control mobile flow,
-          col-start controls desktop placement. */}
+      {/* Two-column layout for personal state + Live Moves below the
+          shared market hero. Open Positions on the right rail desktop,
+          stacked below Plays on mobile. */}
       <div className="flex flex-col lg:grid lg:grid-cols-[2fr_1fr] lg:gap-x-6 lg:gap-y-5">
-        <div className="order-1 lg:col-start-1 lg:row-start-1 min-w-0">
-          <LiveGexStrip />
-        </div>
-
         <div className="order-2 lg:col-start-2 lg:row-start-1 mb-5 lg:mb-0">
           <OpenPositions />
         </div>
 
-        <div className="order-3 lg:col-start-1 lg:row-start-2 min-w-0">
+        <div className="order-1 lg:col-start-1 lg:row-start-1 min-w-0">
           {isFirstRun && <OnboardingCard navigate={navigate} />}
 
           {/* Queue cards — biotech surfaces, kept for now until the sunset PR
@@ -207,26 +217,6 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* Suggested plays for the default ticker. Embedded directly so
-              the Tape becomes the action surface — no need to bounce to
-              Markets to see what's tradable right now. */}
-          <section className="mb-5">
-            <div className="flex items-end justify-between mb-2.5">
-              <div>
-                <p className="eyebrow">Gamma · {TAPE_DEFAULT_TICKER}</p>
-                <h2 className="font-display text-base text-fg mt-0.5">Suggested Plays</h2>
-              </div>
-              <button
-                onClick={() => navigate(`/markets?ticker=${TAPE_DEFAULT_TICKER}`)}
-                className="text-[11px] text-subtle hover:text-fg transition-colors"
-              >
-                Open in Markets →
-              </button>
-            </div>
-            <SuggestedPlays ticker={TAPE_DEFAULT_TICKER} isPro={false} />
-          </section>
-
-          {/* Log Move — primary CTA, full-width pill above the Live Moves feed. */}
           <button
             onClick={() => navigate('/log')}
             className="btn-primary w-full inline-flex items-center justify-center gap-2 text-sm font-semibold px-4 py-3 rounded-xl mb-4"
@@ -235,7 +225,6 @@ export default function Dashboard() {
             Log a Move
           </button>
 
-          {/* Moves feed */}
           <div className="flex items-end justify-between mb-3">
             <div>
               <p className="eyebrow">Live Theses</p>
@@ -292,6 +281,24 @@ export default function Dashboard() {
         </div>
 
       </div>
+
+      {/* Record summary moved to the bottom — your trading record over
+          time is interesting context, but it's not what drives a
+          decision the moment you open the app. Keeping it visible
+          but de-emphasized below the action surfaces. */}
+      <section className="surface rounded-xl px-2 py-2 mt-6">
+        <div className="grid grid-cols-4">
+          <Stat label="Open" value={stats.open} />
+          <Stat label="Wins" value={stats.wins} tone="green" divider />
+          <Stat label="Losses" value={stats.losses} tone="red" divider />
+          <Stat
+            label="Win Rate"
+            value={`${stats.winRate}%`}
+            tone={stats.winRate >= 55 ? 'green' : stats.winRate > 0 ? 'amber' : 'neutral'}
+            divider
+          />
+        </div>
+      </section>
     </div>
   )
 }
