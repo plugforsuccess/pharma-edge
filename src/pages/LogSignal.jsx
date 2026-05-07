@@ -522,7 +522,7 @@ export default function LogSignal() {
               isn't in the list (newly-IPO'd, OTC, etc.). */}
           <div>
             <label className="text-muted text-xs uppercase tracking-wider block mb-1">
-              Ticker <span className="text-red-500">*</span>
+              Ticker <span className="text-red-400">*</span>
             </label>
             <button
               type="button"

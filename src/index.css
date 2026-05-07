@@ -1,5 +1,48 @@
 @import "tailwindcss";
 
+/* ─── Tone palette discipline ────────────────────────────────────
+ *
+ * Color usage is opinionated. Every visible color in the app should
+ * resolve to one of these four families:
+ *
+ *   1. AMBER  — brand. CTAs (Log a Move, Test Connection), Pro tier,
+ *               "live" / favorited / hash-locked indicators, share
+ *               buttons. The "this is Cash Moves" tone.
+ *               Use: text-amber-400, bg-amber-400, border-amber-400/40.
+ *
+ *   2. GREEN  — wins. long_call direction, profit %, calibration in
+ *               the well-calibrated band, "synced" success states.
+ *               Use: text-green-400 (the brand-mapped #1de851).
+ *
+ *   3. RED    — losses + errors. long_put direction, drawdown %,
+ *               connection failures, hard rule violations.
+ *               Use: text-red-400, bg-red-950/30. text-crimson for
+ *               the brand-mapped #e0344c.
+ *
+ *   4. YELLOW — caution. Calibration drift in the over/under-confident
+ *               band, DTE warnings, "15M DELAYED" badge, paper-trading
+ *               period warnings. Distinct from AMBER on purpose:
+ *               yellow says "be careful," amber says "primary action."
+ *               Use: text-yellow-400, bg-yellow-950/20.
+ *
+ * Plus three accent tones reserved for spread-structure differentiation
+ * on the LogSignal strategy picker, where mapping all credit spreads
+ * to "green" would falsely imply they're all winners:
+ *
+ *   - emerald  — Bull Put Credit
+ *   - rose     — Bear Call Credit
+ *   - purple   — Iron Condor
+ *
+ * These accents do NOT carry tone meaning anywhere else. If you need
+ * a fifth color for some other state, prefer adjusting one of the four
+ * families above.
+ *
+ * Avoid: text-red-500, text-yellow-500, text-green-600 (variants
+ * that drift outside the canonical 400-shade ramp; they read as
+ * "almost but not quite the brand color"). Stick to *-400 across
+ * each family.
+ */
+
 @theme {
   /* Surfaces — deeper, more sophisticated than generic dark */
   --color-bg: #06060a;

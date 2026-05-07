@@ -831,7 +831,7 @@ export default function StrikePriceCalculator({
           )}
           {premiumValid === true && (
             <div className="bg-green-950/10 border border-green-900/20 rounded-xl p-2">
-              <p className="text-green-600 text-[10px]">
+              <p className="text-green-400 text-[10px]">
                 {config.isCredit
                   ? '✓ Credit clears the 60% floor (R/R ≥ 1:1.5)'
                   : '✓ Premium within the 40% cap (R/R ≥ 1:1.5)'}
@@ -927,7 +927,7 @@ function ResultPanel({ result, config, expiry, sellStrike, buyStrike, premium })
             'rounded-xl p-3 border text-[10px]',
             result.dteWarning.kind === 'warn'
               ? 'bg-yellow-950/20 border-yellow-900/40 text-yellow-400'
-              : 'bg-green-950/10 border-green-900/20 text-green-600',
+              : 'bg-green-950/10 border-green-900/20 text-green-400',
           )}
         >
           {result.dteWarning.text}

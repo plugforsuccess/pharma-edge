@@ -459,7 +459,7 @@ function CandidateCard({
               <div className="space-y-1">
                 {flags.map((flag, i) => (
                   <div key={i} className="flex items-start gap-2">
-                    <span className="text-red-500 text-xs">⚠</span>
+                    <span className="text-red-400 text-xs">⚠</span>
                     <p className="text-zinc-400 text-xs">{flag}</p>
                   </div>
                 ))}
