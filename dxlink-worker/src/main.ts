@@ -23,6 +23,7 @@
 import {
   equityStreamerSymbol,
   fetchNestedChain,
+  fetchOpenInterestMap,
   getStreamerAuth,
   login,
   type ChainExpiration,
@@ -261,6 +262,31 @@ async function main() {
   ]
   await seedShadowFromDb(allSymbols)
 
+  // Authoritative OI snapshot from Tastytrade REST. dxFeed Summary
+  // frames are unreliable as a first-time seed (snapshot-on-change
+  // semantics — symbols whose OI hasn't moved since session start
+  // never get a frame). We pull /market-metrics for every option's
+  // OCC symbol on boot, then map back to the dxFeed streamer symbol
+  // and apply OI to the shadow Map. Result: matrix is dense from
+  // tick zero, regardless of whether Summary frames arrive.
+  try {
+    const occSymbols = options.map((o) => o.occ).filter(Boolean)
+    const occToStreamer = new Map(options.map((o) => [o.occ, o.streamer]))
+    console.log(`[main] fetching OI snapshot for ${occSymbols.length} options`)
+    const oiMap = await fetchOpenInterestMap(session, occSymbols)
+    let applied = 0
+    for (const [occ, oi] of oiMap) {
+      const streamer = occToStreamer.get(occ)
+      if (streamer && Number.isFinite(oi)) {
+        applyEvent(streamer, { open_interest: oi })
+        applied++
+      }
+    }
+    console.log(`[main] OI snapshot applied to ${applied}/${oiMap.size} symbols`)
+  } catch (e) {
+    console.warn('[main] OI snapshot failed (non-fatal):', e)
+  }
+
   const CHUNK = 500
   for (let i = 0; i < allSpecs.length; i += CHUNK) {
     await client.subscribe(allSpecs.slice(i, i + CHUNK))
@@ -325,6 +351,28 @@ async function main() {
           await client.subscribe(newSpecs.slice(i, i + CHUNK))
         }
         console.log(`[main] subscribed to ${newSpecs.length} new symbols`)
+      }
+
+      // Refresh the OI snapshot for the full universe (new + existing
+      // strikes) — OI changes intraday as positions open and close,
+      // so a 4h refresh keeps the matrix accurate. We call this even
+      // if no new strikes were added, since it picks up OI drift on
+      // existing legs.
+      try {
+        const occSymbols = options.map((o) => o.occ).filter(Boolean)
+        const occToStreamer = new Map(options.map((o) => [o.occ, o.streamer]))
+        const oiMap = await fetchOpenInterestMap(session, occSymbols)
+        let applied = 0
+        for (const [occ, oi] of oiMap) {
+          const streamer = occToStreamer.get(occ)
+          if (streamer && Number.isFinite(oi)) {
+            applyEvent(streamer, { open_interest: oi })
+            applied++
+          }
+        }
+        console.log(`[main] OI snapshot refreshed for ${applied}/${oiMap.size} symbols`)
+      } catch (e) {
+        console.warn('[main] OI snapshot refresh failed (non-fatal):', e)
       }
     } catch (e) {
       console.error('[main] plan refresh failed:', e)
