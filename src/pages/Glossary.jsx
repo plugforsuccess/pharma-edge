@@ -529,16 +529,16 @@ function PlaybookRow({ setup, regime, strike, dte, why }) {
         <span className="text-xs font-semibold text-fg leading-tight">
           {setup}
         </span>
-        <span className="text-[9px] uppercase tracking-wider text-amber-400 font-semibold shrink-0">
+        <span className="text-[10px] uppercase tracking-wider text-amber-400 font-semibold shrink-0">
           {regime}
         </span>
       </div>
       <div className="grid grid-cols-[auto,1fr] gap-x-2 gap-y-0.5 text-[11px] leading-snug">
-        <span className="text-muted uppercase tracking-wider text-[9px] pt-0.5">
+        <span className="text-muted uppercase tracking-wider text-[10px] pt-0.5">
           Strike
         </span>
         <span className="text-subtle">{strike}</span>
-        <span className="text-muted uppercase tracking-wider text-[9px] pt-0.5">
+        <span className="text-muted uppercase tracking-wider text-[10px] pt-0.5">
           DTE
         </span>
         <span className="text-subtle">{dte}</span>

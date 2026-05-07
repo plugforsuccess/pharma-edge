@@ -43,6 +43,30 @@
  * each family.
  */
 
+/* ─── Type scale discipline ──────────────────────────────────────
+ *
+ * Five sizes, two weights. Trading-dashboard density wants tight
+ * hierarchy — every off-spec arbitrary size makes the page feel
+ * inconsistent on long scrolls.
+ *
+ *   text-[10px]  — eyebrows, micro-caps, badges, "as of" timestamps
+ *   text-[11px]  — supporting body (helper text under inputs,
+ *                  rationale paragraphs, fine-print disclaimers)
+ *   text-xs (12px) — default body small (table rows, signal cards)
+ *   text-sm (14px) — body default (input labels, primary copy)
+ *   text-lg (18px) — section / card titles
+ *   text-2xl–3xl   — hero numbers (NLV, win rate %), page titles
+ *
+ * Weight: regular (400) for body, semibold (600) for titles + numeric
+ * stats. Bold (700) reserved for amber CTAs and the public-record
+ * hero numbers. Don't introduce 500/800.
+ *
+ * Off-spec sizes (text-[8px], text-[9px], text-[12px], text-[13px],
+ * text-[15px], text-[17px], text-[18px]) have been purged in favor
+ * of the canonical 5; if you need an arbitrary value, prefer
+ * adjusting line-height or letter-spacing on a canonical size first.
+ */
+
 @theme {
   /* Surfaces — deeper, more sophisticated than generic dark */
   --color-bg: #06060a;

@@ -98,7 +98,7 @@ function GexCard({ row, onClick }) {
         onClick={onClick}
         className="surface surface-hover rounded-xl px-3 py-2.5 min-w-[145px] snap-start text-left"
       >
-        <div className="text-fg font-mono-tab text-[13px] font-semibold">
+        <div className="text-fg font-mono-tab text-sm font-semibold">
           {row.ticker}
         </div>
         <div className="text-muted text-[10px] mt-1">no data</div>
@@ -126,12 +126,12 @@ function GexCard({ row, onClick }) {
                  group transition-transform active:scale-[0.98]"
     >
       <div className="flex items-center justify-between mb-1.5">
-        <span className="font-mono-tab text-fg font-semibold text-[13px] tracking-tight">
+        <span className="font-mono-tab text-fg font-semibold text-sm tracking-tight">
           {row.ticker}
         </span>
         <span
           className={clsx(
-            'inline-flex items-center gap-0.5 text-[9px] uppercase tracking-wider font-semibold',
+            'inline-flex items-center gap-0.5 text-[10px] uppercase tracking-wider font-semibold',
             positiveRegime ? 'text-green-400/80' : 'text-[#f25068]/80',
           )}
           title={
@@ -145,7 +145,7 @@ function GexCard({ row, onClick }) {
         </span>
       </div>
 
-      <div className={clsx('font-display text-[18px] leading-none num-tab flex items-baseline gap-1', spotTone)}>
+      <div className={clsx('font-display text-lg leading-none num-tab flex items-baseline gap-1', spotTone)}>
         <TrendIcon size={11} strokeWidth={2.5} className="opacity-80 self-center" />
         ${formatPrice(d.spot)}
       </div>

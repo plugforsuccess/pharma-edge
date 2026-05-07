@@ -60,7 +60,7 @@ export default function GexHeatmap({ data }) {
               >
                 {formatStrike(row.strike)}
                 {isFlip && (
-                  <span className="ml-1 text-[9px] uppercase tracking-wide">
+                  <span className="ml-1 text-[10px] uppercase tracking-wide">
                     flip
                   </span>
                 )}

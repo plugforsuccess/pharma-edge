@@ -666,7 +666,7 @@ export default function StrikePriceCalculator({
                   onClick={fetchBrokerAccount}
                   disabled={nlvLoading}
                   className={clsx(
-                    'inline-flex items-center gap-1 text-[9px] uppercase tracking-wider transition',
+                    'inline-flex items-center gap-1 text-[10px] uppercase tracking-wider transition',
                     nlvLoading
                       ? 'text-muted cursor-wait'
                       : liveNlv != null
