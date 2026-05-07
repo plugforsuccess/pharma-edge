@@ -2,7 +2,8 @@
 
 Long-running Deno process that maintains a single WebSocket connection
 to Tastytrade's dxFeed (DXLink) gateway and streams real-time quotes,
-greeks, and open interest for a curated universe of tickers into
+greeks, and open interest (seeded from Yahoo's chain endpoint on boot
+and on the 4h chain-refresh cadence) for a curated universe of tickers into
 `public.dxlink_quotes`. The `compute-gex` Supabase Edge Function reads
 from that table to render the GEX heatmap on `/markets`.
 
