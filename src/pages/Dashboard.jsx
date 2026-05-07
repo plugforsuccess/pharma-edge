@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Activity, ChevronRight, Cpu, Eye, Plus, Sparkles, TrendingUp } from 'lucide-react'
+import { Activity, ChevronRight, Cpu, Eye, Plus, Settings as SettingsIcon, Sparkles, TrendingUp } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { daysUntil } from '../utils/dates'
@@ -127,7 +127,23 @@ export default function Dashboard() {
             <span className="text-fg font-light">Moves</span>
           </h1>
         </div>
-        <NotificationCenter />
+        <div className="flex items-center gap-2">
+          <NotificationCenter />
+          {/* Settings entry point on mobile. Bottom nav was trimmed
+              to 4 tabs + Log FAB so Settings doesn't fit there;
+              this gear icon next to the bell is the canonical
+              entry on mobile. Desktop already has Settings in the
+              sidebar. lg:hidden so we don't duplicate on big
+              screens. */}
+          <button
+            type="button"
+            onClick={() => navigate('/settings')}
+            aria-label="Settings"
+            className="lg:hidden tap-spring relative w-9 h-9 bg-card border border-border rounded-xl flex items-center justify-center text-muted hover:text-fg transition-colors"
+          >
+            <SettingsIcon size={16} />
+          </button>
+        </div>
       </header>
 
       {/* Thin stats strip — full-width across both columns. Was the page's
