@@ -300,7 +300,7 @@ function extractJson(rawText: string): unknown {
   const first = stripped.indexOf('{')
   const last = stripped.lastIndexOf('}')
   if (first === -1 || last === -1 || last <= first) {
-    throw new Error('claude did not return parseable JSON')
+    throw new Error('analysis engine did not return parseable JSON')
   }
   return JSON.parse(stripped.slice(first, last + 1))
 }
@@ -368,7 +368,7 @@ serve(async (req) => {
     .gte('called_at', sinceIso)
   if ((recentCalls ?? 0) >= RATE_LIMIT_PER_HOUR) {
     return json(
-      { success: false, error: `rate limited: ${RATE_LIMIT_PER_HOUR} Claude calls per hour reached` },
+      { success: false, error: `rate limited: ${RATE_LIMIT_PER_HOUR} analyses per hour reached` },
       429,
     )
   }
@@ -457,13 +457,13 @@ serve(async (req) => {
   })
   if (!claudeResp.ok) {
     const detail = await claudeResp.text().catch(() => '')
-    return json({ success: false, error: `claude returned ${claudeResp.status}: ${detail.slice(0, 200)}` }, 502)
+    return json({ success: false, error: `analysis backend returned ${claudeResp.status}: ${detail.slice(0, 200)}` }, 502)
   }
   const claudeBody = await claudeResp.json()
   const text = claudeBody?.content?.[0]?.text
-  if (!text) return json({ success: false, error: 'claude response had no text content' }, 502)
+  if (!text) return json({ success: false, error: 'analysis response had no text content' }, 502)
   if (claudeBody.stop_reason === 'max_tokens') {
-    return json({ success: false, error: 'claude response truncated; try a different ticker' }, 502)
+    return json({ success: false, error: 'analysis response truncated; try a different ticker' }, 502)
   }
 
   let parsed

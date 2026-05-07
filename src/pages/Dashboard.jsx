@@ -7,7 +7,6 @@ import { daysUntil } from '../utils/dates'
 import { catalystLabel, directionLabel } from '../lib/design'
 import NotificationCenter from '../components/NotificationCenter'
 import OpenPositions from '../components/OpenPositions'
-import PaperTradingStatus from '../components/PaperTradingStatus'
 import LiveGexStrip from '../components/LiveGexStrip'
 import SuggestedPlays from '../components/SuggestedPlays'
 import clsx from 'clsx'
@@ -183,7 +182,7 @@ export default function Dashboard() {
           <section className="mb-5">
             <div className="flex items-end justify-between mb-2.5">
               <div>
-                <p className="eyebrow">Claude · {TAPE_DEFAULT_TICKER}</p>
+                <p className="eyebrow">Gamma · {TAPE_DEFAULT_TICKER}</p>
                 <h2 className="font-display text-base text-fg mt-0.5">Suggested Plays</h2>
               </div>
               <button
@@ -250,11 +249,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* PaperTradingStatus — last on mobile (low-freq widget), bottom of
-            the right rail on desktop. */}
-        <div className="order-4 lg:col-start-2 lg:row-start-2 mt-4 lg:mt-0">
-          <PaperTradingStatus stats={stats} />
-        </div>
       </div>
     </div>
   )
@@ -272,7 +266,7 @@ function OnboardingCard({ navigate }) {
     {
       icon: Sparkles,
       title: 'Get a suggested play',
-      sub: 'Claude reads dealer positioning and proposes 0–3 setups (spread or single-leg long) that fit your account.',
+      sub: 'Cash Moves reads dealer positioning and proposes spread setups that fit your account-size rules.',
       cta: 'Generate',
       onClick: () => navigate('/markets'),
     },

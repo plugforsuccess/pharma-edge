@@ -110,10 +110,10 @@ export default function SuggestedPlays({ ticker, isPro }) {
           <h2 className="text-sm font-semibold">Suggested Plays</h2>
         </div>
         <p className="text-xs text-subtle leading-relaxed">
-          Claude reads the live GEX matrix and proposes 0–3 spread trade
-          setups that fit your Cash Moves rules — strikes, expiration,
-          contract count, R/R, and the rationale citing specific GEX
-          numbers. Pro feature.
+          Cash Moves reads the live GEX matrix and proposes spread trade
+          setups that fit your rules — strikes, expiration, contract
+          count, R/R, and the rationale citing specific GEX numbers.
+          Pro feature.
         </p>
       </div>
     )
@@ -141,11 +141,11 @@ export default function SuggestedPlays({ ticker, isPro }) {
       <div className="p-4 space-y-3">
         {!data && !loading && !error && (
           <p className="text-xs text-subtle leading-relaxed">
-            Tap <strong className="text-amber-400">Generate</strong> to ask
-            Claude for spread setups based on{' '}
+            Tap <strong className="text-amber-400">Generate</strong> for
+            spread setups based on{' '}
             <strong className="text-fg">{ticker}</strong>'s live GEX matrix
-            and your account size. ~$0.04 in API tokens per call (counts
-            against your 30/hour Claude quota).
+            and your account size. Refreshes once per 5 min cache window;
+            limited to 30 generations per hour per account.
           </p>
         )}
 
@@ -202,9 +202,9 @@ export default function SuggestedPlays({ ticker, isPro }) {
         {data && Array.isArray(data.plays) && data.plays.length === 0 && (
           <p className="text-xs text-subtle leading-relaxed py-2">
             <strong className="text-fg">No high-conviction setups</strong>{' '}
-            in the current matrix. Claude declined to invent one to pad
-            the response. Check back when the chain has firmed up
-            (typically late-morning + post-1pm ET).
+            in the current matrix. Cash Moves only surfaces plays that
+            clear the rules — no padding. Check back when the chain has
+            firmed up (typically late-morning + post-1pm ET).
           </p>
         )}
 

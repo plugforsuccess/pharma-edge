@@ -131,7 +131,7 @@ function extractJson(rawText: string): unknown {
   const first = stripped.indexOf('{')
   const last = stripped.lastIndexOf('}')
   if (first === -1 || last === -1 || last <= first) {
-    throw new Error('claude did not return parseable JSON')
+    throw new Error('analysis engine did not return parseable JSON')
   }
   return JSON.parse(stripped.slice(first, last + 1))
 }
@@ -254,7 +254,7 @@ serve(async (req) => {
         if (!claudeResp.ok || !claudeResp.body) {
           const detail = await claudeResp.text().catch(() => '')
           send('error', {
-            error: `claude returned ${claudeResp.status}`,
+            error: `analysis backend returned ${claudeResp.status}`,
             detail: detail.slice(0, 500),
           })
           return
@@ -329,7 +329,7 @@ serve(async (req) => {
               // wrap up below
             } else if (t === 'error') {
               const err = evt.error as Record<string, unknown> | undefined
-              send('error', { error: (err?.message as string) || 'claude stream error' })
+              send('error', { error: (err?.message as string) || 'analysis stream error' })
               return
             }
           }

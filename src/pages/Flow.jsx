@@ -199,10 +199,10 @@ export default function Flow() {
         Volume + premium are running totals since the open. Premium = price ×
         size × 100 per print, summed. Biggest print flagged when ≥ 100
         contracts. UOA (unusual activity) is approximated as strikes with
-        single prints ≥ 500 contracts or total volume ≥ 5K. Without standing
-        OI in this view we can't compute exact vol/OI ratios — the
-        Suggested Plays prompt sees those numbers and uses them in
-        Claude's reasoning.
+        single prints ≥ 500 contracts or total volume ≥ 5K. Without
+        standing OI in this view we can't compute exact vol/OI ratios —
+        the Suggested Plays engine sees those numbers and folds them into
+        the play rationale.
       </p>
     </div>
   )
