@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Bell, BellOff, Check, Copy, ExternalLink, Link2, LogOut, Plus, Share2, Trash2, Zap } from 'lucide-react'
+import { Bell, BellOff, Check, Copy, Download, ExternalLink, Link2, LogOut, Plus, Share2, Trash2, Zap } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { useSubscription } from '../hooks/useSubscription'
@@ -244,6 +244,8 @@ export default function Settings() {
         {saving ? 'Saving…' : savedFlash ? 'Saved ✓' : 'Save Settings'}
       </button>
 
+      <ExportDataButton userId={user?.id} email={user?.email} />
+
       <button
         type="button"
         onClick={() => signOut()}
@@ -255,6 +257,81 @@ export default function Settings() {
         Sign Out
       </button>
     </div>
+  )
+}
+
+// One-tap "give me everything you have on me" download. Pulls the
+// user's profile, signals, outcomes, and order_history rows via the
+// authenticated client (RLS scopes to own rows automatically), bundles
+// into a JSON file, and triggers a browser download. No edge function
+// needed — RLS does the access control on the client SELECT.
+//
+// Why JSON not CSV: signals carry nested fields (claude_analysis_full,
+// signal_scores, source_urls) that flatten badly to CSV. JSON is the
+// honest format. Power users can pipe through `jq` if they want CSV.
+function ExportDataButton({ userId, email }) {
+  const [busy, setBusy] = useState(false)
+  const [done, setDone] = useState(false)
+
+  async function handleExport() {
+    if (!userId) return
+    setBusy(true)
+    try {
+      const [profileRes, signalsRes, outcomesRes, ordersRes] = await Promise.all([
+        supabase.from('profiles').select('*').eq('id', userId).maybeSingle(),
+        supabase.from('signals').select('*').eq('user_id', userId).order('logged_at', { ascending: false }),
+        supabase.from('outcomes').select('*').eq('user_id', userId).order('recorded_at', { ascending: false }),
+        supabase.from('order_history').select('*').eq('user_id', userId).order('id', { ascending: false }),
+      ])
+      const bundle = {
+        export_metadata: {
+          generated_at: new Date().toISOString(),
+          generated_for: email || null,
+          schema_note:
+            'JSON export of every Cash Moves row attached to your account. Hashes match the rows on cashmoves.io and the GitHub anchor commits.',
+        },
+        profile: profileRes.data ?? null,
+        signals: signalsRes.data ?? [],
+        outcomes: outcomesRes.data ?? [],
+        order_history: ordersRes.data ?? [],
+      }
+      const blob = new Blob([JSON.stringify(bundle, null, 2)], {
+        type: 'application/json',
+      })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      const stamp = new Date().toISOString().slice(0, 10)
+      a.href = url
+      a.download = `cash-moves-export-${stamp}.json`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      setDone(true)
+      setTimeout(() => setDone(false), 2000)
+    } catch (err) {
+      console.error('export failed', err)
+      alert('Export failed — try again or contact support.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleExport}
+      disabled={busy || !userId}
+      className={clsx(
+        'w-full flex items-center justify-center gap-2 border rounded-xl py-3 text-sm font-semibold transition-colors',
+        done
+          ? 'border-green-700 bg-green-950/40 text-green-400'
+          : 'bg-card border-border hover:border-amber-400/50 text-white',
+      )}
+    >
+      <Download size={14} />
+      {busy ? 'Bundling…' : done ? 'Downloaded ✓' : 'Export My Data (JSON)'}
+    </button>
   )
 }
 
