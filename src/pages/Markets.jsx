@@ -14,6 +14,8 @@ import SuggestedPlays from '../components/SuggestedPlays'
 import TrinityView from '../components/TrinityView'
 import UpgradeNotice from '../components/UpgradeNotice'
 import LiveDataStatus from '../components/LiveDataStatus'
+import PullToRefreshIndicator from '../components/PullToRefreshIndicator'
+import usePullToRefresh from '../hooks/usePullToRefresh'
 
 // HOT_TICKERS = the ~50 names the dxlink-worker actually streams
 // (see dxlink-worker/src/tickers.ts). The pill row at the top of the
@@ -184,8 +186,22 @@ export default function Markets() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ticker])
 
+  // Pull-to-refresh: dragging from the top of the page calls the
+  // same `refresh: true` path as the manual refresh button. Disabled
+  // in replay mode so the user can't accidentally clobber the
+  // historical snapshot they're inspecting.
+  const { pullDistance, refreshing, threshold } = usePullToRefresh(
+    () => load(ticker, { refresh: true }),
+    { disabled: replayActive },
+  )
+
   return (
     <div className="px-4 lg:px-6 py-5 space-y-4 max-w-md mx-auto lg:max-w-7xl">
+      <PullToRefreshIndicator
+        pullDistance={pullDistance}
+        refreshing={refreshing}
+        threshold={threshold}
+      />
       <div className="flex items-center gap-3">
         <button
           onClick={() => navigate(-1)}
