@@ -463,7 +463,7 @@ function OutcomeRow({ outcome, onClick }) {
             </span>
           )}
           {!outcome.rules_followed && (
-            <span className="text-[10px] text-yellow-500 border border-yellow-900 px-1.5 py-0.5 rounded-full">
+            <span className="text-[10px] text-yellow-400 border border-yellow-900 px-1.5 py-0.5 rounded-full">
               rule break
             </span>
           )}

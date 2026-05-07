@@ -555,7 +555,7 @@ function PublicSignalRow({ signal }) {
 
       {signal.signal_hash && (
         <div className="flex items-center gap-2 pt-2 border-t border-zinc-900">
-          <Shield size={10} className="text-green-600 flex-shrink-0" />
+          <Shield size={10} className="text-green-400 flex-shrink-0" />
           <p className="text-muted text-[10px] font-mono truncate flex-1">
             {String(signal.signal_hash).slice(0, 16)}…
           </p>

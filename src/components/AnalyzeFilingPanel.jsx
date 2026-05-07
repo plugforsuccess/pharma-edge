@@ -517,7 +517,7 @@ function AnalysisResult({ analysis, onReset }) {
           <div className="space-y-1">
             {analysis.flags.map((flag, i) => (
               <div key={i} className="flex items-start gap-2">
-                <span className="text-red-500 text-xs mt-0.5">⚠</span>
+                <span className="text-red-400 text-xs mt-0.5">⚠</span>
                 <p className="text-zinc-400 text-xs">{flag}</p>
               </div>
             ))}
