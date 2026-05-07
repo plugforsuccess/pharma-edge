@@ -198,7 +198,7 @@ export default function ScannerCandidates() {
         </div>
         <div className="ml-auto flex items-center gap-1 text-muted text-xs">
           <Sparkles size={12} />
-          <span>AI-detected</span>
+          <span>Auto-surfaced</span>
         </div>
       </div>
 

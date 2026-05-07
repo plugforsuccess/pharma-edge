@@ -21,14 +21,14 @@ import LiveDataStatus from '../components/LiveDataStatus'
 // Yahoo's 15-min delayed feed via compute-gex's fallback path).
 const TICKERS = HOT_TICKERS
 
-// Heatmap density presets. compact mirrors the Skylit default. wide
-// and extra trade horizontal/vertical scroll for more strikes and
-// further-out expirations. Bounded server-side by *_LIMIT constants
-// in compute-gex.
-const DENSITY_PRESETS = {
-  compact: { maxExpirations: 4, maxStrikes: 30, strikeWindowPct: 0.05, label: 'Compact' },
-  wide:    { maxExpirations: 6, maxStrikes: 50, strikeWindowPct: 0.10, label: 'Wide' },
-  extra:   { maxExpirations: 8, maxStrikes: 80, strikeWindowPct: 0.20, label: 'Extra' },
+// Single matrix shape — wide enough to expose ~2 weeks of expirations
+// and meaningful walls (ATM ±7%). The user navigates further-out
+// expirations by horizontal-scrolling/swiping the matrix itself
+// instead of clicking a density toggle.
+const MATRIX_OPTS = {
+  maxExpirations: 10,
+  maxStrikes: 50,
+  strikeWindowPct: 0.07,
 }
 
 export default function Markets() {
@@ -65,10 +65,6 @@ export default function Markets() {
   // by load(). Toggling off clears the snapshot and we go back to live.
   const [replayActive, setReplayActive] = useState(false)
   const [replaySnapshot, setReplaySnapshot] = useState(null)
-  // Matrix density: 'compact' is the Skylit default (4×30 strikes,
-  // ATM ±5%); 'wide' and 'extra' progressively expand both axes for
-  // users who want to see further-OTM strikes or more expirations.
-  const [density, setDensity] = useState('compact')
   // User's watchlist tickers, shown as a separate section in the picker
   // so a biotech a user is tracking shows up here without needing to be
   // hardcoded into TICKERS.
@@ -112,21 +108,20 @@ export default function Markets() {
     }
   }, [user?.id])
 
-  async function load(sym, { refresh = false, withDensity = density } = {}) {
+  async function load(sym, { refresh = false } = {}) {
     setLoading(true)
     setError(null)
     setData(null)
     try {
       // matrix:true asks compute-gex for the strikes×expirations grid
       // (Skylit-style heatmap) instead of the single-expiration shape.
-      const dims = DENSITY_PRESETS[withDensity] ?? DENSITY_PRESETS.compact
       const body = {
         ticker: sym,
         refresh,
         matrix: true,
-        matrix_max_expirations: dims.maxExpirations,
-        matrix_max_strikes: dims.maxStrikes,
-        matrix_strike_window_pct: dims.strikeWindowPct,
+        matrix_max_expirations: MATRIX_OPTS.maxExpirations,
+        matrix_max_strikes: MATRIX_OPTS.maxStrikes,
+        matrix_strike_window_pct: MATRIX_OPTS.strikeWindowPct,
       }
       const { data: result, error: invokeErr } = await supabase.functions.invoke(
         'compute-gex',
@@ -159,9 +154,9 @@ export default function Markets() {
   }
 
   useEffect(() => {
-    load(ticker, { withDensity: density })
+    load(ticker)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ticker, density])
+  }, [ticker])
 
   return (
     <div className="px-4 lg:px-6 py-5 space-y-4 max-w-md mx-auto lg:max-w-7xl">
@@ -178,27 +173,6 @@ export default function Markets() {
           <p className="text-xs lg:text-sm text-subtle">
             Where dealer hedging flow concentrates by strike.
           </p>
-        </div>
-        {/* Density picker — controls how many strikes/expirations the
-            heatmap fetches. Compact = Skylit-default (4×30); Wide = 6×50;
-            Extra = 8×80. Visible on mobile too — users on the Gamma Map
-            page on phones need this lever as much as desktop users. */}
-        <div className="flex items-center gap-1 border border-border rounded-lg p-0.5 bg-card shrink-0">
-          {(['compact', 'wide', 'extra']).map((d) => (
-            <button
-              key={d}
-              onClick={() => setDensity(d)}
-              className={
-                'px-2 md:px-2.5 py-1 text-[10px] font-semibold rounded-md transition uppercase tracking-wider ' +
-                (density === d
-                  ? 'bg-amber-400 text-bg'
-                  : 'text-subtle hover:text-fg')
-              }
-              title={`${DENSITY_PRESETS[d].maxExpirations} expirations · ${DENSITY_PRESETS[d].maxStrikes} strikes · ATM ±${Math.round(DENSITY_PRESETS[d].strikeWindowPct * 100)}%`}
-            >
-              {DENSITY_PRESETS[d].label}
-            </button>
-          ))}
         </div>
         <button
           onClick={() => setReplayActive((v) => !v)}
@@ -360,7 +334,7 @@ export default function Markets() {
                 <span>
                   {data.expirations?.length ?? 0} expirations · {data.strikes?.length ?? 0} strikes
                 </span>
-                <SourceBadge source={data.source} />
+                <SourceBadge source={data.source} eodAt={data.eod_snapshot_at} />
                 {data.from_cache && (
                   <span className="text-muted">
                     · cached {formatCacheAge(data.cache_age_ms)} ago
@@ -460,7 +434,7 @@ export default function Markets() {
           <div className="text-2xl font-mono-tab tabular-nums text-fg">
             ${formatNumber(data.spot)}
           </div>
-          <SourceBadge source={data.source} />
+          <SourceBadge source={data.source} eodAt={data.eod_snapshot_at} />
           {data.largest && (
             <div className="text-xs text-subtle">
               <span className="text-muted uppercase tracking-wider mr-1">Wall</span>
@@ -575,7 +549,7 @@ function formatNumber(v) {
   return n.toFixed(2)
 }
 
-function SourceBadge({ source }) {
+function SourceBadge({ source, eodAt }) {
   // dxlink data outside RTH means the worker streamed earlier and the
   // Greeks/OI snapshot is now frozen at the close. Label that distinctly
   // so users don't think 16:30 ET data is "live".
@@ -599,6 +573,26 @@ function SourceBadge({ source }) {
     return (
       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-yellow-950 border border-yellow-800 text-yellow-400 text-[9px] uppercase tracking-wider font-semibold">
         15m delayed
+      </span>
+    )
+  }
+  if (source === 'eod') {
+    // Yesterday's close, used overnight + weekends + when both live
+    // paths fail. Show the snapshot date so the user knows exactly
+    // how stale this is — "EOD · Tue 4:30 PM" not just "EOD".
+    const label = eodAt
+      ? new Date(eodAt).toLocaleString([], {
+          weekday: 'short',
+          hour: 'numeric',
+          minute: '2-digit',
+        })
+      : 'close'
+    return (
+      <span
+        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-yellow-950 border border-yellow-800 text-yellow-400 text-[9px] uppercase tracking-wider font-semibold"
+        title={`Showing the most recent end-of-day snapshot. Live data resumes when the dxlink worker reconnects at the next session open.`}
+      >
+        eod · {label}
       </span>
     )
   }

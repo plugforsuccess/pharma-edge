@@ -99,81 +99,92 @@ export default function GexMatrix({ data }) {
   }
 
   return (
-    <div className="font-mono-tab text-xs">
-      {/* Header row — sticky-ish; doesn't actually stick on iOS Safari
-          inside an overflow scroll, so we just leave it at the top. */}
-      <div className="grid mb-px" style={gridCols(expirations.length)}>
-        <div className="px-2 py-1.5 text-fg font-semibold tabular-nums">
-          Strike
-        </div>
-        {expirations.map((e) => (
-          <div
-            key={e.date}
-            className="px-2 py-1.5 text-right text-fg font-semibold leading-tight"
-            title={`${e.dte} days to expiration`}
-          >
-            <div>{formatExpHeader(e.date)}</div>
-            <div className="text-[9px] text-subtle font-normal">{e.dte}d</div>
+    // Horizontal scroll container — when the matrix has more
+    // expirations than fit in the viewport (10+ on mobile), the user
+    // swipes left/right. Strike column is sticky-left so it stays
+    // visible during swipe, which is essential for reading rows.
+    // touch-pan-x explicitly opts the container into horizontal
+    // gestures so iOS doesn't interpret a left-swipe as back-nav.
+    <div className="font-mono-tab text-xs overflow-x-auto -mx-4 px-4 lg:mx-0 lg:px-0 touch-pan-x">
+      <div className="min-w-max">
+        <div className="grid mb-px" style={gridCols(expirations.length)}>
+          <div className="px-2 py-1.5 text-fg font-semibold tabular-nums sticky left-0 z-10 bg-bg-card">
+            Strike
           </div>
-        ))}
-      </div>
-
-      {strikes.map((strike, i) => {
-        const isSpotRow = i === spotStrikeIndex
-        return (
-          <div
-            key={strike}
-            className={
-              'grid ' +
-              (isSpotRow
-                ? 'ring-1 ring-amber-400/40 bg-amber-400/5'
-                : '')
-            }
-            style={gridCols(expirations.length)}
-          >
+          {expirations.map((e) => (
             <div
-              className={
-                'px-2 py-1.5 font-semibold tabular-nums flex items-center gap-1 ' +
-                (isSpotRow
-                  ? 'text-amber-400 bg-amber-400/10'
-                  : 'text-fg bg-bg-elev/40')
-              }
-              title={isSpotRow ? `Spot ${formatStrike(spot)}` : undefined}
+              key={e.date}
+              className="px-2 py-1.5 text-right text-fg font-semibold leading-tight"
+              title={`${e.dte} days to expiration`}
             >
-              {isSpotRow && (
-                <span className="text-amber-400 text-[10px]" aria-hidden>
-                  ▶
-                </span>
-              )}
-              {formatStrike(strike)}
+              <div>{formatExpHeader(e.date)}</div>
+              <div className="text-[9px] text-subtle font-normal">{e.dte}d</div>
             </div>
-            {cells[i].map((v, j) => {
-              const isLargest =
-                largest &&
-                largest.strike_index === i &&
-                largest.expiration_index === j
-              return (
-                <div
-                  key={j}
-                  className="px-2 py-1.5 text-right tabular-nums text-fg flex items-center justify-end gap-1"
-                  style={{ backgroundColor: gexColor(v, maxAbs) }}
-                >
-                  {isLargest && <span className="text-[10px]">★</span>}
-                  <span>{formatGex(v)}</span>
-                </div>
-              )
-            })}
-          </div>
-        )
-      })}
+          ))}
+        </div>
+
+        {strikes.map((strike, i) => {
+          const isSpotRow = i === spotStrikeIndex
+          return (
+            <div
+              key={strike}
+              className={
+                'grid ' +
+                (isSpotRow
+                  ? 'ring-1 ring-amber-400/40 bg-amber-400/5'
+                  : '')
+              }
+              style={gridCols(expirations.length)}
+            >
+              <div
+                className={
+                  'px-2 py-1.5 font-semibold tabular-nums flex items-center gap-1 sticky left-0 z-10 ' +
+                  (isSpotRow
+                    ? 'text-amber-400 bg-amber-400/10'
+                    : 'text-fg bg-bg-elev/40')
+                }
+                title={isSpotRow ? `Spot ${formatStrike(spot)}` : undefined}
+              >
+                {isSpotRow && (
+                  <span className="text-amber-400 text-[10px]" aria-hidden>
+                    ▶
+                  </span>
+                )}
+                {formatStrike(strike)}
+              </div>
+              {cells[i].map((v, j) => {
+                const isLargest =
+                  largest &&
+                  largest.strike_index === i &&
+                  largest.expiration_index === j
+                return (
+                  <div
+                    key={j}
+                    className="px-2 py-1.5 text-right tabular-nums text-fg flex items-center justify-end gap-1"
+                    style={{ backgroundColor: gexColor(v, maxAbs) }}
+                  >
+                    {isLargest && <span className="text-[10px]">★</span>}
+                    <span>{formatGex(v)}</span>
+                  </div>
+                )
+              })}
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
 
 function gridCols(numExpirations) {
-  // 60px strike column + equal share for each expiration.
+  // Strike column has a hard 64px width so the sticky-left position
+  // works predictably; expiration columns get a minimum 72px so they
+  // don't squeeze unreadable when 10+ are visible. Total grid width
+  // exceeds container on mobile, which is what triggers the
+  // overflow-x-auto scroll. Desktop with fewer expirations: still
+  // expands to 1fr per column thanks to the minmax upper bound.
   return {
-    gridTemplateColumns: `60px repeat(${numExpirations}, minmax(0, 1fr))`,
+    gridTemplateColumns: `64px repeat(${numExpirations}, minmax(72px, 1fr))`,
   }
 }
 

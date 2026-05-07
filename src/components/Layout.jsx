@@ -5,7 +5,6 @@ import {
   BarChart2,
   Flame,
   Home,
-  Sparkles,
   Settings,
 } from 'lucide-react'
 import InstallPrompt from './InstallPrompt'
@@ -16,14 +15,18 @@ import clsx from 'clsx'
 //   /        → "Tape"   (the home dashboard, "The Tape")
 //   /markets → "Gamma"  (the GEX dashboard, "Gamma Map")
 //   /flow    → "Flow"
-//   /scanner → "Scanner"
 //   /record  → "Record"
 //   /settings→ "Settings"
+//
+// Scanner (/scanner) is intentionally NOT in primary nav anymore —
+// it remains routable for Pro users via Settings or direct URL, but
+// the catalyst-scanner queue is a secondary surface in the GEX-first
+// product. Keeps the primary tab bar at 5 items, which fits cleanly
+// on small phones without crowding.
 const nav = [
   { to: '/', icon: Home, label: 'Tape' },
   { to: '/markets', icon: Activity, label: 'Gamma' },
   { to: '/flow', icon: Flame, label: 'Flow' },
-  { to: '/scanner', icon: Sparkles, label: 'Scanner' },
   { to: '/record', icon: BarChart2, label: 'Record' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ]

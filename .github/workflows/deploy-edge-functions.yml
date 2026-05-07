@@ -1,0 +1,98 @@
+# Deploys Supabase Edge Functions on push to main when any function
+# under supabase/functions/** changes. Mirrors the dxlink-worker deploy
+# pattern so the user doesn't need a terminal to ship edge code.
+#
+# Required GitHub Actions secret:
+#   SUPABASE_ACCESS_TOKEN — personal access token from
+#     https://supabase.com/dashboard/account/tokens. Do NOT confuse
+#     this with SUPABASE_SERVICE_ROLE_KEY — the access token authenticates
+#     the CLI; the service-role key is for runtime data access.
+#
+# Project ref is hardcoded to rghoynbaykeyjbhqmaff (see CLAUDE.md).
+#
+# How it works:
+#   1. Detect which subdirectories under supabase/functions/ changed
+#      between the previous push and HEAD.
+#   2. For each changed function, run `supabase functions deploy <name>`.
+#   3. workflow_dispatch with `function` input lets you redeploy a
+#      specific function manually if a cron-triggered call needs it.
+
+name: Deploy Edge Functions
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/functions/**'
+      - '.github/workflows/deploy-edge-functions.yml'
+  workflow_dispatch:
+    inputs:
+      function:
+        description: 'Function name to deploy (leave blank to deploy all changed in last commit)'
+        type: string
+        required: false
+
+concurrency:
+  group: edge-functions-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Need the previous commit so we can diff for changed
+          # functions. fetch-depth: 2 is enough for a push diff;
+          # workflow_dispatch is unaffected since it deploys all.
+          fetch-depth: 2
+
+      - name: Install Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Determine functions to deploy
+        id: detect
+        env:
+          MANUAL_FN: ${{ inputs.function }}
+        run: |
+          if [ -n "$MANUAL_FN" ]; then
+            echo "Manual deploy of: $MANUAL_FN"
+            echo "functions=$MANUAL_FN" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Push trigger — diff against previous commit to find which
+          # functions changed. `git diff --name-only HEAD~1 HEAD`
+          # returns paths like supabase/functions/compute-gex/index.ts;
+          # we want unique function names from the second path segment.
+          changed=$(git diff --name-only HEAD~1 HEAD -- 'supabase/functions/' \
+            | awk -F/ '/^supabase\/functions\/[^\/]+/ { print $3 }' \
+            | sort -u \
+            | tr '\n' ' ')
+          if [ -z "$changed" ]; then
+            echo "No edge function changes detected. Nothing to deploy."
+            echo "functions=" >> "$GITHUB_OUTPUT"
+          else
+            echo "Changed functions: $changed"
+            echo "functions=$changed" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deploy
+        if: steps.detect.outputs.functions != ''
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          # NOTE: we do NOT pass --no-verify-jwt here. That flag would
+          # disable JWT verification for ALL deployed functions, which
+          # is dangerous (analyze-signal, suggest-plays, place-order
+          # all require verified user auth). The CLI respects the
+          # per-function setting captured at first deploy by default.
+          for fn in ${{ steps.detect.outputs.functions }}; do
+            echo "::group::Deploy $fn"
+            supabase functions deploy "$fn" \
+              --project-ref rghoynbaykeyjbhqmaff
+            echo "::endgroup::"
+          done
+          echo "All deploys complete."

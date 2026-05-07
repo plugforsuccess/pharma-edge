@@ -291,7 +291,7 @@ function SubscriptionSection({ tier, isPro }) {
           <div className="flex-1">
             <p className="text-white text-sm font-semibold">Cash Moves Pro</p>
             <p className="text-subtle text-xs">
-              Full Gamma Map, Flow, Suggested Plays, broker execution, and Claude analysis.
+              Full Gamma Map, Flow, Suggested Plays, broker execution, and full move analytics.
             </p>
           </div>
         </div>
@@ -319,7 +319,7 @@ function SubscriptionSection({ tier, isPro }) {
             <ul className="text-subtle text-xs space-y-1 list-disc list-inside">
               <li>Full Gamma Map ticker list + watchlist</li>
               <li>Live options Flow + UOA detection</li>
-              <li>Suggested Plays (Claude-generated spread setups)</li>
+              <li>Suggested Plays (GEX-driven spread setups)</li>
               <li>Tastytrade execution</li>
               <li>Hash-anchored public track record</li>
             </ul>

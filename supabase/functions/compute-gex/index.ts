@@ -339,7 +339,10 @@ async function computeFromYahoo(args: ComputeArgs): Promise<{ result?: ComputeOu
 interface MatrixOutput {
   ticker: string
   spot: number
-  source: 'dxlink' | 'yahoo'
+  // 'eod' = served from gex_history when both live paths failed (or
+  // returned sparse data); UI renders a yellow EOD CLOSE badge with
+  // eod_snapshot_at as the timestamp.
+  source: 'dxlink' | 'yahoo' | 'eod'
   computed_at: string
   expirations: ExpirationInfo[]
   strikes: number[]                      // descending; same length as cells.length
@@ -351,6 +354,9 @@ interface MatrixOutput {
     strike_index: number
     expiration_index: number
   } | null
+  // Only set when source='eod' — when this snapshot was originally
+  // captured. Used by the UI to label the badge ("EOD · Tue 4:00 PM").
+  eod_snapshot_at?: string
 }
 
 function todayDateStr(): string {
@@ -740,10 +746,12 @@ serve(async (req) => {
   }
 
   // Matrix mode short-circuits — different output shape, different
-  // pipeline. DXLink first, Yahoo fallback like the single-exp path.
+  // pipeline. DXLink first, Yahoo fallback, then EOD-snapshot fallback
+  // from gex_history so the matrix never goes blank overnight.
   if (matrixMode) {
     let matrix: MatrixOutput | null = null
     let dxErr: string | null = null
+    let yhErr: string | null = null
     try {
       const dx = await computeMatrixFromDxLink(adminClient, ticker, matrixOpts)
       if (dx.matrix) matrix = dx.matrix
@@ -755,19 +763,56 @@ serve(async (req) => {
       try {
         const y = await computeMatrixFromYahoo(ticker, matrixOpts)
         if (y.matrix) matrix = y.matrix
-        else {
-          return json(
-            { success: false, error: `dxlink: ${dxErr}; yahoo: ${y.error}` },
-            502,
-          )
-        }
+        else yhErr = y.error ?? 'yahoo unknown error'
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e)
+        yhErr = e instanceof Error ? e.message : String(e)
+      }
+    }
+    // Sparse-result detection — Yahoo sometimes returns a chain where
+    // only the bootstrap expiration has cells (crumb rotates, follow-up
+    // fetches silently fail). If <20% of cells are populated AND we
+    // have an EOD snapshot to fall back to, prefer the snapshot. This
+    // also handles the overnight case (both live paths empty).
+    const cellCount = matrix
+      ? matrix.cells.reduce((s, row) => s + row.length, 0)
+      : 0
+    const nonNullCells = matrix
+      ? matrix.cells.reduce(
+        (s, row) => s + row.filter((v) => v != null && v !== 0).length,
+        0,
+      )
+      : 0
+    const sparse = matrix != null && cellCount > 0 && nonNullCells / cellCount < 0.2
+
+    if (!matrix || sparse) {
+      // Pull the most recent gex_history row for this ticker. Older
+      // snapshots are still useful overnight: GEX is a structural
+      // metric (OI updates once per day, gamma barely moves), so
+      // serving yesterday's 4pm close is correct, not a hack.
+      const { data: eodRow } = await adminClient
+        .from('gex_history')
+        .select('snapshot_at, payload')
+        .eq('ticker', ticker)
+        .order('snapshot_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (eodRow?.payload) {
+        const eodMatrix = eodRow.payload as MatrixOutput
+        // Tag the source so the UI can render an EOD badge.
+        matrix = {
+          ...eodMatrix,
+          source: 'eod' as MatrixOutput['source'],
+          eod_snapshot_at: eodRow.snapshot_at,
+        } as MatrixOutput
+      } else if (!matrix) {
         return json(
-          { success: false, error: `dxlink: ${dxErr}; yahoo: ${msg}` },
+          { success: false, error: `dxlink: ${dxErr ?? 'n/a'}; yahoo: ${yhErr ?? 'n/a'}; eod: no snapshot` },
           502,
         )
       }
+      // If we had a sparse live result and no EOD snapshot, keep the
+      // sparse one rather than 502'ing — partial data is better than
+      // no data when the user is just trying to look at the matrix.
     }
     adminClient
       .from('gex_snapshots')
@@ -776,24 +821,22 @@ serve(async (req) => {
         { onConflict: 'ticker' },
       )
       .then(() => {})
-    // Archive mode: also insert into gex_history so the replay slider
-    // can scrub through the day's snapshots. We don't await this — the
-    // response shouldn't block on the archive write, and an
-    // ON CONFLICT DO NOTHING means a racing cron is harmless.
-    if (archive) {
-      adminClient
+    // Archive mode: also insert into gex_history. AWAITED — the
+    // previous fire-and-forget version was being killed by the Edge
+    // runtime as soon as the response was sent, leaving gex_history
+    // empty. Cron callers don't care about the extra ~50ms; user-
+    // facing requests don't pass archive=true so they're unaffected.
+    if (archive && matrix && matrix.source !== 'eod') {
+      const { error: insertError } = await adminClient
         .from('gex_history')
         .insert({
           ticker,
           snapshot_at: new Date().toISOString(),
           payload: matrix,
         })
-        .then(({ error: insertError }) => {
-          if (insertError && insertError.code !== '23505') {
-            // 23505 = unique-violation; ignore (race with another cron run)
-            console.error('[archive] gex_history insert failed:', insertError)
-          }
-        })
+      if (insertError && insertError.code !== '23505') {
+        console.error('[archive] gex_history insert failed:', insertError)
+      }
     }
     return json({
       success: true,
