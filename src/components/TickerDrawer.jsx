@@ -20,6 +20,13 @@ export default function TickerDrawer({
   selected,
   onSelect,       // (symbol) => void
   onUpgrade,      // () => void — invoked when a locked ticker is tapped
+  // When true, allow free-text fallback: if the query doesn't match
+  // any curated/watchlist ticker, surface a "Use {QUERY}" button so
+  // the user can commit a symbol that isn't in our universe (e.g. a
+  // newly-IPO'd name not yet in TICKER_UNIVERSE). LogSignal turns
+  // this on; Markets leaves it off because the curated universe is
+  // its actual subscription list.
+  allowCustom = false,
 }) {
   const [query, setQuery] = useState('')
 
@@ -182,9 +189,27 @@ export default function TickerDrawer({
           )}
 
           {filteredCurated.length === 0 && filteredWatchlist.length === 0 && (
-            <p className="px-4 py-8 text-center text-subtle text-sm">
-              No matches for "{query}"
-            </p>
+            <div className="px-4 py-8 text-center space-y-3">
+              <p className="text-subtle text-sm">
+                No matches for "{query}"
+              </p>
+              {allowCustom && /^[A-Z][A-Z0-9.\-]{0,9}$/.test(q) && (
+                <button
+                  onClick={() => {
+                    onSelect(q)
+                    onClose()
+                  }}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-400/10 border border-amber-400/40 text-amber-400 text-sm font-medium hover:bg-amber-400/20 transition"
+                >
+                  Use <span className="font-mono-tab font-semibold">{q}</span>
+                </button>
+              )}
+              {allowCustom && !/^[A-Z][A-Z0-9.\-]{0,9}$/.test(q) && q.length > 0 && (
+                <p className="text-xs text-muted">
+                  Custom tickers must be 1–10 letters/digits.
+                </p>
+              )}
+            </div>
           )}
         </div>
       </div>

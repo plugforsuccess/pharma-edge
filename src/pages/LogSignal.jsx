@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Check } from 'lucide-react'
+import { ArrowLeft, Check, ChevronDown } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import AnalyzeFilingPanel from '../components/AnalyzeFilingPanel'
 import StrikePriceCalculator from '../components/StrikePriceCalculator'
+import TickerDrawer from '../components/TickerDrawer'
+import { TICKER_UNIVERSE } from '../lib/tickerUniverse'
 import { directionLabelLong } from '../lib/design'
 import clsx from 'clsx'
 
@@ -152,6 +154,10 @@ export default function LogSignal() {
   const [step, setStep] = useState(1)
   const [loading, setLoading] = useState(false)
   const [submitError, setSubmitError] = useState('')
+  // Ticker picker drawer — same component the Markets page uses, with
+  // allowCustom=true so users can commit a symbol that isn't in the
+  // curated universe (newly-IPO'd, OTC, etc.).
+  const [tickerDrawerOpen, setTickerDrawerOpen] = useState(false)
   // The structure Claude originally suggested for this signal, if the
   // user arrived here via Suggested Plays. Used to render a "Suggested"
   // badge while the prefilled choice is selected, and a "Modified from
@@ -182,10 +188,13 @@ export default function LogSignal() {
   }, [candidateId])
 
   const [form, setForm] = useState(() => ({
-    // 'biotech_catalyst' (default — pharma flow with drug/PDUFA fields)
-    // or 'gex_flow' (GEX matrix-driven options trade — no biotech context).
-    // Suggested Plays sets this when deep-linking from /markets.
-    signal_source: prefill.signal_source || 'biotech_catalyst',
+    // signal_source: always 'gex_flow' in the GEX-first product. The
+    // biotech_catalyst path remains in the DB schema and on existing
+    // historical signals, but the LogSignal UI no longer surfaces a
+    // toggle — every newly-logged trade is a GEX-driven structure.
+    // Suggested Plays continues to pass 'gex_flow' explicitly; we keep
+    // honoring an explicit prefill so legacy deep links don't break.
+    signal_source: prefill.signal_source || 'gex_flow',
     ticker: (prefill.ticker || '').toUpperCase(),
     company_name: prefill.company_name || '',
     drug_name: prefill.drug_name || '',
@@ -465,42 +474,25 @@ export default function LogSignal() {
           {isGexFlow ? 'Trade Setup' : 'Company & Catalyst'}
         </h2>
 
-        {/* Source toggle — biotech-catalyst flow keeps the full pharma
-            form; GEX-flow strips drug/indication/catalyst_type/catalyst_date
-            since GEX-driven trades have no biotech catalyst. */}
-        <div>
-          <label className="text-muted text-xs uppercase tracking-wider block mb-1">
-            Signal Type
-          </label>
-          <div className="grid grid-cols-2 gap-2">
-            {[
-              { value: 'biotech_catalyst', label: 'Biotech Catalyst' },
-              { value: 'gex_flow', label: 'GEX Flow Trade' },
-            ].map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => update('signal_source', opt.value)}
-                className={clsx(
-                  'py-2 rounded-xl border text-xs font-semibold transition-colors',
-                  form.signal_source === opt.value
-                    ? 'border-amber-400 bg-amber-950/30 text-amber-400'
-                    : 'border-border text-subtle',
-                )}
-              >
-                {opt.label}
-              </button>
-            ))}
+          {/* Ticker picker — opens TickerDrawer for typeahead over
+              the curated universe (HOT + S&P 500). Free-text fallback
+              via the drawer's "Use {QUERY}" button when the symbol
+              isn't in the list (newly-IPO'd, OTC, etc.). */}
+          <div>
+            <label className="text-muted text-xs uppercase tracking-wider block mb-1">
+              Ticker <span className="text-red-500">*</span>
+            </label>
+            <button
+              type="button"
+              onClick={() => setTickerDrawerOpen(true)}
+              className="w-full bg-card border border-border rounded-lg px-3 py-2.5 text-left flex items-center justify-between hover:border-amber-400/40 transition-colors"
+            >
+              <span className={form.ticker ? 'text-fg font-mono-tab text-sm' : 'text-muted text-sm'}>
+                {form.ticker || 'Tap to pick a ticker'}
+              </span>
+              <ChevronDown size={14} className="text-subtle shrink-0" />
+            </button>
           </div>
-        </div>
-
-          <Input
-            label="Ticker"
-            value={form.ticker}
-            onChange={(v) => update('ticker', v.toUpperCase())}
-            placeholder={isGexFlow ? 'SPY' : 'ACMX'}
-            required
-          />
 
           {!isGexFlow && (
             <>
@@ -928,6 +920,17 @@ export default function LogSignal() {
             </button>
           </div>
       </div>
+
+      <TickerDrawer
+        open={tickerDrawerOpen}
+        onClose={() => setTickerDrawerOpen(false)}
+        curated={TICKER_UNIVERSE}
+        watchlist={[]}
+        gatedSet={new Set()}
+        selected={form.ticker}
+        onSelect={(sym) => update('ticker', sym.toUpperCase())}
+        allowCustom={true}
+      />
     </div>
   )
 }
