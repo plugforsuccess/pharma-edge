@@ -4,36 +4,97 @@ import {
   Calculator,
   ChevronDown,
   ChevronUp,
+  RefreshCw,
 } from 'lucide-react'
 import clsx from 'clsx'
+import { supabase } from '../lib/supabase'
+import { computeProfitProbabilityBp, formatPopBp } from '../utils/pop'
 
 // Premium cap is 40% of spread width — keeps R/R >= 1:1.5 (the rule).
 // Naked options are intentionally absent: the pre-trade checklist requires
 // a spread, so the calculator UI shouldn't normalise a rule violation.
 const PREMIUM_PCT_CAP = 0.4
 
+// Four vertical-spread structures, two debit and two credit. Iron
+// condor is intentionally NOT in the calculator yet — it needs four
+// strikes (two short legs + two protective wings) and the calculator
+// is built around a two-strike form. Condor support comes when the
+// form gets the wing inputs; until then condors live in LogSignal /
+// Suggested Plays only.
 const STRUCTURE_CONFIG = {
-  bear_put_spread: {
-    label: 'Bear Put Spread',
-    direction: 'long_put',
-    accent: 'red',
-    buyLabel: 'Buy Put Strike',
-    sellLabel: 'Sell Put Strike',
-    buyDefault: (price) => (price * 0.88).toFixed(2), // ~12% OTM
-    sellDefault: (price) => (price * 0.65).toFixed(2), // ~35% OTM
-    spreadWidth: (buy, sell) => buy - sell,
-    breakEven: (buy, premium) => buy - premium,
-  },
   bull_call_spread: {
-    label: 'Bull Call Spread',
+    label: 'Bull Call',
+    longLabel: 'Bull Call Spread',
     direction: 'long_call',
     accent: 'green',
+    isCredit: false,
+    optionType: 'C',
+    popType: 'BULL_CALL',
     buyLabel: 'Buy Call Strike',
     sellLabel: 'Sell Call Strike',
     buyDefault: (price) => (price * 1.05).toFixed(2), // ~5% OTM
     sellDefault: (price) => (price * 1.25).toFixed(2), // ~25% OTM
     spreadWidth: (buy, sell) => sell - buy,
-    breakEven: (buy, premium) => buy + premium,
+    breakEven: (buy, _sell, premium) => buy + premium,
+    premiumLabel: 'Premium Paid',
+    premiumHelp: 'Net debit you pay to open the spread.',
+  },
+  bear_put_spread: {
+    label: 'Bear Put',
+    longLabel: 'Bear Put Spread',
+    direction: 'long_put',
+    accent: 'red',
+    isCredit: false,
+    optionType: 'P',
+    popType: 'BEAR_PUT',
+    buyLabel: 'Buy Put Strike',
+    sellLabel: 'Sell Put Strike',
+    buyDefault: (price) => (price * 0.88).toFixed(2), // ~12% OTM
+    sellDefault: (price) => (price * 0.65).toFixed(2), // ~35% OTM
+    spreadWidth: (buy, sell) => buy - sell,
+    breakEven: (buy, _sell, premium) => buy - premium,
+    premiumLabel: 'Premium Paid',
+    premiumHelp: 'Net debit you pay to open the spread.',
+  },
+  bull_put_credit: {
+    label: 'Bull Put (cr)',
+    longLabel: 'Bull Put Credit Spread',
+    direction: 'long_call',
+    accent: 'emerald',
+    isCredit: true,
+    optionType: 'P',
+    popType: 'BULL_PUT_CREDIT',
+    buyLabel: 'Buy Put Strike (wing)',
+    sellLabel: 'Sell Put Strike (short)',
+    // Sell ~5% OTM; buy ~10% OTM as the protective wing 5 points further out.
+    buyDefault: (price) => (price * 0.90).toFixed(2),
+    sellDefault: (price) => (price * 0.95).toFixed(2),
+    // Width = short_strike - long_strike (sell side is closer to spot).
+    spreadWidth: (buy, sell) => sell - buy,
+    // Breakeven on the SHORT strike side: short - credit collected.
+    breakEven: (_buy, sell, premium) => sell - premium,
+    premiumLabel: 'Premium Collected',
+    premiumHelp: 'Net credit you receive when opening (max profit).',
+  },
+  bear_call_credit: {
+    label: 'Bear Call (cr)',
+    longLabel: 'Bear Call Credit Spread',
+    direction: 'long_put',
+    accent: 'rose',
+    isCredit: true,
+    optionType: 'C',
+    popType: 'BEAR_CALL_CREDIT',
+    buyLabel: 'Buy Call Strike (wing)',
+    sellLabel: 'Sell Call Strike (short)',
+    // Sell ~5% OTM call; buy ~10% OTM as the protective wing.
+    buyDefault: (price) => (price * 1.10).toFixed(2),
+    sellDefault: (price) => (price * 1.05).toFixed(2),
+    // Width = long_strike - short_strike (buy side is further OTM).
+    spreadWidth: (buy, sell) => buy - sell,
+    // Breakeven: short_strike + credit.
+    breakEven: (_buy, sell, premium) => sell + premium,
+    premiumLabel: 'Premium Collected',
+    premiumHelp: 'Net credit you receive when opening (max profit).',
   },
 }
 
@@ -41,6 +102,16 @@ const STRUCTURE_FOR_DIRECTION = {
   long_put: 'bear_put_spread',
   long_call: 'bull_call_spread',
   watch: 'bear_put_spread',
+}
+
+// Tailwind doesn't include arbitrary class names so we map accent
+// keys to the actual selected/border classes. Adding a new accent
+// here means adding rows to this map.
+const ACCENT_CLASSES = {
+  red: 'border-red-500 bg-red-950/30 text-red-400',
+  green: 'border-green-500 bg-green-950/30 text-green-400',
+  emerald: 'border-emerald-500 bg-emerald-950/30 text-emerald-400',
+  rose: 'border-rose-500 bg-rose-950/30 text-rose-400',
 }
 
 export default function StrikePriceCalculator({
@@ -53,6 +124,11 @@ export default function StrikePriceCalculator({
   catalystDate,
   buyStrikeOtmPct,
   sellStrikeOtmPct,
+  // Optional: implied volatility at the strike (decimal, e.g. 0.42 = 42%).
+  // Suggested Plays passes this so the calculator can render a Probability
+  // of Profit alongside the R/R numbers. When absent we skip POP rather
+  // than fabricate a number from a default sigma.
+  iv,
   onCalculationComplete,
 }) {
   const [structure, setStructure] = useState(
@@ -74,10 +150,69 @@ export default function StrikePriceCalculator({
   const [result, setResult] = useState(null)
   const [expanded, setExpanded] = useState(true)
   const [showExplainer, setShowExplainer] = useState(false)
+  // Live broker NLV sync. Calls get-account on mount; if a connection
+  // is healthy and the user hasn't typed into accountSize, the
+  // calculator's 2% basis switches to live NLV. nlvSynced=true
+  // stamps the source so the parent (LogSignal) sees we're using
+  // live data, not the manual profile.account_size value.
+  const [liveNlv, setLiveNlv] = useState(null)
+  const [liveBp, setLiveBp] = useState(null)
+  const [liveAcctNumber, setLiveAcctNumber] = useState(null)
+  const [nlvSyncedAt, setNlvSyncedAt] = useState(null)
+  const [nlvSyncError, setNlvSyncError] = useState(null)
+  const [nlvLoading, setNlvLoading] = useState(false)
 
   const config = STRUCTURE_CONFIG[structure]
-  const accountNum = toNumOrNull(accountSize)
-  const maxPositionDollars = accountNum != null ? accountNum * 0.02 : null
+  // Manual accountSize from props is the fallback. If we successfully
+  // pulled a live NLV, prefer that — sizing should track the actual
+  // account, not a manually-entered number that drifts over time.
+  const effectiveAccount = liveNlv != null ? liveNlv : toNumOrNull(accountSize)
+  const maxPositionDollars =
+    effectiveAccount != null ? effectiveAccount * 0.02 : null
+
+  async function fetchBrokerAccount() {
+    setNlvLoading(true)
+    setNlvSyncError(null)
+    try {
+      const { data, error } = await supabase.functions.invoke('get-account')
+      if (error) {
+        let detail = error.message || 'request failed'
+        try {
+          const ctx = error.context
+          if (ctx && typeof ctx.json === 'function') {
+            const body = await ctx.json()
+            if (body?.error) detail = body.error
+          }
+        } catch { /* keep generic */ }
+        throw new Error(detail)
+      }
+      if (!data?.success) throw new Error(data?.error || 'no broker data')
+      // Prefer the largest non-paper account. If only paper is
+      // available, use that (sandbox testing). NLV is the basis for
+      // 2% sizing; BP is shown as a guard rail.
+      const accounts = (data.accounts || []).slice()
+      accounts.sort((a, b) => Number(b.net_liquidating_value ?? 0) - Number(a.net_liquidating_value ?? 0))
+      const primary = accounts.find((a) => !a.is_paper) || accounts[0]
+      if (!primary) throw new Error('no broker accounts on file')
+      const nlv = Number(primary.net_liquidating_value)
+      const bp = Number(primary.buying_power)
+      setLiveNlv(Number.isFinite(nlv) ? nlv : null)
+      setLiveBp(Number.isFinite(bp) ? bp : null)
+      setLiveAcctNumber(primary.account_number || null)
+      setNlvSyncedAt(Date.now())
+    } catch (e) {
+      setNlvSyncError(e.message || 'sync failed')
+    } finally {
+      setNlvLoading(false)
+    }
+  }
+
+  // One-shot fetch on mount. Subsequent refreshes are user-triggered
+  // via the refresh button on the Account Size field.
+  useEffect(() => {
+    fetchBrokerAccount()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Auto-populate strikes + suggest expiry when stock price, structure, or
   // catalyst date change. Only writes empty fields so we don't clobber
@@ -125,9 +260,16 @@ export default function StrikePriceCalculator({
     const spreadWidth = config.spreadWidth(buy, sell)
     if (spreadWidth <= 0) return
 
-    const maxGainPerContract = (spreadWidth - prem) * 100
-    const maxLossPerContract = prem * 100
-    const breakEven = config.breakEven(buy, prem)
+    // Credit and debit spreads have inverted P/L characteristics:
+    //   debit  → max gain = width − debit, max loss = debit
+    //   credit → max gain = credit, max loss = width − credit
+    const maxGainPerContract = config.isCredit
+      ? prem * 100
+      : (spreadWidth - prem) * 100
+    const maxLossPerContract = config.isCredit
+      ? (spreadWidth - prem) * 100
+      : prem * 100
+    const breakEven = config.breakEven(buy, sell, prem)
     const riskReward =
       maxLossPerContract > 0 ? maxGainPerContract / maxLossPerContract : 0
     const contracts =
@@ -136,6 +278,46 @@ export default function StrikePriceCalculator({
         : null
 
     const dteWarning = computeDteWarning(catalystDate, expiry)
+
+    // Probability of Profit at Expiration. Only computed when we have
+    // an IV from the chain — the calculator never fabricates a default
+    // sigma, since a fake POP is worse than no POP for calibration.
+    const dte = expiry
+      ? Math.max(1, Math.round(
+          (new Date(`${expiry}T00:00:00Z`).getTime() - Date.now()) / 86_400_000,
+        ))
+      : null
+    const popBp =
+      iv != null && Number(iv) > 0 && dte != null
+        ? computeProfitProbabilityBp({
+            spot: price,
+            sigma: Number(iv),
+            dte,
+            structure: config.popType,
+            longStrike: buy,
+            shortStrike: sell,
+            net_debit: config.isCredit ? undefined : prem,
+            net_credit: config.isCredit ? prem : undefined,
+            // Calculator doesn't currently model condors, but pass the
+            // fields in case popType is ever switched to IRON_CONDOR.
+            inner_call_strike: undefined,
+            inner_put_strike: undefined,
+          })
+        : null
+
+    // Buying-power guard: if the broker reports BP and the proposed
+    // total cost exceeds it, surface the gap so the user catches it
+    // before clicking Place Order. Only meaningful for debit spreads
+    // (cost = total_cost). Credit spreads tie up margin in different
+    // ways the BP figure already accounts for; comparing total credit
+    // to BP isn't right, so we skip.
+    const totalCostNum =
+      contracts != null ? contracts * maxLossPerContract : null
+    const bpInsufficient =
+      !config.isCredit &&
+      liveBp != null &&
+      totalCostNum != null &&
+      totalCostNum > liveBp
 
     const calc = {
       structure,
@@ -159,6 +341,15 @@ export default function StrikePriceCalculator({
       totalMaxGain:
         contracts != null ? (contracts * maxGainPerContract).toFixed(2) : null,
       premiumValid: prem <= spreadWidth * PREMIUM_PCT_CAP,
+      // POP gets passed back through onCalculationComplete so LogSignal
+      // can stamp it onto the signal at insert time (entry_pop_bp).
+      entry_pop_bp: popBp,
+      // Sizing-context fields — surfaced so the parent can render the
+      // "synced from broker" badge and BP guard rail.
+      account_size_source: liveNlv != null ? 'broker' : 'manual',
+      account_size_used: effectiveAccount,
+      live_buying_power: liveBp,
+      bp_insufficient: bpInsufficient,
       premiumCap: (spreadWidth * PREMIUM_PCT_CAP).toFixed(2),
       profitTargets: {
         exit100pct: {
@@ -207,16 +398,22 @@ export default function StrikePriceCalculator({
                   type="button"
                   onClick={() => {
                     setStructure(key)
+                    // Reset strikes + premium so structure-specific
+                    // defaults repopulate from useEffect; otherwise
+                    // a put-strike from the previous structure would
+                    // still show under "Buy Call Strike", confusing.
+                    setBuyStrike('')
+                    setSellStrike('')
+                    setPremium('')
                     setResult(null)
                   }}
                   className={clsx(
                     'py-2 px-2 rounded-xl border text-xs font-semibold transition-colors text-center',
                     structure === key
-                      ? cfg.accent === 'red'
-                        ? 'border-red-500 bg-red-950/30 text-red-400'
-                        : 'border-green-500 bg-green-950/30 text-green-400'
+                      ? ACCENT_CLASSES[cfg.accent] ?? 'border-amber-500 bg-amber-950/30 text-amber-400'
                       : 'border-border text-subtle',
                   )}
+                  title={cfg.longLabel}
                 >
                   {cfg.label}
                 </button>
@@ -235,19 +432,51 @@ export default function StrikePriceCalculator({
               prefix="$"
               placeholder="4.00"
             />
-            <CalcInput
-              label="Account Size"
-              value={accountNum != null ? String(accountNum) : ''}
-              onChange={() => {}}
-              prefix="$"
-              placeholder="—"
-              readOnly
-              note={
-                maxPositionDollars != null
-                  ? `Max trade: $${maxPositionDollars.toFixed(0)}`
-                  : 'Set in Settings'
-              }
-            />
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-muted text-[10px] uppercase tracking-wider">
+                  Account Size
+                </label>
+                <button
+                  type="button"
+                  onClick={fetchBrokerAccount}
+                  disabled={nlvLoading}
+                  className={clsx(
+                    'inline-flex items-center gap-1 text-[9px] uppercase tracking-wider transition',
+                    nlvLoading
+                      ? 'text-muted cursor-wait'
+                      : liveNlv != null
+                        ? 'text-green-400 hover:text-green-300'
+                        : 'text-subtle hover:text-fg',
+                  )}
+                  title={
+                    liveNlv != null
+                      ? `Synced from Tastytrade${liveAcctNumber ? ` · ${liveAcctNumber}` : ''}`
+                      : 'Pull live NLV from Tastytrade'
+                  }
+                >
+                  <RefreshCw size={9} className={nlvLoading ? 'animate-spin' : ''} />
+                  {liveNlv != null ? 'Live' : 'Sync'}
+                </button>
+              </div>
+              <CalcInput
+                label=""
+                value={effectiveAccount != null ? String(effectiveAccount) : ''}
+                onChange={() => {}}
+                prefix="$"
+                placeholder="—"
+                readOnly
+                note={
+                  nlvSyncError
+                    ? `Sync failed: ${nlvSyncError}`
+                    : maxPositionDollars != null
+                      ? liveBp != null
+                        ? `Max trade: $${maxPositionDollars.toFixed(0)} · BP $${liveBp.toFixed(0)}`
+                        : `Max trade: $${maxPositionDollars.toFixed(0)}`
+                      : 'Set in Settings or sync broker'
+                }
+              />
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -276,7 +505,7 @@ export default function StrikePriceCalculator({
 
           <div className="grid grid-cols-2 gap-3">
             <CalcInput
-              label="Premium Paid"
+              label={config.premiumLabel}
               value={premium}
               onChange={(v) => {
                 setPremium(v)
@@ -284,7 +513,7 @@ export default function StrikePriceCalculator({
               }}
               prefix="$"
               placeholder="0.50"
-              note="Per share (×100 per contract)"
+              note={config.premiumHelp}
             />
             <CalcInput
               label="Expiry Date"
@@ -581,9 +810,12 @@ function toNumOrNull(value) {
 function computeStrike(price, structure, side, suggestedOtmPct, config) {
   const otm = toNumOrNull(suggestedOtmPct)
   if (otm != null && otm > 0) {
-    // For puts: buy below stock (lower price), sell further below.
-    // For calls: buy above stock (higher price), sell further above.
-    const direction = structure === 'bear_put_spread' ? -1 : 1
+    // Sign of the OTM offset depends on whether strikes sit above or
+    // below spot for this structure:
+    //   * bear_put_spread / bull_put_credit  → put strikes BELOW spot (negative)
+    //   * bull_call_spread / bear_call_credit → call strikes ABOVE spot (positive)
+    const isCallSide = config.optionType === 'C'
+    const direction = isCallSide ? 1 : -1
     return (price * (1 + (direction * otm) / 100)).toFixed(2)
   }
   return side === 'buy' ? config.buyDefault(price) : config.sellDefault(price)
