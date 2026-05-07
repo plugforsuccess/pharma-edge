@@ -39,7 +39,15 @@ export default function MarketPulse({ ticker }) {
       try {
         const { data: result, error: invokeErr } = await supabase.functions.invoke(
           'compute-gex',
-          { body: { ticker: ticker.toUpperCase() } },
+          // preferred_dte=1 pins the snapshot to the front (nearest)
+          // expiration so the wall / flip / Net GEX figures match
+          // what the user sees in the leftmost column of the GEX
+          // matrix on /markets. The default of 30 was picking the
+          // ~30-DTE expiration which can disagree with the front-
+          // dated matrix view (e.g. matrix shows wall at $700 on
+          // 1DTE, MarketPulse showed wall at $710 on 28DTE — same
+          // ticker, different expiration, confusing user).
+          { body: { ticker: ticker.toUpperCase(), preferred_dte: 1 } },
         )
         if (cancelled) return
         if (invokeErr) {
