@@ -96,6 +96,25 @@ const STRUCTURE_CONFIG = {
     premiumLabel: 'Premium Collected',
     premiumHelp: 'Net credit you receive when opening (max profit).',
   },
+  iron_condor: {
+    label: 'Iron Condor',
+    longLabel: 'Iron Condor',
+    direction: 'watch',
+    accent: 'purple',
+    isCredit: true,
+    isCondor: true,
+    popType: 'IRON_CONDOR',
+    premiumLabel: 'Premium Collected',
+    premiumHelp:
+      'Net credit from selling both shorts minus paid for both wings.',
+    // Defaults centered ATM ±3% for inner shorts, ±5% for wings —
+    // a "5%-wide condor" by spot. The user can edit any strike;
+    // these just get the form unstuck so calc has something to chew.
+    longPutDefault:    (price) => (price * 0.95).toFixed(2),
+    shortPutDefault:   (price) => (price * 0.97).toFixed(2),
+    shortCallDefault:  (price) => (price * 1.03).toFixed(2),
+    longCallDefault:   (price) => (price * 1.05).toFixed(2),
+  },
 }
 
 const STRUCTURE_FOR_DIRECTION = {
@@ -112,6 +131,7 @@ const ACCENT_CLASSES = {
   green: 'border-green-500 bg-green-950/30 text-green-400',
   emerald: 'border-emerald-500 bg-emerald-950/30 text-emerald-400',
   rose: 'border-rose-500 bg-rose-950/30 text-rose-400',
+  purple: 'border-purple-500 bg-purple-950/30 text-purple-400',
 }
 
 export default function StrikePriceCalculator({
@@ -143,6 +163,13 @@ export default function StrikePriceCalculator({
   const [sellStrike, setSellStrike] = useState(
     initialSellStrike != null ? String(initialSellStrike) : '',
   )
+  // Iron condor needs 4 strikes — verticals only use buy/sell above.
+  // Stored separately so switching back to a vertical doesn't carry
+  // condor wing values into the 2-strike form.
+  const [longPutStrike, setLongPutStrike] = useState('')
+  const [shortPutStrike, setShortPutStrike] = useState('')
+  const [shortCallStrike, setShortCallStrike] = useState('')
+  const [longCallStrike, setLongCallStrike] = useState('')
   const [premium, setPremium] = useState('')
   const [expiry, setExpiry] = useState(
     initialExpiry ? String(initialExpiry) : '',
@@ -222,10 +249,17 @@ export default function StrikePriceCalculator({
   useEffect(() => {
     const price = toNumOrNull(stockPrice)
     if (price == null || price <= 0) return
-    const buy = computeStrike(price, structure, 'buy', buyStrikeOtmPct, config)
-    const sell = computeStrike(price, structure, 'sell', sellStrikeOtmPct, config)
-    setBuyStrike((cur) => cur || buy)
-    setSellStrike((cur) => cur || sell)
+    if (config.isCondor) {
+      setLongPutStrike((cur) => cur || config.longPutDefault(price))
+      setShortPutStrike((cur) => cur || config.shortPutDefault(price))
+      setShortCallStrike((cur) => cur || config.shortCallDefault(price))
+      setLongCallStrike((cur) => cur || config.longCallDefault(price))
+    } else {
+      const buy = computeStrike(price, structure, 'buy', buyStrikeOtmPct, config)
+      const sell = computeStrike(price, structure, 'sell', sellStrikeOtmPct, config)
+      setBuyStrike((cur) => cur || buy)
+      setSellStrike((cur) => cur || sell)
+    }
     if (catalystDate) {
       const target = new Date(`${catalystDate}T00:00:00Z`)
       target.setUTCDate(target.getUTCDate() + 32)
@@ -238,13 +272,21 @@ export default function StrikePriceCalculator({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stockPrice, structure, catalystDate, buyStrikeOtmPct, sellStrikeOtmPct])
 
-  const inputsReady =
-    toNumOrNull(stockPrice) != null &&
-    toNumOrNull(buyStrike) != null &&
-    toNumOrNull(sellStrike) != null &&
-    toNumOrNull(premium) != null
+  const inputsReady = config.isCondor
+    ? toNumOrNull(stockPrice) != null &&
+      toNumOrNull(longPutStrike) != null &&
+      toNumOrNull(shortPutStrike) != null &&
+      toNumOrNull(shortCallStrike) != null &&
+      toNumOrNull(longCallStrike) != null &&
+      toNumOrNull(premium) != null
+    : toNumOrNull(stockPrice) != null &&
+      toNumOrNull(buyStrike) != null &&
+      toNumOrNull(sellStrike) != null &&
+      toNumOrNull(premium) != null
 
-  const liveSpread = liveSpreadWidth(structure, buyStrike, sellStrike)
+  const liveSpread = config.isCondor
+    ? condorMaxWidth(longPutStrike, shortPutStrike, shortCallStrike, longCallStrike)
+    : liveSpreadWidth(structure, buyStrike, sellStrike)
   const premiumValid =
     liveSpread != null && toNumOrNull(premium) != null
       ? toNumOrNull(premium) <= liveSpread * PREMIUM_PCT_CAP
@@ -252,10 +294,124 @@ export default function StrikePriceCalculator({
 
   function calculate() {
     const price = toNumOrNull(stockPrice)
+    const prem = toNumOrNull(premium)
+    if (price == null || prem == null) return
+
+    // Iron condor: 4 strikes, two breakevens, max-loss is the wider
+    // of the two wing widths minus the credit. Profit zone is between
+    // the two short strikes, adjusted outward by the credit.
+    if (config.isCondor) {
+      const longPut = toNumOrNull(longPutStrike)
+      const shortPut = toNumOrNull(shortPutStrike)
+      const shortCall = toNumOrNull(shortCallStrike)
+      const longCall = toNumOrNull(longCallStrike)
+      if (longPut == null || shortPut == null || shortCall == null || longCall == null) return
+      // Strike ordering check: longPut < shortPut < spot < shortCall < longCall
+      if (!(longPut < shortPut && shortPut < shortCall && shortCall < longCall)) return
+
+      const putWidth = shortPut - longPut
+      const callWidth = longCall - shortCall
+      // Risk on a condor = the wider wing minus the credit. If the
+      // user built asymmetric wings, the wider side dominates max loss.
+      const maxWingWidth = Math.max(putWidth, callWidth)
+      if (maxWingWidth <= 0) return
+
+      const maxGainPerContract = prem * 100
+      const maxLossPerContract = (maxWingWidth - prem) * 100
+      const lowerBe = shortPut - prem
+      const upperBe = shortCall + prem
+      const riskReward =
+        maxLossPerContract > 0 ? maxGainPerContract / maxLossPerContract : 0
+      const contracts =
+        maxPositionDollars != null && maxLossPerContract > 0
+          ? Math.floor(maxPositionDollars / maxLossPerContract)
+          : null
+
+      const dteWarning = computeDteWarning(catalystDate, expiry)
+      const dte = expiry
+        ? Math.max(1, Math.round(
+            (new Date(`${expiry}T00:00:00Z`).getTime() - Date.now()) / 86_400_000,
+          ))
+        : null
+      const popBp =
+        iv != null && Number(iv) > 0 && dte != null
+          ? computeProfitProbabilityBp({
+              spot: price,
+              sigma: Number(iv),
+              dte,
+              structure: 'IRON_CONDOR',
+              longStrike: shortPut,           // not used by condor branch
+              shortStrike: shortCall,          // not used by condor branch
+              inner_call_strike: shortCall,
+              inner_put_strike: shortPut,
+              net_credit: prem,
+            })
+          : null
+      const totalCostNum =
+        contracts != null ? contracts * maxLossPerContract : null
+      // For condors, BP comparison against max-loss-per-position makes
+      // sense (margin requirement ≈ max loss). Same gate as debit
+      // spreads, but using max loss instead of total cost.
+      const bpInsufficient =
+        liveBp != null && totalCostNum != null && totalCostNum > liveBp
+
+      const calc = {
+        structure,
+        direction: config.direction,
+        // Persisted convention for condors: long_strike = inner short
+        // put (lower bound of profit zone), short_strike = inner short
+        // call (upper bound). The wings live in the calc result for
+        // the place-order builder but aren't on the signals row yet.
+        buyStrike: shortPut.toFixed(2),
+        sellStrike: shortCall.toFixed(2),
+        longPutStrike: longPut.toFixed(2),
+        shortPutStrike: shortPut.toFixed(2),
+        shortCallStrike: shortCall.toFixed(2),
+        longCallStrike: longCall.toFixed(2),
+        premium: prem.toFixed(2),
+        expiry,
+        stockPrice: price.toFixed(2),
+        spreadWidth: maxWingWidth.toFixed(2),
+        putWidth: putWidth.toFixed(2),
+        callWidth: callWidth.toFixed(2),
+        maxGainPerContract: maxGainPerContract.toFixed(2),
+        maxLossPerContract: maxLossPerContract.toFixed(2),
+        // Condors have two breakevens — surface both. Existing UI
+        // reads `breakEven`; we set it to the upper to keep that
+        // working and add `breakEvenLower` for condor-aware UIs.
+        breakEven: upperBe.toFixed(2),
+        breakEvenLower: lowerBe.toFixed(2),
+        breakEvenUpper: upperBe.toFixed(2),
+        riskReward: riskReward.toFixed(2),
+        contracts,
+        totalCost: totalCostNum != null ? totalCostNum.toFixed(2) : null,
+        totalMaxGain:
+          contracts != null ? (contracts * maxGainPerContract).toFixed(2) : null,
+        premiumValid: prem <= maxWingWidth * PREMIUM_PCT_CAP,
+        premiumCap: (maxWingWidth * PREMIUM_PCT_CAP).toFixed(2),
+        profitTargets: {
+          // Half-credit = 50% profit target (industry-standard condor exit).
+          exit50pct: { spreadValue: (prem * 0.5).toFixed(2) },
+          exit75pct: { spreadValue: (prem * 0.25).toFixed(2) },
+        },
+        // Stop-loss on a condor is typically 2x credit collected as
+        // the spread's mark-to-market price (not the underlying).
+        stopLoss: { triggerValue: (prem * 2).toFixed(2) },
+        dteWarning,
+        entry_pop_bp: popBp,
+        account_size_source: liveNlv != null ? 'broker' : 'manual',
+        account_size_used: effectiveAccount,
+        live_buying_power: liveBp,
+        bp_insufficient: bpInsufficient,
+      }
+      setResult(calc)
+      onCalculationComplete?.(calc)
+      return
+    }
+
     const buy = toNumOrNull(buyStrike)
     const sell = toNumOrNull(sellStrike)
-    const prem = toNumOrNull(premium)
-    if (price == null || buy == null || sell == null || prem == null) return
+    if (buy == null || sell == null) return
 
     const spreadWidth = config.spreadWidth(buy, sell)
     if (spreadWidth <= 0) return
@@ -404,6 +560,10 @@ export default function StrikePriceCalculator({
                     // still show under "Buy Call Strike", confusing.
                     setBuyStrike('')
                     setSellStrike('')
+                    setLongPutStrike('')
+                    setShortPutStrike('')
+                    setShortCallStrike('')
+                    setLongCallStrike('')
                     setPremium('')
                     setResult(null)
                   }}
@@ -479,29 +639,86 @@ export default function StrikePriceCalculator({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <CalcInput
-              label={config.buyLabel}
-              value={buyStrike}
-              onChange={(v) => {
-                setBuyStrike(v)
-                setResult(null)
-              }}
-              prefix="$"
-              placeholder="3.50"
-              highlight
-            />
-            <CalcInput
-              label={config.sellLabel}
-              value={sellStrike}
-              onChange={(v) => {
-                setSellStrike(v)
-                setResult(null)
-              }}
-              prefix="$"
-              placeholder="2.50"
-            />
-          </div>
+          {config.isCondor ? (
+            <div className="space-y-2">
+              <p className="text-muted text-[10px] uppercase tracking-wider">
+                Strikes (4 legs)
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <CalcInput
+                  label="Long Put (wing)"
+                  value={longPutStrike}
+                  onChange={(v) => {
+                    setLongPutStrike(v)
+                    setResult(null)
+                  }}
+                  prefix="$"
+                  placeholder="—"
+                />
+                <CalcInput
+                  label="Short Put (inner)"
+                  value={shortPutStrike}
+                  onChange={(v) => {
+                    setShortPutStrike(v)
+                    setResult(null)
+                  }}
+                  prefix="$"
+                  placeholder="—"
+                  highlight
+                />
+                <CalcInput
+                  label="Short Call (inner)"
+                  value={shortCallStrike}
+                  onChange={(v) => {
+                    setShortCallStrike(v)
+                    setResult(null)
+                  }}
+                  prefix="$"
+                  placeholder="—"
+                  highlight
+                />
+                <CalcInput
+                  label="Long Call (wing)"
+                  value={longCallStrike}
+                  onChange={(v) => {
+                    setLongCallStrike(v)
+                    setResult(null)
+                  }}
+                  prefix="$"
+                  placeholder="—"
+                />
+              </div>
+              <p className="text-muted text-[10px] leading-snug">
+                Order: long put &lt; short put &lt; short call &lt; long call.
+                Profit zone is between the two short strikes; wings cap
+                the loss.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              <CalcInput
+                label={config.buyLabel}
+                value={buyStrike}
+                onChange={(v) => {
+                  setBuyStrike(v)
+                  setResult(null)
+                }}
+                prefix="$"
+                placeholder="3.50"
+                highlight
+              />
+              <CalcInput
+                label={config.sellLabel}
+                value={sellStrike}
+                onChange={(v) => {
+                  setSellStrike(v)
+                  setResult(null)
+                }}
+                prefix="$"
+                placeholder="2.50"
+              />
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <CalcInput
@@ -828,6 +1045,19 @@ function liveSpreadWidth(structure, buy, sell) {
   const cfg = STRUCTURE_CONFIG[structure]
   const w = cfg.spreadWidth(b, s)
   return w > 0 ? w : null
+}
+
+// Live max-wing width for a condor while the user is still typing —
+// drives the premium-cap badge and PREMIUM_PCT_CAP gate. Returns null
+// until all 4 strikes are populated and ordered correctly.
+function condorMaxWidth(longPut, shortPut, shortCall, longCall) {
+  const lp = toNumOrNull(longPut)
+  const sp = toNumOrNull(shortPut)
+  const sc = toNumOrNull(shortCall)
+  const lc = toNumOrNull(longCall)
+  if (lp == null || sp == null || sc == null || lc == null) return null
+  if (!(lp < sp && sp < sc && sc < lc)) return null
+  return Math.max(sp - lp, lc - sc)
 }
 
 function computeDteWarning(catalystDate, expiryDate) {
