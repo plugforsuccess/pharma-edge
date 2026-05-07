@@ -248,7 +248,7 @@ export default function Markets() {
           Trinity
         </TabButton>
         <TabButton active={view === 'vex'} onClick={() => setView('vex')}>
-          VEX <span className="text-[8px] uppercase opacity-60 ml-1">soon</span>
+          VEX <span className="text-[10px] uppercase opacity-60 ml-1">soon</span>
         </TabButton>
       </div>
 
@@ -593,7 +593,7 @@ function SourceBadge({ source, eodAt }) {
   const afterHours = source === 'dxlink' && !isWithinRth()
   if (source === 'dxlink' && !afterHours) {
     return (
-      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-green-950 border border-green-800 text-green-400 text-[9px] uppercase tracking-wider font-semibold">
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-green-950 border border-green-800 text-green-400 text-[10px] uppercase tracking-wider font-semibold">
         <span className="w-1 h-1 rounded-full bg-green-400 animate-pulse" />
         live
       </span>
@@ -601,14 +601,14 @@ function SourceBadge({ source, eodAt }) {
   }
   if (source === 'dxlink' && afterHours) {
     return (
-      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-950 border border-amber-800 text-amber-400 text-[9px] uppercase tracking-wider font-semibold">
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-950 border border-amber-800 text-amber-400 text-[10px] uppercase tracking-wider font-semibold">
         after hours
       </span>
     )
   }
   if (source === 'yahoo') {
     return (
-      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-yellow-950 border border-yellow-800 text-yellow-400 text-[9px] uppercase tracking-wider font-semibold">
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-yellow-950 border border-yellow-800 text-yellow-400 text-[10px] uppercase tracking-wider font-semibold">
         15m delayed
       </span>
     )
@@ -626,7 +626,7 @@ function SourceBadge({ source, eodAt }) {
       : 'close'
     return (
       <span
-        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-yellow-950 border border-yellow-800 text-yellow-400 text-[9px] uppercase tracking-wider font-semibold"
+        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-yellow-950 border border-yellow-800 text-yellow-400 text-[10px] uppercase tracking-wider font-semibold"
         title={`Showing the most recent end-of-day snapshot. Live data resumes when the dxlink worker reconnects at the next session open.`}
       >
         eod · {label}

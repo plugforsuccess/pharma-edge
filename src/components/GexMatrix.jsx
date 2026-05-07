@@ -118,7 +118,7 @@ export default function GexMatrix({ data }) {
               title={`${e.dte} days to expiration`}
             >
               <div>{formatExpHeader(e.date)}</div>
-              <div className="text-[9px] text-subtle font-normal">{e.dte}d</div>
+              <div className="text-[10px] text-subtle font-normal">{e.dte}d</div>
             </div>
           ))}
         </div>

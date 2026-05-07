@@ -640,12 +640,12 @@ export default function LogSignal() {
                 Strategy
               </label>
               {suggestedStructure && form.structure === suggestedStructure && (
-                <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-400/15 text-amber-400 border border-amber-400/40">
+                <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-400/15 text-amber-400 border border-amber-400/40">
                   Suggested
                 </span>
               )}
               {suggestedStructure && form.structure !== suggestedStructure && (
-                <span className="text-[9px] uppercase tracking-wider text-muted">
+                <span className="text-[10px] uppercase tracking-wider text-muted">
                   Modified from suggestion
                 </span>
               )}
@@ -674,7 +674,7 @@ export default function LogSignal() {
                     {wasSuggested && !active && (
                       <span
                         aria-hidden
-                        className="absolute top-0.5 right-1 text-[8px] text-amber-400/70"
+                        className="absolute top-0.5 right-1 text-[10px] text-amber-400/70"
                       >
                         ★
                       </span>
@@ -804,7 +804,7 @@ export default function LogSignal() {
                 <p className="text-muted text-xs uppercase tracking-wider">
                   Entry POP
                   {form.entry_pop_bp != null && form.entry_pop_bp === prefilledPopBp && (
-                    <span className="ml-2 text-[9px] text-green-400/80 font-semibold">
+                    <span className="ml-2 text-[10px] text-green-400/80 font-semibold">
                       AUTO
                     </span>
                   )}
@@ -1096,7 +1096,7 @@ function PopRow({ valueBp, prefilledBp, onChange }) {
         <p className="text-subtle text-xs">
           Entry POP
           {isAuto && (
-            <span className="ml-2 text-[9px] uppercase tracking-wider text-green-400/80">
+            <span className="ml-2 text-[10px] uppercase tracking-wider text-green-400/80">
               Auto
             </span>
           )}

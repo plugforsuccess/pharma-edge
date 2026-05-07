@@ -63,7 +63,7 @@ export default function PaperTradingStatus({ stats }) {
           <p className="eyebrow">
             {readyForReal ? '✓ Phase Complete' : 'Paper Trading Period'}
           </p>
-          <p className="font-display text-[17px] text-fg mt-1 leading-tight">
+          <p className="font-display text-base text-fg mt-1 leading-tight">
             {readyForReal ? 'Ready for real capital' : `Day ${daysElapsed} of ${TARGET_DAYS}`}
           </p>
         </div>
@@ -76,7 +76,7 @@ export default function PaperTradingStatus({ stats }) {
           >
             {daysRemaining}
           </p>
-          <p className="eyebrow text-[9px] mt-1">
+          <p className="eyebrow text-[10px] mt-1">
             {daysRemaining > 0 ? 'days left' : 'cleared'}
           </p>
         </div>
@@ -184,7 +184,7 @@ function Requirement({ label, met, value }) {
       >
         {met ? '✓' : value}
       </p>
-      <p className="eyebrow text-[8px] mt-1.5">{label}</p>
+      <p className="eyebrow text-[10px] mt-1.5">{label}</p>
     </div>
   )
 }

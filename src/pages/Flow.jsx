@@ -194,7 +194,7 @@ export default function Flow() {
 
       {!loading && !error && filtered.length > 0 && (
         <div className="bg-card border border-border rounded-xl overflow-hidden">
-          <div className="grid grid-cols-[1fr_auto_auto_auto] gap-2 px-3 py-2 text-[9px] uppercase tracking-wider text-muted border-b border-border">
+          <div className="grid grid-cols-[1fr_auto_auto_auto] gap-2 px-3 py-2 text-[10px] uppercase tracking-wider text-muted border-b border-border">
             <div>Symbol / Exp</div>
             <div className="text-right">Vol</div>
             <div className="text-right">Premium</div>

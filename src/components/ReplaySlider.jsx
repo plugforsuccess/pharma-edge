@@ -160,7 +160,7 @@ export default function ReplaySlider({ ticker, active, onSnapshot, onClose }) {
             </div>
           </div>
 
-          <div className="flex justify-between text-[9px] uppercase tracking-wider text-muted px-9">
+          <div className="flex justify-between text-[10px] uppercase tracking-wider text-muted px-9">
             <span>
               {formatTime(snapshots[0]?.snapshot_at)}
             </span>

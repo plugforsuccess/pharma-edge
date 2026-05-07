@@ -309,7 +309,7 @@ function OnboardingCard({ navigate }) {
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-baseline gap-2">
-                <span className="text-fg text-[13px] font-semibold">
+                <span className="text-fg text-sm font-semibold">
                   {i + 1}. {step.title}
                 </span>
               </div>
@@ -343,7 +343,7 @@ function Stat({ label, value, tone = 'neutral', divider }) {
       <span className={clsx('font-display text-2xl leading-none num-tab', toneClass)}>
         {value}
       </span>
-      <span className="eyebrow mt-1.5 text-[9px]">{label}</span>
+      <span className="eyebrow mt-1.5 text-[10px]">{label}</span>
     </div>
   )
 }
@@ -453,7 +453,7 @@ function SignalCard({ signal, onClick }) {
 
       <div className="flex items-start justify-between mb-2.5">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-mono-tab text-fg font-semibold text-[15px] tracking-tight">
+          <span className="font-mono-tab text-fg font-semibold text-sm tracking-tight">
             {signal.ticker}
           </span>
           <span
@@ -464,7 +464,7 @@ function SignalCard({ signal, onClick }) {
           >
             {directionLabel(signal.direction)}
           </span>
-          <span className="text-[9px] tracking-[0.16em] text-muted border border-border/70 px-1.5 py-0.5 rounded-md uppercase">
+          <span className="text-[10px] tracking-[0.16em] text-muted border border-border/70 px-1.5 py-0.5 rounded-md uppercase">
             {signal.trade_type === 'paper' ? 'Paper' : 'Real'}
           </span>
         </div>
@@ -477,14 +477,14 @@ function SignalCard({ signal, onClick }) {
               {daysTo}
               <span className="text-[10px] font-sans ml-0.5 opacity-70">d</span>
             </p>
-            <p className="eyebrow text-[8px] mt-1">{clockLabel}</p>
+            <p className="eyebrow text-[10px] mt-1">{clockLabel}</p>
           </div>
         )}
       </div>
 
       {/* Thesis is the only body text — same for every Move type. */}
       <div className="flex items-center justify-between gap-3">
-        <p className="text-subtle text-[12px] line-clamp-1 flex-1 italic font-display">
+        <p className="text-subtle text-xs line-clamp-1 flex-1 italic font-display">
           {signal.thesis?.slice(0, 90)}…
         </p>
         <ConfidenceMeter level={confidence} />
@@ -492,7 +492,7 @@ function SignalCard({ signal, onClick }) {
 
       <div className="hairline mt-3 mb-2.5 opacity-60" />
       <div className="flex items-center justify-between">
-        <span className="eyebrow text-[9px]">{sourceLabel}</span>
+        <span className="eyebrow text-[10px]">{sourceLabel}</span>
         {clockDate && (
           <span className="font-mono-tab text-[10px] text-muted">
             {new Date(clockDate).toLocaleDateString('en-US', {

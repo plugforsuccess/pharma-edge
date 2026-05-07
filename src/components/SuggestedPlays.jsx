@@ -367,7 +367,7 @@ function CacheTimer({ computedAt }) {
   return (
     <span
       className={
-        'text-[9px] uppercase tracking-wider truncate ' +
+        'text-[10px] uppercase tracking-wider truncate ' +
         (expired ? 'text-amber-400' : 'text-muted')
       }
     >
@@ -395,7 +395,7 @@ function PlayCard({ play, onLogSignal }) {
     <div className={`border rounded-lg p-3 space-y-2 ${accentClass}`}>
       <div className="flex items-baseline justify-between gap-2">
         <span className="text-xs font-semibold text-fg">{play.strategy}</span>
-        <span className="text-[9px] uppercase tracking-wider text-muted shrink-0">
+        <span className="text-[10px] uppercase tracking-wider text-muted shrink-0">
           {play.dte}d · {play.expiration}
         </span>
       </div>
@@ -408,7 +408,7 @@ function PlayCard({ play, onLogSignal }) {
 
       {play.market_view && (
         <p className="text-[11px] text-fg/85 leading-snug">
-          <span className="eyebrow text-[9px] text-muted mr-1.5">View</span>
+          <span className="eyebrow text-[10px] text-muted mr-1.5">View</span>
           {play.market_view}
         </p>
       )}
@@ -458,7 +458,7 @@ function PlayCard({ play, onLogSignal }) {
 function Stat({ label, value }) {
   return (
     <div className="bg-bg-elev/60 border border-border rounded px-2 py-1">
-      <div className="text-[9px] uppercase tracking-wider text-muted">
+      <div className="text-[10px] uppercase tracking-wider text-muted">
         {label}
       </div>
       <div className="font-mono-tab tabular-nums text-fg font-medium">
