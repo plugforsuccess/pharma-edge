@@ -889,40 +889,14 @@ function ResultPanel({ result, config, expiry, sellStrike, buyStrike, premium })
         </div>
       )}
 
-      <div className="bg-bg border border-border rounded-xl p-4">
-        <p className="text-muted text-[10px] uppercase tracking-wider mb-3">
-          Pre-Planned Exit Ladder
-        </p>
-        <div className="space-y-3">
-          <ExitRow
-            trigger="+100% on premium"
-            value={`Spread worth $${result.profitTargets.exit100pct.spreadValue}`}
-            action="Sell 50% of position"
-            color="text-green-400"
-          />
-          <ExitRow
-            trigger="+200% on premium"
-            value={`Spread worth $${result.profitTargets.exit200pct.spreadValue}`}
-            action="Sell 75% of position"
-            color="text-green-400"
-          />
-          <ExitRow
-            trigger="Day before catalyst"
-            value="Sell into IV spike"
-            action="Consider full exit"
-            color="text-yellow-400"
-          />
-          <div className="border-t border-border pt-3">
-            <ExitRow
-              trigger="-50% on premium"
-              value={`Spread worth $${result.stopLoss.triggerValue}`}
-              action="EXIT FULL POSITION"
-              color="text-red-400"
-              isStopLoss
-            />
-          </div>
-        </div>
-      </div>
+      {/* Pre-Planned Exit Ladder removed: spreads have a capped max
+          profit/loss by construction, so the laddered "+100% sell
+          half / +200% sell three-quarters / -50% stop" framework
+          (built for naked-option position management) doesn't add
+          guidance over what max-gain/max-loss already say. The
+          stop-loss trigger value still surfaces inline in the Trade
+          Summary as a single line, which is the only piece that
+          actually matters for spreads. */}
 
       <div className="bg-bg border border-zinc-800 rounded-xl p-4">
         <p className="text-muted text-[10px] uppercase tracking-wider mb-3">Trade Summary</p>
@@ -949,6 +923,15 @@ function ResultPanel({ result, config, expiry, sellStrike, buyStrike, premium })
           <p>
             Break-even: <span className="text-white">${result.breakEven}</span>
           </p>
+          {result.entry_pop_bp != null && (
+            <p>
+              Entry POP:{' '}
+              <span className="text-amber-400">
+                {Math.round(Number(result.entry_pop_bp) / 100)}%
+              </span>
+              <span className="text-muted"> · hash-locked</span>
+            </p>
+          )}
           <p>
             Stop Loss:{' '}
             <span className="text-red-400">Spread @ ${result.stopLoss.triggerValue}</span>
@@ -1019,25 +1002,6 @@ function ResultBox({ label, value, color, sub }) {
       <p className={clsx('font-bold text-lg', color)}>{value}</p>
       <p className="text-subtle text-[10px] uppercase tracking-wider mt-0.5">{label}</p>
       {sub && <p className="text-muted text-[10px]">{sub}</p>}
-    </div>
-  )
-}
-
-function ExitRow({ trigger, value, action, color, isStopLoss }) {
-  return (
-    <div className={clsx('flex items-start justify-between gap-2', isStopLoss && 'opacity-90')}>
-      <div className="flex-1">
-        <p className={clsx('text-xs font-semibold', color)}>{trigger}</p>
-        {value && <p className="text-muted text-[10px]">{value}</p>}
-      </div>
-      <p
-        className={clsx(
-          'text-[10px] font-bold text-right flex-shrink-0',
-          isStopLoss ? 'text-red-400' : 'text-zinc-400',
-        )}
-      >
-        {action}
-      </p>
     </div>
   )
 }
