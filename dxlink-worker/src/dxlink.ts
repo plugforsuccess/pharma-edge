@@ -185,6 +185,12 @@ export class DxLinkClient {
         return
       case 'FEED_CONFIG':
         if (frame['channel'] === FEED_CHANNEL) {
+          // FEED_CONFIG can arrive twice on a single connect (server
+          // echoes config updates). Only resubscribe on the FIRST
+          // one — without this gate we'd fire 64k subscription
+          // specs twice during the boot burst, doubling memory
+          // pressure during the exact window the OOM-killer watches.
+          if (this.feedReady) return
           this.feedReady = true
           this.reconnectAttempt = 0
           this.startKeepalive()
