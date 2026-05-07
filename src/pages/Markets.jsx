@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ArrowLeft, RefreshCw, Activity, Star, Lock, ChevronDown, Clock, BookOpen, Search } from 'lucide-react'
 import clsx from 'clsx'
 import { isWithinRth } from '../utils/marketHours'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { useSubscription } from '../hooks/useSubscription'
@@ -38,6 +38,7 @@ const MATRIX_OPTS = {
 
 export default function Markets() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { user } = useAuth()
   const { isPro, limits } = useSubscription()
   // Persisted ticker — survives navigation away (e.g. user clicks
@@ -45,8 +46,20 @@ export default function Markets() {
   // this we'd snap to TICKERS[0] and lose the user's place, which
   // also blanks SuggestedPlays since its localStorage cache is keyed
   // by ticker.
+  // Resolution priority: URL ?ticker=… (deep links from Tape's
+  // "Open in Markets" win) → localStorage (the user's last-viewed
+  // ticker) → TICKERS[0]. Without the URL check, deep-linking from
+  // Tape would silently snap to whatever the user previously
+  // viewed on Markets.
   const [ticker, setTicker] = useState(() => {
     if (typeof window === 'undefined') return TICKERS[0].symbol
+    try {
+      const params = new URLSearchParams(window.location.search)
+      const fromUrl = params.get('ticker')
+      if (fromUrl && /^[A-Z][A-Z0-9.\-]{0,9}$/.test(fromUrl.toUpperCase())) {
+        return fromUrl.toUpperCase()
+      }
+    } catch { /* */ }
     try {
       const saved = window.localStorage.getItem('pe_markets_ticker')
       if (saved && /^[A-Z][A-Z0-9.\-]{0,9}$/.test(saved)) return saved
@@ -56,6 +69,32 @@ export default function Markets() {
   useEffect(() => {
     if (typeof window === 'undefined' || !ticker) return
     try { window.localStorage.setItem('pe_markets_ticker', ticker) } catch { /* */ }
+  }, [ticker])
+
+  // Watch the URL ?ticker= for changes after mount — covers the case
+  // where the user is already on /markets and the Tape pushes them
+  // here with a different ticker. Skip the case where the URL ticker
+  // matches local state to avoid feedback loops.
+  useEffect(() => {
+    const fromUrl = searchParams.get('ticker')
+    if (!fromUrl) return
+    const upper = fromUrl.toUpperCase()
+    if (!/^[A-Z][A-Z0-9.\-]{0,9}$/.test(upper)) return
+    if (upper !== ticker) setTicker(upper)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
+
+  // Mirror the active ticker back into the URL so refresh / share
+  // preserves the view. Replace (not push) so we don't pollute the
+  // back-button stack with one entry per ticker click.
+  useEffect(() => {
+    if (!ticker) return
+    const current = searchParams.get('ticker')
+    if (current === ticker) return
+    const next = new URLSearchParams(searchParams)
+    next.set('ticker', ticker)
+    setSearchParams(next, { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ticker])
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
