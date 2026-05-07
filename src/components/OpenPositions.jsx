@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Plus, TrendingUp, TrendingDown, Clock, AlertTriangle, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import Spinner from './Spinner'
 
 // Open Positions card on the Home dashboard. Pulls from public.open_positions
 // (RLS-scoped to the current user), shows live P&L from the monitor-positions
@@ -59,7 +60,10 @@ export default function OpenPositions() {
 
         <div className="divide-y divide-border">
           {loading && (
-            <div className="px-4 py-6 text-xs text-subtle">Loading…</div>
+            <div className="px-4 py-6 flex items-center gap-2 text-xs text-subtle">
+              <Spinner size="sm" />
+              Loading positions…
+            </div>
           )}
           {!loading && positions.length === 0 && (
             <div className="px-4 py-6 text-xs text-subtle leading-relaxed">

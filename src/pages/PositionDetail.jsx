@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, X, AlertTriangle, RefreshCw, Check } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import Spinner from '../components/Spinner'
 
 // Detail view for a single open_position. Shows entry, live mid, P&L,
 // triggered alerts, and a "Close Position" flow that submits an inverse
@@ -87,8 +88,9 @@ export default function PositionDetail() {
 
   if (loading) {
     return (
-      <div className="px-4 lg:px-6 py-6 max-w-md lg:max-w-3xl mx-auto">
-        <p className="text-xs text-subtle">Loading…</p>
+      <div className="px-4 lg:px-6 py-12 max-w-md lg:max-w-3xl mx-auto flex items-center justify-center gap-2">
+        <Spinner size="md" />
+        <span className="text-xs text-subtle">Loading position…</span>
       </div>
     )
   }

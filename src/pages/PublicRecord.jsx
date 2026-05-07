@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { Check, ExternalLink, Share2, Shield } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import Sparkline from '../components/Sparkline'
+import Spinner from '../components/Spinner'
 import clsx from 'clsx'
 
 const REPO = import.meta.env.VITE_PUBLIC_RECORD_REPO || ''
@@ -597,7 +598,7 @@ function Detail({ label, value }) {
 function LoadingPage() {
   return (
     <div className="min-h-screen bg-bg flex items-center justify-center">
-      <div className="w-8 h-8 border-2 border-red-500 border-t-transparent rounded-full animate-spin" />
+      <Spinner size="lg" tone="amber" label="Loading public record" />
     </div>
   )
 }
