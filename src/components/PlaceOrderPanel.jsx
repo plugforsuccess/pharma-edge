@@ -18,6 +18,31 @@ export default function PlaceOrderPanel({ signal, calculation, onOrderPlaced }) 
   const [step, setStep] = useState('idle') // idle | confirm | submitted
   const [loading, setLoading] = useState(false)
   const [orderResult, setOrderResult] = useState(null)
+  // Manual contract count — defaults to whatever the calculator
+  // computed under the 2% rule, but the user can override (e.g. when
+  // the broker NLV is small and the rule rounds to 0, or when the
+  // user wants to size smaller than the rule allows). null means
+  // "use the calculator's value".
+  const [manualContracts, setManualContracts] = useState('')
+
+  // Effective contract count for the order: manual override wins if
+  // it parses to a positive integer; otherwise fall back to the
+  // calculator's computed value.
+  const effectiveContracts = useMemo(() => {
+    const m = parseInt(manualContracts, 10)
+    if (Number.isFinite(m) && m > 0) return m
+    return Number.isFinite(Number(calculation?.contracts)) && Number(calculation.contracts) > 0
+      ? Number(calculation.contracts)
+      : 0
+  }, [manualContracts, calculation?.contracts])
+
+  const perContractMaxLoss = Number(calculation?.maxLossPerContract) || 0
+  const perContractMaxGain = Number(calculation?.maxGainPerContract) || 0
+  const effectiveTotalCost = effectiveContracts * perContractMaxLoss
+  const effectiveTotalGain = effectiveContracts * perContractMaxGain
+  const acctSize = Number(calculation?.account_size_used) || 0
+  const pctOfAccount = acctSize > 0 ? (effectiveTotalCost / acctSize) * 100 : null
+  const violatesRule = pctOfAccount != null && pctOfAccount > 2
   const [liveConfirm, setLiveConfirm] = useState('')
 
   const existingOrderInFlight = useMemo(() => {
@@ -65,7 +90,7 @@ export default function PlaceOrderPanel({ signal, calculation, onOrderPlaced }) 
           buy_strike: Number(calculation.buyStrike ?? 0) || undefined,
           sell_strike: Number(calculation.sellStrike ?? 0) || undefined,
           expiry_date: calculation.expiry,
-          contracts: calculation.contracts,
+          contracts: effectiveContracts,
           limit_price: Number(calculation.premium ?? 0) || undefined,
           action_type: 'open',
         },
@@ -227,6 +252,69 @@ export default function PlaceOrderPanel({ signal, calculation, onOrderPlaced }) 
 
         {step === 'idle' && selectedAccount && !existingOrderInFlight && (
           <>
+            {/* Manual contract count input — the calculator's
+                computed value (under the 2% rule) defaults here, but
+                the user can override. Necessary for two cases:
+                  1. Small NLV where the 2% rule rounds to 0 and the
+                     user wants to take 1 contract anyway (informed
+                     rule violation).
+                  2. User wants smaller size than the rule allows
+                     (e.g. low-conviction trade). */}
+            <div className="bg-bg border border-border rounded-xl p-4">
+              <div className="flex items-center justify-between mb-2">
+                <label
+                  htmlFor="po-contracts"
+                  className="text-muted text-[10px] uppercase tracking-wider"
+                >
+                  Contracts
+                </label>
+                {Number(calculation?.contracts) > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setManualContracts('')}
+                    className="text-[10px] text-subtle hover:text-fg"
+                  >
+                    Reset to 2% rule ({calculation.contracts})
+                  </button>
+                )}
+              </div>
+              <input
+                id="po-contracts"
+                type="number"
+                inputMode="numeric"
+                min="1"
+                step="1"
+                value={
+                  manualContracts !== ''
+                    ? manualContracts
+                    : (calculation?.contracts ?? '')
+                }
+                onChange={(e) => setManualContracts(e.target.value)}
+                placeholder="1"
+                className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm font-mono-tab text-fg focus:outline-none focus:border-amber-400/40"
+              />
+              <p
+                className={clsx(
+                  'text-[10px] mt-2 leading-relaxed',
+                  violatesRule ? 'text-red-400' : 'text-muted',
+                )}
+              >
+                {effectiveContracts === 0 ? (
+                  'Enter at least 1 contract to place this order.'
+                ) : pctOfAccount != null ? (
+                  violatesRule ? (
+                    <>
+                      ⚠ {pctOfAccount.toFixed(1)}% of account at risk —
+                      exceeds the 2% rule. Reduce size or accept the
+                      breach knowingly.
+                    </>
+                  ) : (
+                    <>{pctOfAccount.toFixed(1)}% of account at risk · within 2% rule.</>
+                  )
+                ) : null}
+              </p>
+            </div>
+
             <div className="bg-bg border border-border rounded-xl p-4">
               <p className="text-muted text-[10px] uppercase tracking-wider mb-3">
                 Order Preview
@@ -241,17 +329,17 @@ export default function PlaceOrderPanel({ signal, calculation, onOrderPlaced }) 
                 <OrderRow label="Buy Strike" value={`$${calculation.buyStrike}`} highlight />
                 <OrderRow label="Sell Strike" value={`$${calculation.sellStrike}`} />
                 <OrderRow label="Expiry" value={calculation.expiry || '—'} />
-                <OrderRow label="Contracts" value={String(calculation.contracts ?? '—')} highlight />
+                <OrderRow label="Contracts" value={String(effectiveContracts || '—')} highlight />
                 <OrderRow label="Limit Price" value={`$${calculation.premium} debit`} />
                 <div className="border-t border-border pt-2 mt-2">
                   <OrderRow
                     label="Total Cost"
-                    value={`$${calculation.totalCost ?? '—'}`}
+                    value={`$${effectiveTotalCost.toFixed(2)}`}
                     color="text-red-400"
                   />
                   <OrderRow
                     label="Max Gain"
-                    value={`$${calculation.totalMaxGain ?? '—'}`}
+                    value={`$${effectiveTotalGain.toFixed(2)}`}
                     color="text-green-400"
                   />
                 </div>
@@ -274,7 +362,7 @@ export default function PlaceOrderPanel({ signal, calculation, onOrderPlaced }) 
             <button
               type="button"
               onClick={() => setStep('confirm')}
-              disabled={!selectedAccount}
+              disabled={!selectedAccount || effectiveContracts === 0}
               className="w-full bg-red-600 hover:bg-red-500 disabled:bg-red-950 disabled:text-red-900
                          text-white font-semibold rounded-xl py-3 text-sm transition-colors"
             >
@@ -290,7 +378,7 @@ export default function PlaceOrderPanel({ signal, calculation, onOrderPlaced }) 
                 Final Confirmation
               </p>
               <p className="text-zinc-400 text-xs leading-relaxed mb-4">
-                {calculation.contracts} contracts of {signal.ticker}{' '}
+                {effectiveContracts} contracts of {signal.ticker}{' '}
                 {(calculation.structure || '').replace(/_/g, ' ')} at $
                 {calculation.premium} debit. Max risk: ${calculation.totalCost}.
               </p>
