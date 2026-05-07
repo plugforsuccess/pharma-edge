@@ -178,11 +178,35 @@ export default function StrikePriceCalculator({
   // of Profit alongside the R/R numbers. When absent we skip POP rather
   // than fabricate a number from a default sigma.
   iv,
+  // When the calculator is rendered inside a flow that already let
+  // the user pick a structure (LogSignal step 1), pass the chosen
+  // structure here. The picker is hidden and the calculator is
+  // anchored to the chosen value — switching structures has to go
+  // back to the upstream picker. Without this prop the calculator
+  // shows its own picker and infers from `direction`.
+  lockedStructure,
   onCalculationComplete,
 }) {
   const [structure, setStructure] = useState(
-    STRUCTURE_FOR_DIRECTION[direction] || 'bear_put_spread',
+    lockedStructure || STRUCTURE_FOR_DIRECTION[direction] || 'bear_put_spread',
   )
+
+  // If the upstream picker changes the structure (e.g. user backs to
+  // step 1 of LogSignal and switches), keep the calculator in sync
+  // and clear strikes/premium so structure-specific defaults rebuild.
+  useEffect(() => {
+    if (!lockedStructure || lockedStructure === structure) return
+    setStructure(lockedStructure)
+    setBuyStrike('')
+    setSellStrike('')
+    setLongPutStrike('')
+    setShortPutStrike('')
+    setShortCallStrike('')
+    setLongCallStrike('')
+    setPremium('')
+    setResult(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lockedStructure])
   const [stockPrice, setStockPrice] = useState(
     initialStockPrice != null ? String(initialStockPrice) : '',
   )
@@ -654,6 +678,7 @@ export default function StrikePriceCalculator({
 
       {expanded && (
         <div className="px-4 pb-4 space-y-4">
+          {!lockedStructure && (
           <div>
             <label className="text-muted text-[10px] uppercase tracking-wider block mb-2">
               Trade Structure
@@ -691,6 +716,7 @@ export default function StrikePriceCalculator({
               ))}
             </div>
           </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <CalcInput
