@@ -127,3 +127,5 @@ populating shortly after deploy without a full restart.
   `main.ts` and a `[[services]]` block to fly.toml.
 - During market-closed hours dxFeed sends almost nothing. That's
   normal; the periodic `[store]` log line confirms the WS is still up.
+
+<!-- redeploy-trigger: 2026-05-08 — BTMR/NOW/BE + 0DTE -->
