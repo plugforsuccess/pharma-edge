@@ -399,7 +399,7 @@ function SubscriptionSection({ tier, isPro }) {
           <div className="flex-1">
             <p className="text-white text-sm font-semibold">Cash Moves Pro</p>
             <p className="text-subtle text-xs">
-              Full Cashmoves HeatPulse™, Flow, Suggested Plays, broker execution, and full move analytics.
+              Full HeatPulse™, Flow, Suggested Plays, broker execution, and full move analytics.
             </p>
           </div>
         </div>
@@ -412,7 +412,7 @@ function SubscriptionSection({ tier, isPro }) {
             <div className="flex-1">
               <p className="text-white text-sm font-semibold">Free</p>
               <p className="text-subtle text-xs">
-                3 Cashmoves HeatPulse™ tickers · read-only public records.
+                3 HeatPulse™ tickers · read-only public records.
               </p>
             </div>
           </div>
@@ -425,7 +425,7 @@ function SubscriptionSection({ tier, isPro }) {
               </p>
             </div>
             <ul className="text-subtle text-xs space-y-1 list-disc list-inside">
-              <li>Full Cashmoves HeatPulse™ ticker list + watchlist</li>
+              <li>Full HeatPulse™ ticker list + watchlist</li>
               <li>Live options Flow + UOA detection</li>
               <li>Suggested Plays (GEX-driven spread setups)</li>
               <li>Tastytrade execution</li>

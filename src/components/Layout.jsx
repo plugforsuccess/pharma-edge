@@ -15,7 +15,7 @@ import clsx from 'clsx'
 // Bottom nav (mobile) + sidebar nav (desktop). Naming conventions per
 // the Cash Moves brand:
 //   /        → "Tape"   (the home dashboard, "The Tape")
-//   /markets → "Gamma"  (the GEX dashboard, "Cashmoves HeatPulse™")
+//   /markets → "Gamma"  (the GEX dashboard, "HeatPulse™")
 //   /flow    → "Flow"
 //   /record  → "Record"
 //   /settings→ "Settings"
