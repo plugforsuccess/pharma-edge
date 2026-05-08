@@ -19,7 +19,7 @@
 >   * Watchlist → "Tracking"
 >   * Premium tier → "Cash Moves Pro"
 >   * Top tier → "Inner Circle"
->   * GEX dashboard → "Gamma Map"
+>   * GEX dashboard → "Cashmoves HeatPulse™"
 >   * Zero-gamma level → "The Flip"
 >   * Largest dealer position → "The Wall"
 >
@@ -87,7 +87,7 @@ Treat file paths and component names from the unimplemented sections as the buil
 Positioning: same brand tier as Unusual Whales — built for serious traders who want dealer positioning, unusual options activity, and GEX levels in one tape. Comparable, not feature-clone.
 
 The app does four things:
-1. **Gamma Map** — live GEX by strike for the streamed-ticker universe (SPY/QQQ/IWM/AAPL/etc.) with "The Flip" (zero-gamma level) and "The Wall" (largest dealer position) called out. dxlink-worker streams Greeks + OI in real time during RTH.
+1. **Cashmoves HeatPulse™** — live GEX by strike for the streamed-ticker universe (SPY/QQQ/IWM/AAPL/etc.) with "The Flip" (zero-gamma level) and "The Wall" (largest dealer position) called out. dxlink-worker streams Greeks + OI in real time during RTH.
 2. **Flow** — live options-print stream with UOA detection. Surfaces where the size is going strike by strike.
 3. **Suggested Plays** — Claude reads the GEX matrix + flow + scanner data and proposes 0–3 spread setups that fit the user's account-size rules.
 4. **Immutable track record** — every signal locked is SHA-256 hashed and anchored to a public GitHub commit. Public profile at `/r/:slug` is the credibility layer.
