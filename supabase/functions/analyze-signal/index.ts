@@ -243,9 +243,24 @@ serve(async (req) => {
             model: CLAUDE_MODEL,
             max_tokens: MAX_TOKENS,
             stream: true,
-            system: SYSTEM_PROMPT,
+            // Prompt caching: SYSTEM_PROMPT + the web_search tool block
+            // are static across calls. Marking the tools array's tail
+            // with cache_control=ephemeral caches the entire prefix
+            // (system + tools) at the 5-min ephemeral rate, so warm
+            // calls read the prefix at ~$0.30/M instead of ~$3/M.
+            // Below ~1024 tokens caching is silently ignored, but the
+            // marker is harmless either way and engages cleanly once
+            // the prompt grows.
+            system: [
+              { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
+            ],
             tools: [
-              { type: 'web_search_20250305', name: 'web_search', max_uses: WEB_SEARCH_MAX_USES },
+              {
+                type: 'web_search_20250305',
+                name: 'web_search',
+                max_uses: WEB_SEARCH_MAX_USES,
+                cache_control: { type: 'ephemeral' },
+              },
             ],
             messages: [{ role: 'user', content: userPrompt }],
           }),
