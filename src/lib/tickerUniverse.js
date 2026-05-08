@@ -62,6 +62,7 @@ export const HOT_TICKERS = [
   { symbol: 'CRWV',  label: 'CoreWeave' },
   { symbol: 'NBIS',  label: 'Nebius' },
   { symbol: 'IREN',  label: 'Iris Energy' },
+  { symbol: 'BTMR',  label: 'Bitmine Immersion' },
   { symbol: 'SMCI',  label: 'Super Micro' },
   { symbol: 'ANET',  label: 'Arista' },
   // Banks
