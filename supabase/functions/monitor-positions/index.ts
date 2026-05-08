@@ -20,6 +20,7 @@
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { buildOccSymbol, tastytradeFetch, TastytradeError } from './tastytrade.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
@@ -145,6 +146,38 @@ interface Position {
   thesis: string | null
 }
 
+// Triggers that fire real broker close orders (real money, no
+// sandbox gate per the v1 product spec). The +50% trigger is alert-
+// only — it's a heads-up for the user, not a Cash Moves rule.
+const AUTO_CLOSE_TRIGGERS = new Set([
+  'position_stop_loss',
+  'position_profit_100',
+  'position_profit_200',
+])
+
+// Pct of ORIGINAL contracts to close at each trigger. Cumulative
+// across triggers — by the time profit_200 fires, profit_100 has
+// already closed 50%, so this 25% gets us to 75% closed total.
+// Stop loss closes everything still open.
+function targetClosePct(triggerType: string): number {
+  if (triggerType === 'position_stop_loss') return 1.0      // close everything
+  if (triggerType === 'position_profit_100') return 0.5     // close 50% of original
+  if (triggerType === 'position_profit_200') return 0.25    // close another 25% (75% total)
+  return 0
+}
+
+// Map our internal strategy enum to the place-order `structure`
+// param. Currently we only auto-close debit verticals — credit
+// spreads + iron condors are alert-only because their close-order
+// shape needs different leg actions (Buy/Sell to Close the
+// originally-sold leg). Add support if real-money credit auto-
+// close becomes a need.
+function structureFor(strategy: string): 'bull_call_spread' | 'bear_put_spread' | null {
+  if (strategy === 'BULL_CALL') return 'bull_call_spread'
+  if (strategy === 'BEAR_PUT') return 'bear_put_spread'
+  return null
+}
+
 function isCallSpread(strategy: string): boolean {
   return strategy === 'BULL_CALL' || strategy === 'BEAR_CALL_CREDIT'
 }
@@ -218,6 +251,274 @@ function evaluateTriggers(
   return out
 }
 
+// Submit a real broker close order for a fraction of the original
+// position. Best-effort — failures here only log; the alert still
+// fires so the user can intervene manually.
+//
+// Idempotency: each trigger type fires once per position (idempotent
+// via `triggers_fired`), and we re-derive contracts-to-close from
+// order_history rather than a separate counter, so duplicate calls
+// would be caught by Tastytrade or by the contracts-remaining check.
+//
+// Limit-pricing rule:
+//   - stop loss: bid the current spread mid down 5% to ensure fill
+//     in a falling-mid environment. Yahoo mid is 15-min delayed so
+//     a market order is too risky.
+//   - profit-take: limit AT mid; we have time, the market is paying.
+async function submitAutoClose(
+  supabase: ReturnType<typeof createClient>,
+  pos: Position,
+  triggerType: string,
+  currentMid: number,
+): Promise<{ submitted: boolean; reason?: string }> {
+  if (!AUTO_CLOSE_TRIGGERS.has(triggerType)) return { submitted: false, reason: 'not an auto-close trigger' }
+  if (!pos.signal_id) return { submitted: false, reason: 'no signal_id (manual position)' }
+  const structure = structureFor(pos.strategy_type)
+  if (!structure) return { submitted: false, reason: `unsupported strategy: ${pos.strategy_type}` }
+
+  // Pull broker account from the linked signal. If the signal was
+  // never wired to a Tastytrade account (paper trade or older signal),
+  // we can't auto-close.
+  const { data: signal } = await supabase
+    .from('signals')
+    .select('id, tastytrade_account_number, status')
+    .eq('id', pos.signal_id)
+    .maybeSingle()
+  if (!signal?.tastytrade_account_number) {
+    return { submitted: false, reason: 'signal has no broker account number' }
+  }
+  if (signal.status !== 'active') {
+    return { submitted: false, reason: `signal not active (${signal.status})` }
+  }
+
+  // Sum already-auto-closed contracts so we don't over-close.
+  const { data: existingCloses } = await supabase
+    .from('order_history')
+    .select('contracts, status, auto_close_strategy')
+    .eq('signal_id', pos.signal_id)
+    .eq('order_type', 'close')
+    .eq('auto_executed', true)
+    .in('status', ['submitted', 'pending', 'filled', 'partial_fill'])
+  const alreadyAutoClosed = (existingCloses ?? [])
+    .reduce((s, r) => s + (Number(r.contracts) || 0), 0)
+  const remaining = pos.contracts - alreadyAutoClosed
+  if (remaining <= 0) {
+    return { submitted: false, reason: 'no contracts remaining to auto-close' }
+  }
+
+  // Compute target contracts to close in THIS trigger.
+  let target: number
+  if (triggerType === 'position_stop_loss') {
+    target = remaining
+  } else {
+    // profit_100 / profit_200 — fraction of original, rounded down,
+    // capped to remaining. Round down so we never close more than the
+    // rules call for.
+    const pct = targetClosePct(triggerType)
+    target = Math.min(remaining, Math.floor(pos.contracts * pct))
+  }
+  if (target <= 0) {
+    return { submitted: false, reason: 'rounded contract count is zero' }
+  }
+
+  // Limit price.
+  const isProfitTake = triggerType !== 'position_stop_loss'
+  const limitPrice = isProfitTake
+    ? Math.max(0.01, currentMid)               // at mid, we have time
+    : Math.max(0.01, currentMid * 0.95)        // 5% below mid for stop, ensure fill
+  const limitRounded = Math.round(limitPrice * 100) / 100
+
+  // Build OCC symbols. Same convention place-order uses.
+  const optionType: 'C' | 'P' = isCallSpread(pos.strategy_type) ? 'C' : 'P'
+  const longSymbol = buildOccSymbol(pos.ticker, pos.expiration, optionType, pos.long_strike)
+  const shortSymbol = buildOccSymbol(pos.ticker, pos.expiration, optionType, pos.short_strike)
+
+  // Closing a debit spread: Sell the long, Buy back the short.
+  // Tastytrade convention: positive `price` paired with `price-effect: Credit`
+  // (closing a debit spread is net Credit when in profit, but you can
+  // also close at break-even / loss; we model it as Credit here since
+  // the only auto-close cases hit a meaningful mid > 0).
+  const orderPayload = {
+    'order-type': 'Limit',
+    'time-in-force': 'Day',
+    'price': limitRounded.toFixed(2),
+    'price-effect': 'Credit',
+    'legs': [
+      { 'instrument-type': 'Equity Option', 'symbol': longSymbol, 'quantity': target, 'action': 'Sell to Close' },
+      { 'instrument-type': 'Equity Option', 'symbol': shortSymbol, 'quantity': target, 'action': 'Buy to Close' },
+    ],
+  }
+
+  let orderResp: Response
+  try {
+    orderResp = await tastytradeFetch(
+      supabase,
+      `/accounts/${encodeURIComponent(signal.tastytrade_account_number)}/orders`,
+      { method: 'POST', body: JSON.stringify(orderPayload) },
+    )
+  } catch (err) {
+    const reason = err instanceof TastytradeError ? err.message : String(err)
+    await supabase.from('order_history').insert({
+      signal_id: pos.signal_id,
+      user_id: pos.user_id,
+      account_number: signal.tastytrade_account_number,
+      order_type: 'close',
+      action: 'sell_to_close',
+      structure,
+      ticker: pos.ticker,
+      buy_strike: pos.long_strike,
+      sell_strike: pos.short_strike,
+      expiry_date: pos.expiration,
+      contracts: target,
+      limit_price: limitRounded,
+      status: 'rejected',
+      auto_executed: true,
+      auto_close_strategy: triggerType,
+      api_response: { error: reason },
+    })
+    return { submitted: false, reason }
+  }
+
+  const orderData = await orderResp.json().catch(() => ({}))
+  if (!orderResp.ok) {
+    await supabase.from('order_history').insert({
+      signal_id: pos.signal_id,
+      user_id: pos.user_id,
+      account_number: signal.tastytrade_account_number,
+      order_type: 'close',
+      action: 'sell_to_close',
+      structure,
+      ticker: pos.ticker,
+      buy_strike: pos.long_strike,
+      sell_strike: pos.short_strike,
+      expiry_date: pos.expiration,
+      contracts: target,
+      limit_price: limitRounded,
+      status: 'rejected',
+      auto_executed: true,
+      auto_close_strategy: triggerType,
+      api_response: orderData,
+    })
+    return { submitted: false, reason: `tastytrade ${orderResp.status}` }
+  }
+
+  const orderId = orderData?.data?.order?.id ?? null
+  const tastyStatus = String(orderData?.data?.order?.status ?? 'submitted').toLowerCase()
+  const normalised = ['pending', 'submitted', 'filled', 'cancelled', 'rejected', 'partial_fill']
+    .includes(tastyStatus) ? tastyStatus : 'submitted'
+
+  await supabase.from('order_history').insert({
+    signal_id: pos.signal_id,
+    user_id: pos.user_id,
+    tastytrade_order_id: orderId,
+    account_number: signal.tastytrade_account_number,
+    order_type: 'close',
+    action: 'sell_to_close',
+    structure,
+    ticker: pos.ticker,
+    buy_strike: pos.long_strike,
+    sell_strike: pos.short_strike,
+    expiry_date: pos.expiration,
+    contracts: target,
+    limit_price: limitRounded,
+    status: normalised,
+    auto_executed: true,
+    auto_close_strategy: triggerType,
+    api_response: orderData,
+  })
+
+  console.log(
+    `[auto-close] ${pos.ticker} ${pos.long_strike}/${pos.short_strike} ` +
+    `${triggerType} → ${target} contracts @ $${limitRounded} (order ${orderId ?? '?'})`,
+  )
+  return { submitted: true }
+}
+
+// Poll Tastytrade for the latest status of every recently-submitted
+// auto-close order. When a status change includes a fill, fire a
+// position_filled push so the user knows their stop-loss / profit-
+// take actually hit. Ran once per cron invocation BEFORE the trigger
+// pass — so a fill from the previous tick lands an alert before any
+// new triggers go off.
+async function pollOpenOrders(
+  supabase: ReturnType<typeof createClient>,
+): Promise<{ checked: number; updated: number; filled: number }> {
+  // Look back 24h. Anything older that's still 'submitted' is almost
+  // certainly stale (Tastytrade Day orders expire at EOD) — but we
+  // still poll once so the row reflects reality.
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+  const { data: orders } = await supabase
+    .from('order_history')
+    .select('id, signal_id, user_id, tastytrade_order_id, account_number, status, contracts, ticker, auto_executed, auto_close_strategy, limit_price')
+    .gte('submitted_at', since)
+    .in('status', ['submitted', 'pending', 'partial_fill'])
+    .not('tastytrade_order_id', 'is', null)
+    .limit(100)
+
+  let updated = 0
+  let filled = 0
+  for (const o of orders ?? []) {
+    try {
+      const resp = await tastytradeFetch(
+        supabase,
+        `/accounts/${encodeURIComponent(o.account_number)}/orders/${encodeURIComponent(o.tastytrade_order_id)}`,
+      )
+      if (!resp.ok) continue
+      const body = await resp.json().catch(() => ({}))
+      const tastyStatus = String(body?.data?.order?.status ?? '').toLowerCase()
+      const normalised = ['pending', 'submitted', 'filled', 'cancelled', 'rejected', 'partial_fill']
+        .includes(tastyStatus) ? tastyStatus : null
+      if (!normalised || normalised === o.status) continue
+
+      const updates: Record<string, unknown> = { status: normalised, api_response: body }
+      if (normalised === 'filled') {
+        const filledPrice = Number(body?.data?.order?.['avg-fill-price'] ?? body?.data?.order?.['filled-price'])
+        if (Number.isFinite(filledPrice)) updates.filled_price = filledPrice
+        updates.filled_at = new Date().toISOString()
+      }
+      await supabase.from('order_history').update(updates).eq('id', o.id)
+      updated++
+
+      // Fire fill alert for auto-executed orders that just filled.
+      if (normalised === 'filled' && o.auto_executed) {
+        filled++
+        const alertRow = {
+          user_id: o.user_id,
+          alert_type: 'position_filled',
+          payload: {
+            order_id: o.id,
+            tastytrade_order_id: o.tastytrade_order_id,
+            ticker: o.ticker,
+            contracts: o.contracts,
+            limit_price: o.limit_price,
+            filled_price: updates.filled_price ?? null,
+            auto_close_strategy: o.auto_close_strategy,
+            message: `Auto-close filled: ${o.contracts} contracts of ${o.ticker} (${o.auto_close_strategy?.replace('position_', '') ?? 'close'})`,
+            url: `${APP_URL}/position/${o.signal_id}`,
+          },
+          sent_at: new Date().toISOString(),
+        }
+        await supabase.from('alerts').insert(alertRow)
+        await fetch(`${SUPABASE_URL}/functions/v1/send-alerts`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            user_id: o.user_id,
+            alert_type: 'position_filled',
+            payload: alertRow.payload,
+          }),
+        }).catch((e) => console.warn('[poll-orders] send-alerts failed:', e))
+      }
+    } catch (e) {
+      console.warn('[poll-orders] fetch failed:', e instanceof Error ? e.message : e)
+    }
+  }
+  return { checked: orders?.length ?? 0, updated, filled }
+}
+
 async function fireAlert(
   supabase: ReturnType<typeof createClient>,
   pos: Position,
@@ -289,6 +590,12 @@ serve(async (req) => {
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
+  // First pass: poll Tastytrade for status changes on any auto-close
+  // orders that are still pending. Doing this before the trigger pass
+  // means a fill from the previous tick lands a push alert before
+  // we evaluate new triggers — keeps the audit trail tidy.
+  const pollResult = await pollOpenOrders(supabase)
+
   // Pull every open position. At realistic scale (one user, dozens of
   // positions max) this is fine; if it grows we'd page or filter by
   // last_polled_at older than 4 min.
@@ -357,6 +664,19 @@ serve(async (req) => {
         newFired[t.type] = new Date().toISOString()
         await fireAlert(supabase, pos, t, pnlPct)
         triggersFired++
+
+        // Auto-execute close orders for stop-loss + profit-take rules.
+        // Real money, no sandbox gate. The fireAlert call above means
+        // the user always gets a push regardless of whether the auto-
+        // close attempt succeeds — no silent failures.
+        if (AUTO_CLOSE_TRIGGERS.has(t.type)) {
+          const ac = await submitAutoClose(supabase, pos, t.type, mid)
+          if (!ac.submitted) {
+            console.log(
+              `[auto-close] ${pos.ticker} ${t.type}: skipped — ${ac.reason}`,
+            )
+          }
+        }
       }
       await supabase
         .from('open_positions')
@@ -387,5 +707,6 @@ serve(async (req) => {
     pollSucceeded,
     pollFailed,
     triggersFired,
+    orderPoll: pollResult,
   })
 })
