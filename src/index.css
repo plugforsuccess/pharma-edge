@@ -405,3 +405,85 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-border-hover);
 }
+
+/* ─── Prose styles for /learn/* SEO articles ─────────────────────
+ *
+ * Hand-rolled instead of using @tailwindcss/typography because we
+ * already have a strict color discipline (see top of file) and the
+ * defaults override our muted/subtle/fg tokens. Styles target the
+ * direct children of .prose-cm so article authors can write plain
+ * semantic JSX (h2, p, ul, code) without inline class spam.
+ */
+.prose-cm {
+  color: var(--color-fg);
+  font-size: 0.95rem;
+  line-height: 1.7;
+}
+.prose-cm > * + * { margin-top: 1rem; }
+.prose-cm h2 {
+  font-size: 1.4rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin-top: 2.25rem;
+  margin-bottom: 0.75rem;
+}
+.prose-cm h3 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-top: 1.75rem;
+  margin-bottom: 0.5rem;
+  color: var(--color-fg);
+}
+.prose-cm p { color: var(--color-subtle); }
+.prose-cm strong { color: var(--color-fg); font-weight: 600; }
+.prose-cm a {
+  color: #fbbf24;            /* amber-400 — matches brand link color */
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.prose-cm a:hover { color: #fcd34d; }
+.prose-cm code {
+  font-family: var(--font-mono-tab);
+  font-size: 0.85em;
+  background: var(--color-bg-elev);
+  padding: 0.1em 0.35em;
+  border-radius: 0.25rem;
+  color: var(--color-fg);
+}
+.prose-cm ul, .prose-cm ol {
+  padding-left: 1.5rem;
+  color: var(--color-subtle);
+}
+.prose-cm ul { list-style: disc; }
+.prose-cm ol { list-style: decimal; }
+.prose-cm li { margin-top: 0.4rem; }
+.prose-cm blockquote {
+  border-left: 2px solid #fbbf24;
+  padding-left: 1rem;
+  font-style: italic;
+  color: var(--color-fg);
+}
+.prose-cm hr {
+  border: none;
+  border-top: 1px solid var(--color-border);
+  margin: 2rem 0;
+}
+.prose-cm table {
+  width: 100%;
+  font-size: 0.85rem;
+  border-collapse: collapse;
+  margin-top: 1rem;
+}
+.prose-cm th, .prose-cm td {
+  border: 1px solid var(--color-border);
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+}
+.prose-cm th {
+  background: var(--color-bg-elev);
+  color: var(--color-fg);
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}

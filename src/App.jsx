@@ -21,6 +21,12 @@ const Glossary = lazy(() => import('./pages/Glossary'))
 const PositionDetail = lazy(() => import('./pages/PositionDetail'))
 const Flow = lazy(() => import('./pages/Flow'))
 const Reasoning = lazy(() => import('./pages/Reasoning'))
+const LearnIndex = lazy(() => import('./pages/LearnIndex'))
+const DealerPositioningGuide = lazy(() => import('./pages/learn/DealerPositioningGuide'))
+const GammaFlipTrading = lazy(() => import('./pages/learn/GammaFlipTrading'))
+const ZeroDtePinningStrategy = lazy(() => import('./pages/learn/ZeroDtePinningStrategy'))
+const VannaExposureExplained = lazy(() => import('./pages/learn/VannaExposureExplained'))
+const BestGexTools = lazy(() => import('./pages/learn/BestGexTools'))
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -79,6 +85,12 @@ export default function App() {
             <Route path="markets" element={<Markets />} />
             <Route path="flow" element={<Flow />} />
             <Route path="reasoning" element={<Reasoning />} />
+            <Route path="learn" element={<LearnIndex />} />
+            <Route path="learn/dealer-positioning-guide" element={<DealerPositioningGuide />} />
+            <Route path="learn/gamma-flip-trading" element={<GammaFlipTrading />} />
+            <Route path="learn/0dte-pinning-strategy" element={<ZeroDtePinningStrategy />} />
+            <Route path="learn/vanna-exposure-explained" element={<VannaExposureExplained />} />
+            <Route path="learn/best-gex-tools" element={<BestGexTools /> } />
             <Route path="glossary" element={<Glossary />} />
             <Route path="position/:id" element={<PositionDetail />} />
           </Route>
