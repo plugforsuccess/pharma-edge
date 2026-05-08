@@ -908,3 +908,5 @@ serve(async (req) => {
     data: { ...result, from_cache: false, cache_age_ms: 0 },
   })
 })
+
+// redeploy-trigger: 2026-05-08 — pick up 0DTE Yahoo unix-cutoff fix from PR #73
