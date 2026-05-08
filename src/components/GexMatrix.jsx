@@ -56,16 +56,32 @@ function gexColor(gex, maxAbs) {
   return `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`
 }
 
-export default function GexMatrix({ data, liveSpot = null }) {
+// Map an exposureType prop to the cells array on the matrix payload.
+// 'gex' is the default and reads `data.cells` for back-compat with
+// older snapshot payloads that pre-date the multi-exposure response.
+const CELLS_FIELD = {
+  gex: 'cells',
+  vex: 'vex_cells',
+  cex: 'cex_cells',
+  dex: 'dex_cells',
+  velocity: 'velocity_cells',
+}
+
+export default function GexMatrix({ data, liveSpot = null, exposureType = 'gex' }) {
   const expirations = data?.expirations ?? []
   const strikes = data?.strikes ?? []
-  const cells = data?.cells ?? []
+  const cellsField = CELLS_FIELD[exposureType] ?? 'cells'
+  const cells = data?.[cellsField] ?? []
   // The matrix snapshot's `spot` is from when compute-gex ran (cached
   // 5 min server-side). For the cursor row to actually look live the
   // way the LIVE badge implies, we accept an optional `liveSpot`
   // override polled from dxlink_quotes — falls back to snapshot spot.
   const spot = Number.isFinite(liveSpot) && liveSpot > 0 ? liveSpot : data?.spot ?? null
-  const largest = data?.largest ?? null
+  // The `largest` highlight is only meaningful for the GEX layer —
+  // it's the single most important strike for dealer hedging. The
+  // other exposure layers have their own peaks but the backend
+  // doesn't track them; the star marker stays GEX-only by design.
+  const largest = exposureType === 'gex' ? (data?.largest ?? null) : null
 
   const maxAbs = useMemo(() => {
     let m = 0
@@ -101,7 +117,24 @@ export default function GexMatrix({ data, liveSpot = null }) {
   if (strikes.length === 0 || expirations.length === 0) {
     return (
       <div className="text-center text-subtle text-sm py-8">
-        No GEX data to display.
+        No {exposureType.toUpperCase()} data to display.
+      </div>
+    )
+  }
+
+  // Velocity requires a prior snapshot to diff against. When the
+  // backend couldn't find one in the 5min–4hr window, velocity_cells
+  // comes back null and we render a clear empty state instead of an
+  // unstyled blank grid.
+  if (exposureType === 'velocity' && (cells == null || cells.length === 0 || cells.every((row) => row.every((v) => v == null)))) {
+    return (
+      <div className="text-center text-subtle text-sm py-12 px-6 leading-relaxed">
+        <div className="font-semibold text-fg mb-1">Not enough history yet</div>
+        <div className="text-xs">
+          Velocity Mode needs at least one prior snapshot 5+ min old to
+          diff against. Come back in a few minutes — the 5-min archive
+          cron will fill the gap.
+        </div>
       </div>
     )
   }
