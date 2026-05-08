@@ -740,5 +740,67 @@ serve(async (req) => {
     { onConflict: 'cache_key' },
   ).then(() => {})
 
-  return json({ success: true, data: { ...payload, from_cache: false, cache_age_ms: 0 } })
+  // Log to reasoning_history — the time-series record the /reasoning
+  // page reads from to render regime + confidence drift. Best-effort:
+  // failures here don't block the response (we already have the
+  // user-visible result; the history panel just shows one fewer row
+  // if the insert fails). Confidence aggregates per-play EV edge —
+  // converting the per-play ev_edge_bp (basis points relative to
+  // breakeven, range typically ±2000) to a 0..1 confidence by
+  // shifting + clamping. No plays → 0 confidence.
+  let aggConfidence: number | null = null
+  if (Array.isArray(parsed?.plays) && parsed.plays.length > 0) {
+    const evEdges = parsed.plays
+      .map((p: { ev_edge_bp?: number | null }) => p.ev_edge_bp)
+      .filter((v: unknown): v is number => typeof v === 'number' && Number.isFinite(v))
+    if (evEdges.length > 0) {
+      const avgEdgeBp = evEdges.reduce((s: number, v: number) => s + v, 0) / evEdges.length
+      // ev_edge_bp 0 → 0.5 confidence (break-even); +1000bp (10pp
+      // edge over breakeven) → 1.0; -1000bp → 0.0. Clamp to [0,1].
+      aggConfidence = Math.max(0, Math.min(1, 0.5 + avgEdgeBp / 2000))
+    } else {
+      aggConfidence = 0.5 // plays exist but no IV at the strikes
+    }
+  } else {
+    aggConfidence = 0
+  }
+  // The matrix payload carries the deterministic context we want to
+  // pin in history. If a field is missing (older cached payload) we
+  // fall back to null — the column is nullable.
+  const m = matrix as MatrixData & {
+    net_gex?: number; expected_move?: number; expected_move_pct?: number
+    pinning_probability?: number; zero_gamma_strike?: number
+    largest_negative_strike?: number
+  }
+  adminClient.from('reasoning_history').insert({
+    user_id: user.id,
+    ticker,
+    regime: parsed?.regime ?? 'mixed',
+    regime_explanation: parsed?.regime_explanation ?? null,
+    spot: m.spot ?? null,
+    net_gex: m.net_gex ?? null,
+    expected_move: m.expected_move ?? null,
+    expected_move_pct: m.expected_move_pct ?? null,
+    pinning_probability: m.pinning_probability ?? null,
+    call_wall: m.largest?.strike ?? null,
+    put_wall: m.largest_negative_strike ?? null,
+    flip_strike: m.zero_gamma_strike ?? null,
+    play_count: parsed?.plays?.length ?? 0,
+    plays: parsed?.plays ?? [],
+    confidence: aggConfidence,
+  }).then(({ error }) => {
+    if (error) console.warn('[reasoning_history] insert failed:', error.message)
+  })
+
+  return json({
+    success: true,
+    data: {
+      ...payload,
+      from_cache: false,
+      cache_age_ms: 0,
+      // Echo the aggregate confidence so /reasoning's history panel
+      // can render the latest entry without an extra round-trip.
+      confidence: aggConfidence,
+    },
+  })
 })
