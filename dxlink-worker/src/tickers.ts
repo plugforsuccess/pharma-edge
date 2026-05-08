@@ -45,6 +45,7 @@ export const TRACKED_TICKERS: string[] = [
   'CRM',
   'ADBE',
   'NFLX',
+  'NOW',
   // Semis (foundry / equipment / mobile / networking-silicon)
   'TSM',
   'ASML',
@@ -96,6 +97,7 @@ export const TRACKED_TICKERS: string[] = [
   'SMR',
   'OKLO',
   'CCJ',
+  'BE',
   // Liquid retail / meme / fintech
   'COIN',
   'PLTR',
