@@ -277,7 +277,7 @@ export default function Markets() {
           <ArrowLeft size={20} />
         </button>
         <div className="flex-1">
-          <h1 className="text-lg lg:text-2xl font-semibold leading-tight">Gamma Map</h1>
+          <h1 className="text-lg lg:text-2xl font-semibold leading-tight">Cashmoves HeatPulse™</h1>
           <p className="text-xs lg:text-sm text-subtle">
             Where dealer hedging flow concentrates by strike.
           </p>
