@@ -70,11 +70,15 @@ export default function Dashboard() {
     setLoading(true)
     const [signalRes, openCountRes, outcomeRes, candidateCountRes, watchlistCountRes] =
       await Promise.all([
+        // Watch-only signals — the user logged a thesis but didn't enter a trade.
+        // Active spread trades are handled by <OpenPositions/> directly; the
+        // previous "Live Moves" feed showed both, which read as redundant.
         supabase
           .from('signals')
           .select('*, outcomes(*)')
           .eq('user_id', user.id)
           .eq('status', 'active')
+          .eq('direction', 'watch')
           .order('logged_at', { ascending: false })
           .limit(10),
         supabase
@@ -246,59 +250,32 @@ export default function Dashboard() {
             Log a Move
           </button>
 
-          <div className="flex items-end justify-between mb-3">
-            <div>
-              <p className="eyebrow">Live Theses</p>
-              <h2 className="font-display text-xl text-fg mt-0.5">Live Moves</h2>
-            </div>
-          </div>
-
-          <div className="space-y-2.5">
-            {loading ? (
-              Array(3)
-                .fill(0)
-                .map((_, i) => (
-                  <div
-                    key={i}
-                    className="surface rounded-2xl p-4 animate-pulse"
-                  >
-                    <div className="h-4 bg-white/5 rounded w-1/3 mb-2" />
-                    <div className="h-3 bg-white/5 rounded w-2/3" />
-                  </div>
-                ))
-            ) : signals.length === 0 ? (
-              <div className="surface rounded-2xl p-10 text-center">
-                <TrendingUp
-                  size={28}
-                  strokeWidth={1.5}
-                  className="mx-auto mb-3 text-muted"
-                />
-                <p className="font-display text-lg text-fg">The tape is quiet</p>
-                <p className="text-subtle text-xs mt-1.5 leading-relaxed max-w-xs mx-auto">
-                  No moves logged yet. Tap the
-                  {' '}<span className="text-amber-400 font-semibold">+</span>{' '}
-                  in the nav to write your first thesis — every signal
-                  hashes into the public record at lock time.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => navigate('/log')}
-                  className="tap-spring mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-bg font-semibold text-sm"
-                >
-                  <Plus size={14} strokeWidth={2.5} />
-                  Log your first move
-                </button>
+          {/* Watching — only signals where direction='watch' (logged a
+              thesis but didn't enter a trade). Active spread trades
+              live in <OpenPositions/> on the right rail; merging the
+              two surfaces eliminated the prior redundancy where
+              every active trade appeared in both sections.
+              Renders nothing when empty so the section doesn't
+              clutter the Tape for users who only trade. */}
+          {!loading && signals.length > 0 && (
+            <>
+              <div className="flex items-end justify-between mb-3">
+                <div>
+                  <p className="eyebrow">Theses without trades</p>
+                  <h2 className="font-display text-xl text-fg mt-0.5">Watching</h2>
+                </div>
               </div>
-            ) : (
-              signals.map((signal) => (
-                <SignalCard
-                  key={signal.id}
-                  signal={signal}
-                  onClick={() => navigate(`/signal/${signal.id}`)}
-                />
-              ))
-            )}
-          </div>
+              <div className="space-y-2.5">
+                {signals.map((signal) => (
+                  <SignalCard
+                    key={signal.id}
+                    signal={signal}
+                    onClick={() => navigate(`/signal/${signal.id}`)}
+                  />
+                ))}
+              </div>
+            </>
+          )}
         </div>
 
       </div>
