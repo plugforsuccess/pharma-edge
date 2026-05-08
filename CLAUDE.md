@@ -103,6 +103,7 @@ Legacy biotech-catalyst scanner (CT.gov, FDA, SEC EDGAR → scanner_candidates) 
 ```
 pharma-edge/
 ├── CLAUDE.md                        ← You are here. Read before touching anything.
+├── RISK_MANAGEMENT.md               ← Personal trading discipline layer (read after CLAUDE.md)
 ├── .env.local                       ← Never commit. Never log. Never expose.
 ├── .gitignore                       ← Confirms .env.local is excluded
 ├── package.json
