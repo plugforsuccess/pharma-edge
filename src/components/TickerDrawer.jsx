@@ -80,12 +80,17 @@ export default function TickerDrawer({
                       open ? 'translate-y-0' : 'translate-y-full'
                     }`}
         style={{
-          // dvh (dynamic viewport height) shrinks when the iOS
-          // keyboard opens; vh does not. Without this the drawer
-          // sat anchored to the full-viewport bottom while the
-          // keyboard covered the search input + result list.
-          // Capping at 85dvh keeps the backdrop visible at the top
-          // and gives the drawer a hard ceiling on tall screens.
+          // Use a fixed height (not just max-height) so the inner
+          // overflow-y-auto list has a real container to scroll
+          // against. Without this, when search filters down to 1-2
+          // matches the parent collapses to fit-content height,
+          // pushing those matches below the visible area on iOS
+          // Safari (the result list is theoretically still
+          // there, just clipped because flex-1 + max-height with
+          // no defined height = no remaining space to allocate).
+          // 75dvh is keyboard-aware and gives plenty of room for
+          // the search + at least 6-7 visible result rows.
+          height: '75dvh',
           maxHeight: '85dvh',
           paddingBottom: 'env(safe-area-inset-bottom)',
         }}
