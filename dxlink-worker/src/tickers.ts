@@ -64,6 +64,7 @@ export const TRACKED_TICKERS: string[] = [
   'CRWV',
   'NBIS',
   'IREN',
+  'BTMR',
   'SMCI',
   'ANET',
   // Banks
