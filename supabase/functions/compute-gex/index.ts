@@ -447,9 +447,18 @@ async function computeMatrixFromYahoo(
   const { spot, expirations: expiryUnixes } = firstChain
   if (!Number.isFinite(spot) || spot <= 0) return { error: `no spot for ${ticker}` }
 
-  const todayUnix = Math.floor(Date.now() / 1000)
+  // Use start-of-today-UTC instead of "right now" — Yahoo encodes
+  // option expirations as the unix timestamp at 00:00 UTC of the
+  // expiration date. Comparing against `Math.floor(Date.now() / 1000)`
+  // would filter out today's 0DTE expiration any time the request
+  // arrives after 00:00 UTC (which is always, in practice). We want
+  // every expiration whose CALENDAR DAY is today or later.
+  const now = new Date()
+  const todayMidnightUnix = Math.floor(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) / 1000,
+  )
   const futureUnixes = expiryUnixes
-    .filter((u) => u >= todayUnix)
+    .filter((u) => u >= todayMidnightUnix)
     .slice(0, opts.maxExpirations)
   if (futureUnixes.length === 0) return { error: 'no future expirations from yahoo' }
 
