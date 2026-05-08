@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, RefreshCw, Activity, Star, Lock, ChevronDown, Clock, BookOpen, Search } from 'lucide-react'
+import { ArrowLeft, RefreshCw, Activity, Star, Lock, ChevronDown, Clock, BookOpen, Search, Sparkles } from 'lucide-react'
 import clsx from 'clsx'
 import { isWithinRth } from '../utils/marketHours'
 import { useNavigate, useSearchParams } from 'react-router-dom'
@@ -319,6 +319,14 @@ export default function Markets() {
         >
           <Clock size={13} />
           {replayActive ? 'Live' : 'Replay'}
+        </button>
+        <button
+          onClick={() => navigate(`/reasoning?t=${ticker}`)}
+          className="p-2 text-subtle hover:text-amber-400"
+          aria-label="Open Reasoning"
+          title="Open the live inference engine for this ticker"
+        >
+          <Sparkles size={18} />
         </button>
         <button
           onClick={() => navigate('/glossary')}

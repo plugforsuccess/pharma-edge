@@ -7,6 +7,7 @@ import {
   Home,
   Plus,
   Settings,
+  Sparkles,
 } from 'lucide-react'
 import InstallPrompt from './InstallPrompt'
 import Spinner from './Spinner'
@@ -37,6 +38,11 @@ const navRight = [
 const navFull = [
   ...navLeft,
   ...navRight,
+  // Reasoning sits between the visualization tabs (Gamma/Flow) and
+  // the operational tabs (Record/Settings) in the desktop sidebar
+  // since it's the engine output for the views above it. Mobile
+  // users reach /reasoning from the Markets page header for now.
+  { to: '/reasoning', icon: Sparkles, label: 'Reasoning' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ]
 

@@ -20,6 +20,7 @@ const Markets = lazy(() => import('./pages/Markets'))
 const Glossary = lazy(() => import('./pages/Glossary'))
 const PositionDetail = lazy(() => import('./pages/PositionDetail'))
 const Flow = lazy(() => import('./pages/Flow'))
+const Reasoning = lazy(() => import('./pages/Reasoning'))
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -77,6 +78,7 @@ export default function App() {
             <Route path="calculator" element={<OptionCalculator />} />
             <Route path="markets" element={<Markets />} />
             <Route path="flow" element={<Flow />} />
+            <Route path="reasoning" element={<Reasoning />} />
             <Route path="glossary" element={<Glossary />} />
             <Route path="position/:id" element={<PositionDetail />} />
           </Route>
