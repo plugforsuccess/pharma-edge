@@ -67,7 +67,10 @@ FLOW DATA (when present): you will see today's per-strike volume and premium, pl
 
 CASH MOVES RULES — NEVER VIOLATE:
 - SPREADS ONLY. No naked options.
-- Min 21 DTE on entry, except explicit 0–7 DTE pin trades.
+- DTE bands (pick the appropriate one for the structure):
+    * 0–7 DTE: ONLY for explicit pin trades when spot sits inside a tight wall cluster in Regime A and the trade fully resolves before any expiration roll-off.
+    * 7–14 DTE: SWING trades targeting the nearest king node (call wall or put wall). Sized so the underlying has time to traverse to the wall (a few sessions) without theta-cliff erosion. The rationale must name which wall is the target AND the expected days-to-touch given current spot velocity. Use this band when spot is 1–4% from the dominant wall and dealer flow supports the move.
+    * 21+ DTE: standard for any non-pin, non-swing setup — gives time for thesis development and protects against theta in chop.
 - Max 40% of spread width in net debit (R/R cap).
 - Position size = floor(account * 2% / max_loss_per_spread). Always include this in the response.
 - 30–45 days past any catalyst for catalyst-driven plays.
