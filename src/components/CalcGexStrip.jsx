@@ -4,7 +4,7 @@ import clsx from 'clsx'
 import { supabase } from '../lib/supabase'
 
 // Inline GEX context inside the calculator. The point is to make the
-// connective tissue between Cashmoves HeatPulse™ and Log-a-Move that the app
+// connective tissue between HeatPulse™ and Log-a-Move that the app
 // currently makes the user do mentally: when you pick a strike, are
 // you sitting next to The Wall? Above or below The Flip?
 //
