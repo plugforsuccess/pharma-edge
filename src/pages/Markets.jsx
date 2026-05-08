@@ -162,17 +162,36 @@ export default function Markets() {
     const symbol = sym.toUpperCase()
     const isCurrentlyFav = watchlist.includes(symbol)
     if (isCurrentlyFav) {
+      // Optimistic remove. If the delete fails (network, RLS), the
+      // next mount's load will repopulate from DB so the UI corrects
+      // itself.
       setWatchlist((cur) => cur.filter((t) => t !== symbol))
-      await supabase
+      const { error } = await supabase
         .from('watchlist')
         .delete()
         .eq('user_id', user.id)
         .eq('ticker', symbol)
+      if (error) {
+        console.error('[watchlist] delete failed', error)
+        // Roll back optimistic update so the star reflects DB truth
+        setWatchlist((cur) => (cur.includes(symbol) ? cur : [...cur, symbol]))
+      }
     } else {
       setWatchlist((cur) => [...cur, symbol])
-      await supabase
+      // Look up the human-readable label from the universe so the
+      // row is more than a bare symbol when it lands in DB. Falls
+      // back to the symbol itself if the ticker isn't in our
+      // universe (custom search).
+      const label =
+        TICKER_UNIVERSE.find((t) => t.symbol === symbol)?.label || symbol
+      const { error } = await supabase
         .from('watchlist')
-        .insert({ user_id: user.id, ticker: symbol })
+        .insert({ user_id: user.id, ticker: symbol, company_name: label })
+      if (error) {
+        console.error('[watchlist] insert failed', error)
+        // Roll back so the UI doesn't lie about being saved
+        setWatchlist((cur) => cur.filter((t) => t !== symbol))
+      }
     }
   }
 
