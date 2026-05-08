@@ -67,10 +67,24 @@ FLOW DATA (when present): you will see today's per-strike volume and premium, pl
 
 CASH MOVES RULES — NEVER VIOLATE:
 - SPREADS ONLY. No naked options.
-- DTE bands (pick the appropriate one for the structure):
-    * 0–7 DTE: ONLY for explicit pin trades when spot sits inside a tight wall cluster in Regime A and the trade fully resolves before any expiration roll-off.
-    * 7–14 DTE: SWING trades targeting the nearest king node (call wall or put wall). Sized so the underlying has time to traverse to the wall (a few sessions) without theta-cliff erosion. The rationale must name which wall is the target AND the expected days-to-touch given current spot velocity. Use this band when spot is 1–4% from the dominant wall and dealer flow supports the move.
-    * 21+ DTE: standard for any non-pin, non-swing setup — gives time for thesis development and protects against theta in chop.
+- R/R ≥ 1:1.5 is the OBJECTIVE FUNCTION. The server filters every
+  play that doesn't clear it. DTE is a free parameter you optimize
+  IN SERVICE OF R/R + EV — pick whatever expiration in the chain
+  yields the best risk/reward for the structure given spot's
+  position relative to the king nodes. Do NOT bucket trades into
+  rigid DTE bands and pick from the band; pick the DTE that makes
+  the R/R math work.
+- DTE sanity floors (these are the ONLY hard rules on DTE):
+    * No same-day / 1 DTE entries unless it's an explicit Regime A
+      pin trade where spot is INSIDE a tight wall cluster and theta
+      decay is the trade's edge (not its risk).
+    * No 60+ DTE entries without a named catalyst — vega exposure
+      starts dominating the P/L curve.
+- Within those floors, optimize freely: a 9 DTE swing to the wall
+  with R/R 1:2.4 beats a 28 DTE play with R/R 1:1.6. A 4 DTE pin
+  with R/R 1:3.1 beats both. The market_view + rationale must name
+  the king node being targeted and the days-to-touch the trade
+  needs to win.
 - Max 40% of spread width in net debit (R/R cap).
 - Position size = floor(account * 2% / max_loss_per_spread). Always include this in the response.
 - 30–45 days past any catalyst for catalyst-driven plays.
