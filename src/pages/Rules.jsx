@@ -8,58 +8,70 @@ const RULE_SECTIONS = [
     title: 'Entry',
     border: 'border-red-900/40',
     rules: [
-      'Minimum 2 confirmed signals before logging',
-      'Never enter when stock is at all-time highs',
-      'Never enter under 21 DTE',
-      '30–45 days before known catalyst',
-      '90–120 days for fuzzy timelines',
+      'A clear king node thesis: trade is targeting the call wall, the put wall, or a flip break',
+      'Regime supports the direction — Regime A for pins / fades, Regime B for directional / breakouts',
+      'EV edge ≥ 0: estimated PoP (from IV) beats the breakeven PoP the structure needs',
+      'R/R ≥ 1:1.5 — target 1:2',
+      'Never enter at vol extremes (regime flip in progress, IV blow-off)',
+      'Confirm flow + GEX agree; mismatch = transition signal, reduce conviction',
     ],
   },
   {
     title: 'Position Sizing',
     border: 'border-yellow-900/40',
     rules: [
-      'Max 2% of account per options trade',
-      'Max 1% of account per Kalshi trade',
-      'Max 20% total biotech sector exposure',
+      'Max 2% of account per spread (max-loss-per-spread × contracts ≤ 2% of NLV)',
+      'Manual override allowed but the calculator warns when you breach',
+      'Max 20% of account in any single underlying',
+      'Real-money trades only after 90 days of verified paper trading',
     ],
   },
   {
     title: 'Stop Loss',
     border: 'border-orange-900/40',
     rules: [
-      'Option down -50% → exit immediately',
-      'Thesis invalidated by new data → exit same day',
-      '50% of DTE consumed with no movement → reassess',
+      'Spread mark down −50% from entry → exit immediately',
+      'Thesis invalidated (wall breaks, regime flips, flow flips against you) → exit same day',
+      '50% of DTE consumed with no thesis progress → reassess size or close',
     ],
   },
   {
     title: 'Profit Taking',
     border: 'border-green-900/40',
     rules: [
-      '+100% → sell 50% of position',
-      '+200% → sell 75% of position',
-      'Day before catalyst → consider full exit',
-      'Sell into IV spike, not after announcement',
+      '+100% on the spread → sell 50% of position',
+      '+200% on the spread → sell 75% (keep 25% running into expiry)',
+      'Spot reaches the target king node → consider full exit',
+      'Sell into IV expansion, not after the move completes',
     ],
   },
   {
-    title: 'DTE',
+    title: 'DTE Discipline',
     border: 'border-blue-900/40',
     rules: [
-      'Known catalyst: 30–45 days past event date',
-      'Fuzzy timeline: 90–120 days',
-      'Hard floor: never under 21 days',
-      'Buy more time than you think you need',
+      'R/R is the objective; DTE is the parameter you optimize for it',
+      'No same-day / 1 DTE entries unless it\'s an explicit Regime A pin (spot inside a tight wall cluster, theta is the edge)',
+      'No 60+ DTE without a named catalyst — vega exposure dominates the P/L curve',
+      'Pick the expiration that produces the cleanest R/R math, not a fixed bucket',
     ],
   },
   {
-    title: 'Strike Calculator',
+    title: 'Strike Selection',
     border: 'border-zinc-700',
     rules: [
-      'Never pay more than 40% of spread width in premium (caps R/R at 1:1.5; ≤33% for 1:2)',
-      'Minimum 1:1.5 risk/reward — target 1:2',
-      'Always buy expiry 30–45 days PAST the catalyst date',
+      'Anchor strikes to king nodes — call wall, put wall, or zero-gamma flip',
+      'Debits: net debit ≤ 40% of spread width (caps R/R at 1:1.5; pay ≤33% for the 1:2 target)',
+      'Credits: net credit ≥ 60% of spread width (same R/R floor, math inverted)',
+      'Estimated PoP must beat Breakeven PoP — the +EV edge is what makes the trade work',
+    ],
+  },
+  {
+    title: 'Regime Awareness',
+    border: 'border-purple-900/40',
+    rules: [
+      'Regime A (spot above flip, positive net GEX) — dealers long gamma, sell rallies + buy dips → pin / vol-suppressed environment. Setups: short premium, pin trades, breakout calls AT the call wall.',
+      'Regime B (spot below flip, negative net GEX) — dealers short gamma, buy rallies + sell dips → trend / vol-expansion. Setups: long premium, breakdown puts AT the put wall, vol-expansion plays.',
+      'Mixed regime / flow contradicting GEX = transition signal — wait for the new regime to settle, or size half',
     ],
   },
 ]
@@ -76,8 +88,7 @@ export default function Rules() {
   const parsed = accountSize === '' ? null : Number(accountSize)
   const valid = parsed != null && Number.isFinite(parsed) && parsed >= 0
   const maxOption = valid ? parsed * 0.02 : null
-  const maxKalshi = valid ? parsed * 0.01 : null
-  const maxSector = valid ? parsed * 0.2 : null
+  const maxTicker = valid ? parsed * 0.2 : null
 
   async function saveAccountSize() {
     if (!valid || !profile?.id) return
@@ -101,7 +112,8 @@ export default function Rules() {
       <div>
         <h1 className="text-white text-xl lg:text-2xl font-bold tracking-tight mb-1">Rules</h1>
         <p className="text-subtle text-xs">
-          The non-negotiables. Encoded in the pre-trade checklist and stop-loss UI.
+          The non-negotiables. Encoded in the suggest-plays filter, the
+          calculator's premium-of-width caps, and the stop-loss UI.
         </p>
       </div>
 
@@ -167,17 +179,12 @@ export default function Rules() {
             {profile?.account_size != null && (
               <>
                 <CalcRow
-                  label="Max per options trade (2%)"
+                  label="Max per spread (2%)"
                   value={`$${(profile.account_size * 0.02).toLocaleString()}`}
                   valueClass="text-red-400"
                 />
                 <CalcRow
-                  label="Max per Kalshi trade (1%)"
-                  value={`$${(profile.account_size * 0.01).toLocaleString()}`}
-                  valueClass="text-blue-400"
-                />
-                <CalcRow
-                  label="Max biotech sector (20%)"
+                  label="Max per ticker (20%)"
                   value={`$${(profile.account_size * 0.2).toLocaleString()}`}
                   valueClass="text-yellow-400"
                 />
@@ -203,8 +210,9 @@ export default function Rules() {
 
       <div className="bg-card border border-border rounded-xl p-4">
         <p className="text-subtle text-xs text-center leading-relaxed italic">
-          "Price reflects expectations, not reality. Your edge is reading the science better than
-          the market. Patience + confirmation + discipline = alpha."
+          "Dealer positioning is information; flow is intent. Your edge is
+          reading the gamma map better than the tape. R/R + EV beats
+          conviction. Discipline + walls = alpha."
         </p>
       </div>
     </div>
