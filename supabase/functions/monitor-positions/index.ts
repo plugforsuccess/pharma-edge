@@ -144,6 +144,94 @@ interface Position {
   entry_debit_per_spread: number
   triggers_fired: Record<string, string>
   thesis: string | null
+  last_regime: 'A' | 'B' | 'mixed' | null
+}
+
+// Regime classification — same A/B/mixed taxonomy used in suggest-plays
+// and the /reasoning route. Derived deterministically from spot vs flip
+// and net GEX sign so we never need an LLM call to detect a shift.
+//
+// 'A' = positive gamma + above flip → vol-suppressed
+// 'B' = negative gamma + below flip → vol-amplified
+// 'mixed' = transition / disagreement
+type Regime = 'A' | 'B' | 'mixed'
+
+// Inline regime computation from dxlink_quotes. Mirrors compute-gex's
+// dxlink path — sums OI × gamma × spot² across calls (positive) and
+// puts (negative) for the strikes near spot, then walks the cumulative
+// to find the zero-gamma flip strike. Returns null when the data is
+// stale, missing, or insufficient (the caller treats null as "skip
+// this position's regime check, try again next tick").
+async function deriveRegimeForTicker(
+  supabase: ReturnType<typeof createClient>,
+  ticker: string,
+): Promise<Regime | null> {
+  const { data: rows } = await supabase
+    .from('dxlink_quotes')
+    .select('kind, expiration_date, strike, option_type, gamma, open_interest, mid, bid, ask, updated_at')
+    .or(`symbol.eq.${ticker},underlying.eq.${ticker}`)
+  if (!rows || rows.length === 0) return null
+
+  const equity = rows.find((r: any) => r.kind === 'equity')
+  if (!equity) return null
+  const spot = equity.mid ?? equity.bid ?? equity.ask
+  if (!spot || spot <= 0) return null
+  // 30s freshness gate — same threshold compute-gex uses for its
+  // dxlink path. Stale data → skip.
+  const age = Date.now() - new Date(equity.updated_at).getTime()
+  if (age > 30_000) return null
+
+  // Pick the front-most expiration with options. Different positions
+  // may sit on different expirations, but for regime classification
+  // the front gamma profile dominates the dealer book — that's the
+  // expiry we want.
+  const optionRows = rows.filter((r: any) => r.kind === 'option')
+  if (optionRows.length === 0) return null
+  const today = new Date().toISOString().slice(0, 10)
+  const futureExps = Array.from(
+    new Set(optionRows.map((r: any) => r.expiration_date).filter((d: any): d is string => typeof d === 'string' && d >= today)),
+  ).sort() as string[]
+  if (futureExps.length === 0) return null
+  const frontExp = futureExps[0]
+  const frontRows = optionRows.filter((r: any) => r.expiration_date === frontExp)
+
+  // Aggregate per-strike net GEX. Same formula as compute-gex.
+  const dN = spot * spot
+  const byStrike = new Map<number, number>()
+  for (const r of frontRows) {
+    if (r.strike == null) continue
+    const oi = r.open_interest ?? 0
+    const g = r.gamma ?? 0
+    if (oi === 0 || !Number.isFinite(g) || g <= 0) continue
+    const sign = r.option_type === 'C' ? 1 : -1
+    byStrike.set(r.strike, (byStrike.get(r.strike) ?? 0) + sign * oi * g * dN)
+  }
+  if (byStrike.size === 0) return null
+
+  // Net GEX: sum across all strikes.
+  let netGex = 0
+  for (const v of byStrike.values()) netGex += v
+
+  // Zero-gamma flip: walk strikes ascending, track running cumulative,
+  // find the first strike where cumulative crosses zero.
+  const strikesSorted = Array.from(byStrike.keys()).sort((a, b) => a - b)
+  let cumulative = 0
+  let flip: number | null = null
+  for (const k of strikesSorted) {
+    const prev = cumulative
+    cumulative += byStrike.get(k)!
+    if ((prev <= 0 && cumulative > 0) || (prev >= 0 && cumulative < 0)) {
+      flip = k
+      break
+    }
+  }
+
+  // Regime decision — same rules as Reasoning.jsx's deriveRegime().
+  const aboveFlip = flip == null || spot >= flip
+  const positiveGex = netGex >= 0
+  if (aboveFlip && positiveGex) return 'A'
+  if (!aboveFlip && !positiveGex) return 'B'
+  return 'mixed'
 }
 
 // Triggers that fire real broker close orders (real money, no
@@ -602,7 +690,7 @@ serve(async (req) => {
   const { data: rows, error } = await supabase
     .from('open_positions')
     .select(
-      'id, user_id, signal_id, ticker, strategy_type, long_strike, short_strike, expiration, contracts, entry_debit_per_spread, triggers_fired, thesis',
+      'id, user_id, signal_id, ticker, strategy_type, long_strike, short_strike, expiration, contracts, entry_debit_per_spread, triggers_fired, thesis, last_regime',
     )
     .eq('status', 'open')
   if (error) return json({ success: false, error: error.message }, 500)
@@ -656,10 +744,60 @@ serve(async (req) => {
       ? ((mid - pos.entry_debit_per_spread) / pos.entry_debit_per_spread) * 100
       : null
 
+    // Confidence drift / regime-shift detection — derives the current
+    // regime deterministically from dxlink_quotes (no LLM cost) and
+    // compares to last_regime stored on the position. First observation
+    // just baselines (no alert); every subsequent transition fires a
+    // position_regime_shift alert. We track it via triggers_fired with
+    // a per-shift timestamp so oscillation still alerts each new
+    // transition without spamming on every cron tick within one regime.
+    let regimeUpdate: { last_regime?: Regime | null } = {}
+    let regimeShiftFired = false
+    const currentRegime = await deriveRegimeForTicker(supabase, pos.ticker)
+    if (currentRegime) {
+      regimeUpdate.last_regime = currentRegime
+      const prior = pos.last_regime
+      if (prior && prior !== currentRegime) {
+        const shiftAlert = {
+          user_id: pos.user_id,
+          alert_type: 'position_regime_shift',
+          payload: {
+            position_id: pos.id,
+            ticker: pos.ticker,
+            strategy: pos.strategy_type,
+            entry_regime: prior,
+            current_regime: currentRegime,
+            message: `${pos.ticker} regime shifted ${prior} → ${currentRegime} since you opened the trade`,
+            url: `${APP_URL}/position/${pos.id}`,
+          },
+          sent_at: new Date().toISOString(),
+        }
+        await supabase.from('alerts').insert(shiftAlert).then(({ error }) => {
+          if (error) console.warn('[regime-shift] alert insert failed', error)
+        })
+        await fetch(`${SUPABASE_URL}/functions/v1/send-alerts`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            user_id: pos.user_id,
+            alert_type: 'position_regime_shift',
+            payload: shiftAlert.payload,
+          }),
+        }).catch((e) => console.warn('[regime-shift] send-alerts failed:', e))
+        regimeShiftFired = true
+      }
+    }
+
     // Evaluate triggers
     const triggers = evaluateTriggers(pos, pnlPct, dte)
     if (triggers.length > 0) {
       const newFired = { ...pos.triggers_fired }
+      if (regimeShiftFired) {
+        newFired['position_regime_shift'] = new Date().toISOString()
+      }
       for (const t of triggers) {
         newFired[t.type] = new Date().toISOString()
         await fireAlert(supabase, pos, t, pnlPct)
@@ -686,6 +824,7 @@ serve(async (req) => {
           last_polled_at: new Date().toISOString(),
           last_poll_source: source,
           triggers_fired: newFired,
+          ...regimeUpdate,
         })
         .eq('id', pos.id)
     } else {
@@ -696,6 +835,7 @@ serve(async (req) => {
           last_pnl_pct: pnlPct,
           last_polled_at: new Date().toISOString(),
           last_poll_source: source,
+          ...regimeUpdate,
         })
         .eq('id', pos.id)
     }
