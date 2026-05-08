@@ -815,6 +815,39 @@ export default function LogSignal() {
             />
           )}
 
+          {/* Contracts input. The calculator computes a 2%-rule
+              recommendation but with small NLVs that can round to 0,
+              blocking the user from logging. Editable here so the
+              user can size the actual trade they intend to place. */}
+          {form.direction !== 'watch' && (
+            <div className="bg-card border border-border rounded-xl p-4">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex-1">
+                  <p className="text-muted text-xs uppercase tracking-wider">
+                    Contracts
+                  </p>
+                  <p className="text-muted text-[11px] leading-snug mt-1">
+                    Number of spreads to trade. Auto-filled by the
+                    calculator's 2%-rule sizing; edit if you want to
+                    size larger or smaller. PlaceOrderPanel will
+                    re-validate against your live broker NLV.
+                  </p>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    inputMode="numeric"
+                    value={form.contracts}
+                    onChange={(e) => update('contracts', e.target.value)}
+                    className="w-20 bg-bg border border-border rounded-lg px-2 py-1.5 text-fg text-sm font-mono-tab text-right focus:outline-none focus:border-amber-400/40"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* POP input lives on step 2 alongside the calculator output
               so the user can dial in their entry probability while
               still looking at strikes / breakeven / max-loss. The
