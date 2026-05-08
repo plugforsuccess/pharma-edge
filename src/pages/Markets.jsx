@@ -26,6 +26,12 @@ import useLiveSpot from '../hooks/useLiveSpot'
 // Yahoo's 15-min delayed feed via compute-gex's fallback path).
 const TICKERS = HOT_TICKERS
 
+// Single-ticker exposure views — all render the same matrix but
+// pivot to a different cells field. Trinity is the only non-
+// single-ticker view (3 tickers side-by-side), so it falls outside
+// this list.
+const SINGLE_TICKER_VIEWS = ['gex', 'vex', 'cex', 'dex', 'velocity']
+
 // Single matrix shape — wide enough to expose ~2 weeks of expirations
 // and meaningful walls (ATM ±7%). The user navigates further-out
 // expirations by horizontal-scrolling/swiping the matrix itself
@@ -100,9 +106,10 @@ export default function Markets() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
-  // Internal view switcher: GEX (single-ticker matrix, default),
-  // Trinity (3-ticker comparison), VEX (vega exposure — backend math
-  // pending; tab is a teaser placeholder for now).
+  // View switcher. Single-ticker exposure tabs (GEX/VEX/CEX/DEX/
+  // Velocity) all reuse the same matrix fetch — the tab just picks
+  // which cells field gets rendered. Trinity is the only non-
+  // single-ticker view (3 tickers side-by-side).
   const [view, setView] = useState('gex')
   // Replay mode: when active, the time slider feeds historical
   // snapshot payloads to the matrix instead of the live data fetched
@@ -209,6 +216,11 @@ export default function Markets() {
         matrix_max_expirations: MATRIX_OPTS.maxExpirations,
         matrix_max_strikes: MATRIX_OPTS.maxStrikes,
         matrix_strike_window_pct: MATRIX_OPTS.strikeWindowPct,
+        // Velocity Mode renders ∆GEX vs the most recent prior snapshot
+        // — backend skips the diff query unless we ask for it. The
+        // payload size delta is small but it's an extra DB roundtrip,
+        // so only opt in when the user is actually viewing it.
+        include_velocity: view === 'velocity',
       }
       const { data: result, error: invokeErr } = await supabase.functions.invoke(
         'compute-gex',
@@ -244,6 +256,17 @@ export default function Markets() {
     load(ticker)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ticker])
+
+  // Switching to/from Velocity Mode requires a fetch that asks for
+  // include_velocity. Don't reload between non-velocity tabs — the
+  // matrix already carries vex/cex/dex cells, so those are free
+  // pivots. Only velocity needs the round-trip.
+  useEffect(() => {
+    if (view === 'velocity' && data && !data.velocity_cells) {
+      load(ticker)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view])
 
   // Pull-to-refresh: dragging from the top of the page calls the
   // same `refresh: true` path as the manual refresh button. Disabled
@@ -317,38 +340,35 @@ export default function Markets() {
 
       <LiveDataStatus />
 
-      {/* View tabs — switches between single-ticker matrix, 3-ticker
-          comparison, and (placeholder) vega exposure. Trinity tab
-          hides the ticker picker since it has its own per-column
-          tickers. VEX is a stub until the Black-Scholes vega path
-          ships in the next push. */}
-      <div className="flex gap-1 border border-border rounded-lg p-1 bg-card">
+      {/* View tabs — single-ticker matrix supports five exposure
+          views (GEX, VEX, CEX, DEX, Velocity), plus Trinity for the
+          3-ticker side-by-side. The single-ticker tabs all share the
+          same fetch + matrix render — the tab just picks which cells
+          array (gex_cells / vex_cells / etc.) gets visualized. */}
+      <div className="flex gap-1 border border-border rounded-lg p-1 bg-card overflow-x-auto">
         <TabButton active={view === 'gex'} onClick={() => setView('gex')}>
           GEX
         </TabButton>
+        <TabButton active={view === 'vex'} onClick={() => setView('vex')}>
+          VEX
+        </TabButton>
+        <TabButton active={view === 'cex'} onClick={() => setView('cex')}>
+          CEX
+        </TabButton>
+        <TabButton active={view === 'dex'} onClick={() => setView('dex')}>
+          DEX
+        </TabButton>
+        <TabButton active={view === 'velocity'} onClick={() => setView('velocity')}>
+          Velocity
+        </TabButton>
         <TabButton active={view === 'trinity'} onClick={() => setView('trinity')}>
           Trinity
-        </TabButton>
-        <TabButton active={view === 'vex'} onClick={() => setView('vex')}>
-          VEX <span className="text-[10px] uppercase opacity-60 ml-1">soon</span>
         </TabButton>
       </div>
 
       {view === 'trinity' && <TrinityView />}
 
-      {view === 'vex' && (
-        <div className="bg-card border border-border rounded-xl p-6 text-center space-y-2">
-          <p className="text-sm text-fg font-semibold">NetVEX coming soon</p>
-          <p className="text-xs text-subtle leading-relaxed">
-            Net Vega Exposure — same matrix structure as GEX but
-            measuring sensitivity to IV moves instead of spot moves.
-            The dxlink-worker is already streaming vega; backend math
-            for the Yahoo fallback ships in the next push.
-          </p>
-        </div>
-      )}
-
-      {view === 'gex' && (<>
+      {SINGLE_TICKER_VIEWS.includes(view) && (<>
 
       {/* Ticker picker — favorites-only chip row. The full ~500-name
           universe lives in the search drawer; the chip row is just the
@@ -483,8 +503,28 @@ export default function Markets() {
       <div className="bg-card border border-border rounded-xl p-4 min-h-[280px] lg:min-h-[calc(100vh-15rem)]">
         <div className="flex items-center gap-2 mb-3">
           <Activity size={14} className="text-brand" />
-          <h2 className="text-sm font-semibold">GEX by strike</h2>
+          <h2 className="text-sm font-semibold">{exposureLabel(view)} by strike</h2>
+          {view === 'velocity' && data?.velocity_window_minutes != null && (
+            <span className="text-[10px] text-muted uppercase tracking-wider">
+              · last {data.velocity_window_minutes}m
+            </span>
+          )}
         </div>
+
+        {/* Inference strip — surfaces the deterministic context the
+            /reasoning route polls for. Cheap to compute on the
+            backend (every cell is already aggregated), free to
+            render here. The strip stays visible across all
+            single-ticker exposure views since the metrics are
+            structural, not exposure-specific. */}
+        {!loading && !error && data && (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-4 text-xs">
+            <Metric label="Net GEX" value={formatGex(data.net_gex)} tone={data.net_gex >= 0 ? 'green' : 'red'} />
+            <Metric label="Expected ±" value={data.expected_move ? `$${data.expected_move.toFixed(2)} (${(data.expected_move_pct * 100).toFixed(1)}%)` : '—'} tone="amber" />
+            <Metric label="Pin prob." value={data.pinning_probability != null ? `${Math.round(data.pinning_probability * 100)}%` : '—'} tone={data.pinning_probability >= 0.6 ? 'green' : data.pinning_probability >= 0.3 ? 'amber' : 'muted'} />
+            <Metric label="Wall" value={data.largest ? `$${formatNumber(data.largest.strike)}` : '—'} tone={data.largest && data.largest.gex_net >= 0 ? 'green' : 'red'} />
+          </div>
+        )}
 
           {loading && (
             <div className="space-y-2 py-2 animate-pulse" aria-label="Loading GEX matrix">
@@ -522,6 +562,7 @@ export default function Markets() {
           <GexMatrix
             data={replayActive && replaySnapshot ? replaySnapshot : data}
             liveSpot={replayActive ? null : liveSpot}
+            exposureType={view}
           />
         )}
       </div>
@@ -662,6 +703,39 @@ function formatNumber(v) {
   const n = Number(v)
   if (!Number.isFinite(n)) return '—'
   return n.toFixed(2)
+}
+
+// Short heading for the heatmap card per exposure tab — drives both
+// the H2 ("GEX by strike", "VEX by strike", …) and the empty-state
+// copy in GexMatrix.
+function exposureLabel(view) {
+  return ({
+    gex: 'GEX',
+    vex: 'VEX',
+    cex: 'CEX',
+    dex: 'DEX',
+    velocity: '∆GEX',
+  }[view]) || 'GEX'
+}
+
+// Inference-strip metric pill. Tone maps to one of the design-system
+// accent colors so the badge matches the same regime cues used
+// elsewhere on the page.
+function Metric({ label, value, tone = 'muted' }) {
+  const toneClass = ({
+    green: 'text-green-400',
+    red: 'text-red-400',
+    amber: 'text-amber-400',
+    muted: 'text-subtle',
+  }[tone]) || 'text-subtle'
+  return (
+    <div className="bg-bg border border-border rounded-lg px-3 py-2 flex flex-col gap-0.5">
+      <span className="text-[10px] uppercase tracking-wider text-muted">{label}</span>
+      <span className={'font-mono-tab tabular-nums text-sm font-semibold ' + toneClass}>
+        {value}
+      </span>
+    </div>
+  )
 }
 
 function SourceBadge({ source, eodAt }) {

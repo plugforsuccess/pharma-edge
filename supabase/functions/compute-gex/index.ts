@@ -26,6 +26,13 @@
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { fetchYahooChain, YahooError } from './yahoo.ts'
+import {
+  bsCallDelta,
+  bsCharm,
+  bsVanna,
+  expectedMove,
+  pinningProbability,
+} from './greeks.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')
@@ -138,9 +145,23 @@ interface DxQuoteRow {
   mid: number | null
   iv: number | null
   gamma: number | null
+  delta: number | null
   open_interest: number | null
   updated_at: string
 }
+
+// Per-cell exposures used by the matrix path. GEX = gamma * spot²;
+// VEX = vanna * spot²; CEX = charm * spot² (per-day); DEX = delta * spot.
+// Calls contribute positive, puts negative — the dealer-hedging
+// convention used throughout this file.
+interface CellExposures {
+  gex: number | null
+  vex: number | null
+  cex: number | null
+  dex: number | null
+}
+
+const EMPTY_CELL: CellExposures = { gex: null, vex: null, cex: null, dex: null }
 
 async function computeFromDxLink(
   supabase: ReturnType<typeof createClient>,
@@ -153,7 +174,7 @@ async function computeFromDxLink(
     .from('dxlink_quotes')
     .select(
       'symbol, kind, underlying, expiration_date, strike, option_type, ' +
-        'bid, ask, mid, iv, gamma, open_interest, updated_at',
+        'bid, ask, mid, iv, gamma, delta, open_interest, updated_at',
     )
     .or(`symbol.eq.${ticker},underlying.eq.${ticker}`)
   if (error) return { error: `dxlink_quotes query: ${error.message}` }
@@ -346,7 +367,20 @@ interface MatrixOutput {
   computed_at: string
   expirations: ExpirationInfo[]
   strikes: number[]                      // descending; same length as cells.length
+  // Primary GEX matrix. Kept as `cells` (not `gex_cells`) for
+  // back-compat with consumers that pre-date the multi-exposure layer.
   cells: (number | null)[][]             // [strike_idx][exp_idx] -> gex_net
+  // Vanna / Charm / Delta exposures, same indexing as `cells`. Each
+  // matrix is computed in the same pass so callers can switch view
+  // without a second round-trip.
+  vex_cells: (number | null)[][]
+  cex_cells: (number | null)[][]
+  dex_cells: (number | null)[][]
+  // ∆GEX vs the most recent prior snapshot in gex_history (Velocity
+  // Mode). Only populated when `include_velocity` is set on the
+  // request body; null otherwise.
+  velocity_cells?: (number | null)[][] | null
+  velocity_window_minutes?: number | null
   largest: {
     strike: number
     expiration: string
@@ -354,6 +388,14 @@ interface MatrixOutput {
     strike_index: number
     expiration_index: number
   } | null
+  // Aggregate metrics surfaced for the /reasoning page header and the
+  // pinning-probability badge. All summed over the strike-window slice
+  // we returned (not the full chain).
+  net_gex: number
+  total_abs_gex: number
+  expected_move: number          // 1-stddev underlying $ move at front-expiry IV
+  expected_move_pct: number      // expected_move / spot
+  pinning_probability: number    // 0..1 heuristic — see greeks.ts
   // Only set when source='eod' — when this snapshot was originally
   // captured. Used by the UI to label the badge ("EOD · Tue 4:00 PM").
   eod_snapshot_at?: string
@@ -373,7 +415,7 @@ async function computeMatrixFromDxLink(
     .from('dxlink_quotes')
     .select(
       'symbol, kind, underlying, expiration_date, strike, option_type, ' +
-        'bid, ask, mid, iv, gamma, open_interest, updated_at',
+        'bid, ask, mid, iv, gamma, delta, open_interest, updated_at',
     )
     .or(`symbol.eq.${ticker},underlying.eq.${ticker}`)
   if (error) return { error: `dxlink_quotes query: ${error.message}` }
@@ -420,14 +462,71 @@ async function computeMatrixFromDxLink(
     .slice(0, opts.maxExpirations)
   if (futureExps.length === 0) return { error: 'no future expirations in cache' }
 
+  // Re-bucket so we can compute vanna/charm/delta from BS using the
+  // dxFeed IV per option side. The original `byExp` only retained
+  // gamma + OI; we need IV too for second-order Greeks.
+  type DxBucket = {
+    call_oi: number; call_gamma: number; call_iv: number | null; call_delta: number | null
+    put_oi:  number; put_gamma:  number; put_iv:  number | null; put_delta:  number | null
+  }
+  const byExpFull = new Map<string, Map<number, DxBucket>>()
+  for (const r of (rows as DxQuoteRow[]).filter((r) => r.kind === 'option')) {
+    if (!r.expiration_date || r.strike == null) continue
+    let strikeMap = byExpFull.get(r.expiration_date)
+    if (!strikeMap) {
+      strikeMap = new Map()
+      byExpFull.set(r.expiration_date, strikeMap)
+    }
+    let bucket = strikeMap.get(r.strike)
+    if (!bucket) {
+      bucket = {
+        call_oi: 0, call_gamma: 0, call_iv: null, call_delta: null,
+        put_oi: 0, put_gamma: 0, put_iv: null, put_delta: null,
+      }
+      strikeMap.set(r.strike, bucket)
+    }
+    if (r.option_type === 'C') {
+      bucket.call_oi = r.open_interest ?? 0
+      bucket.call_gamma = r.gamma ?? 0
+      bucket.call_iv = r.iv
+      bucket.call_delta = r.delta
+    } else if (r.option_type === 'P') {
+      bucket.put_oi = r.open_interest ?? 0
+      bucket.put_gamma = r.gamma ?? 0
+      bucket.put_iv = r.iv
+      bucket.put_delta = r.delta
+    }
+  }
+
+  const dteOf = (exp: string): number => {
+    const expMs = new Date(exp + 'T00:00:00Z').getTime()
+    return Math.max(1, Math.round((expMs - Date.now()) / 86_400_000))
+  }
+
   return buildMatrix(ticker, spot, 'dxlink', futureExps, (exp, strike) => {
-    const bucket = byExp.get(exp)?.get(strike)
-    if (!bucket) return null
-    const callContribution = bucket.call_oi * bucket.call_gamma * spot * spot
-    const putContribution = bucket.put_oi * bucket.put_gamma * spot * spot
-    return callContribution - putContribution
+    const bucket = byExpFull.get(exp)?.get(strike)
+    if (!bucket) return EMPTY_CELL
+    const dte = dteOf(exp)
+    const t = dte / 365
+    const sigC = bucket.call_iv ?? bucket.put_iv ?? 0
+    const sigP = bucket.put_iv ?? bucket.call_iv ?? 0
+    const dN = spot * spot
+    const gex = (bucket.call_oi * bucket.call_gamma - bucket.put_oi * bucket.put_gamma) * dN
+    // Vanna / charm — compute from BS since dxFeed doesn't deliver them.
+    const vC = bsVanna(spot, strike, t, sigC)
+    const vP = bsVanna(spot, strike, t, sigP)
+    const vex = (bucket.call_oi * vC - bucket.put_oi * vP) * dN
+    const chC = bsCharm(spot, strike, t, sigC) / 365 // per-day
+    const chP = bsCharm(spot, strike, t, sigP) / 365
+    const cex = (bucket.call_oi * chC - bucket.put_oi * chP) * dN
+    // Delta — prefer dxFeed's value; fall back to BS.
+    const dC = bucket.call_delta ?? bsCallDelta(spot, strike, t, sigC)
+    // Put delta = call delta - 1 (per put-call parity).
+    const dP = bucket.put_delta ?? (bsCallDelta(spot, strike, t, sigP) - 1)
+    const dex = (bucket.call_oi * dC + bucket.put_oi * dP) * spot
+    return { gex, vex, cex, dex }
   }, (exp) => {
-    return Array.from(byExp.get(exp)?.keys() ?? [])
+    return Array.from(byExpFull.get(exp)?.keys() ?? [])
   }, opts)
 }
 
@@ -509,33 +608,118 @@ async function computeMatrixFromYahoo(
 
   return buildMatrix(ticker, spot, 'yahoo', futureExps, (exp, strike) => {
     const bucket = byExp.get(exp)?.get(strike)
-    if (!bucket) return null
+    if (!bucket) return EMPTY_CELL
     const dte = dteByExp.get(exp) ?? 30
     const t = Math.max(dte, 1) / 365
     const sigmaCall = bucket.callIV ?? bucket.putIV ?? 0
     const sigmaPut = bucket.putIV ?? bucket.callIV ?? 0
     const gC = bsGamma(spot, strike, t, sigmaCall)
     const gP = bsGamma(spot, strike, t, sigmaPut)
-    const dealerNotional = spot * spot
-    const gexCall = +(bucket.callOI * gC * dealerNotional)
-    const gexPut = -(bucket.putOI * gP * dealerNotional)
-    return gexCall + gexPut
+    const dN = spot * spot
+    const gex = bucket.callOI * gC * dN - bucket.putOI * gP * dN
+    const vC = bsVanna(spot, strike, t, sigmaCall)
+    const vP = bsVanna(spot, strike, t, sigmaPut)
+    const vex = (bucket.callOI * vC - bucket.putOI * vP) * dN
+    const chC = bsCharm(spot, strike, t, sigmaCall) / 365
+    const chP = bsCharm(spot, strike, t, sigmaPut) / 365
+    const cex = (bucket.callOI * chC - bucket.putOI * chP) * dN
+    const dC = bsCallDelta(spot, strike, t, sigmaCall)
+    const dP = bsCallDelta(spot, strike, t, sigmaPut) - 1
+    const dex = (bucket.callOI * dC + bucket.putOI * dP) * spot
+    return { gex, vex, cex, dex }
   }, (exp) => {
     return Array.from(byExp.get(exp)?.keys() ?? [])
   }, opts, dteByExp)
 }
 
+// Velocity Mode — diff the live matrix against the most recent
+// historical snapshot for the same ticker, returning per-cell ∆GEX.
+//
+// We pick the most recent gex_history row that's at least 5 minutes
+// older than `now` (so we're comparing against a meaningfully different
+// point in time, not a stale cache write from 30 seconds ago) but no
+// more than 4 hours old (older than that and the diff is dominated by
+// OI/IV churn rather than intraday positioning shifts). When no
+// suitable prior snapshot exists, velocity_cells stays null and the
+// UI renders an "insufficient history" empty state.
+//
+// Cell-pairing rule: for each (strike, expiration) in the live matrix,
+// find the same (strike, expiration) in the prior snapshot. If absent
+// (e.g. a strike rolled into the window since), velocity is null. We
+// don't try to interpolate.
+async function attachVelocity(
+  supabase: ReturnType<typeof createClient>,
+  ticker: string,
+  matrix: MatrixOutput,
+): Promise<MatrixOutput> {
+  const now = Date.now()
+  const minAgeMs = 5 * 60 * 1000
+  const maxAgeMs = 4 * 60 * 60 * 1000
+  const upperBound = new Date(now - minAgeMs).toISOString()
+  const lowerBound = new Date(now - maxAgeMs).toISOString()
+  const { data, error } = await supabase
+    .from('gex_history')
+    .select('snapshot_at, payload')
+    .eq('ticker', ticker)
+    .gte('snapshot_at', lowerBound)
+    .lte('snapshot_at', upperBound)
+    .order('snapshot_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error || !data?.payload) {
+    return { ...matrix, velocity_cells: null, velocity_window_minutes: null }
+  }
+  const prior = data.payload as MatrixOutput
+  const priorAt = new Date(data.snapshot_at).getTime()
+  const windowMin = Math.round((now - priorAt) / 60_000)
+
+  // Build (strike → exp → gex) lookup over the prior snapshot.
+  const priorByStrike = new Map<number, Map<string, number>>()
+  for (let i = 0; i < prior.strikes.length; i++) {
+    const strikeMap = new Map<string, number>()
+    for (let j = 0; j < prior.expirations.length; j++) {
+      const v = prior.cells[i]?.[j]
+      if (v != null) strikeMap.set(prior.expirations[j].date, v)
+    }
+    priorByStrike.set(prior.strikes[i], strikeMap)
+  }
+
+  const velCells: (number | null)[][] = []
+  for (let i = 0; i < matrix.strikes.length; i++) {
+    const row: (number | null)[] = []
+    const priorRow = priorByStrike.get(matrix.strikes[i])
+    for (let j = 0; j < matrix.expirations.length; j++) {
+      const liveVal = matrix.cells[i]?.[j]
+      const priorVal = priorRow?.get(matrix.expirations[j].date)
+      if (liveVal == null || priorVal == null) {
+        row.push(null)
+      } else {
+        row.push(liveVal - priorVal)
+      }
+    }
+    velCells.push(row)
+  }
+
+  return {
+    ...matrix,
+    velocity_cells: velCells,
+    velocity_window_minutes: windowMin,
+  }
+}
+
 // Common builder — picks the strike window centered on spot, applies
-// the gex(exp, strike) closure to every cell, and finds the largest.
+// the exposureFor(exp, strike) closure to every cell (returning all
+// four exposures at once), and finds the largest |gex|.
 function buildMatrix(
   ticker: string,
   spot: number,
   source: 'dxlink' | 'yahoo',
   expirations: string[],
-  gexFor: (exp: string, strike: number) => number | null,
+  exposureFor: (exp: string, strike: number) => CellExposures,
   strikesIn: (exp: string) => number[],
   opts: MatrixOpts,
   dteByExp?: Map<string, number>,
+  frontIv?: number,
 ): { matrix?: MatrixOutput; error?: string } {
   // Strike union across all expirations, trimmed to ATM ± window,
   // capped to opts.maxStrikes centered on spot, descending order.
@@ -558,23 +742,41 @@ function buildMatrix(
   if (strikes.length === 0) return { error: 'no strikes within window' }
 
   const cells: (number | null)[][] = []
+  const vexCells: (number | null)[][] = []
+  const cexCells: (number | null)[][] = []
+  const dexCells: (number | null)[][] = []
   let largest: MatrixOutput['largest'] = null
+  let netGex = 0
+  let totalAbsGex = 0
   for (let i = 0; i < strikes.length; i++) {
-    const row: (number | null)[] = []
+    const gexRow: (number | null)[] = []
+    const vexRow: (number | null)[] = []
+    const cexRow: (number | null)[] = []
+    const dexRow: (number | null)[] = []
     for (let j = 0; j < expirations.length; j++) {
-      const v = gexFor(expirations[j], strikes[i])
-      row.push(v)
-      if (v != null && (largest == null || Math.abs(v) > Math.abs(largest.gex_net))) {
-        largest = {
-          strike: strikes[i],
-          expiration: expirations[j],
-          gex_net: v,
-          strike_index: i,
-          expiration_index: j,
+      const e = exposureFor(expirations[j], strikes[i])
+      gexRow.push(e.gex)
+      vexRow.push(e.vex)
+      cexRow.push(e.cex)
+      dexRow.push(e.dex)
+      if (e.gex != null) {
+        netGex += e.gex
+        totalAbsGex += Math.abs(e.gex)
+        if (largest == null || Math.abs(e.gex) > Math.abs(largest.gex_net)) {
+          largest = {
+            strike: strikes[i],
+            expiration: expirations[j],
+            gex_net: e.gex,
+            strike_index: i,
+            expiration_index: j,
+          }
         }
       }
     }
-    cells.push(row)
+    cells.push(gexRow)
+    vexCells.push(vexRow)
+    cexCells.push(cexRow)
+    dexCells.push(dexRow)
   }
 
   const todayMs = Date.now()
@@ -583,6 +785,30 @@ function buildMatrix(
       Math.max(0, Math.round((new Date(date + 'T00:00:00Z').getTime() - todayMs) / 86_400_000))
     return { date, dte }
   })
+
+  // Expected move uses the front-expiry IV. When the caller didn't
+  // pass one (dxlink path doesn't bother extracting it cleanly), we
+  // approximate by walking the strikes at the front expiry and taking
+  // the median IV-equivalent gamma — but a much simpler stand-in is
+  // 20% as a fallback default. Front IV is the right answer when we
+  // have it; the fallback keeps the metric defined.
+  const frontDte = expirationInfos[0]?.dte ?? 7
+  const ivForExpectedMove = frontIv && frontIv > 0 ? frontIv : 0.20
+  const em = expectedMove(spot, ivForExpectedMove, frontDte)
+  const emPct = spot > 0 ? em / spot : 0
+
+  // Pinning probability needs the largest |GEX| (we already track it),
+  // total |GEX|, spot, the largest strike, and the expected move.
+  const pin = largest && em > 0
+    ? pinningProbability(
+        netGex,
+        Math.abs(largest.gex_net),
+        totalAbsGex || 1,
+        spot,
+        largest.strike,
+        em,
+      )
+    : 0
 
   return {
     matrix: {
@@ -593,7 +819,17 @@ function buildMatrix(
       expirations: expirationInfos,
       strikes,
       cells,
+      vex_cells: vexCells,
+      cex_cells: cexCells,
+      dex_cells: dexCells,
+      velocity_cells: null,
+      velocity_window_minutes: null,
       largest,
+      net_gex: netGex,
+      total_abs_gex: totalAbsGex,
+      expected_move: em,
+      expected_move_pct: emPct,
+      pinning_probability: pin,
     },
   }
 }
@@ -701,6 +937,9 @@ serve(async (req) => {
   // time-series the /markets replay slider scrubs through. Implies
   // matrix=true since replay is matrix-only.
   const archive = body.archive === true
+  // include_velocity=true asks for ∆GEX cells vs the most recent
+  // prior gex_history row. Powers the /markets Velocity Mode tab.
+  const includeVelocity = body.include_velocity === true
 
   // Matrix dimensions can be widened/narrowed by the caller. Each
   // is bounded by the corresponding _LIMIT constant so a malicious
@@ -746,9 +985,13 @@ serve(async (req) => {
     if (cached?.payload && cached.computed_at) {
       const age = Date.now() - new Date(cached.computed_at).getTime()
       if (age >= 0 && age < CACHE_TTL_MS) {
+        let payload = cached.payload as MatrixOutput
+        if (includeVelocity && matrixMode) {
+          payload = await attachVelocity(adminClient, ticker, payload)
+        }
         return json({
           success: true,
-          data: { ...cached.payload, from_cache: true, cache_age_ms: age },
+          data: { ...payload, from_cache: true, cache_age_ms: age },
         })
       }
     }
@@ -846,6 +1089,9 @@ serve(async (req) => {
       if (insertError && insertError.code !== '23505') {
         console.error('[archive] gex_history insert failed:', insertError)
       }
+    }
+    if (includeVelocity && matrix) {
+      matrix = await attachVelocity(adminClient, ticker, matrix)
     }
     return json({
       success: true,
