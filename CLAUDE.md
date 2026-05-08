@@ -371,47 +371,51 @@ When modifying the prompt, always test with at least 3 different filing types be
 
 ---
 
-## Kalshi Integration Rules
-
-- **Legal instrument only:** Kalshi (CFTC regulated). Never add Polymarket integration. This is a hard rule — Polymarket is prohibited for US persons under CFTC regulations.
-- Kalshi position size = **1% of account** (not 2%). Kalshi is binary — no stop loss possible. The smaller allocation reflects full-loss risk.
-- Minimum edge threshold = **15 points** before recommending a Kalshi trade.
-- Minimum R/R = **1.5** on the Kalshi position.
-- Kalshi is the **overlay**, never the primary instrument. If no Kalshi market exists, proceed with options only.
-
----
-
 ## Trading Rules Embedded in the App
 
-These rules are not suggestions — they are encoded in the pre-trade checklist and stop loss logic. Do not remove or soften them in the UI:
+These rules are not suggestions — they are encoded in the suggest-plays server filter (R/R + EV gate), the calculator's premium-of-width caps, and the stop-loss UI. Do not remove or soften them.
 
 **Entry:**
-- Minimum 2 confirmed signals before logging
-- Never enter when stock is at all-time highs
-- Never enter under 21 DTE
-- 30–45 days before known catalyst
-- 90–120 days for fuzzy timelines
+- Clear king-node thesis: trade is targeting the call wall, the put wall, or a flip break
+- Regime supports the direction (Regime A → pin / fade / sell premium; Regime B → directional / breakout / long premium)
+- EV edge ≥ 0: the IV-implied PoP must beat the breakeven PoP the structure mathematically needs
+- R/R ≥ 1:1.5 (target 1:2) — server-filtered in suggest-plays before plays reach the client
+- Don't enter at vol extremes (regime flip in progress, IV blow-off)
+- Confirm flow + GEX agree; mismatch = transition signal, reduce conviction or wait
 
 **Position Sizing:**
-- Max 2% of account per options trade
-- Max 1% of account per Kalshi trade
-- Max 20% total biotech sector exposure
+- Max 2% of account per spread (max-loss-per-spread × contracts ≤ 2% of NLV). Manual override allowed in PlaceOrderPanel + LogSignal step 2 with a visible % warning when exceeded
+- Max 20% of account in any single underlying
+- Real-money trades only after 90 days of verified paper trading
 
 **Stop Loss:**
-- Option down -50% → exit immediately
-- Thesis invalidated by new data → exit same day
-- These are enforced via StopLossCheck emotion check UI
+- Spread mark down −50% from entry → exit immediately
+- Thesis invalidated (wall breaks, regime flips, flow flips against position) → exit same day
+- 50% of DTE consumed with no thesis progress → reassess size or close
+- Enforced via StopLossCheck emotion-check UI before holding through the trigger
 
 **Profit Taking:**
-- +100% → sell 50% of position
-- +200% → sell 75% of position
-- Day before catalyst → consider full exit
-- Sell into IV spike, not after announcement
+- +100% on the spread → sell 50% of position
+- +200% on the spread → sell 75% (keep 25% running into expiry)
+- Spot reaches the target king node → consider full exit
+- Sell into IV expansion, not after the move completes
 
-**Strike Calculator Rules:**
-- Never pay more than 40% of spread width in premium (caps R/R at 1:1.5; pay ≤33% for the 1:2 target)
-- Minimum 1:1.5 risk/reward — target 1:2
-- Always buy expiry 30–45 days PAST the catalyst date
+**DTE Discipline:**
+- R/R is the objective function; DTE is the parameter you optimize for it
+- No same-day / 1 DTE entries unless it's an explicit Regime A pin (spot inside a tight wall cluster, theta is the edge)
+- No 60+ DTE without a named catalyst — vega exposure dominates the P/L curve
+- Pick the expiration that yields the cleanest R/R math, not a fixed bucket
+
+**Strike Selection:**
+- Anchor strikes to king nodes — call wall, put wall, or zero-gamma flip
+- Debits: net debit ≤ 40% of spread width (caps R/R at 1:1.5; pay ≤33% for the 1:2 target)
+- Credits: net credit ≥ 60% of spread width (same R/R floor, math inverted)
+- Estimated PoP must beat Breakeven PoP — the +EV edge is what makes the trade work
+
+**Regime Awareness:**
+- Regime A (spot above flip, positive net GEX): dealers long gamma → sell rallies + buy dips → pin / vol-suppressed. Setups: short premium, pin trades, breakout calls AT the call wall
+- Regime B (spot below flip, negative net GEX): dealers short gamma → buy rallies + sell dips → trend / vol-expansion. Setups: long premium, breakdown puts AT the put wall, vol-expansion plays
+- Mixed regime / flow contradicting GEX = transition signal, half-size or wait for the new regime to settle
 
 ---
 
@@ -456,10 +460,10 @@ textMuted:    '#3a3a5c'
 - Calculator UI improvements
 
 ### ⚠️ Modify with caution — test thoroughly
-- `analyze-signal` Edge Function prompt — test 3+ filings before deploying
+- `suggest-plays` Edge Function prompt — the R/R + EV gate, regime classification, and king-node anchoring all live here. Test against 3+ different ticker scenarios (Regime A pin, Regime B trend, mixed flow) before deploying
+- `analyze-signal` Edge Function prompt — test 3+ filings before deploying (used by the legacy biotech path)
 - `send-alerts` Edge Function — test email delivery before deploying
-- `StrikePriceCalculator` math — verify against manual calculations
-- `KalshiMarketPanel` edge calculation — verify against Kalshi docs
+- `StrikePriceCalculator` math — verify against manual calculations, especially debit-vs-credit width caps
 - Service worker (`public/sw.js`) — test PWA install on device after changes
 
 ### ❌ Do not touch without explicit instruction
@@ -472,7 +476,8 @@ textMuted:    '#3a3a5c'
 - The `public_record` view definition
 - Pre-trade checklist items or count (10 required)
 - Stop loss threshold (-50%)
-- Position sizing rules (2% options, 1% Kalshi)
+- Position sizing rule (max 2% per spread / max 20% per ticker)
+- The R/R ≥ 1:1.5 + EV-edge ≥ 0 server filter in suggest-plays — these are the two gates that keep broken-math plays from reaching the user
 
 ---
 

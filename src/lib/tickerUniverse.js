@@ -43,6 +43,7 @@ export const HOT_TICKERS = [
   { symbol: 'CRM',   label: 'Salesforce' },
   { symbol: 'ADBE',  label: 'Adobe' },
   { symbol: 'NFLX',  label: 'Netflix' },
+  { symbol: 'NOW',   label: 'ServiceNow' },
   // Semis (foundry / equipment / mobile-silicon / networking-silicon)
   { symbol: 'TSM',   label: 'Taiwan Semi' },
   { symbol: 'ASML',  label: 'ASML' },
@@ -95,6 +96,7 @@ export const HOT_TICKERS = [
   { symbol: 'SMR',   label: 'NuScale' },
   { symbol: 'OKLO',  label: 'Oklo' },
   { symbol: 'CCJ',   label: 'Cameco' },
+  { symbol: 'BE',    label: 'Bloom Energy' },
   // Liquid retail / meme / fintech
   { symbol: 'COIN',  label: 'Coinbase' },
   { symbol: 'PLTR',  label: 'Palantir' },
