@@ -592,7 +592,15 @@ serve(async (req) => {
       // or just model drift. 0.2 keeps a sliver of variance for
       // tie-breaking when two plays score nearly identically.
       temperature: 0.2,
-      system: SYSTEM_PROMPT,
+      // Prompt caching: SYSTEM_PROMPT is ~1.5k tokens of static playbook
+      // (regime rules, R/R math, strategy diversity, output schema) that
+      // never changes between calls. Marking it cache_control=ephemeral
+      // means Anthropic caches the prefix for 5 min and subsequent calls
+      // pay the cache-read rate (~$0.30/M) instead of full input rate
+      // (~$3/M) — roughly 2× cost reduction per call once warm.
+      system: [
+        { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
+      ],
       messages: [{ role: 'user', content: buildUserPrompt(matrix, accountSize, flow) }],
     }),
   })
