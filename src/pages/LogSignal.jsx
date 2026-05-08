@@ -794,23 +794,38 @@ export default function LogSignal() {
               buyStrikeOtmPct={analysis?.strike_suggestion?.buy_strike_pct_otm}
               sellStrikeOtmPct={analysis?.strike_suggestion?.sell_strike_pct_otm}
               onCalculationComplete={(calc) => {
-                // Capture the calculator's authoritative result so the
-                // open_positions row we auto-create on submit gets the
-                // exact strikes/expiry/contracts/debit the user sized to.
-                setForm((prev) => ({
-                  ...prev,
-                  long_strike: calc?.buyStrike ?? prev.long_strike,
-                  short_strike: calc?.sellStrike ?? prev.sellStrike,
-                  expiry_date: calc?.expiry || prev.expiry_date,
-                  contracts:
-                    calc?.contracts != null
-                      ? String(calc.contracts)
-                      : prev.contracts,
-                  entry_price:
-                    !prev.entry_price && calc?.premium
-                      ? calc.premium
-                      : prev.entry_price,
-                }))
+                // Sync calculator output → form fields. Two policies:
+                //
+                //   - Strikes / expiry / premium: always sync. The
+                //     calculator's inputs ARE where the user edits
+                //     these on step 2; locking to the latest calc
+                //     guarantees the saved signal/open_position
+                //     matches what the user sees on screen at
+                //     submit. Previously entry_price had a
+                //     `!prev.entry_price` guard that pinned it to
+                //     the FIRST calc forever — so changing strikes
+                //     after the initial calc silently saved the
+                //     stale premium.
+                //
+                //   - Contracts: the user has a dedicated form
+                //     input above the POP block. Auto-fill from
+                //     calc only on first run (when the form still
+                //     holds the default '1'); once the user has
+                //     touched it, their value wins.
+                setForm((prev) => {
+                  const next = { ...prev }
+                  if (calc?.buyStrike) next.long_strike = calc.buyStrike
+                  if (calc?.sellStrike) next.short_strike = calc.sellStrike
+                  if (calc?.expiry) next.expiry_date = calc.expiry
+                  if (calc?.premium) next.entry_price = calc.premium
+                  if (
+                    calc?.contracts != null &&
+                    (prev.contracts === '' || prev.contracts === '1')
+                  ) {
+                    next.contracts = String(calc.contracts)
+                  }
+                  return next
+                })
               }}
             />
           )}
