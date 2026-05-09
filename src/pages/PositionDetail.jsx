@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { ArrowLeft, X, AlertTriangle, RefreshCw, Check } from 'lucide-react'
+import { ArrowLeft, X, AlertTriangle, RefreshCw, Check, Clock, Target, Shield } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import Spinner from '../components/Spinner'
@@ -18,7 +18,7 @@ import Spinner from '../components/Spinner'
 export default function PositionDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
   const [searchParams] = useSearchParams()
   const [pos, setPos] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -270,11 +270,20 @@ export default function PositionDetail() {
           />
         </div>
 
-        <div className="text-[10px] text-muted">
-          Source: {pos.last_poll_source ?? 'pending'}
-          {pos.last_poll_source === 'yahoo' && ' (15-min delayed)'}
-        </div>
+        <DataFreshnessRow pos={pos} />
       </div>
+
+      <PinRiskWarning pos={pos} moveInfo={moveInfo} />
+
+      <PnLLadderCard pos={pos} />
+
+      <DistanceToActionCard pos={pos} moveInfo={moveInfo} />
+
+      <ExitPlanReminderCard pos={pos} />
+
+      <TimePressureCard pos={pos} />
+
+      <AccountContextCard pos={pos} profile={profile} />
 
       {moveInfo && (moveInfo.realizedToday != null || moveInfo.expectedTrade != null) && (
         <div className="bg-card border border-border rounded-xl p-3 space-y-2">
@@ -353,6 +362,8 @@ export default function PositionDetail() {
           )}
         </div>
       )}
+
+      <ProbabilityConeCard pos={pos} moveInfo={moveInfo} />
 
       {wallInfo && (
         <div className="bg-card border border-border rounded-xl p-3 space-y-2">
@@ -503,6 +514,527 @@ function PreviewRealized({ entry, exit, contracts }) {
       <span className="text-muted">Realized P&L: </span>
       <span className={`font-mono-tab font-semibold ${tone}`}>
         {realized >= 0 ? '+' : ''}${fmt(realized)}
+      </span>
+    </div>
+  )
+}
+
+// Spread structure helpers shared across the cards below. The
+// long/short orientation depends on whether the spread is a debit
+// (long ITM closer to spot) or credit, but for max-profit /
+// max-loss math what matters is the width and the entry credit/debit
+// the user paid/collected. We currently only model debit spreads on
+// this page (per CLAUDE.md spreads-only rule + Cash Moves' default
+// suggester output).
+function spreadGeometry(pos) {
+  if (!pos) return null
+  const long = Number(pos.long_strike)
+  const short = Number(pos.short_strike)
+  const entry = Number(pos.entry_debit_per_spread)
+  if (![long, short, entry].every(Number.isFinite)) return null
+  const width = Math.abs(short - long)
+  const maxProfit = width - entry  // per share
+  const maxLoss = entry            // per share
+  const isCall = (pos.strategy_type || '').toLowerCase().includes('call')
+  // Bull call: spot needs to rise above breakeven (long_strike + debit)
+  // Bear put:  spot needs to fall below breakeven (long_strike − debit)
+  const breakeven = isCall ? long + entry : long - entry
+  const direction = isCall ? 'up' : 'down'
+  return { long, short, entry, width, maxProfit, maxLoss, breakeven, isCall, direction }
+}
+
+// Visual P&L ladder — horizontal bar showing where current spread
+// mark sits between entry, 50% target, and max profit, plus where
+// the stop floor would be at the standard 50%-of-debit rule.
+function PnLLadderCard({ pos }) {
+  const g = spreadGeometry(pos)
+  if (!g) return null
+  const current = Number(pos.last_mid_per_spread)
+  const hasCurrent = Number.isFinite(current)
+
+  // Define the ladder anchors in spread-mark dollars.
+  const stopFloor = g.entry * 0.5            // 50%-of-debit stop
+  const target50 = g.entry + g.maxProfit * 0.5
+  const target75 = g.entry + g.maxProfit * 0.75
+  const maxValue = g.entry + g.maxProfit     // = width
+
+  // Bar runs from stopFloor (left) to maxValue (right). Position
+  // current along that range, clamped.
+  const range = Math.max(0.01, maxValue - stopFloor)
+  const pct = (val) => Math.max(0, Math.min(100, ((val - stopFloor) / range) * 100))
+  const currentPct = hasCurrent ? pct(current) : null
+  const entryPct = pct(g.entry)
+  const target50Pct = pct(target50)
+  const target75Pct = pct(target75)
+
+  const profitDollars = hasCurrent
+    ? (current - g.entry) * pos.contracts * 100
+    : null
+  const profitTone = profitDollars == null
+    ? 'text-fg'
+    : profitDollars >= 0
+      ? 'text-green-400'
+      : 'text-crimson'
+
+  return (
+    <div className="bg-card border border-border rounded-xl p-3 space-y-3">
+      <div className="flex items-baseline justify-between">
+        <div className="text-[10px] uppercase tracking-wider text-muted">P&L ladder</div>
+        {profitDollars != null && (
+          <div className={`text-xs font-mono-tab font-semibold ${profitTone}`}>
+            {profitDollars >= 0 ? '+' : ''}${fmt(profitDollars)}
+          </div>
+        )}
+      </div>
+
+      <div className="relative h-7">
+        {/* Background bar */}
+        <div className="absolute inset-x-0 top-3 h-1 bg-border rounded-full" />
+        {/* Profit zone shaded */}
+        <div
+          className="absolute top-3 h-1 bg-green-900/40 rounded-full"
+          style={{ left: `${entryPct}%`, width: `${100 - entryPct}%` }}
+        />
+        {/* Loss zone shaded */}
+        <div
+          className="absolute top-3 h-1 bg-red-900/40 rounded-full"
+          style={{ left: 0, width: `${entryPct}%` }}
+        />
+        {/* Anchor ticks */}
+        <Tick pct={0} label="stop" tone="neg" />
+        <Tick pct={entryPct} label="entry" tone="muted" />
+        <Tick pct={target50Pct} label="50%" tone="amber" />
+        <Tick pct={target75Pct} label="75%" tone="muted" />
+        <Tick pct={100} label="max" tone="pos" />
+        {/* Current marker */}
+        {currentPct != null && (
+          <div
+            className="absolute top-1 h-5 w-0.5 bg-amber-400"
+            style={{ left: `${currentPct}%` }}
+            aria-label="Current"
+          />
+        )}
+      </div>
+
+      <div className="grid grid-cols-3 gap-2 text-[10px] text-muted pt-1">
+        <div>
+          Stop floor<br />
+          <span className="text-fg font-mono-tab">${fmt(stopFloor)}</span>
+        </div>
+        <div>
+          50% target<br />
+          <span className="text-amber-400 font-mono-tab">${fmt(target50)}</span>
+        </div>
+        <div>
+          Max value<br />
+          <span className="text-green-400 font-mono-tab">${fmt(maxValue)}</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function Tick({ pct, label, tone }) {
+  const toneClass =
+    tone === 'pos' ? 'text-green-400'
+    : tone === 'neg' ? 'text-crimson'
+    : tone === 'amber' ? 'text-amber-400'
+    : 'text-muted'
+  return (
+    <>
+      <div
+        className="absolute top-2 h-3 w-0.5 bg-subtle/40"
+        style={{ left: `${pct}%` }}
+      />
+      <div
+        className={`absolute top-5 text-[9px] -translate-x-1/2 ${toneClass}`}
+        style={{ left: `${pct}%` }}
+      >
+        {label}
+      </div>
+    </>
+  )
+}
+
+// Distance-to-action — translates spread-mark targets back into
+// underlying-price moves the user can compare to the spot they're
+// watching. Uses a simple delta heuristic since we don't have the
+// option chain Greeks loaded on this page.
+function DistanceToActionCard({ pos, moveInfo }) {
+  const g = spreadGeometry(pos)
+  if (!g) return null
+  const spot = moveInfo?.spot
+  if (!Number.isFinite(spot)) return null
+
+  // Net delta heuristic: a vertical debit spread halfway through
+  // its profit zone has net delta roughly 0.30-0.40 depending on
+  // moneyness. We use 0.35 as a midpoint estimate. This understates
+  // delta when the spread is deep ITM and overstates it when far
+  // OTM, but it's a reasonable working estimate for "how much spot
+  // move converts into how much spread mark move."
+  const NET_DELTA_ESTIMATE = 0.35
+
+  const current = Number(pos.last_mid_per_spread) || g.entry
+  const target50 = g.entry + g.maxProfit * 0.5
+  const stopFloor = g.entry * 0.5
+
+  // Spread mark delta needed to reach each anchor, then translate
+  // back to underlying using the net-delta estimate.
+  const spreadDeltaToTarget = target50 - current
+  const spreadDeltaToStop = stopFloor - current
+  const spotMoveToTarget = spreadDeltaToTarget / NET_DELTA_ESTIMATE
+  const spotMoveToStop = spreadDeltaToStop / NET_DELTA_ESTIMATE
+
+  const dirSign = g.isCall ? 1 : -1   // bull call needs spot up, bear put needs spot down
+  const targetSpot = spot + spotMoveToTarget * dirSign
+  const stopSpot = spot - spotMoveToStop * dirSign  // stop fires when spread DROPS, opposite of target
+
+  return (
+    <div className="bg-card border border-border rounded-xl p-3 space-y-2">
+      <div className="text-[10px] uppercase tracking-wider text-muted flex items-center gap-1">
+        <Target size={10} /> Distance to action
+      </div>
+      <div className="grid grid-cols-2 gap-2 text-xs">
+        <div>
+          <div className="text-[10px] text-muted">Spot now</div>
+          <div className="font-mono-tab text-fg">${spot.toFixed(2)}</div>
+        </div>
+        <div>
+          <div className="text-[10px] text-muted">Breakeven</div>
+          <div className="font-mono-tab text-fg">${g.breakeven.toFixed(2)}</div>
+        </div>
+        <div>
+          <div className="text-[10px] text-muted">→ 50% target</div>
+          <div className="font-mono-tab text-amber-400">
+            ${targetSpot.toFixed(2)}
+            <span className="text-muted text-[10px] ml-1">
+              ({(((targetSpot - spot) / spot) * 100).toFixed(2)}%)
+            </span>
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] text-muted">→ stop fires</div>
+          <div className="font-mono-tab text-crimson">
+            ${stopSpot.toFixed(2)}
+            <span className="text-muted text-[10px] ml-1">
+              ({(((stopSpot - spot) / spot) * 100).toFixed(2)}%)
+            </span>
+          </div>
+        </div>
+      </div>
+      <p className="text-[10px] text-muted leading-relaxed pt-1 border-t border-border">
+        Estimated using ~0.35 net delta — actual fill prices may differ.
+      </p>
+    </div>
+  )
+}
+
+// Pre-defined exit plan reminder. Pulls from RM_MANAGEMENT.md
+// defaults when no custom plan is stored on the position. Once
+// signals/positions get an `exit_plan` JSONB column, this reads
+// from there instead.
+function ExitPlanReminderCard({ pos }) {
+  const g = spreadGeometry(pos)
+  if (!g) return null
+  const target = g.entry + g.maxProfit * 0.5
+  const stop = g.entry * 0.5
+  return (
+    <div className="bg-card border border-border rounded-xl p-3 space-y-2">
+      <div className="text-[10px] uppercase tracking-wider text-muted flex items-center gap-1">
+        <Shield size={10} /> Exit plan (standard)
+      </div>
+      <div className="space-y-1.5 text-xs">
+        <PlanRow
+          label="Profit target"
+          detail="50% of max profit"
+          value={`$${fmt(target)}`}
+          tone="amber"
+        />
+        <PlanRow
+          label="Stop loss"
+          detail="50% of debit paid"
+          value={`$${fmt(stop)}`}
+          tone="neg"
+        />
+        <PlanRow
+          label="Time exit"
+          detail="50% of DTE elapsed (whichever first)"
+          value="manual"
+          tone="muted"
+        />
+        <PlanRow
+          label="Hard expiration cutoff"
+          detail="No holds past 2pm on expiration day"
+          value="rule"
+          tone="muted"
+        />
+      </div>
+      <p className="text-[10px] text-muted leading-relaxed pt-1 border-t border-border">
+        Defaults from RISK_MANAGEMENT.md. Bracket order in your broker
+        should mirror the profit/stop levels above.
+      </p>
+    </div>
+  )
+}
+
+function PlanRow({ label, detail, value, tone }) {
+  const toneClass =
+    tone === 'amber' ? 'text-amber-400'
+    : tone === 'neg' ? 'text-crimson'
+    : 'text-fg'
+  return (
+    <div className="flex items-baseline justify-between gap-2">
+      <div className="min-w-0">
+        <div className="text-fg">{label}</div>
+        <div className="text-[10px] text-muted">{detail}</div>
+      </div>
+      <div className={`font-mono-tab text-xs font-medium shrink-0 ${toneClass}`}>
+        {value}
+      </div>
+    </div>
+  )
+}
+
+// Time-pressure granularity — translates raw DTE into trading
+// sessions remaining + theta-acceleration warning for the final
+// 24-48h window where gamma/pin variance dominates. Approximates
+// trading sessions by skipping weekends (no holidays handled).
+function TimePressureCard({ pos }) {
+  const dte = daysUntil(pos.expiration)
+  if (dte <= 0) return null
+  const sessions = tradingSessionsUntil(pos.expiration)
+  const finalDay = sessions <= 1
+  const tightWindow = sessions <= 3
+
+  if (!tightWindow) return null  // only surface this card when time is tight
+
+  return (
+    <div className="bg-card border border-border rounded-xl p-3 space-y-1.5">
+      <div className="text-[10px] uppercase tracking-wider text-muted flex items-center gap-1">
+        <Clock size={10} /> Time pressure
+      </div>
+      <div className="text-xs text-fg">
+        <span className={finalDay ? 'text-amber-400 font-medium' : 'text-fg'}>
+          {sessions} trading session{sessions === 1 ? '' : 's'}
+        </span>
+        {' until expiration'}
+        {dte !== sessions && (
+          <span className="text-muted"> · {dte} calendar day{dte === 1 ? '' : 's'}</span>
+        )}
+      </div>
+      <p className="text-[10px] text-subtle leading-relaxed">
+        {finalDay
+          ? 'Expiration day. Theta + gamma + pin risk all peak. Close by 11am, hard cutoff 2pm.'
+          : sessions === 2
+            ? 'Two sessions left. Theta accelerates each day. Plan exit by mid-morning of expiration day.'
+            : 'Three sessions left. Theta starts to bite. Bracket should fire well before expiration.'}
+      </p>
+    </div>
+  )
+}
+
+function tradingSessionsUntil(date) {
+  if (!date) return 0
+  const target = new Date(date + 'T00:00:00Z')
+  const now = new Date()
+  let sessions = 0
+  const cursor = new Date(now)
+  // Round forward to nearest day boundary
+  cursor.setUTCHours(0, 0, 0, 0)
+  while (cursor < target) {
+    const day = cursor.getUTCDay()
+    if (day !== 0 && day !== 6) sessions++
+    cursor.setUTCDate(cursor.getUTCDate() + 1)
+  }
+  // The expiration day itself counts if it's a weekday
+  const expDay = target.getUTCDay()
+  if (expDay !== 0 && expDay !== 6) sessions++
+  return sessions
+}
+
+// Account-level context — shows risk and max-gain as a percentage
+// of the user's set account size. Helps right-size mental tilt
+// (a $400 loss is meaningful at $5k, trivial at $500k). Pulls from
+// profile.account_size set in Settings.
+function AccountContextCard({ pos, profile }) {
+  const accountSize = Number(profile?.account_size)
+  if (!Number.isFinite(accountSize) || accountSize <= 0) return null
+  const g = spreadGeometry(pos)
+  if (!g) return null
+
+  const totalRisk = g.maxLoss * pos.contracts * 100
+  const totalMaxGain = g.maxProfit * pos.contracts * 100
+  const riskPct = (totalRisk / accountSize) * 100
+  const gainPct = (totalMaxGain / accountSize) * 100
+  const overSized = riskPct > 2.1  // 2% rule with small float
+
+  return (
+    <div className="bg-card border border-border rounded-xl p-3 space-y-1.5">
+      <div className="flex items-baseline justify-between">
+        <div className="text-[10px] uppercase tracking-wider text-muted">
+          Account context
+        </div>
+        <div className="text-[10px] text-muted font-mono-tab">
+          ${fmt(accountSize)} acct
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2 text-xs">
+        <div>
+          <div className="text-[10px] text-muted">Risk if max loss</div>
+          <div className={`font-mono-tab ${overSized ? 'text-crimson' : 'text-fg'}`}>
+            {riskPct.toFixed(2)}%
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] text-muted">Gain if max profit</div>
+          <div className="font-mono-tab text-green-400">{gainPct.toFixed(2)}%</div>
+        </div>
+      </div>
+      {overSized && (
+        <p className="text-[10px] text-crimson leading-relaxed pt-1 border-t border-border">
+          Position exceeds the 2% sizing rule. Consider sizing down on
+          future entries — see RISK_MANAGEMENT.md.
+        </p>
+      )}
+    </div>
+  )
+}
+
+// Pin risk warning — fires when spot is within $2 (or 0.5%) of
+// the short strike on a debit spread. Closing exactly at the strike
+// triggers assignment overnight, which converts a defined-risk
+// position into uncovered stock exposure.
+function PinRiskWarning({ pos, moveInfo }) {
+  const g = spreadGeometry(pos)
+  if (!g) return null
+  const spot = moveInfo?.spot
+  if (!Number.isFinite(spot)) return null
+  const sessions = tradingSessionsUntil(pos.expiration)
+  if (sessions > 1) return null  // only matters near/at expiration day
+
+  const distance = Math.abs(spot - g.short)
+  const distancePct = distance / spot
+  const inPinZone = distance <= 2 || distancePct <= 0.005
+  if (!inPinZone) return null
+
+  return (
+    <div className="bg-amber-950/30 border border-amber-700/50 rounded-xl p-3 space-y-1.5">
+      <div className="flex items-center gap-1.5 text-xs font-medium text-amber-400">
+        <AlertTriangle size={12} /> Pin risk zone
+      </div>
+      <p className="text-[11px] text-fg leading-relaxed">
+        Spot ${spot.toFixed(2)} is within ${distance.toFixed(2)} of your
+        short strike ${formatStrike(g.short)}. Close manually before 2pm
+        ET to avoid assignment — short legs sitting at-the-money at the
+        bell can be exercised, leaving you with overnight stock exposure.
+      </p>
+    </div>
+  )
+}
+
+// Probability cone — uses IV-derived expected move over remaining
+// trade life to project rough probability of three outcomes:
+// max profit, breakeven, max loss. Assumes normal distribution
+// (Black-Scholes-ish). Approximation only — real pin/wall regimes
+// distort these probabilities meaningfully.
+function ProbabilityConeCard({ pos, moveInfo }) {
+  const g = spreadGeometry(pos)
+  if (!g) return null
+  const spot = moveInfo?.spot
+  const sigma = moveInfo?.expectedTrade  // 1-sigma $ move over remaining DTE
+  if (!Number.isFinite(spot) || !Number.isFinite(sigma) || sigma <= 0) return null
+
+  // Probability that spot reaches/passes a target by expiration,
+  // approximated as 1-CDF of a normal distribution centered at spot
+  // with stddev = sigma.
+  const probAbove = (target) => {
+    const z = (target - spot) / sigma
+    return 1 - normCdf(z)
+  }
+  const probBelow = (target) => 1 - probAbove(target)
+
+  let pMaxProfit, pBreakeven, pMaxLoss
+  if (g.isCall) {
+    // Bull call: max profit if spot >= short_strike at expiration,
+    // breakeven if spot >= breakeven, max loss if spot <= long_strike
+    pMaxProfit = probAbove(g.short)
+    pBreakeven = probAbove(g.breakeven)
+    pMaxLoss = probBelow(g.long)
+  } else {
+    pMaxProfit = probBelow(g.short)
+    pBreakeven = probBelow(g.breakeven)
+    pMaxLoss = probAbove(g.long)
+  }
+
+  return (
+    <div className="bg-card border border-border rounded-xl p-3 space-y-2">
+      <div className="text-[10px] uppercase tracking-wider text-muted">
+        Probability cone (by expiration)
+      </div>
+      <div className="grid grid-cols-3 gap-2 text-xs">
+        <ProbCell label="Max profit" pct={pMaxProfit} tone="pos" />
+        <ProbCell label="≥ breakeven" pct={pBreakeven} tone="amber" />
+        <ProbCell label="Max loss" pct={pMaxLoss} tone="neg" />
+      </div>
+      <p className="text-[10px] text-muted leading-relaxed pt-1 border-t border-border">
+        IV-implied probabilities. Pin/wall regimes distort the
+        distribution — treat as a rough baseline, not a guarantee.
+      </p>
+    </div>
+  )
+}
+
+function ProbCell({ label, pct, tone }) {
+  const toneClass =
+    tone === 'pos' ? 'text-green-400'
+    : tone === 'neg' ? 'text-crimson'
+    : tone === 'amber' ? 'text-amber-400'
+    : 'text-fg'
+  return (
+    <div className="bg-bg-elev rounded-md p-2 text-center">
+      <div className="text-[9px] uppercase tracking-wider text-muted">{label}</div>
+      <div className={`font-mono-tab text-sm font-semibold ${toneClass}`}>
+        {(pct * 100).toFixed(0)}%
+      </div>
+    </div>
+  )
+}
+
+// Standard normal CDF using Abramowitz & Stegun approximation.
+// Sufficient precision for the rough probability display we want.
+function normCdf(z) {
+  const sign = z < 0 ? -1 : 1
+  const x = Math.abs(z) / Math.sqrt(2)
+  const t = 1 / (1 + 0.3275911 * x)
+  const y =
+    1 -
+    ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) *
+      t +
+      0.254829592) *
+      t *
+      Math.exp(-x * x)
+  return 0.5 * (1 + sign * y)
+}
+
+// Improved data freshness row — surfaces source, age of last poll,
+// and a switch-to-live hint when on Yahoo fallback.
+function DataFreshnessRow({ pos }) {
+  const source = pos.last_poll_source ?? 'pending'
+  const isYahoo = source === 'yahoo'
+  const isLive = source === 'dxlink'
+  const ageStr = pos.last_polled_at ? agoString(pos.last_polled_at) : 'never'
+  return (
+    <div className="text-[10px] text-muted flex items-baseline justify-between gap-2 flex-wrap">
+      <span>
+        Source:{' '}
+        <span className={isLive ? 'text-green-400' : isYahoo ? 'text-amber-400' : 'text-fg'}>
+          {source}
+        </span>
+        {isYahoo && ' (15-min delayed)'}
+        {isLive && ' (live stream)'}
+      </span>
+      <span>
+        Last refresh: <span className="text-fg">{ageStr}</span>
       </span>
     </div>
   )
