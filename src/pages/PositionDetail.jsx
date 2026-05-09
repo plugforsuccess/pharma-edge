@@ -38,6 +38,10 @@ export default function PositionDetail() {
   // expected move scaled to the trade's remaining DTE (using iv_used
   // returned from the matrix payload).
   const [moveInfo, setMoveInfo] = useState(null)
+  // Linked signal row, loaded so we can read entry_gex_snapshot for
+  // the entry-vs-now diff card. Skipped for manual positions without
+  // a signal_id link.
+  const [signalRow, setSignalRow] = useState(null)
   // Per-leg Greeks pulled from dxlink_quotes. Populated when the
   // worker is subscribed to the spread's strikes; shows "—" otherwise.
   // Per-spread net = long − short (long-leg Greeks dominate exposure
@@ -154,6 +158,26 @@ export default function PositionDetail() {
     })()
     return () => { cancelled = true }
   }, [pos?.ticker, pos?.expiration, pos?.long_strike, pos?.short_strike, pos?.strategy_type])
+
+  // Pull the linked signal so the entry-vs-now diff card can read
+  // signal.entry_gex_snapshot. Best-effort: rows without a signal_id
+  // (manual position adds) skip this entirely.
+  useEffect(() => {
+    if (!pos?.signal_id) {
+      setSignalRow(null)
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      const { data } = await supabase
+        .from('signals')
+        .select('id, entry_gex_snapshot, logged_at, signal_source')
+        .eq('id', pos.signal_id)
+        .maybeSingle()
+      if (!cancelled) setSignalRow(data ?? null)
+    })()
+    return () => { cancelled = true }
+  }, [pos?.signal_id])
 
   // Live Tastytrade working orders for this signal. Skipped silently
   // if pos has no signal_id (open_position not linked back to a logged
@@ -450,6 +474,12 @@ export default function PositionDetail() {
           )}
         </div>
       )}
+
+      <EntrySnapshotDiffCard
+        snapshot={signalRow?.entry_gex_snapshot}
+        moveInfo={moveInfo}
+        wallInfo={wallInfo}
+      />
 
       <ProbabilityConeCard pos={pos} moveInfo={moveInfo} />
 
@@ -1286,6 +1316,137 @@ function BracketRow({ order }) {
       </div>
     </div>
   )
+}
+
+// Entry-vs-now headline diff. Shows what dealer positioning looked
+// like at signal lock vs what it looks like right now, so the user
+// can decide whether the thesis still holds. Reads
+// signal.entry_gex_snapshot (captured by LogSignal at submit) and
+// the live wallInfo / moveInfo already loaded for the page.
+//
+// Hidden when no snapshot exists — every signal logged before
+// 2026-05-09 has a null column. Don't fake an "unchanged" diff.
+function EntrySnapshotDiffCard({ snapshot, moveInfo, wallInfo }) {
+  if (!snapshot) return null
+  const nowSpot = moveInfo?.spot
+  const nowNetGex = wallInfo?.netGex
+  const nowWallStrike = wallInfo?.wallStrike
+  const nowWallExp = wallInfo?.wallExp
+  const entrySpot = snapshot.spot
+  const entryNetGex = snapshot.net_gex
+  const entryWallStrike = snapshot.largest_wall?.strike ?? null
+  const entryWallExp = snapshot.largest_wall?.expiration ?? null
+
+  const spotDelta =
+    Number.isFinite(nowSpot) && Number.isFinite(entrySpot)
+      ? nowSpot - entrySpot
+      : null
+  const spotDeltaPct =
+    spotDelta != null && entrySpot
+      ? spotDelta / entrySpot
+      : null
+  const gexDelta =
+    Number.isFinite(nowNetGex) && Number.isFinite(entryNetGex)
+      ? nowNetGex - entryNetGex
+      : null
+  const wallStrikeChanged =
+    nowWallStrike != null &&
+    entryWallStrike != null &&
+    Number(nowWallStrike) !== Number(entryWallStrike)
+  const wallExpChanged =
+    nowWallExp != null && entryWallExp != null && nowWallExp !== entryWallExp
+
+  return (
+    <div className="bg-card border border-border rounded-xl p-3 space-y-2">
+      <div className="flex items-baseline justify-between">
+        <div className="text-[10px] uppercase tracking-wider text-muted">
+          Entry vs now
+        </div>
+        <div className="text-[10px] text-muted">
+          captured {agoString(snapshot.captured_at)}
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <DiffRow
+          label="Spot"
+          entry={entrySpot != null ? `$${Number(entrySpot).toFixed(2)}` : '—'}
+          now={nowSpot != null ? `$${Number(nowSpot).toFixed(2)}` : '—'}
+          delta={
+            spotDelta != null
+              ? `${spotDelta >= 0 ? '+' : ''}$${spotDelta.toFixed(2)}`
+              : null
+          }
+          deltaPct={spotDeltaPct}
+        />
+        <DiffRow
+          label="Net GEX"
+          entry={entryNetGex != null ? fmtMillions(entryNetGex) : '—'}
+          now={nowNetGex != null ? fmtMillions(nowNetGex) : '—'}
+          delta={gexDelta != null ? fmtMillions(gexDelta) : null}
+        />
+        <DiffRow
+          label="Call wall"
+          entry={
+            entryWallStrike != null
+              ? `${formatStrike(entryWallStrike)} @ ${entryWallExp ?? '—'}`
+              : '—'
+          }
+          now={
+            nowWallStrike != null
+              ? `${formatStrike(nowWallStrike)} @ ${nowWallExp ?? '—'}`
+              : '—'
+          }
+          flag={wallStrikeChanged || wallExpChanged}
+        />
+        <DiffRow
+          label="Source"
+          entry={snapshot.source ?? '—'}
+          now={moveInfo ? 'live' : '—'}
+        />
+      </div>
+      {(wallStrikeChanged || wallExpChanged) && (
+        <p className="text-[11px] text-amber-400 leading-relaxed pt-1">
+          The dominant wall has shifted since you entered — the
+          thesis is now anchored to a different magnetism point. Re-
+          read the matrix before defending the trade.
+        </p>
+      )}
+    </div>
+  )
+}
+
+function DiffRow({ label, entry, now, delta, deltaPct, flag }) {
+  return (
+    <div className={`bg-bg/50 border rounded-lg p-2 ${flag ? 'border-amber-400/40' : 'border-border/50'}`}>
+      <div className="text-[10px] uppercase tracking-wider text-muted">
+        {label}
+      </div>
+      <div className="text-[11px] flex items-baseline justify-between mt-0.5">
+        <span className="text-muted">entry</span>
+        <span className="text-fg font-mono-tab">{entry}</span>
+      </div>
+      <div className="text-[11px] flex items-baseline justify-between">
+        <span className="text-muted">now</span>
+        <span className="text-fg font-mono-tab">{now}</span>
+      </div>
+      {delta && (
+        <div className="text-[10px] text-subtle font-mono-tab mt-0.5 text-right">
+          Δ {delta}
+          {deltaPct != null && Number.isFinite(deltaPct) && (
+            <span className="ml-1">
+              ({deltaPct >= 0 ? '+' : ''}{(deltaPct * 100).toFixed(1)}%)
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function fmtMillions(v) {
+  if (v == null || !Number.isFinite(v)) return '—'
+  const sign = v >= 0 ? '+' : '−'
+  return `${sign}$${(Math.abs(v) / 1e6).toFixed(1)}M`
 }
 
 function GreekCell({ label, value, hint, tone }) {
