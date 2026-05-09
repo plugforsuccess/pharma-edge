@@ -22,9 +22,11 @@ export default function Glossary() {
           <ArrowLeft size={20} />
         </button>
         <div>
-          <h1 className="text-lg font-semibold leading-tight">GEX Glossary</h1>
+          <h1 className="text-lg font-semibold leading-tight">Pulse Glossary</h1>
           <p className="text-xs text-subtle">
-            What the heatmap is telling you, in trader language.
+            HeatPulse™ vocabulary — what the heatmap, the secondary
+            Greeks, and the suggested-play cards are telling you, in
+            trader language.
           </p>
         </div>
       </div>
@@ -488,6 +490,192 @@ export default function Glossary() {
           drag to any time, or hit play to auto-advance. Good for
           end-of-day post-mortems: where did the call wall first form?
           When did the flip strike move?
+        </p>
+      </Term>
+
+      <Term
+        title="HeatPulse™ / Pulse"
+        short="The Cash Moves dealer-positioning console — the page itself."
+      >
+        <p>
+          Live per-strike Greeks streamed from dxFeed during RTH. The{' '}
+          <strong>Pulse</strong> nav button (formerly "Gamma") opens
+          the matrix; the page houses five exposure layers (GEX, VEX,
+          CEX, DEX, Velocity) plus Trinity Mode for cross-index
+          comparison.
+        </p>
+        <p className="text-subtle">
+          The data freshness indicator on the page header tells you
+          whether you're reading the live dxFeed stream (green pulse)
+          or the 15-minute-delayed Yahoo fallback (amber).
+        </p>
+      </Term>
+
+      <Term
+        title="NetDEX (Net Delta Exposure)"
+        short="Confirms or contradicts walls — same shape as NetVEX, but for delta."
+      >
+        <p>
+          DEX = OI × delta × spot. A "call wall" with a large positive
+          DEX cluster at the same strike means dealers are net long
+          there and have a real economic reason to defend it — they
+          sell into rallies into that strike. A wall with weak or
+          contradictory DEX is a paper wall. Downgrade conviction or
+          skip.
+        </p>
+      </Term>
+
+      <Term
+        title="NetCEX (Net Charm Exposure)"
+        short="Matters most for short DTE — how fast dealer delta drains from a strike."
+      >
+        <p>
+          Charm is the rate delta decays as time passes. Strong
+          negative net CEX into a 0–1 DTE pin trade means charm pulls
+          dealer delta away from the pinning strike faster than gamma
+          defends it. The pin weakens through the day, so a tight Iron
+          Condor anchored at that strike has more drift risk than the
+          headline GEX suggests. Widen the wings or pick a different
+          expiration.
+        </p>
+      </Term>
+
+      <Term
+        title="Velocity Mode"
+        short="Rate-of-change of GEX between consecutive snapshots — where positioning is moving NOW."
+      >
+        <p>
+          <strong>Velocity = GEX(t) − GEX(t − 5min)</strong>. A strike
+          that's been quiet all day suddenly going green = new size
+          hitting the chain. Useful for spotting institutional flow
+          as it lands rather than reading the cumulative state.
+        </p>
+        <p className="text-subtle">
+          Needs at least one prior snapshot to diff against — first
+          read of the day shows an empty grid until the 5-min archive
+          cron has filled the gap.
+        </p>
+      </Term>
+
+      <Term
+        title="Trinity Mode"
+        short="Three matrices side-by-side (default SPXW / SPY / QQQ) for cross-index comparison."
+      >
+        <p>
+          Compact strike → summed-GEX list per ticker, ATM
+          auto-centered. Use it to spot when one index leads — e.g.,
+          QQQ flipping below its key wall while SPY is still pinned.
+          Divergences usually resolve.
+        </p>
+      </Term>
+
+      <Term
+        title="Pinning Probability"
+        short="0–1 score for how likely spot pins to the call wall by expiration."
+      >
+        <p>
+          Heuristic computed from the ratio of dominant-wall GEX to
+          total |GEX| in the matrix slice. Higher score = the wall is
+          doing more of the work. Surfaces on the Markets header and
+          on the entry-snapshot diff card on a position page.
+        </p>
+      </Term>
+
+      <Term
+        title="Wall Timing (Peak Gamma Window)"
+        short="How close your trade's expiration is to the dominant wall's peak gamma."
+      >
+        <p>
+          Gamma at a strike concentrates as it approaches expiration —
+          a wall at next Friday's expiry is barely defending today
+          but will be at peak magnetism that morning.
+        </p>
+        <p>
+          <strong className="text-fg">Pin / fade-the-wall</strong>{' '}
+          trades want their expiration to ALIGN with the wall's
+          expiration.{' '}
+          <strong className="text-fg">Break-the-wall</strong> trades
+          (debit spreads structured to push spot through) want to hit
+          when the wall is still weak.
+        </p>
+      </Term>
+
+      <Term
+        title="Gamma Roll-off Risk"
+        short="The dominant gamma cluster anchoring the regime expires before your trade does."
+      >
+        <p>
+          When the largest GEX cluster expires mid-trade, dealer
+          hedges around those strikes vanish, positioning resets, and
+          the regime can shift (freer price discovery, larger moves,
+          less suppression). Suggested Plays flags this with a banner
+          per play; never inherit a thesis whose anchor expires before
+          you do without sizing it down.
+        </p>
+      </Term>
+
+      <Term
+        title="King Node"
+        short="The single most important strike — where a thesis lives or dies."
+      >
+        <p>
+          Usually the call wall, the put wall, or the flip strike.
+          Suggested Plays builds every recommendation around hitting
+          (or fading from) a king node. If you can't name the king
+          node a trade is targeting, the structure is hand-waving.
+        </p>
+      </Term>
+
+      <Term
+        title="Dominant Expiration"
+        short="The expiration that holds the largest share of total |GEX| in the matrix."
+      >
+        <p>
+          What's anchoring today's pinning / regime behavior. Once it
+          expires, hedging unwinds and the regime can flip. Surfaced
+          on every Suggested Plays response and used to compute
+          gamma-roll-off risk per play.
+        </p>
+      </Term>
+
+      <Term
+        title="Entry PoP · Breakeven PoP · EV Edge"
+        short="Three numbers that say 'is this trade +EV?'"
+      >
+        <p>
+          <strong className="text-fg">Entry PoP</strong> — the
+          IV-implied probability you hit your breakeven by expiration
+          (lognormal Black–Scholes from live dxFeed IV). Locked into
+          the v2 signal hash at log time.
+        </p>
+        <p>
+          <strong className="text-fg">Breakeven PoP</strong> — the win
+          rate the structure mathematically needs to be EV-neutral:{' '}
+          max_loss / (max_loss + max_win). Pure structure math, not a
+          forecast.
+        </p>
+        <p>
+          <strong className="text-fg">EV Edge</strong> — Entry PoP −
+          Breakeven PoP. Positive edge = the IV says this trade beats
+          what it needs to break even. Suggested Plays server-filters
+          every play with EV Edge {'<'} 0.
+        </p>
+      </Term>
+
+      <Term
+        title="Bracket Order (OTOCO)"
+        short="Stop loss + profit target placed together so one fill cancels the other."
+      >
+        <p>
+          Tastytrade's <strong>One-Triggers-OCO</strong>: a parent
+          fill submits two children — a limit-credit close at your
+          target and a stop-loss close — and whichever fills first
+          cancels the other.
+        </p>
+        <p className="text-subtle">
+          Cash Moves reads working brackets via the broker integration
+          and lets you nudge the limit price without a cancel +
+          replace via the Edit button on each row.
         </p>
       </Term>
 

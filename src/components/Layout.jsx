@@ -17,21 +17,27 @@ import clsx from 'clsx'
 
 // Bottom nav (mobile) + sidebar nav (desktop). Naming conventions per
 // the Cash Moves brand:
-//   /        → "Tape"   (the home dashboard, "The Tape")
-//   /markets → "Gamma"  (the GEX dashboard, "HeatPulse™")
+//   /        → "Tape"    (the home dashboard, "The Tape")
+//   /markets → "Pulse"   (HeatPulse™ — GEX/VEX/CEX/DEX/Velocity/Trinity)
 //   /flow    → "Flow"
 //   /record  → "Record"
 //   /settings→ "Settings"
 //
+// "Pulse" replaces the older "Gamma" label — /markets has grown beyond
+// gamma-only into all five Greek exposures plus the Trinity multi-
+// ticker comparison, so the single-Greek name was misleading. We
+// don't use "Dashboard" here because The Tape is already the
+// dashboard; double-labeling would collide.
+//
 // Mobile bottom nav has 4 tabs split 2/2 around a center FAB:
-//   [Tape] [Gamma] (LOG FAB) [Flow] [Record]
+//   [Tape] [Pulse] (LOG FAB) [Flow] [Record]
 // Settings moves to the desktop sidebar + tape header avatar so it
 // frees up bottom-bar real estate. The Log FAB is the primary action
 // (writing a signal); making it visually dominant matches the
 // "log first, place second" workflow CLAUDE.md describes.
 const navLeft = [
   { to: '/', icon: Home, label: 'Tape' },
-  { to: '/markets', icon: Activity, label: 'Gamma' },
+  { to: '/markets', icon: Activity, label: 'Pulse' },
 ]
 const navRight = [
   { to: '/flow', icon: Flame, label: 'Flow' },
@@ -40,7 +46,7 @@ const navRight = [
 const navFull = [
   ...navLeft,
   ...navRight,
-  // Reasoning sits between the visualization tabs (Gamma/Flow) and
+  // Reasoning sits between the visualization tabs (Pulse/Flow) and
   // the operational tabs (Record/Settings) in the desktop sidebar
   // since it's the engine output for the views above it. Mobile
   // users reach /reasoning from the Markets page header for now.
