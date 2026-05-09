@@ -89,10 +89,42 @@ serve(async (req) => {
   if (!signal || signal.user_id !== user.id) {
     return json({ success: false, error: 'signal not found' }, 404)
   }
-  if (!signal.tastytrade_account_number) {
-    return json({ success: false, error: 'signal has no broker link' }, 400)
+  // Same account-number fallback as get-working-orders: when the
+  // signal wasn't placed via Cash Moves' place-order flow, the
+  // tastytrade_account_number column is null. Discover the live
+  // account from /customers/me/accounts (the same call get-account
+  // uses) and pick the first non-closed account on the OAuth grant.
+  // Lets the broker-write path operate on manually-placed brackets.
+  let accountNumber = signal.tastytrade_account_number as string | null
+  if (!accountNumber) {
+    let acctsResp: Response
+    try {
+      acctsResp = await tastytradeFetch(
+        adminClient,
+        '/customers/me/accounts',
+        { method: 'GET' },
+      )
+    } catch (err) {
+      const reason = err instanceof TastytradeError ? err.message : String(err)
+      return json({ success: false, error: `account lookup failed: ${reason}` }, 502)
+    }
+    if (!acctsResp.ok) {
+      return json({ success: false, error: 'no broker account available' }, 400)
+    }
+    const acctsBody = await acctsResp.json().catch(() => null) as
+      | { data?: { items?: Array<Record<string, unknown>> } }
+      | null
+    const items = acctsBody?.data?.items ?? []
+    const firstActive = items.find((it) => {
+      const acct = (it.account ?? it) as Record<string, unknown>
+      return !acct['is-closed']
+    })
+    const acct = (firstActive?.account ?? firstActive) as Record<string, unknown> | undefined
+    accountNumber = acct ? String(acct['account-number'] ?? '') : ''
+    if (!accountNumber) {
+      return json({ success: false, error: 'no broker account available' }, 400)
+    }
   }
-  const accountNumber = signal.tastytrade_account_number
 
   // Fetch the current order so we can echo its legs + only mutate
   // price. Tastytrade rejects PUTs that omit the leg array.
