@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Check, ChevronDown } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
-import AnalyzeFilingPanel from '../components/AnalyzeFilingPanel'
 import StrikePriceCalculator from '../components/StrikePriceCalculator'
 import TickerDrawer from '../components/TickerDrawer'
 import Modal from '../components/Modal'
@@ -60,97 +59,11 @@ const SUGGESTED_TYPE_TO_STRUCTURE = {
 
 const today = () => new Date().toISOString().slice(0, 10)
 
-// localStorage-backed draft persistence keyed by candidate_id, so leaving
-// LogSignal and re-promoting the same candidate restores the rich
-// AnalyzeFilingPanel result instead of the user having to re-run Claude.
-// 7-day TTL prunes stale drafts. Solo-user / per-device by design.
-const DRAFT_TTL_MS = 7 * 24 * 60 * 60 * 1000
-
-function draftKey(candidateId) {
-  return candidateId ? `pe_draft_analysis_${candidateId}` : null
-}
-
-function loadDraftAnalysis(candidateId) {
-  const key = draftKey(candidateId)
-  if (!key || typeof window === 'undefined') return null
-  try {
-    const raw = window.localStorage.getItem(key)
-    if (!raw) return null
-    const parsed = JSON.parse(raw)
-    if (!parsed?.savedAt || Date.now() - parsed.savedAt > DRAFT_TTL_MS) {
-      window.localStorage.removeItem(key)
-      return null
-    }
-    return parsed.analysis ?? null
-  } catch {
-    return null
-  }
-}
-
-function saveDraftAnalysis(candidateId, analysis) {
-  const key = draftKey(candidateId)
-  if (!key || typeof window === 'undefined') return
-  try {
-    window.localStorage.setItem(
-      key,
-      JSON.stringify({ savedAt: Date.now(), analysis }),
-    )
-  } catch {
-    /* quota / private mode — silent */
-  }
-}
-
-function clearDraftAnalysis(candidateId) {
-  const key = draftKey(candidateId)
-  if (!key || typeof window === 'undefined') return
-  try {
-    window.localStorage.removeItem(key)
-  } catch {
-    /* ignore */
-  }
-}
-
-// ─── DB-backed cross-device draft persistence ────────────────────
-// localStorage above is the fast cache (synchronous on mount). The
-// candidate_drafts table is the canonical store so a draft started
-// on phone shows up on desktop. RLS scopes to own rows.
-
-async function fetchRemoteDraft(supabaseClient, candidateId) {
-  if (!candidateId) return null
-  const { data } = await supabaseClient
-    .from('candidate_drafts')
-    .select('analysis')
-    .eq('candidate_id', candidateId)
-    .maybeSingle()
-  return data?.analysis ?? null
-}
-
-async function upsertRemoteDraft(supabaseClient, userId, candidateId, analysis) {
-  if (!candidateId || !userId) return
-  await supabaseClient
-    .from('candidate_drafts')
-    .upsert(
-      {
-        user_id: userId,
-        candidate_id: candidateId,
-        analysis,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'user_id,candidate_id' },
-    )
-}
-
-async function deleteRemoteDraft(supabaseClient, candidateId) {
-  if (!candidateId) return
-  await supabaseClient.from('candidate_drafts').delete().eq('candidate_id', candidateId)
-}
-
 export default function LogSignal() {
   const { user, profile } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const prefill = location.state?.prefill || {}
-  const candidateId = location.state?.candidate_id || null
 
   const [step, setStep] = useState(1)
   const [loading, setLoading] = useState(false)
@@ -184,42 +97,9 @@ export default function LogSignal() {
     prefill.structure ||
     SUGGESTED_TYPE_TO_STRUCTURE[prefill.suggested_play_type] ||
     null
-  // Synchronous hydrate from localStorage so first paint is instant.
-  // The DB fetch below overrides if a newer cross-device draft exists.
-  const [analysis, setAnalysis] = useState(() => loadDraftAnalysis(candidateId))
-
-  useEffect(() => {
-    if (!candidateId) return
-    let cancelled = false
-    fetchRemoteDraft(supabase, candidateId).then((remote) => {
-      if (cancelled || !remote) return
-      // Override local cache when DB has a draft (DB is canonical).
-      // If localStorage already had this analysis, no visible change.
-      setAnalysis(remote)
-      saveDraftAnalysis(candidateId, remote)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [candidateId])
 
   const [form, setForm] = useState(() => ({
-    // signal_source: always 'gex_flow' in the GEX-first product. The
-    // biotech_catalyst path remains in the DB schema and on existing
-    // historical signals, but the LogSignal UI no longer surfaces a
-    // toggle — every newly-logged trade is a GEX-driven structure.
-    // Suggested Plays continues to pass 'gex_flow' explicitly; we keep
-    // honoring an explicit prefill so legacy deep links don't break.
-    signal_source: prefill.signal_source || 'gex_flow',
     ticker: (prefill.ticker || '').toUpperCase(),
-    company_name: prefill.company_name || '',
-    drug_name: prefill.drug_name || '',
-    indication: prefill.indication || '',
-    catalyst_type:
-      prefill.catalyst_type ||
-      (prefill.signal_source === 'gex_flow' ? 'other' : 'pdufa'),
-    catalyst_date: prefill.catalyst_date || '',
-    catalyst_date_precision: prefill.catalyst_date_precision || 'day',
     // Resolve direction + structure together. When the prefill came
     // from a Suggested Play we get a play.type string ("BEAR_CALL_CREDIT"
     // etc.) which uniquely determines both. Otherwise fall back to the
@@ -238,13 +118,7 @@ export default function LogSignal() {
     // Prefer an explicit prefill.expiry_date (Suggested Plays sends one),
     // otherwise default expiry to catalyst_date + 35 days (mid of 30–45
     // window per the strategy rule). If neither is set we leave blank.
-    expiry_date:
-      prefill.expiry_date ||
-      (prefill.catalyst_date
-        ? new Date(new Date(prefill.catalyst_date).getTime() + 35 * 86400_000)
-            .toISOString()
-            .slice(0, 10)
-        : ''),
+    expiry_date: prefill.expiry_date || '',
     long_strike: prefill.long_strike != null ? String(prefill.long_strike) : '',
     short_strike:
       prefill.short_strike != null ? String(prefill.short_strike) : '',
@@ -276,8 +150,6 @@ export default function LogSignal() {
     ...Object.fromEntries(CHECKLIST_ITEMS.map((i) => [i.key, false])),
   }))
 
-  const isGexFlow = form.signal_source === 'gex_flow'
-
   function update(key, value) {
     setForm((prev) => ({ ...prev, [key]: value }))
   }
@@ -294,77 +166,38 @@ export default function LogSignal() {
     }))
   }
 
-  function handleAnalysisComplete(result) {
-    // localStorage write is synchronous (fast cache); the DB upsert is
-    // fire-and-forget so the UI doesn't wait. Both happen so a draft
-    // started on phone shows up on desktop and vice versa.
-    setAnalysis(result)
-    saveDraftAnalysis(candidateId, result)
-    if (user?.id) {
-      upsertRemoteDraft(supabase, user.id, candidateId, result).catch(() => {})
-    }
-    setForm((prev) => ({
-      ...prev,
-      // Only fill thesis if the user hasn't typed their own.
-      thesis: prev.thesis.trim() ? prev.thesis : result.thesis ?? prev.thesis,
-      confidence_score: result.confidence_score ?? prev.confidence_score,
-      direction: result.direction_recommendation ?? prev.direction,
-      structure:
-        prev.structure === DEFAULT_STRUCTURE[prev.direction]
-          ? result.suggested_structure ?? DEFAULT_STRUCTURE[result.direction_recommendation || prev.direction]
-          : prev.structure,
-      your_probability:
-        result.your_probability != null ? String(result.your_probability) : prev.your_probability,
-      market_implied_probability:
-        result.market_implied_probability != null
-          ? String(result.market_implied_probability)
-          : prev.market_implied_probability,
-    }))
-  }
-
   const checklistComplete = useMemo(
     () => CHECKLIST_ITEMS.every((i) => form[i.key]),
     [form],
   )
 
-  // For biotech catalysts we require company + a real future catalyst date.
-  // For GEX flow trades there's no biotech catalyst — the spread expiry is
-  // the de-facto deadline, and company_name is auto-derived from the ticker
-  // on submit, so the only step-1 requirements are ticker + expiry.
-  const step1Valid = isGexFlow
-    ? Boolean(form.ticker.trim() && form.expiry_date && form.expiry_date >= today())
-    : Boolean(
-        form.ticker.trim() &&
-          form.company_name.trim() &&
-          form.catalyst_date &&
-          form.catalyst_date >= today(),
-      )
+  // Step-1 requires only ticker + a future spread expiration. Spread
+  // expiry is the resolution date for GEX-flow trades — there's no
+  // separate catalyst to satisfy. company_name is auto-derived from the
+  // ticker on submit so the user doesn't have to type it.
+  const step1Valid = Boolean(
+    form.ticker.trim() && form.expiry_date && form.expiry_date >= today(),
+  )
 
   async function submitSignal() {
     setSubmitError('')
     setLoading(true)
 
     const num = (v) => (v === '' || v == null ? null : Number(v))
-    // For GEX-flow signals the spread expiry IS the resolution date —
-    // we mirror it into catalyst_date so the (still NOT NULL) DB column
-    // is honest about when the thesis must play out, and drug/indication
-    // are explicitly nulled since they don't exist for index trades.
+    // Spread expiry mirrors into catalyst_date because that DB column is
+    // still NOT NULL — for GEX-flow trades the expiry IS the resolution
+    // date, so the mirror is honest. company_name auto-derives from the
+    // ticker so the form doesn't have to ask for it.
     const ticker = form.ticker.toUpperCase().trim()
-    const effectiveCatalystDate = isGexFlow
-      ? form.expiry_date
-      : form.catalyst_date
-    const effectiveCompanyName = isGexFlow
-      ? form.company_name.trim() || ticker
-      : form.company_name.trim()
     const signalData = {
       user_id: user.id,
-      signal_source: form.signal_source,
+      signal_source: 'gex_flow',
       ticker,
-      company_name: effectiveCompanyName,
-      drug_name: isGexFlow ? null : form.drug_name.trim() || null,
-      indication: isGexFlow ? null : form.indication.trim() || null,
-      catalyst_type: isGexFlow ? 'other' : form.catalyst_type,
-      catalyst_date: effectiveCatalystDate,
+      company_name: ticker,
+      drug_name: null,
+      indication: null,
+      catalyst_type: 'other',
+      catalyst_date: form.expiry_date,
       direction: form.direction,
       trade_type: form.trade_type,
       structure: form.structure,
@@ -374,32 +207,19 @@ export default function LogSignal() {
       stock_price_at_signal: num(form.stock_price_at_signal),
       your_probability: num(form.your_probability),
       market_implied_probability: num(form.market_implied_probability),
-      // The thesis textarea was removed from step 2 — Suggested Plays
-      // prefills a rationale-derived thesis, and manual logs without a
-      // typed thesis fall back to a structure-derived auto-thesis so
-      // the NOT NULL DB constraint is honored without forcing the user
-      // to write copy that adds no signal.
       thesis: form.thesis.trim() || autoThesis(form, ticker),
-      claude_analysis: analysis?.claude_analysis ?? null,
-      claude_analysis_full: analysis ?? null,
       confidence_score: form.confidence_score,
-      // entry_pop_bp + hash_version: the DB column default for hash_version
-      // is 2 (set in migration 20260507000002), so omitting it here would
-      // also work — but explicit > implicit when the column is in the
-      // signal_hash payload. New signals inserted from the app are ALWAYS
-      // v2; hash_version=1 is a backfill marker for pre-2026-05-07 rows.
+      // entry_pop_bp + hash_version: DB default for hash_version is 2,
+      // but explicit > implicit when the column is in the signal_hash
+      // payload. New signals from the app are ALWAYS v2; hash_version=1
+      // is a backfill marker for pre-2026-05-07 rows.
       entry_pop_bp: form.entry_pop_bp,
       hash_version: 2,
-      enrollment_signal: analysis?.signal_scores?.enrollment_signal ?? 0,
-      fda_precedent_signal: analysis?.signal_scores?.fda_precedent_signal ?? 0,
-      protocol_amendment_signal: analysis?.signal_scores?.protocol_amendment_signal ?? 0,
-      insider_selling_signal: analysis?.signal_scores?.insider_selling_signal ?? 0,
-      cash_runway_signal: analysis?.signal_scores?.cash_runway_signal ?? 0,
       source_urls: form.source_urls
         ? form.source_urls.split('\n').map((s) => s.trim()).filter(Boolean)
         : [],
       ...Object.fromEntries(CHECKLIST_ITEMS.map((i) => [i.key, form[i.key]])),
-      // signal_hash + logged_at intentionally omitted: the DB trigger
+      // signal_hash + logged_at intentionally omitted: DB trigger
       // computes the canonical hash on INSERT and logged_at defaults to NOW().
     }
 
@@ -413,28 +233,6 @@ export default function LogSignal() {
       setLoading(false)
       setSubmitError(error.message)
       return
-    }
-
-    // Signal locked successfully — clear local + remote draft so a
-    // future promote of the same candidate (rare) doesn't restore stale.
-    clearDraftAnalysis(candidateId)
-    if (candidateId) {
-      deleteRemoteDraft(supabase, candidateId).catch(() => {})
-    }
-
-    // If this signal was promoted from a scanner candidate, link + claim
-    // it now (only after the signal actually inserted — pre-claiming on
-    // navigate meant a back-out silently lost the candidate from the queue).
-    if (candidateId) {
-      await supabase
-        .from('scanner_candidates')
-        .update({
-          promoted_to_signal: data.id,
-          reviewed: true,
-          reviewed_by: user.id,
-          reviewed_at: new Date().toISOString(),
-        })
-        .eq('id', candidateId)
     }
 
     // Auto-create the open_positions row so monitor-positions starts
@@ -472,7 +270,7 @@ export default function LogSignal() {
           contracts: contractsNum,
           entry_debit_per_spread: entryPriceNum,
           thesis: form.thesis.trim() || null,
-          source: isGexFlow ? 'gex_play' : 'catalyst',
+          source: 'gex_play',
         })
         // Insert is fire-and-forget on failure (non-fatal) — RLS
         // violations or a dup row shouldn't block the signal flow.
@@ -513,9 +311,7 @@ export default function LogSignal() {
       </div>
 
       <div className={clsx('space-y-4', step !== 1 && 'hidden')}>
-        <h2 className="text-white font-semibold">
-          {isGexFlow ? 'Trade Setup' : 'Company & Catalyst'}
-        </h2>
+        <h2 className="text-white font-semibold">Trade Setup</h2>
 
           {/* Ticker picker — opens TickerDrawer for typeahead over
               the curated universe (HOT + S&P 500). Free-text fallback
@@ -537,103 +333,20 @@ export default function LogSignal() {
             </button>
           </div>
 
-          {!isGexFlow && (
-            <>
-              <Input
-                label="Company Name"
-                value={form.company_name}
-                onChange={(v) => update('company_name', v)}
-                placeholder="Acme Therapeutics"
-                required
-              />
-              <Input
-                label="Drug Name"
-                value={form.drug_name}
-                onChange={(v) => update('drug_name', v)}
-                placeholder="ACM-101"
-              />
-              <Input
-                label="Indication"
-                value={form.indication}
-                onChange={(v) => update('indication', v)}
-                placeholder="Pancreatic Cancer"
-              />
-
-              <div>
-                <label className="text-muted text-xs uppercase tracking-wider block mb-1">
-                  Catalyst Type
-                </label>
-                <select
-                  value={form.catalyst_type}
-                  onChange={(e) => update('catalyst_type', e.target.value)}
-                  className="w-full bg-card border border-border text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-red-500"
-                >
-                  <option value="pdufa">PDUFA Date</option>
-                  <option value="adcomm">AdComm Meeting</option>
-                  <option value="phase2_readout">Phase 2 Readout</option>
-                  <option value="phase3_readout">Phase 3 Readout</option>
-                  <option value="enrollment_end">Enrollment End</option>
-                  <option value="patent_expiry">Patent Expiry</option>
-                  <option value="earnings">Earnings</option>
-                  <option value="other">Other</option>
-                </select>
-              </div>
-
-              <Input
-                label="Catalyst Date"
-                value={form.catalyst_date}
-                onChange={(v) => {
-                  // Manual edit overrides any prefilled precision —
-                  // a date the user typed is a real day-precision date.
-                  update('catalyst_date', v)
-                  if (form.catalyst_date_precision !== 'day') {
-                    update('catalyst_date_precision', 'day')
-                  }
-                }}
-                type="date"
-                min={today()}
-                required
-              />
-            </>
-          )}
-
-          {isGexFlow && (
-            <>
-              <Input
-                label="Spread Expiration"
-                value={form.expiry_date}
-                onChange={(v) => update('expiry_date', v)}
-                type="date"
-                min={today()}
-                required
-              />
-              <p className="text-[11px] text-muted leading-relaxed -mt-2">
-                For GEX-flow trades the spread expiry is the resolution date —
-                no biotech catalyst is being timed. The expiry is mirrored to
-                <span className="font-mono-tab"> catalyst_date </span>
-                on the underlying record so calendar &amp; alerts still work.
-              </p>
-            </>
-          )}
-
-          {!isGexFlow && form.catalyst_date && form.catalyst_date < today() && (
-            <p className="text-red-400 text-xs">Catalyst date must be today or later.</p>
-          )}
-          {!isGexFlow && form.catalyst_date_precision === 'month' && (
-            <p className="text-yellow-400 text-xs leading-relaxed">
-              ⚠ CT.gov has only confirmed the <span className="font-semibold">month</span> for this catalyst.
-              The day above defaults to the 1st as a conservative earliest-possible placeholder.
-              Verify the exact date with the company's press release or 8-K before locking —
-              the signal hash will preserve whatever you set.
-            </p>
-          )}
-          {!isGexFlow && form.catalyst_date_precision === 'year' && (
-            <p className="text-yellow-400 text-xs leading-relaxed">
-              ⚠ CT.gov has only confirmed the <span className="font-semibold">year</span> for this catalyst.
-              The month and day above default to January 1st (earliest possible). Verify the exact
-              date with the company before locking.
-            </p>
-          )}
+          <Input
+            label="Spread Expiration"
+            value={form.expiry_date}
+            onChange={(v) => update('expiry_date', v)}
+            type="date"
+            min={today()}
+            required
+          />
+          <p className="text-[11px] text-muted leading-relaxed -mt-2">
+            The spread expiry is the resolution date for the trade. It's
+            mirrored into <span className="font-mono-tab">catalyst_date</span>
+            {' '}on the signal record so the calendar &amp; alerts still
+            fire against it.
+          </p>
 
           <div>
             <div className="flex items-baseline justify-between mb-1">
@@ -715,15 +428,13 @@ export default function LogSignal() {
             disabled={!step1Valid}
             className="w-full bg-red-600 hover:bg-red-500 disabled:bg-red-950 disabled:text-red-900 text-white font-semibold rounded-xl py-3 text-sm transition-colors"
           >
-            {isGexFlow ? 'Next: Strike & Thesis' : 'Next: Analyze Filing'}
+            Next: Strike &amp; Thesis
           </button>
       </div>
 
       <div className={clsx('space-y-4', step !== 2 && 'hidden')}>
         <div className="flex items-center justify-between gap-3">
-          <h2 className="text-white font-semibold">
-            {isGexFlow ? 'Strike & Thesis' : 'Filing Analysis'}
-          </h2>
+          <h2 className="text-white font-semibold">Strike &amp; Thesis</h2>
           {(() => {
             const opt = STRATEGY_OPTIONS.find((o) => o.structure === form.structure)
             if (!opt) return null
@@ -743,41 +454,12 @@ export default function LogSignal() {
             )
           })()}
         </div>
-          {!isGexFlow && (
-            <p className="text-subtle text-xs">
-              Paste public filing text for the AI analyst to score, or write your thesis manually.
-              Analysis results will fill in your thesis only if it's empty.
-            </p>
-          )}
-          {isGexFlow && (
-            <p className="text-subtle text-xs">
-              Verify the spread pricing in the calculator below, then confirm
-              the GEX rationale that came in from the matrix. No filing
-              analysis runs for index / ETF flow trades.
-            </p>
-          )}
+          <p className="text-subtle text-xs">
+            Verify the spread pricing in the calculator below, then confirm
+            the GEX rationale that came in from the matrix.
+          </p>
 
-          {!isGexFlow && (
-            <AnalyzeFilingPanel
-              ticker={form.ticker}
-              companyName={form.company_name}
-              drugName={form.drug_name}
-              indication={form.indication}
-              catalystType={form.catalyst_type}
-              catalystDate={form.catalyst_date}
-              catalystDatePrecision={form.catalyst_date_precision}
-              analysis={analysis}
-              onAnalysisComplete={handleAnalysisComplete}
-              onAnalysisReset={() => {
-                setAnalysis(null)
-                clearDraftAnalysis(candidateId)
-                deleteRemoteDraft(supabase, candidateId).catch(() => {})
-              }}
-            />
-          )}
-
-          {(isGexFlow ? form.expiry_date : form.catalyst_date) &&
-            form.direction !== 'watch' && (
+          {form.expiry_date && form.direction !== 'watch' && (
             <StrikePriceCalculator
               direction={form.direction}
               lockedStructure={form.structure}
@@ -787,12 +469,7 @@ export default function LogSignal() {
               initialBuyStrike={form.long_strike || undefined}
               initialSellStrike={form.short_strike || undefined}
               initialPremium={form.prefill_premium || undefined}
-              initialExpiry={
-                isGexFlow ? form.expiry_date : form.expiry_date || undefined
-              }
-              catalystDate={isGexFlow ? undefined : form.catalyst_date}
-              buyStrikeOtmPct={analysis?.strike_suggestion?.buy_strike_pct_otm}
-              sellStrikeOtmPct={analysis?.strike_suggestion?.sell_strike_pct_otm}
+              initialExpiry={form.expiry_date}
               onCalculationComplete={(calc) => {
                 // Sync calculator output → form fields. Two policies:
                 //
@@ -995,14 +672,10 @@ export default function LogSignal() {
 
           <div className="bg-card border border-border rounded-xl p-4 space-y-3">
             <Row label="Ticker" value={form.ticker} />
-            {!isGexFlow && <Row label="Company" value={form.company_name} />}
-            {isGexFlow && <Row label="Source" value="GEX Flow Trade" />}
+            <Row label="Source" value="GEX Flow Trade" />
             <Row label="Direction" value={directionLabelLong(form.direction)} highlight />
             <Row label="Structure" value={form.structure.replace(/_/g, ' ').toUpperCase()} />
-            <Row
-              label={isGexFlow ? 'Expiration' : 'Catalyst'}
-              value={isGexFlow ? form.expiry_date : form.catalyst_date}
-            />
+            <Row label="Expiration" value={form.expiry_date} />
             <Row label="Type" value={form.trade_type.toUpperCase()} />
             <Row label="Confidence" value={`${form.confidence_score}/10`} />
             <PopRow
@@ -1097,11 +770,8 @@ export default function LogSignal() {
 // that can later be re-parsed if needed.
 function autoThesis(form, ticker) {
   const structure = (form.structure || '').replace(/_/g, ' ')
-  const target = form.expiry_date || form.catalyst_date || ''
-  if (form.signal_source === 'gex_flow') {
-    return `GEX-flow ${structure} on ${ticker} · expires ${target}`
-  }
-  return `${ticker} ${form.catalyst_type || 'event'} catalyst on ${target}`
+  const target = form.expiry_date || ''
+  return `GEX-flow ${structure} on ${ticker} · expires ${target}`
 }
 
 function Input({ label, value, onChange, placeholder, type = 'text', required, min, inputMode }) {

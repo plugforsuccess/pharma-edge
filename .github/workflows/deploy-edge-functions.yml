@@ -86,9 +86,9 @@ jobs:
         run: |
           # NOTE: we do NOT pass --no-verify-jwt here. That flag would
           # disable JWT verification for ALL deployed functions, which
-          # is dangerous (analyze-signal, suggest-plays, place-order
-          # all require verified user auth). The CLI respects the
-          # per-function setting captured at first deploy by default.
+          # is dangerous (suggest-plays, place-order, etc. all require
+          # verified user auth). The CLI respects the per-function
+          # setting captured at first deploy by default.
           for fn in ${{ steps.detect.outputs.functions }}; do
             echo "::group::Deploy $fn"
             supabase functions deploy "$fn" \

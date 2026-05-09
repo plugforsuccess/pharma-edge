@@ -622,7 +622,7 @@ function WatchlistSection({ userId }) {
     if (!userId) return
     const { data } = await supabase
       .from('watchlist')
-      .select('id, ticker, company_name, drug_name, added_at')
+      .select('id, ticker, company_name, added_at')
       .eq('user_id', userId)
       .order('added_at', { ascending: false })
     setItems(data ?? [])
@@ -671,8 +671,6 @@ function WatchlistSection({ userId }) {
       state: {
         prefill: {
           ticker: item.ticker,
-          company_name: item.company_name,
-          drug_name: item.drug_name || '',
         },
       },
     })
@@ -681,9 +679,8 @@ function WatchlistSection({ userId }) {
   return (
     <Section title="My Tickers (Watchlist)">
       <p className="text-subtle text-xs">
-        Tickers here get scraped daily at 7am ET — any new SEC filing, CT.gov trial, or FDA
-        press release shows up as a personal candidate in the scanner queue. Tap a row to open
-        a pre-filled signal log.
+        A personal list of tickers you're tracking. Tap any row to open a
+        pre-filled Log a Move with the ticker selected.
       </p>
 
       <form onSubmit={add} className="grid grid-cols-2 gap-2">

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Activity, ChevronRight, Cpu, Eye, Plus, Settings as SettingsIcon, Sparkles, TrendingUp } from 'lucide-react'
+import { Activity, ChevronRight, Plus, Settings as SettingsIcon, Sparkles, TrendingUp } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { useSubscription } from '../hooks/useSubscription'
@@ -37,8 +37,6 @@ export default function Dashboard() {
   const navigate = useNavigate()
   const [signals, setSignals] = useState([])
   const [stats, setStats] = useState({ wins: 0, losses: 0, open: 0, winRate: 0, total: 0 })
-  const [pendingCandidates, setPendingCandidates] = useState(0)
-  const [watchlistCandidates, setWatchlistCandidates] = useState(0)
   const [loading, setLoading] = useState(true)
   const [activeTicker, setActiveTicker] = useState(loadInitialTicker)
   const [showOnboarding, setShowOnboarding] = useState(false)
@@ -68,38 +66,25 @@ export default function Dashboard() {
 
   async function fetchDashboardData() {
     setLoading(true)
-    const [signalRes, openCountRes, outcomeRes, candidateCountRes, watchlistCountRes] =
-      await Promise.all([
-        // Watch-only signals — the user logged a thesis but didn't enter a trade.
-        // Active spread trades are handled by <OpenPositions/> directly; the
-        // previous "Live Moves" feed showed both, which read as redundant.
-        supabase
-          .from('signals')
-          .select('*, outcomes(*)')
-          .eq('user_id', user.id)
-          .eq('status', 'active')
-          .eq('direction', 'watch')
-          .order('logged_at', { ascending: false })
-          .limit(10),
-        supabase
-          .from('signals')
-          .select('id', { count: 'exact', head: true })
-          .eq('user_id', user.id)
-          .eq('status', 'active'),
-        supabase.from('outcomes').select('thesis_correct').eq('user_id', user.id),
-        supabase
-          .from('scanner_candidates')
-          .select('id', { count: 'exact', head: true })
-          .is('requested_by', null)
-          .eq('reviewed', false)
-          .eq('dismissed', false),
-        supabase
-          .from('scanner_candidates')
-          .select('id', { count: 'exact', head: true })
-          .eq('requested_by', user.id)
-          .eq('reviewed', false)
-          .eq('dismissed', false),
-      ])
+    const [signalRes, openCountRes, outcomeRes] = await Promise.all([
+      // Watch-only signals — the user logged a thesis but didn't enter a trade.
+      // Active spread trades are handled by <OpenPositions/> directly; the
+      // previous "Live Moves" feed showed both, which read as redundant.
+      supabase
+        .from('signals')
+        .select('*, outcomes(*)')
+        .eq('user_id', user.id)
+        .eq('status', 'active')
+        .eq('direction', 'watch')
+        .order('logged_at', { ascending: false })
+        .limit(10),
+      supabase
+        .from('signals')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', user.id)
+        .eq('status', 'active'),
+      supabase.from('outcomes').select('thesis_correct').eq('user_id', user.id),
+    ])
 
     setSignals(signalRes.data ?? [])
 
@@ -114,9 +99,6 @@ export default function Dashboard() {
       winRate: total > 0 ? Math.round((wins / total) * 100) : 0,
       total,
     })
-    setPendingCandidates(candidateCountRes.count ?? 0)
-    setWatchlistCandidates(watchlistCountRes.count ?? 0)
-
     setLoading(false)
   }
 
@@ -127,12 +109,7 @@ export default function Dashboard() {
     day: 'numeric',
   })
 
-  const isFirstRun =
-    !loading &&
-    stats.total === 0 &&
-    stats.open === 0 &&
-    pendingCandidates === 0 &&
-    watchlistCandidates === 0
+  const isFirstRun = !loading && stats.total === 0 && stats.open === 0
 
   // Pull-to-refresh re-runs the same fetch as initial load, so the
   // user can drag-down to pick up a freshly-promoted candidate or a
@@ -214,33 +191,6 @@ export default function Dashboard() {
 
         <div className="order-1 lg:col-start-1 lg:row-start-1 min-w-0">
           {isFirstRun && <OnboardingCard navigate={navigate} />}
-
-          {/* Queue cards — biotech surfaces, kept for now until the sunset PR
-              ships. Naturally hidden when counts are zero. */}
-          {(watchlistCandidates > 0 || pendingCandidates > 0) && (
-            <div className="space-y-2 mb-5">
-              {watchlistCandidates > 0 && (
-                <QueueCard
-                  icon={Eye}
-                  tone="amber"
-                  title="Watchlist Activity"
-                  sub="New filings on your tracked tickers"
-                  count={watchlistCandidates}
-                  onClick={() => navigate('/scanner')}
-                />
-              )}
-              {pendingCandidates > 0 && (
-                <QueueCard
-                  icon={Cpu}
-                  tone="crimson"
-                  title="Scanner Candidates"
-                  sub="Top broad-scan picks from this morning"
-                  count={pendingCandidates}
-                  onClick={() => navigate('/scanner')}
-                />
-              )}
-            </div>
-          )}
 
           <button
             onClick={() => navigate('/log')}
@@ -381,59 +331,6 @@ function Stat({ label, value, tone = 'neutral', divider }) {
       </span>
       <span className="eyebrow mt-1.5 text-[10px]">{label}</span>
     </div>
-  )
-}
-
-function QueueCard({ icon: Icon, tone, title, sub, count, onClick }) {
-  const palette =
-    tone === 'amber'
-      ? {
-          icon: '#f4cf8e',
-          ring: 'rgba(232,181,88,0.25)',
-          badge:
-            'bg-[#e8b558] text-[#1a1208] shadow-[0_0_18px_-4px_rgba(232,181,88,0.6)]',
-        }
-      : {
-          icon: '#f25068',
-          ring: 'rgba(224,52,76,0.25)',
-          badge:
-            'bg-[#e0344c] text-white shadow-[0_0_18px_-4px_rgba(224,52,76,0.55)]',
-        }
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="group surface surface-hover w-full flex items-center justify-between rounded-2xl px-4 py-3.5 text-left"
-      style={{ borderColor: palette.ring }}
-    >
-      <div className="flex items-center gap-3">
-        <div
-          className="w-9 h-9 rounded-xl flex items-center justify-center"
-          style={{ background: 'rgba(255,255,255,0.03)' }}
-        >
-          <Icon size={16} style={{ color: palette.icon }} strokeWidth={2} />
-        </div>
-        <div>
-          <p className="text-fg text-sm font-semibold tracking-tight">{title}</p>
-          <p className="text-muted text-[11px] mt-0.5">{sub}</p>
-        </div>
-      </div>
-      <div className="flex items-center gap-2">
-        <span
-          className={clsx(
-            'text-[11px] font-bold px-2 py-0.5 rounded-full num-tab',
-            palette.badge,
-          )}
-        >
-          {count}
-        </span>
-        <ChevronRight
-          size={15}
-          className="text-muted group-hover:text-subtle transition-colors"
-        />
-      </div>
-    </button>
   )
 }
 

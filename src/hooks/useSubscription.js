@@ -11,20 +11,15 @@ import { useAuth } from '../context/AuthContext'
 export const FREE_TIER_LIMITS = {
   // /markets ticker pickable count (curated list trimmed to this)
   marketsTickerCap: 3,
-  // scanner_candidates page is fully gated on free
-  scannerEnabled: false,
   // Tastytrade place-order is gated on free
   brokerExecutionEnabled: false,
-  // analyze-signal still works but at a lower per-hour cap; the edge
-  // function reads CLAUDE_RATE_LIMIT_PER_HOUR globally — for now we
-  // surface a softer cap in the UI, and the edge function will enforce
-  // its own absolute cap regardless.
+  // suggest-plays per-hour cap surfaced in the UI. The edge function
+  // enforces its own absolute cap (CLAUDE_RATE_LIMIT_PER_HOUR) on top.
   claudeAnalysesPerHour: 3,
 }
 
 export const PRO_TIER_LIMITS = {
   marketsTickerCap: Infinity,
-  scannerEnabled: true,
   brokerExecutionEnabled: true,
   claudeAnalysesPerHour: 30,
 }
