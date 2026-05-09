@@ -44,6 +44,12 @@ export default function PositionDetail() {
   // for debit spreads). Multiply by 100 × contracts for total dollar-
   // denominated values where the card calls them out explicitly.
   const [legGreeks, setLegGreeks] = useState(null)
+  // Live Tastytrade working orders matching the signal's ticker +
+  // expiration. Populated by the get-working-orders edge function.
+  // Refresh button on the card re-runs the fetch.
+  const [workingOrders, setWorkingOrders] = useState(null)
+  const [workingOrdersLoading, setWorkingOrdersLoading] = useState(false)
+  const [workingOrdersError, setWorkingOrdersError] = useState(null)
 
   async function load() {
     setLoading(true)
@@ -148,6 +154,32 @@ export default function PositionDetail() {
     })()
     return () => { cancelled = true }
   }, [pos?.ticker, pos?.expiration, pos?.long_strike, pos?.short_strike, pos?.strategy_type])
+
+  // Live Tastytrade working orders for this signal. Skipped silently
+  // if pos has no signal_id (open_position not linked back to a logged
+  // signal — happens for manually-added rows).
+  async function loadWorkingOrders() {
+    if (!pos?.signal_id) return
+    setWorkingOrdersLoading(true)
+    setWorkingOrdersError(null)
+    const { data, error: woErr } = await supabase.functions.invoke('get-working-orders', {
+      body: { signal_id: pos.signal_id },
+    })
+    setWorkingOrdersLoading(false)
+    if (woErr) {
+      setWorkingOrdersError(woErr.message ?? 'fetch failed')
+      return
+    }
+    if (!data?.success) {
+      setWorkingOrdersError(data?.error ?? 'fetch failed')
+      return
+    }
+    setWorkingOrders(data.data?.working_orders ?? [])
+  }
+  useEffect(() => {
+    loadWorkingOrders()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pos?.signal_id])
 
   // Per-leg Greeks fetch from dxlink_quotes. The worker subscribes to
   // front-2 expirations within ATM ± 25%, so this only finds rows for
@@ -332,6 +364,14 @@ export default function PositionDetail() {
       <AccountContextCard pos={pos} profile={profile} />
 
       <NetGreeksCard pos={pos} legGreeks={legGreeks} />
+
+      <BracketOrderStatusCard
+        pos={pos}
+        workingOrders={workingOrders}
+        loading={workingOrdersLoading}
+        error={workingOrdersError}
+        onRefresh={loadWorkingOrders}
+      />
 
       {moveInfo && (moveInfo.realizedToday != null || moveInfo.expectedTrade != null) && (
         <div className="bg-card border border-border rounded-xl p-3 space-y-2">
@@ -1139,6 +1179,111 @@ function NetGreeksCard({ pos, legGreeks }) {
           </p>
         </>
       )}
+    </div>
+  )
+}
+
+// Live broker brackets — the working close orders Tastytrade has
+// queued against the position. Powered by the get-working-orders
+// edge function. Skipped entirely when the signal has no
+// tastytrade_account_number (manual-only logs); otherwise renders
+// "no working brackets" when the broker returns an empty list.
+//
+// Two surfaces per bracket: the limit-credit close (target) and the
+// stop-loss close. We label them by intent inferred from order_type
+// + price_effect; if the inference fails the card honestly says
+// "unknown intent" rather than guessing wrong.
+function BracketOrderStatusCard({ pos, workingOrders, loading, error, onRefresh }) {
+  if (!pos?.signal_id) return null
+
+  return (
+    <div className="bg-card border border-border rounded-xl p-3 space-y-2">
+      <div className="flex items-baseline justify-between">
+        <div className="text-[10px] uppercase tracking-wider text-muted">
+          Live broker brackets
+        </div>
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={loading}
+          className="text-[10px] text-muted hover:text-fg flex items-center gap-1 disabled:opacity-40"
+          aria-label="Refresh working orders"
+        >
+          <RefreshCw size={10} className={loading ? 'animate-spin' : ''} />
+          {loading ? 'loading' : 'refresh'}
+        </button>
+      </div>
+      {error && (
+        <p className="text-[11px] text-crimson leading-relaxed">
+          {error}
+        </p>
+      )}
+      {!error && workingOrders == null && !loading && (
+        <p className="text-[11px] text-subtle leading-relaxed">
+          Tap refresh to pull working orders from Tastytrade.
+        </p>
+      )}
+      {!error && Array.isArray(workingOrders) && workingOrders.length === 0 && (
+        <p className="text-[11px] text-subtle leading-relaxed">
+          No working brackets on this position. Place a stop / target via
+          your broker — they'll appear here once submitted.
+        </p>
+      )}
+      {!error && Array.isArray(workingOrders) && workingOrders.length > 0 && (
+        <div className="space-y-2">
+          {workingOrders.map((o) => (
+            <BracketRow key={o.tastytrade_order_id} order={o} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function BracketRow({ order }) {
+  const intentLabel =
+    order.intent === 'target'
+      ? 'Profit target'
+      : order.intent === 'stop'
+        ? 'Stop loss'
+        : 'Working order'
+  const tone =
+    order.intent === 'target'
+      ? 'text-green-400'
+      : order.intent === 'stop'
+        ? 'text-amber-400'
+        : 'text-fg'
+  const priceFmt =
+    order.price != null && Number.isFinite(order.price)
+      ? `$${order.price.toFixed(2)}`
+      : '—'
+  return (
+    <div className="bg-bg/50 border border-border/50 rounded-lg p-2 space-y-1">
+      <div className="flex items-baseline justify-between">
+        <span className={`text-xs font-semibold ${tone}`}>{intentLabel}</span>
+        <span className="text-xs font-mono-tab text-fg">
+          {priceFmt}
+          {order.price_effect && (
+            <span className="text-muted ml-1 text-[10px]">
+              {order.price_effect.toLowerCase()}
+            </span>
+          )}
+        </span>
+      </div>
+      <div className="flex items-baseline justify-between text-[10px]">
+        <span className="text-muted">
+          {order.order_type ?? '—'} · {order.time_in_force ?? '—'}
+        </span>
+        <span className="text-muted uppercase tracking-wider">
+          {order.status ?? '—'}
+        </span>
+      </div>
+      <div className="text-[10px] text-muted font-mono">
+        #{order.tastytrade_order_id}
+        {order.complex_order_tag && (
+          <span className="ml-1">· {order.complex_order_tag}</span>
+        )}
+      </div>
     </div>
   )
 }
