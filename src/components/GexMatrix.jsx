@@ -47,7 +47,7 @@ function lerpStops(stops, t) {
   return stops[stops.length - 1].rgb
 }
 
-function gexColor(gex, maxAbs) {
+export function gexColor(gex, maxAbs) {
   if (gex == null || !Number.isFinite(gex) || maxAbs <= 0) {
     return 'transparent'
   }
