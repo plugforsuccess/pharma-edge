@@ -996,7 +996,7 @@ function WallTimingCard({ pos, wallInfo }) {
             Trade
           </span>
           <span className="text-fg font-mono-tab">
-            {formatFriendlyDate(tradeExp)}
+            {formatFriendlyDate(tradeExp, { long: true })}
           </span>
           <span className="text-subtle font-mono-tab text-right">
             {wallInfo.tradeDte}d
@@ -1005,7 +1005,7 @@ function WallTimingCard({ pos, wallInfo }) {
             Wall
           </span>
           <span className="text-fg font-mono-tab">
-            {formatFriendlyDate(wallExp)}
+            {formatFriendlyDate(wallExp, { long: true })}
           </span>
           <span className="text-subtle font-mono-tab text-right">
             {wallInfo.wallDte}d
@@ -1032,13 +1032,13 @@ function WallTimingCard({ pos, wallInfo }) {
   )
 }
 
-// "2026-05-12" → "Tue, May 12, 2026". Always parsed UTC so we don't
-// get off-by-one timezone fuckery on a YYYY-MM-DD string. en-US
-// weekday short + month short + numeric year matches every other
-// date format on the page. The year is intentionally included even
-// when it's the current year — option spreads sometimes span year
-// boundaries (Dec/Jan LEAPS) and consistency beats brevity.
-function formatFriendlyDate(iso) {
+// "2026-05-12" → "Tue May 12". Always parsed UTC so we don't get
+// off-by-one timezone fuckery on a YYYY-MM-DD string. The
+// `long: true` option appends the year ("Tue, May 12, 2026") for
+// the row-level data inside WallTimingCard where the user
+// specifically wants the year visible. Header chips stay short to
+// keep the right-aligned metadata compact.
+function formatFriendlyDate(iso, opts = {}) {
   if (!iso) return '—'
   const d = new Date(`${iso}T00:00:00Z`)
   if (Number.isNaN(d.getTime())) return iso
@@ -1046,7 +1046,7 @@ function formatFriendlyDate(iso) {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
-    year: 'numeric',
+    ...(opts.long ? { year: 'numeric' } : {}),
     timeZone: 'UTC',
   })
 }
