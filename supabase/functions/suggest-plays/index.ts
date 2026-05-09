@@ -65,6 +65,14 @@ If you write a rationale that says negative-gamma dealers "sell rallies and buy 
 
 FLOW DATA (when present): you will see today's per-strike volume and premium, plus a "NOTABLE" section flagging strikes where today's volume is ≥5× standing OI (likely directional bets, not hedging). Use flow to confirm or contradict the GEX read. If flow concentrates at a call wall, the wall is being reinforced. If flow concentrates ABOVE the call wall (out-of-the-money calls running 5x OI), traders expect a breakout — favour breakout call spreads. If flow is heavy on puts at strikes near the put wall, position for support. Mismatch between dealer positioning (GEX) and trader bets (flow) = transition signal; reduce conviction or pick the side flow is on.
 
+SECONDARY GREEKS (VEX / CEX / DEX) — second-order CONFIRMATION or DISQUALIFICATION of GEX-derived theses, never primary signal:
+
+- DEX (delta exposure) confirms walls. A "call wall" with a large positive DEX cluster at the same strike means dealers are net long there and have a real economic reason to defend it — they sell into rallies into that strike. A wall with weak/contradictory DEX is a paper wall; downgrade conviction or skip.
+- VEX (vanna exposure) flags vol-event setups. Large negative net VEX before a binary catalyst means dealers gain delta as IV rises and lose delta as IV crushes — they will SELL the underlying as the post-event vol crush happens. So before a binary, negative net VEX favors a directional structure (debit spread biased the way you expect dealers to unwind) over a pure long-vol/iron-condor structure that bleeds on the vol crush. Positive net VEX before a binary = the opposite (dealers buy on vol crush, supports a long-direction debit spread or sell-vol structure).
+- CEX (charm exposure) matters most for short DTE. Strong negative net CEX into a 0–1 DTE pin trade means charm pulls dealer delta away from the pinning strike faster than gamma defends it; the pin weakens through the day and a tight Iron Condor anchored at that strike has more drift risk than the gamma alone suggests. Widen the wings or pick a different expiration.
+- ALIGNMENT bonus: when GEX, DEX, and flow all agree on the same strike, it's a high-conviction setup — say so in rationale.
+- CONTRADICTION downgrade: when GEX says one regime and DEX/VEX point the other way, treat it as a transition signal, half-size, or skip.
+
 CASH MOVES RULES — NEVER VIOLATE:
 - SPREADS ONLY. No naked options.
 - R/R ≥ 1:1.5 is the OBJECTIVE FUNCTION. The server filters every
@@ -135,6 +143,16 @@ interface MatrixData {
   expirations: Array<{ date: string; dte: number }>
   strikes: number[]
   cells: (number | null)[][]
+  // Higher-order Greek matrices, same shape as `cells`. Optional
+  // because older cached payloads (pre per-Greek-net rollout) won't
+  // have them — buildUserPrompt skips the secondary-Greek section
+  // when any one is missing.
+  vex_cells?: (number | null)[][]
+  cex_cells?: (number | null)[][]
+  dex_cells?: (number | null)[][]
+  net_vex?: number
+  net_cex?: number
+  net_dex?: number
   largest: { strike: number; expiration: string; gex_net: number } | null
 }
 
@@ -222,6 +240,66 @@ ${notable.map((f) => `  ${f.option_type} ${f.strike} @ ${f.expiration_date}: ${f
   : 'NOTABLE: no strikes with vol ≥ 5x OI today'}`
 }
 
+// Build a compact "TOP N strikes by |value|" summary for a Greek
+// matrix that lines up with `cells`. Used for the VEX/CEX/DEX blocks
+// in buildUserPrompt — Claude sees the same structure as the GEX
+// walls, just for a different Greek.
+function topGreekStrikes(
+  greekCells: (number | null)[][] | undefined,
+  matrix: MatrixData,
+  topN: number,
+): Array<{ strike: number; expiration: string; val: number }> {
+  if (!greekCells) return []
+  const flat: Array<{ strike: number; expiration: string; val: number }> = []
+  for (let i = 0; i < greekCells.length; i++) {
+    const strike = matrix.strikes[i]
+    if (strike == null) continue
+    for (let j = 0; j < greekCells[i].length; j++) {
+      const v = greekCells[i][j]
+      const exp = matrix.expirations[j]?.date
+      if (v == null || !exp || !Number.isFinite(v)) continue
+      flat.push({ strike, expiration: exp, val: v })
+    }
+  }
+  flat.sort((a, b) => Math.abs(b.val) - Math.abs(a.val))
+  return flat.slice(0, topN)
+}
+
+function fmtMillions(v: number | null | undefined): string {
+  if (v == null || !Number.isFinite(v)) return 'n/a'
+  const sign = v >= 0 ? '+' : '−'
+  return `${sign}$${(Math.abs(v) / 1e6).toFixed(1)}M`
+}
+
+// Secondary-Greek block. Skipped entirely when the matrix doesn't
+// carry vex/cex/dex (older cached payloads, or the rare path where
+// compute-gex couldn't compute them) — Claude shouldn't see a partial
+// block that might mislead. Includes net-per-Greek + top 5 strikes
+// by |value| for each, mirroring the GEX walls block above.
+function buildSecondaryGreeksSection(matrix: MatrixData): string {
+  if (!matrix.vex_cells || !matrix.cex_cells || !matrix.dex_cells) {
+    return 'SECONDARY GREEKS: not available in this snapshot.'
+  }
+  const fmtRow = (c: { strike: number; expiration: string; val: number }) =>
+    `  ${c.strike} @ ${c.expiration}: ${fmtMillions(c.val)}`
+  const topVex = topGreekStrikes(matrix.vex_cells, matrix, 5).map(fmtRow).join('\n') || '  (none)'
+  const topCex = topGreekStrikes(matrix.cex_cells, matrix, 5).map(fmtRow).join('\n') || '  (none)'
+  const topDex = topGreekStrikes(matrix.dex_cells, matrix, 5).map(fmtRow).join('\n') || '  (none)'
+  return `SECONDARY GREEKS (use as confirmation/contradiction of the GEX read, not primary signal):
+
+NET VEX: ${fmtMillions(matrix.net_vex)}
+TOP VEX STRIKES (by |value|):
+${topVex}
+
+NET CEX: ${fmtMillions(matrix.net_cex)}
+TOP CEX STRIKES (by |value|):
+${topCex}
+
+NET DEX: ${fmtMillions(matrix.net_dex)}
+TOP DEX STRIKES (by |value|):
+${topDex}`
+}
+
 function buildUserPrompt(matrix: MatrixData, accountSize: number, flow: FlowRow[]): string {
   // Compact matrix representation — Claude doesn't need every cell, just
   // structure + the highlights. Cuts token count ~80%.
@@ -302,6 +380,7 @@ LARGEST ABSOLUTE WALL (★): ${matrix.largest ? `${matrix.largest.strike} @ ${ma
 DOMINANT GEX EXPIRATION: ${dominantExp ? `${dominantExp} (${dominantSharePct}% of total |GEX| in this matrix)` : 'unknown'}
 GAMMA ROLL-OFF NOTE: any play with expiration > ${dominantExp ?? 'the dominant expiration above'} MUST set gamma_rolloff_risk=true and explain it in rolloff_note. The pinning/regime behavior driving the thesis ends when the dominant expiry rolls off.
 
+${buildSecondaryGreeksSection(matrix)}
 ${formatFlowSection(flow, chainOI)}
 
 INTERPRETATION HINTS:
