@@ -392,10 +392,17 @@ interface MatrixOutput {
   // pinning-probability badge. All summed over the strike-window slice
   // we returned (not the full chain).
   net_gex: number
+  net_vex: number                // dollar net vanna across the matrix slice
+  net_cex: number                // dollar net charm across the matrix slice
+  net_dex: number                // dollar net delta across the matrix slice
   total_abs_gex: number
   expected_move: number          // 1-stddev underlying $ move at front-expiry IV
   expected_move_pct: number      // expected_move / spot
   pinning_probability: number    // 0..1 heuristic — see greeks.ts
+  // Sum of velocity_cells when set; null otherwise. Used by the
+  // metrics strip on the Velocity tab so it has a tab-specific
+  // headline number instead of falling back to net_gex.
+  net_velocity?: number | null
   // Only set when source='eod' — when this snapshot was originally
   // captured. Used by the UI to label the badge ("EOD · Tue 4:00 PM").
   eod_snapshot_at?: string
@@ -700,10 +707,22 @@ async function attachVelocity(
     velCells.push(row)
   }
 
+  let netVelocity = 0
+  let velocitySeen = false
+  for (const row of velCells) {
+    for (const v of row) {
+      if (v != null) {
+        netVelocity += v
+        velocitySeen = true
+      }
+    }
+  }
+
   return {
     ...matrix,
     velocity_cells: velCells,
     velocity_window_minutes: windowMin,
+    net_velocity: velocitySeen ? netVelocity : null,
   }
 }
 
@@ -747,6 +766,9 @@ function buildMatrix(
   const dexCells: (number | null)[][] = []
   let largest: MatrixOutput['largest'] = null
   let netGex = 0
+  let netVex = 0
+  let netCex = 0
+  let netDex = 0
   let totalAbsGex = 0
   for (let i = 0; i < strikes.length; i++) {
     const gexRow: (number | null)[] = []
@@ -759,6 +781,9 @@ function buildMatrix(
       vexRow.push(e.vex)
       cexRow.push(e.cex)
       dexRow.push(e.dex)
+      if (e.vex != null) netVex += e.vex
+      if (e.cex != null) netCex += e.cex
+      if (e.dex != null) netDex += e.dex
       if (e.gex != null) {
         netGex += e.gex
         totalAbsGex += Math.abs(e.gex)
@@ -826,10 +851,14 @@ function buildMatrix(
       velocity_window_minutes: null,
       largest,
       net_gex: netGex,
+      net_vex: netVex,
+      net_cex: netCex,
+      net_dex: netDex,
       total_abs_gex: totalAbsGex,
       expected_move: em,
       expected_move_pct: emPct,
       pinning_probability: pin,
+      net_velocity: null,
     },
   }
 }

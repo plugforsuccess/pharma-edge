@@ -519,20 +519,24 @@ export default function Markets() {
           )}
         </div>
 
-        {/* Inference strip — surfaces the deterministic context the
-            /reasoning route polls for. Cheap to compute on the
-            backend (every cell is already aggregated), free to
-            render here. The strip stays visible across all
-            single-ticker exposure views since the metrics are
-            structural, not exposure-specific. */}
-        {!loading && !error && data && (
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-4 text-xs">
-            <Metric label="Net GEX" value={formatGex(data.net_gex)} tone={data.net_gex >= 0 ? 'green' : 'red'} />
-            <Metric label="Expected ±" value={data.expected_move ? `$${data.expected_move.toFixed(2)} (${(data.expected_move_pct * 100).toFixed(1)}%)` : '—'} tone="amber" />
-            <Metric label="Pin prob." value={data.pinning_probability != null ? `${Math.round(data.pinning_probability * 100)}%` : '—'} tone={data.pinning_probability >= 0.6 ? 'green' : data.pinning_probability >= 0.3 ? 'amber' : 'muted'} />
-            <Metric label="Wall" value={data.largest ? `$${formatNumber(data.largest.strike)}` : '—'} tone={data.largest && data.largest.gex_net >= 0 ? 'green' : 'red'} />
-          </div>
-        )}
+        {/* Inference strip. The leftmost stat is per-tab — Net GEX on
+            the gamma view, Net VEX/CEX/DEX on those tabs, ΔGEX on
+            Velocity — so the headline number always matches what the
+            heatmap below is showing. Wall + Pin prob + Expected ±
+            stay gamma-anchored on every tab because those concepts
+            only mean something in gamma terms (there's no "vanna
+            wall"). */}
+        {!loading && !error && data && (() => {
+          const headline = headlineMetric(view, data)
+          return (
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-4 text-xs">
+              <Metric label={headline.label} value={headline.value} tone={headline.tone} />
+              <Metric label="Expected ±" value={data.expected_move ? `$${data.expected_move.toFixed(2)} (${(data.expected_move_pct * 100).toFixed(1)}%)` : '—'} tone="amber" />
+              <Metric label="Pin prob." value={data.pinning_probability != null ? `${Math.round(data.pinning_probability * 100)}%` : '—'} tone={data.pinning_probability >= 0.6 ? 'green' : data.pinning_probability >= 0.3 ? 'amber' : 'muted'} />
+              <Metric label="Wall" value={data.largest ? `$${formatNumber(data.largest.strike)}` : '—'} tone={data.largest && data.largest.gex_net >= 0 ? 'green' : 'red'} />
+            </div>
+          )
+        })()}
 
           {loading && (
             <div className="space-y-2 py-2 animate-pulse" aria-label="Loading GEX matrix">
@@ -814,6 +818,26 @@ function formatGex(v) {
   if (abs >= 1e6) return `${sign}$${(abs / 1e6).toFixed(2)}M`
   if (abs >= 1e3) return `${sign}$${(abs / 1e3).toFixed(0)}K`
   return `${sign}$${abs.toFixed(0)}`
+}
+
+// Per-tab headline number for the inference strip. Falls back to net
+// GEX when the per-Greek aggregate is missing (older compute-gex
+// snapshots cached before this field shipped — drop this fallback
+// after the cache TTL has rotated).
+function headlineMetric(view, data) {
+  switch (view) {
+    case 'vex':
+      return { label: 'Net VEX', value: formatGex(data.net_vex), tone: (data.net_vex ?? 0) >= 0 ? 'green' : 'red' }
+    case 'cex':
+      return { label: 'Net CEX', value: formatGex(data.net_cex), tone: (data.net_cex ?? 0) >= 0 ? 'green' : 'red' }
+    case 'dex':
+      return { label: 'Net DEX', value: formatGex(data.net_dex), tone: (data.net_dex ?? 0) >= 0 ? 'green' : 'red' }
+    case 'velocity':
+      return { label: 'ΔGEX (window)', value: formatGex(data.net_velocity), tone: (data.net_velocity ?? 0) >= 0 ? 'green' : 'red' }
+    case 'gex':
+    default:
+      return { label: 'Net GEX', value: formatGex(data.net_gex), tone: (data.net_gex ?? 0) >= 0 ? 'green' : 'red' }
+  }
 }
 
 // supabase-js wraps non-2xx responses in a generic FunctionsHttpError;
