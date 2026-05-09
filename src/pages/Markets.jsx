@@ -308,17 +308,16 @@ export default function Markets() {
         <button
           onClick={() => setReplayActive((v) => !v)}
           className={clsx(
-            'tap-spring inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-semibold transition',
+            'p-2 transition',
             replayActive
-              ? 'border-amber-400 bg-amber-400/15 text-amber-400'
-              : 'border-border text-subtle hover:text-fg hover:border-border-hover',
+              ? 'text-amber-400 hover:text-amber-300'
+              : 'text-subtle hover:text-fg',
           )}
           aria-label={replayActive ? 'Exit replay' : 'Enter replay mode'}
           aria-pressed={replayActive}
           title={replayActive ? 'Showing historical snapshot — tap to return to live' : "Scrub today's GEX evolution"}
         >
-          <Clock size={13} />
-          {replayActive ? 'Live' : 'Replay'}
+          <Clock size={18} />
         </button>
         <button
           onClick={() => navigate(`/reasoning?t=${ticker}`)}
