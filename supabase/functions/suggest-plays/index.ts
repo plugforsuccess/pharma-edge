@@ -5,9 +5,9 @@
 // trading rules + GEX playbook from /glossary. Returns structured JSON
 // the /markets "Suggested Plays" card renders into clickable setups.
 //
-// Architecture mirrors analyze-signal:
+// Architecture:
 //   - Auth: requires a real user JWT (verify_jwt=true)
-//   - Rate-limited per user via the claude_calls ledger (same 30/hr cap)
+//   - Rate-limited per user via the claude_calls ledger (30/hr cap)
 //   - Claude Sonnet 4.6, max_tokens 2000, returns JSON only
 //   - 5-min response cache via play_suggestions table (per ticker)
 //
@@ -604,7 +604,7 @@ serve(async (req) => {
 
   const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
-  // Rate limit check (shared with analyze-signal via claude_calls ledger).
+  // Rate limit check via the claude_calls ledger.
   const sinceIso = new Date(Date.now() - 60 * 60 * 1000).toISOString()
   const { count: recentCalls } = await adminClient
     .from('claude_calls')

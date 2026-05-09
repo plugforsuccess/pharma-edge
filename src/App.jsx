@@ -13,7 +13,6 @@ import Layout from './components/Layout'
 const TrackRecord = lazy(() => import('./pages/TrackRecord'))
 const Rules = lazy(() => import('./pages/Rules'))
 const Settings = lazy(() => import('./pages/Settings'))
-const ScannerCandidates = lazy(() => import('./pages/ScannerCandidates'))
 const OptionCalculator = lazy(() => import('./pages/OptionCalculator'))
 const PublicRecord = lazy(() => import('./pages/PublicRecord'))
 const Markets = lazy(() => import('./pages/Markets'))
@@ -81,7 +80,6 @@ export default function App() {
             <Route path="record" element={<TrackRecord />} />
             <Route path="rules" element={<Rules />} />
             <Route path="settings" element={<Settings />} />
-            <Route path="scanner" element={<ScannerCandidates />} />
             <Route path="calculator" element={<OptionCalculator />} />
             <Route path="markets" element={<Markets />} />
             <Route path="flow" element={<Flow />} />

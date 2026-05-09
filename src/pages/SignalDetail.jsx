@@ -105,12 +105,20 @@ export default function SignalDetail() {
 
       <div className="bg-card border border-border rounded-xl p-4 mb-4">
         <div className="grid grid-cols-2 gap-3">
-          <InfoItem label="Drug" value={signal.drug_name || '—'} />
-          <InfoItem label="Indication" value={signal.indication || '—'} />
-          <InfoItem label="Catalyst" value={catalystLabel(signal.catalyst_type)} />
+          {/* Legacy biotech rows: drug / indication / catalyst type are
+              still rendered for signal_source='biotech_catalyst' rows
+              that pre-date the GEX pivot. New (gex_flow) signals don't
+              populate these columns, so the block collapses naturally. */}
+          {signal.signal_source === 'biotech_catalyst' && (
+            <>
+              <InfoItem label="Drug" value={signal.drug_name || '—'} />
+              <InfoItem label="Indication" value={signal.indication || '—'} />
+              <InfoItem label="Catalyst" value={catalystLabel(signal.catalyst_type)} />
+            </>
+          )}
           <InfoItem
-            label="Date"
-            value={formatYmdLocal(signal.catalyst_date, { format: 'long' })}
+            label={signal.signal_source === 'biotech_catalyst' ? 'Catalyst date' : 'Expiration'}
+            value={formatYmdLocal(signal.expiry_date || signal.catalyst_date, { format: 'long' })}
           />
           <InfoItem label="Market Cap" value={formatMarketCap(signal.market_cap)} />
           <InfoItem

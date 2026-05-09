@@ -14,6 +14,6 @@ export const supabase = createClient(url, anonKey)
 
 // Exported so callers that need raw fetch (SSE streaming) can build
 // their own request. supabase-js's `functions.invoke` doesn't support
-// streaming responses — callers like AnalyzeFilingPanel use this.
+// streaming responses.
 export const SUPABASE_URL = url
 export const SUPABASE_ANON_KEY = anonKey
