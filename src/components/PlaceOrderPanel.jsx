@@ -352,8 +352,7 @@ export default function PlaceOrderPanel({ signal, calculation, onOrderPlaced }) 
                 <div>
                   <p className="text-red-400 text-xs font-bold">Live Account Selected</p>
                   <p className="text-zinc-400 text-[10px] mt-0.5">
-                    This places a REAL order with REAL money. Switch to paper unless you have
-                    completed 90 days of verified paper trading.
+                    This places a REAL order with REAL money. Confirm size and exit plan before submitting.
                   </p>
                 </div>
               </div>
