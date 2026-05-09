@@ -39,6 +39,14 @@ const ALLOWED_TYPES = new Set([
   'position_expiring_tomorrow',
   'position_filled',
   'position_closed',
+  'position_regime_shift',
+  // Dynamic thesis verdict transitions (Phase 1+2). Fired by
+  // monitor-positions when a position's verdict crosses a state
+  // boundary. Debounced via open_positions.last_verdict so a wiggling
+  // wall doesn't spam.
+  'position_thesis_drifting',
+  'position_thesis_invalidated',
+  'position_thesis_recovered',
 ])
 
 const corsHeaders = {
@@ -242,6 +250,36 @@ serve(async (req) => {
         htmlBody = positionAlertHtml(ticker, strategy, longK, shortK, pnlStr,
           'Position closed', 'Outcome logged.', clickUrl)
         break
+      // ── Dynamic thesis verdict transitions ──────────────────────
+      // Reasons[] is a string array surfaced by computeThesisVerdict
+      // (server-side). We pull the first reason for the push body
+      // (one-line constraint) and concatenate all of them in the
+      // email html so the user sees the full picture there.
+      case 'position_thesis_drifting': {
+        const reasons = (payload.reasons as string[] | undefined) ?? []
+        const headline = reasons[0] ?? 'Thesis drifting — review the position.'
+        subject = `${ticker} thesis drifting`
+        pushBody = `${ticker} ${strategy}: ${headline}`
+        htmlBody = positionAlertHtml(ticker, strategy, longK, shortK, pnlStr,
+          'Thesis drifting', reasons.join(' · ') || 'Review the position.', clickUrl)
+        break
+      }
+      case 'position_thesis_invalidated': {
+        const reasons = (payload.reasons as string[] | undefined) ?? []
+        const headline = reasons[0] ?? 'Thesis invalidated — exit consideration.'
+        subject = `${ticker} thesis INVALIDATED`
+        pushBody = `${ticker} ${strategy}: ${headline}`
+        htmlBody = positionAlertHtml(ticker, strategy, longK, shortK, pnlStr,
+          'Thesis invalidated', reasons.join(' · ') || 'Exit consideration.', clickUrl)
+        break
+      }
+      case 'position_thesis_recovered': {
+        subject = `${ticker} thesis recovered`
+        pushBody = `${ticker} ${strategy}: dealer positioning back to entry-time state.`
+        htmlBody = positionAlertHtml(ticker, strategy, longK, shortK, pnlStr,
+          'Thesis recovered', 'Entry-time positioning restored. Trade thesis is intact again.', clickUrl)
+        break
+      }
       default:
         subject = `${ticker} position update`
         pushBody = `${ticker} ${strategy}: ${pnlStr}`

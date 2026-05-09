@@ -21,6 +21,7 @@
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { buildOccSymbol, tastytradeFetch, TastytradeError } from './tastytrade.ts'
+import { computeThesisVerdict, type VerdictState } from './thesisVerdict.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
@@ -145,6 +146,8 @@ interface Position {
   triggers_fired: Record<string, string>
   thesis: string | null
   last_regime: 'A' | 'B' | 'mixed' | null
+  last_verdict: VerdictState | null
+  last_verdict_reasons: string[] | null
 }
 
 // Regime classification — same A/B/mixed taxonomy used in suggest-plays
@@ -156,16 +159,31 @@ interface Position {
 // 'mixed' = transition / disagreement
 type Regime = 'A' | 'B' | 'mixed'
 
-// Inline regime computation from dxlink_quotes. Mirrors compute-gex's
-// dxlink path — sums OI × gamma × spot² across calls (positive) and
-// puts (negative) for the strikes near spot, then walks the cumulative
-// to find the zero-gamma flip strike. Returns null when the data is
-// stale, missing, or insufficient (the caller treats null as "skip
-// this position's regime check, try again next tick").
-async function deriveRegimeForTicker(
+// Inline regime + snapshot computation from dxlink_quotes. Mirrors
+// compute-gex's dxlink path — sums OI × gamma × spot² across calls
+// (positive) and puts (negative) for the strikes near spot, then
+// walks the cumulative to find the zero-gamma flip strike. Returns
+// null when the data is stale, missing, or insufficient (the caller
+// treats null as "skip this position's regime check, try again next
+// tick").
+//
+// Returns the trimmed fields the verdict logic needs (spot, net_gex,
+// largest_wall) plus the derived regime label so callers don't have
+// to recompute it. We intentionally don't shell out to compute-gex
+// over HTTP here — the gateway's verify_jwt rejects service-role
+// calls with UNAUTHORIZED_INVALID_JWT_FORMAT, and reusing
+// dxlink_quotes directly is cheaper anyway.
+export interface LiveSnapshotForVerdict {
+  spot: number
+  net_gex: number
+  largest_wall: { strike: number; expiration: string; gex_net: number } | null
+  regime: Regime
+}
+
+async function deriveSnapshotForTicker(
   supabase: ReturnType<typeof createClient>,
   ticker: string,
-): Promise<Regime | null> {
+): Promise<LiveSnapshotForVerdict | null> {
   const { data: rows } = await supabase
     .from('dxlink_quotes')
     .select('kind, expiration_date, strike, option_type, gamma, open_interest, mid, bid, ask, updated_at')
@@ -226,12 +244,36 @@ async function deriveRegimeForTicker(
     }
   }
 
+  // Largest wall = strike with the largest |gex_net|. Same definition
+  // compute-gex uses for the ★ marker.
+  let largestStrike: number | null = null
+  let largestAbs = 0
+  let largestNet = 0
+  for (const k of strikesSorted) {
+    const v = byStrike.get(k)!
+    if (Math.abs(v) > largestAbs) {
+      largestAbs = Math.abs(v)
+      largestStrike = k
+      largestNet = v
+    }
+  }
+
   // Regime decision — same rules as Reasoning.jsx's deriveRegime().
   const aboveFlip = flip == null || spot >= flip
   const positiveGex = netGex >= 0
-  if (aboveFlip && positiveGex) return 'A'
-  if (!aboveFlip && !positiveGex) return 'B'
-  return 'mixed'
+  let regime: Regime
+  if (aboveFlip && positiveGex) regime = 'A'
+  else if (!aboveFlip && !positiveGex) regime = 'B'
+  else regime = 'mixed'
+
+  return {
+    spot,
+    net_gex: netGex,
+    largest_wall: largestStrike != null
+      ? { strike: largestStrike, expiration: frontExp, gex_net: largestNet }
+      : null,
+    regime,
+  }
 }
 
 // Triggers that fire real broker close orders (real money, no
@@ -689,7 +731,7 @@ serve(async (req) => {
   const { data: rows, error } = await supabase
     .from('open_positions')
     .select(
-      'id, user_id, signal_id, ticker, strategy_type, long_strike, short_strike, expiration, contracts, entry_debit_per_spread, triggers_fired, thesis, last_regime',
+      'id, user_id, signal_id, ticker, strategy_type, long_strike, short_strike, expiration, contracts, entry_debit_per_spread, triggers_fired, thesis, last_regime, last_verdict, last_verdict_reasons',
     )
     .eq('status', 'open')
   if (error) return json({ success: false, error: error.message }, 500)
@@ -752,7 +794,8 @@ serve(async (req) => {
     // transition without spamming on every cron tick within one regime.
     let regimeUpdate: { last_regime?: Regime | null } = {}
     let regimeShiftFired = false
-    const currentRegime = await deriveRegimeForTicker(supabase, pos.ticker)
+    const liveSnapshot = await deriveSnapshotForTicker(supabase, pos.ticker)
+    const currentRegime = liveSnapshot?.regime ?? null
     if (currentRegime) {
       regimeUpdate.last_regime = currentRegime
       const prior = pos.last_regime
@@ -790,6 +833,96 @@ serve(async (req) => {
       }
     }
 
+    // ── Dynamic thesis verdict ─────────────────────────────────────
+    // Compares the captured entry_gex_snapshot against the live
+    // snapshot we just derived. Persists the verdict on
+    // open_positions so the client renders it immediately AND the
+    // transition detection here drives push notifications.
+    //
+    // Push fires only on STATE TRANSITIONS (intact ↔ drifting ↔
+    // invalidated) — not on every poll. This is what stops the user
+    // from getting 50 pings a day if a wall wiggles back and forth.
+    let verdictUpdate: { last_verdict?: VerdictState; last_verdict_reasons?: string[]; last_verdict_at?: string } = {}
+    if (pos.signal_id) {
+      const { data: sigRow } = await supabase
+        .from('signals')
+        .select('entry_gex_snapshot')
+        .eq('id', pos.signal_id)
+        .maybeSingle()
+      const entrySnap = sigRow?.entry_gex_snapshot ?? null
+      const verdict = computeThesisVerdict(
+        entrySnap,
+        liveSnapshot
+          ? {
+              spot: liveSnapshot.spot,
+              net_gex: liveSnapshot.net_gex,
+              largest_wall: liveSnapshot.largest_wall,
+            }
+          : null,
+        {
+          long_strike: pos.long_strike,
+          short_strike: pos.short_strike,
+          strategy_type: pos.strategy_type,
+        },
+      )
+      verdictUpdate = {
+        last_verdict: verdict.state,
+        last_verdict_reasons: verdict.reasons,
+        last_verdict_at: new Date().toISOString(),
+      }
+      // Transition check. Skip when the prior verdict is null (first
+      // observation — baseline only) or when the prior was
+      // not_evaluable (no real meaning to "exit not_evaluable").
+      const prior = pos.last_verdict
+      const transitionedToWorse =
+        prior &&
+        prior !== 'not_evaluable' &&
+        prior !== verdict.state &&
+        (verdict.state === 'drifting' || verdict.state === 'invalidated')
+      const transitionedToBetter =
+        prior &&
+        (prior === 'drifting' || prior === 'invalidated') &&
+        verdict.state === 'intact'
+      const alertType = transitionedToBetter
+        ? 'position_thesis_recovered'
+        : verdict.state === 'invalidated'
+          ? 'position_thesis_invalidated'
+          : verdict.state === 'drifting'
+            ? 'position_thesis_drifting'
+            : null
+      if ((transitionedToWorse || transitionedToBetter) && alertType) {
+        const verdictAlert = {
+          user_id: pos.user_id,
+          alert_type: alertType,
+          payload: {
+            position_id: pos.id,
+            ticker: pos.ticker,
+            strategy: pos.strategy_type,
+            previous_verdict: prior,
+            current_verdict: verdict.state,
+            reasons: verdict.reasons,
+            url: `${APP_URL}/position/${pos.id}`,
+          },
+          sent_at: new Date().toISOString(),
+        }
+        await supabase.from('alerts').insert(verdictAlert).then(({ error }) => {
+          if (error) console.warn('[thesis-verdict] alert insert failed', error)
+        })
+        await fetch(`${SUPABASE_URL}/functions/v1/send-alerts`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            user_id: pos.user_id,
+            alert_type: alertType,
+            payload: verdictAlert.payload,
+          }),
+        }).catch((e) => console.warn('[thesis-verdict] send-alerts failed:', e))
+      }
+    }
+
     // Evaluate triggers
     const triggers = evaluateTriggers(pos, pnlPct, dte)
     if (triggers.length > 0) {
@@ -824,6 +957,7 @@ serve(async (req) => {
           last_poll_source: source,
           triggers_fired: newFired,
           ...regimeUpdate,
+          ...verdictUpdate,
         })
         .eq('id', pos.id)
     } else {
@@ -835,6 +969,7 @@ serve(async (req) => {
           last_polled_at: new Date().toISOString(),
           last_poll_source: source,
           ...regimeUpdate,
+          ...verdictUpdate,
         })
         .eq('id', pos.id)
     }

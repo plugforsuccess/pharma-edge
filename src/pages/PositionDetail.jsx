@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, X, AlertTriangle, RefreshCw, Check, Clock, Target, Shield } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import Spinner from '../components/Spinner'
+import { computeThesisVerdict } from '../utils/thesisVerdict'
 
 // Detail view for a single open_position. Shows entry, live mid, P&L,
 // triggered alerts, and a "Close Position" flow that submits an inverse
@@ -315,6 +316,32 @@ export default function PositionDetail() {
     ([type]) => niceTriggerLabel(type) != null,
   )
 
+  // Dynamic thesis verdict — computed client-side from already-loaded
+  // data so the banner renders the moment the page is interactive.
+  // Server-side monitor-positions writes the same value to
+  // pos.last_verdict on every poll for push-notification transitions;
+  // we surface the live computation here so users don't have to wait
+  // for the next cron tick to see drift.
+  const verdict = useMemo(() => {
+    if (!pos) return null
+    const liveSnapshot = wallInfo
+      ? {
+          spot: wallInfo.spot,
+          net_gex: wallInfo.netGex,
+          largest_wall: {
+            strike: wallInfo.wallStrike,
+            expiration: wallInfo.wallExp,
+            gex_net: 0, // not used by verdict
+          },
+        }
+      : null
+    return computeThesisVerdict(signalRow?.entry_gex_snapshot, liveSnapshot, {
+      long_strike: Number(pos.long_strike),
+      short_strike: Number(pos.short_strike),
+      strategy_type: pos.strategy_type,
+    })
+  }, [pos, wallInfo, signalRow?.entry_gex_snapshot])
+
   return (
     <div className="px-4 lg:px-6 py-5 max-w-md lg:max-w-3xl mx-auto space-y-4">
       <div className="flex items-center gap-3">
@@ -383,6 +410,8 @@ export default function PositionDetail() {
 
         <DataFreshnessRow pos={pos} />
       </div>
+
+      <ThesisVerdictBanner verdict={verdict} thesis={pos.thesis} signalRow={signalRow} />
 
       <PinRiskWarning pos={pos} moveInfo={moveInfo} />
 
@@ -520,14 +549,9 @@ export default function PositionDetail() {
         </div>
       )}
 
-      {pos.thesis && (
-        <div className="bg-card border border-border rounded-xl p-3 space-y-1">
-          <div className="text-[10px] uppercase tracking-wider text-muted">
-            Thesis
-          </div>
-          <p className="text-xs text-subtle leading-relaxed">{pos.thesis}</p>
-        </div>
-      )}
+      {/* The standalone thesis card is gone — ThesisVerdictBanner at
+          the top of the page renders both the dynamic verdict AND the
+          original frozen thesis text inline. */}
 
       {pos.status === 'open' && !closeMode && (
         <button
@@ -651,6 +675,91 @@ function spreadGeometry(pos) {
 // Visual P&L ladder — horizontal bar showing where current spread
 // mark sits between entry, 50% target, and max profit, plus where
 // the stop floor would be at the standard 50%-of-debit rule.
+// Dynamic thesis verdict banner. Shows whether entry-time dealer
+// positioning still supports the trade. Replaces the old static
+// thesis card — the original frozen thesis text appears inside the
+// banner so the user can always see what they committed to, with the
+// live verdict on top.
+//
+// Server-side monitor-positions writes the same verdict to
+// open_positions.last_verdict on each cron tick; the push notifications
+// fire on transitions there, not here. This client-side computation
+// just gives the user an immediate read on page load.
+function ThesisVerdictBanner({ verdict, thesis, signalRow }) {
+  if (!verdict) return null
+
+  const palette = (() => {
+    switch (verdict.state) {
+      case 'invalidated':
+        return {
+          border: 'border-crimson/50',
+          bg: 'bg-red-950/20',
+          dot: 'bg-crimson',
+          label: 'text-crimson',
+          headline: 'Thesis invalidated',
+        }
+      case 'drifting':
+        return {
+          border: 'border-amber-400/50',
+          bg: 'bg-amber-950/20',
+          dot: 'bg-amber-400',
+          label: 'text-amber-400',
+          headline: 'Thesis drifting',
+        }
+      case 'intact':
+        return {
+          border: 'border-green-700/50',
+          bg: 'bg-green-950/15',
+          dot: 'bg-green-400',
+          label: 'text-green-400',
+          headline: 'Thesis intact',
+        }
+      default:
+        return {
+          border: 'border-border',
+          bg: 'bg-card',
+          dot: 'bg-muted',
+          label: 'text-subtle',
+          headline: 'Verdict pending',
+        }
+    }
+  })()
+
+  return (
+    <div className={`border ${palette.border} ${palette.bg} rounded-xl p-3 space-y-2`}>
+      <div className="flex items-center gap-2">
+        <span className={`w-1.5 h-1.5 rounded-full ${palette.dot} ${verdict.state === 'invalidated' ? 'animate-pulse' : ''}`} />
+        <span className={`text-[10px] uppercase tracking-wider font-semibold ${palette.label}`}>
+          {palette.headline}
+        </span>
+      </div>
+      {verdict.reasons.length > 0 && (
+        <ul className="space-y-1 text-xs text-fg leading-relaxed">
+          {verdict.reasons.map((r, i) => (
+            <li key={i} className="flex gap-1.5">
+              <span className="text-muted shrink-0">·</span>
+              <span>{r}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {thesis && (
+        <div className="pt-1.5 border-t border-border/60 space-y-0.5">
+          <div className="text-[10px] uppercase tracking-wider text-muted">
+            Original thesis (locked)
+          </div>
+          <p className="text-[11px] text-subtle leading-relaxed">{thesis}</p>
+        </div>
+      )}
+      {signalRow?.entry_gex_snapshot && verdict.state !== 'not_evaluable' && (
+        <div className="text-[10px] text-muted">
+          Captured {agoString(signalRow.entry_gex_snapshot.captured_at)} · re-evaluated continuously
+        </div>
+      )}
+    </div>
+  )
+}
+
 function PnLLadderCard({ pos }) {
   const g = spreadGeometry(pos)
   if (!g) return null
