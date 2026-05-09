@@ -27,6 +27,12 @@ export default function PositionDetail() {
   const [closeMode, setCloseMode] = useState(searchParams.get('close') === '1')
   const [exitCredit, setExitCredit] = useState('')
   const [closing, setClosing] = useState(false)
+  // Wall-timing context. Lazy-fetched after the position loads — we
+  // need pos.ticker to ask compute-gex for the live matrix, then we
+  // surface the relationship between the wall's expiration and the
+  // trade's expiration. Non-blocking; the rest of the page renders
+  // without waiting.
+  const [wallInfo, setWallInfo] = useState(null)
 
   async function load() {
     setLoading(true)
@@ -55,6 +61,52 @@ export default function PositionDetail() {
     if (id) load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
+
+  useEffect(() => {
+    if (!pos?.ticker) return
+    let cancelled = false
+    ;(async () => {
+      const { data, error: gexErr } = await supabase.functions.invoke('compute-gex', {
+        body: { ticker: pos.ticker, matrix: true },
+      })
+      if (cancelled) return
+      if (gexErr || !data?.success || !data?.data?.largest) return
+      const wallExp = data.data.largest.expiration
+      const wallStrike = data.data.largest.strike
+      const wallDte = daysUntil(wallExp)
+      const tradeDte = daysUntil(pos.expiration)
+      const diff = wallDte - tradeDte
+      let label
+      let tone
+      let interpretation
+      if (Math.abs(diff) <= 1) {
+        label = 'Trade closes at the wall\'s peak gamma window'
+        tone = 'amber'
+        interpretation = 'Full wall magnetism in force during your hold. Pin probability is at its strongest right at expiration.'
+      } else if (diff > 1) {
+        label = `Wall peaks in ${diff} day${diff === 1 ? '' : 's'} — after your trade closes`
+        tone = 'subtle'
+        interpretation = pinOrBreakInterpretation(pos, wallStrike, /*wallAfter=*/true)
+      } else {
+        label = `Wall already peaked ${Math.abs(diff)} day${Math.abs(diff) === 1 ? '' : 's'} ago — gamma rolling off`
+        tone = 'neg'
+        interpretation = 'The dominant gamma cluster anchoring this thesis has already expired. Dealer hedges have rolled off; price discovery is freer.'
+      }
+      setWallInfo({
+        wallStrike,
+        wallExp,
+        wallDte,
+        tradeDte,
+        diff,
+        label,
+        tone,
+        interpretation,
+        spot: data.data.spot,
+        netGex: data.data.net_gex,
+      })
+    })()
+    return () => { cancelled = true }
+  }, [pos?.ticker, pos?.expiration, pos?.long_strike, pos?.short_strike, pos?.strategy_type])
 
   async function handleClose() {
     if (!pos || !exitCredit) return
@@ -188,6 +240,41 @@ export default function PositionDetail() {
           {pos.last_poll_source === 'yahoo' && ' (15-min delayed)'}
         </div>
       </div>
+
+      {wallInfo && (
+        <div className="bg-card border border-border rounded-xl p-3 space-y-2">
+          <div className="flex items-baseline justify-between">
+            <div className="text-[10px] uppercase tracking-wider text-muted">
+              Wall timing
+            </div>
+            <div className="text-[10px] text-muted font-mono-tab">
+              ${formatStrike(wallInfo.wallStrike)} @ {wallInfo.wallExp}
+            </div>
+          </div>
+          <div
+            className={`text-xs font-medium ${
+              wallInfo.tone === 'amber'
+                ? 'text-amber-400'
+                : wallInfo.tone === 'neg'
+                  ? 'text-crimson'
+                  : 'text-fg'
+            }`}
+          >
+            {wallInfo.label}
+          </div>
+          <div className="text-[11px] text-subtle leading-relaxed">
+            Trade {wallInfo.tradeDte}d · Wall {wallInfo.wallDte}d
+            {wallInfo.diff !== 0 && (
+              <span> · diff {wallInfo.diff > 0 ? '+' : ''}{wallInfo.diff}d</span>
+            )}
+          </div>
+          {wallInfo.interpretation && (
+            <p className="text-[11px] text-subtle leading-relaxed">
+              {wallInfo.interpretation}
+            </p>
+          )}
+        </div>
+      )}
 
       {triggers.length > 0 && (
         <div className="bg-card border border-border rounded-xl p-3 space-y-2">
@@ -340,6 +427,27 @@ function daysUntil(date) {
   if (!date) return 0
   const d = new Date(date + 'T00:00:00Z').getTime()
   return Math.max(0, Math.ceil((d - Date.now()) / 86_400_000))
+}
+
+// Decide whether the trade is structurally a "pin / fade-the-wall"
+// play (wall sits OUTSIDE the spread, condor centered near the wall)
+// vs a "break-the-wall" play (wall sits BETWEEN the long and short
+// legs of a debit spread). The interpretation differs:
+//   - Pin trades benefit from a wall AT peak gamma during the hold.
+//     A weak/leaky wall undermines the thesis.
+//   - Break-the-wall trades benefit from a wall BELOW peak gamma
+//     during the hold. A strong wall during the hold defeats the trade.
+function pinOrBreakInterpretation(pos, wallStrike, wallAfter) {
+  const lo = Math.min(pos.long_strike, pos.short_strike)
+  const hi = Math.max(pos.long_strike, pos.short_strike)
+  const wallInside = wallStrike > lo && wallStrike < hi
+  if (wallInside && wallAfter) {
+    return 'Wall sits between your strikes — a break-through-the-wall structure. Wall is at its weakest defense during your hold; if a known catalyst overlaps, this is favorable.'
+  }
+  if (!wallInside && wallAfter) {
+    return 'Wall sits outside your strikes (pin / fade-the-wall structure). Magnetism during your hold is weaker than the headline GEX suggests because the wall hasn\'t hit peak gamma yet.'
+  }
+  return ''
 }
 
 function agoString(iso) {
