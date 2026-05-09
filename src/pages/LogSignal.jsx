@@ -189,6 +189,44 @@ export default function LogSignal() {
     // date, so the mirror is honest. company_name auto-derives from the
     // ticker so the form doesn't have to ask for it.
     const ticker = form.ticker.toUpperCase().trim()
+
+    // Capture the GEX matrix headline at lock time. Best-effort — if
+    // compute-gex fails (Yahoo + DXLink both down, or transient network)
+    // we still let the signal log; entry_gex_snapshot just stays null
+    // and the PositionDetail diff card hides itself. We trim the
+    // returned matrix to the headline fields the UI surfaces because
+    // storing the full per-cell payload is hundreds of KB per signal.
+    let entryGexSnapshot = null
+    try {
+      const { data: gexResp, error: gexErr } = await supabase.functions.invoke(
+        'compute-gex',
+        { body: { ticker, matrix: true } },
+      )
+      if (!gexErr && gexResp?.success && gexResp?.data) {
+        const m = gexResp.data
+        entryGexSnapshot = {
+          spot: m.spot ?? null,
+          source: m.source ?? null,
+          net_gex: m.net_gex ?? null,
+          net_dex: m.net_dex ?? null,
+          net_vex: m.net_vex ?? null,
+          expected_move: m.expected_move ?? null,
+          expected_move_pct: m.expected_move_pct ?? null,
+          pinning_probability: m.pinning_probability ?? null,
+          largest_wall: m.largest
+            ? {
+                strike: m.largest.strike,
+                expiration: m.largest.expiration,
+                gex_net: m.largest.gex_net,
+              }
+            : null,
+          captured_at: new Date().toISOString(),
+        }
+      }
+    } catch {
+      // Swallow — snapshot is informational, not gating.
+    }
+
     const signalData = {
       user_id: user.id,
       signal_source: 'gex_flow',
@@ -219,6 +257,11 @@ export default function LogSignal() {
         ? form.source_urls.split('\n').map((s) => s.trim()).filter(Boolean)
         : [],
       ...Object.fromEntries(CHECKLIST_ITEMS.map((i) => [i.key, form[i.key]])),
+      // entry_gex_snapshot is informational metadata — NOT in the
+      // signal_hash payload. See migration
+      // 20260509000002_signals_entry_gex_snapshot.sql for the
+      // rationale.
+      entry_gex_snapshot: entryGexSnapshot,
       // signal_hash + logged_at intentionally omitted: DB trigger
       // computes the canonical hash on INSERT and logged_at defaults to NOW().
     }
