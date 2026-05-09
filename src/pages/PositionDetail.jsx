@@ -802,41 +802,58 @@ function DistanceToActionCard({ pos, moveInfo }) {
   const targetSpot = spot + spotMoveToTarget * dirSign
   const stopSpot = spot + spotMoveToStop * dirSign
 
+  const targetMovePct = ((targetSpot - spot) / spot) * 100
+  const stopMovePct = ((stopSpot - spot) / spot) * 100
+
   return (
-    <div className="bg-card border border-border rounded-xl p-3 space-y-2">
-      <div className="text-[10px] uppercase tracking-wider text-muted flex items-center gap-1">
-        <Target size={10} /> Distance to action
+    <div className="bg-card border border-border rounded-xl p-3 space-y-2.5">
+      <div className="flex items-baseline justify-between gap-2">
+        <div className="text-[10px] uppercase tracking-wider text-muted flex items-center gap-1">
+          <Target size={10} /> Distance to action
+        </div>
+        <div className="text-[11px] text-muted font-mono-tab">
+          spot ${spot.toFixed(2)}
+        </div>
       </div>
-      <div className="grid grid-cols-2 gap-2 text-xs">
-        <div>
-          <div className="text-[10px] text-muted">Spot now</div>
-          <div className="font-mono-tab text-fg">${spot.toFixed(2)}</div>
-        </div>
-        <div>
-          <div className="text-[10px] text-muted">Breakeven</div>
-          <div className="font-mono-tab text-fg">${g.breakeven.toFixed(2)}</div>
-        </div>
-        <div>
-          <div className="text-[10px] text-muted">→ 50% target</div>
-          <div className="font-mono-tab text-amber-400">
+      <div className="bg-bg/50 border border-border/50 rounded-lg p-2.5 space-y-1.5">
+        <div className="grid grid-cols-[auto_1fr_auto] gap-x-3 gap-y-1 items-baseline text-[11px]">
+          <span className="text-muted uppercase tracking-wider text-[10px]">
+            Breakeven
+          </span>
+          <span className="text-fg font-mono-tab">
+            ${g.breakeven.toFixed(2)}
+          </span>
+          <span className="text-subtle font-mono-tab text-right text-[10px]">
+            {(((g.breakeven - spot) / spot) * 100).toFixed(2)}%
+          </span>
+          <span className="text-muted uppercase tracking-wider text-[10px]">
+            50% target
+          </span>
+          <span className="text-amber-400 font-mono-tab">
             ${targetSpot.toFixed(2)}
-            <span className="text-muted text-[10px] ml-1">
-              ({(((targetSpot - spot) / spot) * 100).toFixed(2)}%)
-            </span>
-          </div>
-        </div>
-        <div>
-          <div className="text-[10px] text-muted">→ stop fires</div>
-          <div className="font-mono-tab text-crimson">
+          </span>
+          <span className="text-subtle font-mono-tab text-right text-[10px]">
+            {targetMovePct >= 0 ? '+' : ''}{targetMovePct.toFixed(2)}%
+          </span>
+          <span className="text-muted uppercase tracking-wider text-[10px]">
+            Stop fires
+          </span>
+          <span className="text-crimson font-mono-tab">
             ${stopSpot.toFixed(2)}
-            <span className="text-muted text-[10px] ml-1">
-              ({(((stopSpot - spot) / spot) * 100).toFixed(2)}%)
-            </span>
-          </div>
+          </span>
+          <span className="text-subtle font-mono-tab text-right text-[10px]">
+            {stopMovePct >= 0 ? '+' : ''}{stopMovePct.toFixed(2)}%
+          </span>
+        </div>
+        <div className="flex justify-end pt-0.5">
+          <span className="text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border text-muted border-border bg-bg/50">
+            ~0.35 net delta
+          </span>
         </div>
       </div>
-      <p className="text-[10px] text-muted leading-relaxed pt-1 border-t border-border">
-        Estimated using ~0.35 net delta — actual fill prices may differ.
+      <p className="text-[11px] text-subtle leading-relaxed">
+        Estimated using a midpoint delta — actual fill prices may
+        differ on deep ITM or far OTM spreads.
       </p>
     </div>
   )
@@ -852,59 +869,75 @@ function ExitPlanReminderCard({ pos }) {
   const target = g.entry + g.maxProfit * 0.5
   const stop = g.entry * 0.5
   return (
-    <div className="bg-card border border-border rounded-xl p-3 space-y-2">
-      <div className="text-[10px] uppercase tracking-wider text-muted flex items-center gap-1">
-        <Shield size={10} /> Exit plan (standard)
+    <div className="bg-card border border-border rounded-xl p-3 space-y-2.5">
+      <div className="flex items-baseline justify-between gap-2">
+        <div className="text-[10px] uppercase tracking-wider text-muted flex items-center gap-1">
+          <Shield size={10} /> Exit plan
+        </div>
+        <div className="text-[11px] text-muted font-mono-tab">
+          standard
+        </div>
       </div>
-      <div className="space-y-1.5 text-xs">
-        <PlanRow
-          label="Profit target"
-          detail="50% of max profit"
-          value={`$${fmt(target)}`}
-          tone="amber"
-        />
-        <PlanRow
-          label="Stop loss"
-          detail="50% of debit paid"
-          value={`$${fmt(stop)}`}
-          tone="neg"
-        />
-        <PlanRow
-          label="Time exit"
-          detail="50% of DTE elapsed (whichever first)"
-          value="manual"
-          tone="muted"
-        />
-        <PlanRow
-          label="Hard expiration cutoff"
-          detail="No holds past 2pm on expiration day"
-          value="rule"
-          tone="muted"
-        />
+      <div className="bg-bg/50 border border-border/50 rounded-lg p-2.5 space-y-1.5">
+        <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 items-baseline text-[11px]">
+          <PlanRow
+            label="Profit target"
+            detail="50% of max profit"
+            value={`$${fmt(target)}`}
+            tone="amber"
+          />
+          <PlanRow
+            label="Stop loss"
+            detail="50% of debit paid"
+            value={`$${fmt(stop)}`}
+            tone="neg"
+          />
+          <PlanRow
+            label="Time exit"
+            detail="50% of DTE elapsed (whichever first)"
+            value="manual"
+            tone="muted"
+          />
+          <PlanRow
+            label="Hard cutoff"
+            detail="No holds past 2pm on expiration day"
+            value="rule"
+            tone="muted"
+          />
+        </div>
+        <div className="flex justify-end pt-0.5">
+          <span className="text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border text-amber-400 border-amber-400/30 bg-amber-400/10">
+            mirror in bracket
+          </span>
+        </div>
       </div>
-      <p className="text-[10px] text-muted leading-relaxed pt-1 border-t border-border">
-        Defaults from RISK_MANAGEMENT.md. Bracket order in your broker
-        should mirror the profit/stop levels above.
+      <p className="text-[11px] text-subtle leading-relaxed">
+        Defaults from RISK_MANAGEMENT.md. Your broker bracket should
+        mirror the profit/stop levels above.
       </p>
     </div>
   )
 }
 
+// Two-line plan row: label + detail wrap on the left, value on the
+// right. Used inside ExitPlanReminderCard's grid (auto + 1fr) so
+// the label column auto-sizes to the longest entry and the value
+// column right-aligns consistently.
 function PlanRow({ label, detail, value, tone }) {
   const toneClass =
     tone === 'amber' ? 'text-amber-400'
     : tone === 'neg' ? 'text-crimson'
     : 'text-fg'
   return (
-    <div className="flex items-baseline justify-between gap-2">
-      <div className="min-w-0">
-        <div className="text-fg">{label}</div>
-        <div className="text-[10px] text-muted">{detail}</div>
+    <>
+      <div>
+        <div className="text-fg leading-tight">{label}</div>
+        <div className="text-[10px] text-muted leading-tight">{detail}</div>
       </div>
-      <div className={`font-mono-tab text-xs font-medium shrink-0 ${toneClass}`}>
+      <div className={`font-mono-tab text-right ${toneClass} font-medium`}>
         {value}
       </div>
-    </div>
+    </>
   )
 }
 
@@ -963,7 +996,7 @@ function WallTimingCard({ pos, wallInfo }) {
             Trade
           </span>
           <span className="text-fg font-mono-tab">
-            {formatFriendlyDate(tradeExp)}
+            {formatFriendlyDate(tradeExp, { long: true })}
           </span>
           <span className="text-subtle font-mono-tab text-right">
             {wallInfo.tradeDte}d
@@ -972,7 +1005,7 @@ function WallTimingCard({ pos, wallInfo }) {
             Wall
           </span>
           <span className="text-fg font-mono-tab">
-            {formatFriendlyDate(wallExp)}
+            {formatFriendlyDate(wallExp, { long: true })}
           </span>
           <span className="text-subtle font-mono-tab text-right">
             {wallInfo.wallDte}d
@@ -999,10 +1032,13 @@ function WallTimingCard({ pos, wallInfo }) {
   )
 }
 
-// "2026-05-12" → "Fri May 12". Always parsed UTC so we don't get
-// off-by-one timezone fuckery on a YYYY-MM-DD string. en-US weekday
-// short + month short matches every other date format on the page.
-function formatFriendlyDate(iso) {
+// "2026-05-12" → "Tue May 12". Always parsed UTC so we don't get
+// off-by-one timezone fuckery on a YYYY-MM-DD string. The
+// `long: true` option appends the year ("Tue, May 12, 2026") for
+// the row-level data inside WallTimingCard where the user
+// specifically wants the year visible. Header chips stay short to
+// keep the right-aligned metadata compact.
+function formatFriendlyDate(iso, opts = {}) {
   if (!iso) return '—'
   const d = new Date(`${iso}T00:00:00Z`)
   if (Number.isNaN(d.getTime())) return iso
@@ -1010,6 +1046,7 @@ function formatFriendlyDate(iso) {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
+    ...(opts.long ? { year: 'numeric' } : {}),
     timeZone: 'UTC',
   })
 }
@@ -1135,31 +1172,50 @@ function AccountContextCard({ pos, profile }) {
   const overSized = riskPct > 2.1  // 2% rule with small float
 
   return (
-    <div className="bg-card border border-border rounded-xl p-3 space-y-1.5">
-      <div className="flex items-baseline justify-between">
+    <div className="bg-card border border-border rounded-xl p-3 space-y-2.5">
+      <div className="flex items-baseline justify-between gap-2">
         <div className="text-[10px] uppercase tracking-wider text-muted">
           Account context
         </div>
-        <div className="text-[10px] text-muted font-mono-tab">
+        <div className="text-[11px] text-muted font-mono-tab">
           ${fmt(accountSize)} acct
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-2 text-xs">
-        <div>
-          <div className="text-[10px] text-muted">Risk if max loss</div>
-          <div className={`font-mono-tab ${overSized ? 'text-crimson' : 'text-fg'}`}>
-            {riskPct.toFixed(2)}%
-          </div>
+      {overSized && (
+        <div className="text-xs font-medium text-crimson">
+          Position exceeds the 2% sizing rule
         </div>
-        <div>
-          <div className="text-[10px] text-muted">Gain if max profit</div>
-          <div className="font-mono-tab text-green-400">{gainPct.toFixed(2)}%</div>
+      )}
+      <div className="bg-bg/50 border border-border/50 rounded-lg p-2.5 space-y-1.5">
+        <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 items-baseline text-[11px]">
+          <span className="text-muted uppercase tracking-wider text-[10px]">
+            Risk if max loss
+          </span>
+          <span className={`font-mono-tab text-right ${overSized ? 'text-crimson' : 'text-fg'}`}>
+            ${fmt(totalRisk)} · {riskPct.toFixed(2)}%
+          </span>
+          <span className="text-muted uppercase tracking-wider text-[10px]">
+            Gain if max profit
+          </span>
+          <span className="font-mono-tab text-right text-green-400">
+            ${fmt(totalMaxGain)} · {gainPct.toFixed(2)}%
+          </span>
+        </div>
+        <div className="flex justify-end pt-0.5">
+          <span
+            className={`text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border ${
+              overSized
+                ? 'text-crimson border-crimson/40 bg-crimson/10'
+                : 'text-green-400 border-green-400/30 bg-green-400/10'
+            }`}
+          >
+            {overSized ? 'oversized' : 'within 2% rule'}
+          </span>
         </div>
       </div>
       {overSized && (
-        <p className="text-[10px] text-crimson leading-relaxed pt-1 border-t border-border">
-          Position exceeds the 2% sizing rule. Consider sizing down on
-          future entries — see RISK_MANAGEMENT.md.
+        <p className="text-[11px] text-subtle leading-relaxed">
+          Consider sizing down on future entries — see RISK_MANAGEMENT.md.
         </p>
       )}
     </div>
