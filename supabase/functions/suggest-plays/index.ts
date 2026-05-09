@@ -104,6 +104,12 @@ GAMMA ROLL-OFF RISK — MUST FLAG:
 - When true, include a "rolloff_note" of one short sentence describing the specific risk for THIS structure (e.g. "Condor expires after the May 8 wall cluster rolls off — the pinning regime anchoring this thesis ends mid-trade.").
 - When the dominant expiration also satisfies the trade's other constraints (DTE rules, sufficient strike spread), PREFER it over later expirations.
 
+WALL TIMING — APPLIES TO PLAYS THAT EXPIRE BEFORE THE DOMINANT WALL:
+- Symmetric to gamma roll-off: when play.expiration < dominant_gex_expiration, the play exits BEFORE the wall reaches its peak gamma magnetism (gamma on a strike concentrates as it approaches expiration, all else equal).
+- For PIN / FADE-THE-WALL setups (Iron Condor centered at the wall, credit spread that profits from the wall holding) — the wall pull during your hold is WEAKER than the dominant cluster's headline GEX suggests. The wall's peak defense happens after you exit. Half-size, or pick a play.expiration that brings you closer to the wall's peak gamma window.
+- For BREAK-THE-WALL setups (debit spread structured to push spot through the wall, e.g. a bull call spread with the wall strike between the long and short legs) — this is actually a feature: you're hitting the wall during its WEAKEST defensive window. If a known catalyst (CPI, FOMC, earnings) overlaps your hold, this can be the right structure. Without a catalyst, it's still a swing-for-the-fence; reduce size.
+- Reflect this in the "rationale" field for any affected play. Don't invent a wall-timing risk where none exists; say so explicitly when play.expiration ≈ dominant_gex_expiration ("trade closes at the wall's peak gamma window — full magnetism in force").
+
 OUTPUT — STRICT JSON, NO PROSE:
 {
   "regime": "A" | "B" | "mixed",
