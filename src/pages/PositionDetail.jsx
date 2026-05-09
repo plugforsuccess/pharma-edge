@@ -1027,27 +1027,74 @@ function TimePressureCard({ pos }) {
 
   if (!tightWindow) return null  // only surface this card when time is tight
 
+  // Three-tier headline + tone, matching the WallTimingCard pattern.
+  // The headline is a punchy one-liner; the longer copy lives in the
+  // detail box below for non-obvious context.
+  const { headline, tone, badgeLabel, badgeTone, detail } = (() => {
+    if (finalDay) {
+      return {
+        headline: 'Expiration day — theta + gamma + pin risk all peak',
+        tone: 'text-amber-400',
+        badgeLabel: 'final day',
+        badgeTone: 'text-crimson border-crimson/40 bg-crimson/10',
+        detail: 'Close by 11am, hard cutoff 2pm. Bracket order should already be live.',
+      }
+    }
+    if (sessions === 2) {
+      return {
+        headline: 'Two sessions left',
+        tone: 'text-amber-400',
+        badgeLabel: 'tightening',
+        badgeTone: 'text-amber-400 border-amber-400/40 bg-amber-400/10',
+        detail: 'Theta accelerates each day. Plan exit by mid-morning of expiration day.',
+      }
+    }
+    return {
+      headline: 'Three sessions left',
+      tone: 'text-fg',
+      badgeLabel: 'theta zone',
+      badgeTone: 'text-amber-400 border-amber-400/30 bg-amber-400/10',
+      detail: 'Theta starts to bite. Bracket should fire well before expiration.',
+    }
+  })()
+
   return (
-    <div className="bg-card border border-border rounded-xl p-3 space-y-1.5">
-      <div className="text-[10px] uppercase tracking-wider text-muted flex items-center gap-1">
-        <Clock size={10} /> Time pressure
+    <div className="bg-card border border-border rounded-xl p-3 space-y-2.5">
+      <div className="flex items-baseline justify-between gap-2">
+        <div className="text-[10px] uppercase tracking-wider text-muted flex items-center gap-1">
+          <Clock size={10} /> Time pressure
+        </div>
+        <div className="text-[11px] text-muted font-mono-tab">
+          {formatFriendlyDate(pos.expiration)}
+        </div>
       </div>
-      <div className="text-xs text-fg">
-        <span className={finalDay ? 'text-amber-400 font-medium' : 'text-fg'}>
-          {sessions} trading session{sessions === 1 ? '' : 's'}
-        </span>
-        {' until expiration'}
-        {dte !== sessions && (
-          <span className="text-muted"> · {dte} calendar day{dte === 1 ? '' : 's'}</span>
-        )}
+      <div className={`text-xs font-medium ${tone}`}>
+        {headline}
       </div>
-      <p className="text-[10px] text-subtle leading-relaxed">
-        {finalDay
-          ? 'Expiration day. Theta + gamma + pin risk all peak. Close by 11am, hard cutoff 2pm.'
-          : sessions === 2
-            ? 'Two sessions left. Theta accelerates each day. Plan exit by mid-morning of expiration day.'
-            : 'Three sessions left. Theta starts to bite. Bracket should fire well before expiration.'}
-      </p>
+      <div className="bg-bg/50 border border-border/50 rounded-lg p-2.5 space-y-1.5">
+        <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 items-baseline text-[11px]">
+          <span className="text-muted uppercase tracking-wider text-[10px]">
+            Sessions
+          </span>
+          <span className="text-fg font-mono-tab text-right">
+            {sessions} trading day{sessions === 1 ? '' : 's'}
+          </span>
+          <span className="text-muted uppercase tracking-wider text-[10px]">
+            Calendar
+          </span>
+          <span className="text-fg font-mono-tab text-right">
+            {dte} day{dte === 1 ? '' : 's'}
+          </span>
+        </div>
+        <div className="flex justify-end pt-0.5">
+          <span
+            className={`text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border ${badgeTone}`}
+          >
+            {badgeLabel}
+          </span>
+        </div>
+      </div>
+      <p className="text-[11px] text-subtle leading-relaxed">{detail}</p>
     </div>
   )
 }
