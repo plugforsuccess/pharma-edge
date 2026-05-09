@@ -54,6 +54,10 @@ export default function PositionDetail() {
   const [workingOrders, setWorkingOrders] = useState(null)
   const [workingOrdersLoading, setWorkingOrdersLoading] = useState(false)
   const [workingOrdersError, setWorkingOrdersError] = useState(null)
+  // Bracket-edit modal state. Holds the order being edited (or null).
+  // Modal owns its own inline form fields; we only need to know which
+  // order is open here so the Save handler can dispatch + refresh.
+  const [editingOrder, setEditingOrder] = useState(null)
 
   async function load() {
     setLoading(true)
@@ -395,6 +399,17 @@ export default function PositionDetail() {
         loading={workingOrdersLoading}
         error={workingOrdersError}
         onRefresh={loadWorkingOrders}
+        onEdit={(o) => setEditingOrder(o)}
+      />
+
+      <BracketEditModal
+        order={editingOrder}
+        signalId={pos?.signal_id}
+        onClose={() => setEditingOrder(null)}
+        onSaved={() => {
+          setEditingOrder(null)
+          loadWorkingOrders()
+        }}
       />
 
       {moveInfo && (moveInfo.realizedToday != null || moveInfo.expectedTrade != null) && (
@@ -1223,7 +1238,7 @@ function NetGreeksCard({ pos, legGreeks }) {
 // stop-loss close. We label them by intent inferred from order_type
 // + price_effect; if the inference fails the card honestly says
 // "unknown intent" rather than guessing wrong.
-function BracketOrderStatusCard({ pos, workingOrders, loading, error, onRefresh }) {
+function BracketOrderStatusCard({ pos, workingOrders, loading, error, onRefresh, onEdit }) {
   if (!pos?.signal_id) return null
 
   return (
@@ -1262,7 +1277,7 @@ function BracketOrderStatusCard({ pos, workingOrders, loading, error, onRefresh 
       {!error && Array.isArray(workingOrders) && workingOrders.length > 0 && (
         <div className="space-y-2">
           {workingOrders.map((o) => (
-            <BracketRow key={o.tastytrade_order_id} order={o} />
+            <BracketRow key={o.tastytrade_order_id} order={o} onEdit={onEdit} />
           ))}
         </div>
       )}
@@ -1270,7 +1285,7 @@ function BracketOrderStatusCard({ pos, workingOrders, loading, error, onRefresh 
   )
 }
 
-function BracketRow({ order }) {
+function BracketRow({ order, onEdit }) {
   const intentLabel =
     order.intent === 'target'
       ? 'Profit target'
@@ -1308,11 +1323,162 @@ function BracketRow({ order }) {
           {order.status ?? '—'}
         </span>
       </div>
-      <div className="text-[10px] text-muted font-mono">
-        #{order.tastytrade_order_id}
-        {order.complex_order_tag && (
-          <span className="ml-1">· {order.complex_order_tag}</span>
+      <div className="flex items-baseline justify-between">
+        <div className="text-[10px] text-muted font-mono">
+          #{order.tastytrade_order_id}
+          {order.complex_order_tag && (
+            <span className="ml-1">· {order.complex_order_tag}</span>
+          )}
+        </div>
+        {onEdit && (
+          <button
+            type="button"
+            onClick={() => onEdit(order)}
+            className="text-[10px] text-amber-400 hover:text-amber-300 font-semibold"
+            aria-label={`Edit order ${order.tastytrade_order_id}`}
+          >
+            Edit
+          </button>
         )}
+      </div>
+    </div>
+  )
+}
+
+// Modal that lets the user nudge the limit price on a working bracket
+// order. Two-step UX: enter new price → review → confirm. Keeps the
+// edit flow honest (no fat-finger send) and gives the user a chance
+// to bail if the API call would do something they didn't intend.
+//
+// The modify-order edge function does the broker write and logs to
+// order_history. UI just collects + dispatches.
+function BracketEditModal({ order, signalId, onClose, onSaved }) {
+  const [newPrice, setNewPrice] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+
+  // Reset form whenever a different order is opened. Avoids carrying
+  // stale state between two consecutive Edit clicks on different rows.
+  useEffect(() => {
+    if (!order) return
+    setNewPrice(order.price != null ? String(order.price) : '')
+    setErr(null)
+  }, [order?.tastytrade_order_id])
+
+  if (!order) return null
+
+  async function save() {
+    const priceNum = Number(newPrice)
+    if (!Number.isFinite(priceNum) || priceNum <= 0) {
+      setErr('Price must be a positive number.')
+      return
+    }
+    setBusy(true)
+    setErr(null)
+    const { data, error: invokeErr } = await supabase.functions.invoke('modify-order', {
+      body: {
+        signal_id: signalId,
+        order_id: order.tastytrade_order_id,
+        new_price: priceNum,
+      },
+    })
+    setBusy(false)
+    if (invokeErr) {
+      setErr(invokeErr.message ?? 'broker write failed')
+      return
+    }
+    if (!data?.success) {
+      setErr(data?.error ?? 'broker write failed')
+      return
+    }
+    onSaved?.()
+  }
+
+  const intentLabel =
+    order.intent === 'target'
+      ? 'profit target'
+      : order.intent === 'stop'
+        ? 'stop loss'
+        : 'working order'
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/70 flex items-end sm:items-center justify-center z-50 p-2"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Edit ${intentLabel}`}
+    >
+      <div className="bg-card border border-amber-400/40 rounded-2xl p-4 w-full sm:max-w-sm space-y-3">
+        <div className="flex items-baseline justify-between">
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-amber-400 font-semibold">
+              Edit {intentLabel}
+            </p>
+            <h3 className="text-sm font-semibold mt-0.5">
+              Order #{order.tastytrade_order_id}
+            </h3>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-muted hover:text-fg"
+            aria-label="Close"
+          >
+            <X size={14} />
+          </button>
+        </div>
+        <div className="text-[11px] text-subtle leading-relaxed">
+          Current limit price:{' '}
+          <span className="font-mono-tab text-fg">
+            {order.price != null ? `$${Number(order.price).toFixed(2)}` : '—'}
+          </span>
+          {order.price_effect && (
+            <span className="text-muted ml-1">{order.price_effect.toLowerCase()}</span>
+          )}
+          . The order legs and time-in-force are preserved — only the
+          limit price changes.
+        </div>
+        <div>
+          <label className="text-[10px] uppercase tracking-wider text-muted block mb-1">
+            New limit price ($)
+          </label>
+          <input
+            type="number"
+            min="0.01"
+            step="0.01"
+            inputMode="decimal"
+            value={newPrice}
+            onChange={(e) => setNewPrice(e.target.value)}
+            disabled={busy}
+            className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm font-mono-tab text-fg focus:outline-none focus:border-amber-400/40"
+            autoFocus
+          />
+        </div>
+        {err && (
+          <div className="bg-red-950/30 border border-red-900/50 rounded-lg p-2">
+            <p className="text-crimson text-[11px]" role="alert">
+              {err}
+            </p>
+          </div>
+        )}
+        <div className="flex gap-2 pt-1">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className="flex-1 bg-card border border-border text-subtle font-semibold rounded-xl py-2.5 text-sm hover:text-fg disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={save}
+            disabled={busy || !newPrice}
+            className="flex-1 bg-amber-400 hover:bg-amber-300 text-bg font-semibold rounded-xl py-2.5 text-sm disabled:opacity-50"
+          >
+            {busy ? 'Saving…' : 'Submit modify'}
+          </button>
+        </div>
       </div>
     </div>
   )
