@@ -806,8 +806,8 @@ function BrokerSection() {
           <p className="text-white text-sm font-medium">Test connection</p>
           <p className="text-subtle text-xs mt-0.5">
             Calls <span className="font-mono">get-account</span>. Lists accounts the bot's
-            credentials can see. Sandbox base URL by default — switch only after 90 days of
-            paper.
+            credentials can see. Sandbox base URL by default — switch via TASTYTRADE_BASE_URL
+            secret when you're ready for live.
           </p>
         </div>
         <button

@@ -1090,9 +1090,6 @@ export default function LogSignal() {
   )
 }
 
-// Returns days remaining in the 90-day paper-trading window. 0 if the
-// user is past the window (or hasn't started — the Dashboard widget
-// stamps paper_trading_started_at on first render).
 // Auto-generated thesis when the user didn't type one. The DB column
 // is NOT NULL, but typed-thesis copy adds no signal for GEX-flow
 // trades — the structure + ticker + expiration captures the bet
@@ -1105,13 +1102,6 @@ function autoThesis(form, ticker) {
     return `GEX-flow ${structure} on ${ticker} · expires ${target}`
   }
   return `${ticker} ${form.catalyst_type || 'event'} catalyst on ${target}`
-}
-
-function paperDaysRemaining(startedAt) {
-  if (!startedAt) return 0
-  const start = new Date(`${startedAt}T00:00:00Z`).getTime()
-  const elapsed = (Date.now() - start) / 86_400_000
-  return Math.max(0, Math.ceil(90 - elapsed))
 }
 
 function Input({ label, value, onChange, placeholder, type = 'text', required, min, inputMode }) {
