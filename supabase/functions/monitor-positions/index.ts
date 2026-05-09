@@ -321,13 +321,12 @@ function evaluateTriggers(
     }
   }
 
-  if (dte <= 21 && dte > 1 && !fired.position_dte_21) {
-    out.push({
-      type: 'position_dte_21',
-      fired: true,
-      message: `${pos.ticker} ${pos.strategy_type} now ${dte} DTE — review per 21-DTE rule`,
-    })
-  }
+  // 21 DTE trigger retired 2026-05-09. Cash Moves no longer treats
+  // 21 DTE as a hard floor — R/R + EV edge are the objective
+  // function, DTE is a free parameter. The TimePressureCard on
+  // PositionDetail covers the actually-actionable window
+  // (sessions ≤ 3) with theta-acceleration copy specific to the day
+  // count, which makes a 21-DTE catch-all alert redundant.
   if (dte <= 1 && !fired.position_expiring_tomorrow) {
     out.push({
       type: 'position_expiring_tomorrow',

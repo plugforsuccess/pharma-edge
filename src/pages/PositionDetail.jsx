@@ -308,7 +308,12 @@ export default function PositionDetail() {
   const pnl = pos.last_pnl_pct
   const pnlTone =
     pnl == null ? 'text-fg' : pnl >= 0 ? 'text-green-400' : 'text-crimson'
-  const triggers = Object.entries(pos.triggers_fired || {})
+  // Filter out trigger types we've retired so legacy JSONB rows
+  // (e.g. position_dte_21 fired before 2026-05-09) don't render as
+  // empty/raw rows in the Triggers Fired card.
+  const triggers = Object.entries(pos.triggers_fired || {}).filter(
+    ([type]) => niceTriggerLabel(type) != null,
+  )
 
   return (
     <div className="px-4 lg:px-6 py-5 max-w-md lg:max-w-3xl mx-auto space-y-4">
@@ -498,40 +503,7 @@ export default function PositionDetail() {
 
       <ProbabilityConeCard pos={pos} moveInfo={moveInfo} />
 
-      {wallInfo && (
-        <div className="bg-card border border-border rounded-xl p-3 space-y-2">
-          <div className="flex items-baseline justify-between">
-            <div className="text-[10px] uppercase tracking-wider text-muted">
-              Wall timing
-            </div>
-            <div className="text-[10px] text-muted font-mono-tab">
-              ${formatStrike(wallInfo.wallStrike)} @ {wallInfo.wallExp}
-            </div>
-          </div>
-          <div
-            className={`text-xs font-medium ${
-              wallInfo.tone === 'amber'
-                ? 'text-amber-400'
-                : wallInfo.tone === 'neg'
-                  ? 'text-crimson'
-                  : 'text-fg'
-            }`}
-          >
-            {wallInfo.label}
-          </div>
-          <div className="text-[11px] text-subtle leading-relaxed">
-            Trade {wallInfo.tradeDte}d · Wall {wallInfo.wallDte}d
-            {wallInfo.diff !== 0 && (
-              <span> · diff {wallInfo.diff > 0 ? '+' : ''}{wallInfo.diff}d</span>
-            )}
-          </div>
-          {wallInfo.interpretation && (
-            <p className="text-[11px] text-subtle leading-relaxed">
-              {wallInfo.interpretation}
-            </p>
-          )}
-        </div>
-      )}
+      {wallInfo && <WallTimingCard pos={pos} wallInfo={wallInfo} />}
 
       {triggers.length > 0 && (
         <div className="bg-card border border-border rounded-xl p-3 space-y-2">
@@ -926,6 +898,112 @@ function PlanRow({ label, detail, value, tone }) {
       </div>
     </div>
   )
+}
+
+// Wall-timing context. Compares the trade's expiration to the
+// dominant gamma cluster's expiration. Three tones:
+//
+//   aligned (|diff| ≤ 1)   → trade closes at the wall's peak gamma
+//                            window. Pin pull is at full strength.
+//   wall after  (diff > 1) → wall peaks AFTER the trade exits. Pin
+//                            pull during the hold is weaker than the
+//                            headline GEX number suggests.
+//   wall before (diff < -1) → dominant cluster has already rolled
+//                             off. Regime can be in transition.
+//
+// Layout: header (label + strike/date) → status line → two-row
+// timing table (trade vs wall) with the gap badge on the right.
+// Long interpretation paragraph from the old design is dropped for
+// aligned cases (the headline already says everything); kept for
+// the misaligned cases where the explanation adds non-obvious
+// trading context.
+function WallTimingCard({ pos, wallInfo }) {
+  const tradeExp = pos.expiration
+  const wallExp = wallInfo.wallExp
+  const tone =
+    wallInfo.tone === 'amber'
+      ? 'text-amber-400'
+      : wallInfo.tone === 'neg'
+        ? 'text-crimson'
+        : 'text-green-400'
+  const gapAbs = Math.abs(wallInfo.diff)
+  const gapLabel =
+    gapAbs === 0
+      ? 'aligned'
+      : `${wallInfo.diff > 0 ? '+' : '−'}${gapAbs}d gap`
+  const gapTone =
+    gapAbs <= 1
+      ? 'text-green-400 border-green-400/30 bg-green-400/10'
+      : 'text-amber-400 border-amber-400/30 bg-amber-400/10'
+
+  return (
+    <div className="bg-card border border-border rounded-xl p-3 space-y-2.5">
+      <div className="flex items-baseline justify-between gap-2">
+        <div className="text-[10px] uppercase tracking-wider text-muted">
+          Wall timing
+        </div>
+        <div className="text-[11px] text-muted font-mono-tab">
+          ${formatStrike(wallInfo.wallStrike)} · {formatFriendlyDate(wallExp)}
+        </div>
+      </div>
+      <div className={`text-xs font-medium ${tone}`}>
+        {wallInfo.label}
+      </div>
+      <div className="bg-bg/50 border border-border/50 rounded-lg p-2.5 space-y-1.5">
+        <div className="grid grid-cols-[auto_1fr_auto] gap-x-3 gap-y-1 items-baseline text-[11px]">
+          <span className="text-muted uppercase tracking-wider text-[10px]">
+            Trade
+          </span>
+          <span className="text-fg font-mono-tab">
+            {formatFriendlyDate(tradeExp)}
+          </span>
+          <span className="text-subtle font-mono-tab text-right">
+            {wallInfo.tradeDte}d
+          </span>
+          <span className="text-muted uppercase tracking-wider text-[10px]">
+            Wall
+          </span>
+          <span className="text-fg font-mono-tab">
+            {formatFriendlyDate(wallExp)}
+          </span>
+          <span className="text-subtle font-mono-tab text-right">
+            {wallInfo.wallDte}d
+          </span>
+        </div>
+        <div className="flex justify-end pt-0.5">
+          <span
+            className={`text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border ${gapTone}`}
+          >
+            {gapLabel}
+          </span>
+        </div>
+      </div>
+      {wallInfo.interpretation && wallInfo.tone !== 'amber' && (
+        // Drop the paragraph for the aligned (amber) case where the
+        // headline already says everything — keep it for misaligned
+        // cases where the trading implication isn't obvious from the
+        // numbers alone.
+        <p className="text-[11px] text-subtle leading-relaxed">
+          {wallInfo.interpretation}
+        </p>
+      )}
+    </div>
+  )
+}
+
+// "2026-05-12" → "Fri May 12". Always parsed UTC so we don't get
+// off-by-one timezone fuckery on a YYYY-MM-DD string. en-US weekday
+// short + month short matches every other date format on the page.
+function formatFriendlyDate(iso) {
+  if (!iso) return '—'
+  const d = new Date(`${iso}T00:00:00Z`)
+  if (Number.isNaN(d.getTime())) return iso
+  return d.toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  })
 }
 
 // Time-pressure granularity — translates raw DTE into trading
@@ -1740,7 +1818,11 @@ function niceTriggerLabel(type) {
     case 'position_profit_50': return 'Profit +50%'
     case 'position_profit_100': return 'Profit +100%'
     case 'position_profit_200': return 'Profit +200%'
-    case 'position_dte_21': return '21 DTE crossed'
+    // position_dte_21 retired 2026-05-09 — TimePressureCard covers
+    // the actionable end-of-trade window. Returning null hides
+    // legacy rows still sitting in open_positions.triggers_fired
+    // without a backfill.
+    case 'position_dte_21': return null
     case 'position_expiring_tomorrow': return 'Expiring tomorrow'
     default: return type
   }

@@ -1,7 +1,6 @@
 import { Suspense, lazy } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
-import { useDteMonitor } from './hooks/useDteMonitor'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import SignalDetail from './pages/SignalDetail'
@@ -44,10 +43,6 @@ function LoadingScreen() {
 }
 
 function ProtectedLayout() {
-  // Daily DTE check fires once per day per session for active real-money
-  // signals. See src/hooks/useDteMonitor.js — the auto -50% stop-loss
-  // trigger remains gated on a live option price feed.
-  useDteMonitor()
   return <Layout />
 }
 
