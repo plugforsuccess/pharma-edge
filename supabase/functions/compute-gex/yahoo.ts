@@ -37,6 +37,9 @@ export interface YahooStrike {
 export interface YahooChain {
   ticker: string
   spot: number
+  // Last regular-session close. Used by /position to compute today's
+  // realized move vs the option market's expected move.
+  previousClose: number | null
   expirations: number[]      // unix-seconds for every available expiry
   expirationDate: string     // YYYY-MM-DD of the expiry returned
   expirationUnix: number
@@ -183,6 +186,13 @@ function parseChain(raw: unknown, ticker: string): YahooChain {
     throw new YahooError(`yahoo options ${ticker}: no spot price in quote`)
   }
 
+  const prevCloseRaw = quote?.['regularMarketPreviousClose'] ?? quote?.['previousClose']
+  const prevCloseNum = prevCloseRaw == null ? null : Number(prevCloseRaw)
+  const previousClose =
+    prevCloseNum != null && Number.isFinite(prevCloseNum) && prevCloseNum > 0
+      ? prevCloseNum
+      : null
+
   const expirationDates = (result['expirationDates'] as number[] | undefined) ?? []
 
   const opts = (result['options'] as Array<Record<string, unknown>> | undefined)?.[0]
@@ -231,6 +241,7 @@ function parseChain(raw: unknown, ticker: string): YahooChain {
   return {
     ticker: ticker.toUpperCase(),
     spot,
+    previousClose,
     expirations: expirationDates,
     expirationDate,
     expirationUnix,
