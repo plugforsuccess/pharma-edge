@@ -399,6 +399,17 @@ interface MatrixOutput {
   expected_move: number          // 1-stddev underlying $ move at front-expiry IV
   expected_move_pct: number      // expected_move / spot
   pinning_probability: number    // 0..1 heuristic — see greeks.ts
+  // 1-day expected move + previous close + intraday-realized so the
+  // /position page can show "today realized X% of expected" context
+  // and let the client compute trade-DTE-tailored expected move from
+  // iv_used. All optional for back-compat with cached payloads.
+  iv_used?: number               // the IV that drove expected_move
+  prev_close?: number | null     // last regular-session close
+  expected_move_today?: number   // 1-stddev $ move over a single day
+  expected_move_today_pct?: number
+  realized_move_today?: number   // signed: spot - prev_close
+  realized_move_today_pct?: number
+  realized_pct_of_today?: number // |realized| / expected_move_today, 0..1+
   // Sum of velocity_cells when set; null otherwise. Used by the
   // metrics strip on the Velocity tab so it has a tab-specific
   // headline number instead of falling back to net_gex.
@@ -422,15 +433,16 @@ async function computeMatrixFromDxLink(
     .from('dxlink_quotes')
     .select(
       'symbol, kind, underlying, expiration_date, strike, option_type, ' +
-        'bid, ask, mid, iv, gamma, delta, open_interest, updated_at',
+        'bid, ask, mid, iv, gamma, delta, open_interest, updated_at, prev_close',
     )
     .or(`symbol.eq.${ticker},underlying.eq.${ticker}`)
   if (error) return { error: `dxlink_quotes query: ${error.message}` }
 
-  const equity = (rows as DxQuoteRow[] | null)?.find((r) => r.kind === 'equity')
+  const equity = (rows as Array<DxQuoteRow & { prev_close?: number | null }> | null)?.find((r) => r.kind === 'equity')
   if (!equity) return { error: 'no dxlink subscription for ticker' }
   const spot = equity.mid ?? equity.bid ?? equity.ask
   if (!spot || spot <= 0) return { error: 'no spot price in dxlink_quotes' }
+  const prevClose = (equity as { prev_close?: number | null }).prev_close ?? null
 
   const equityAge = Date.now() - new Date(equity.updated_at).getTime()
   if (equityAge > DXLINK_FRESH_MS) {
@@ -534,7 +546,7 @@ async function computeMatrixFromDxLink(
     return { gex, vex, cex, dex }
   }, (exp) => {
     return Array.from(byExpFull.get(exp)?.keys() ?? [])
-  }, opts)
+  }, opts, undefined, undefined, prevClose)
 }
 
 async function computeMatrixFromYahoo(
@@ -550,7 +562,7 @@ async function computeMatrixFromYahoo(
     if (err instanceof YahooError) return { error: err.message }
     throw err
   }
-  const { spot, expirations: expiryUnixes } = firstChain
+  const { spot, expirations: expiryUnixes, previousClose: yahooPrevClose } = firstChain
   if (!Number.isFinite(spot) || spot <= 0) return { error: `no spot for ${ticker}` }
 
   // Use start-of-today-UTC instead of "right now" — Yahoo encodes
@@ -636,7 +648,7 @@ async function computeMatrixFromYahoo(
     return { gex, vex, cex, dex }
   }, (exp) => {
     return Array.from(byExp.get(exp)?.keys() ?? [])
-  }, opts, dteByExp)
+  }, opts, dteByExp, undefined, yahooPrevClose ?? null)
 }
 
 // Velocity Mode — diff the live matrix against the most recent
@@ -739,6 +751,7 @@ function buildMatrix(
   opts: MatrixOpts,
   dteByExp?: Map<string, number>,
   frontIv?: number,
+  prevClose?: number | null,
 ): { matrix?: MatrixOutput; error?: string } {
   // Strike union across all expirations, trimmed to ATM ± window,
   // capped to opts.maxStrikes centered on spot, descending order.
@@ -835,6 +848,25 @@ function buildMatrix(
       )
     : 0
 
+  // Move context: 1-day expected move + today's realized move (vs
+  // prev_close). Lets the /position page render "today realized X%
+  // of expected" without a second compute. Also exposes iv_used so
+  // the client can scale to a user-specific trade DTE without us
+  // having to cache per-DTE responses.
+  const ivUsed = ivForExpectedMove
+  const expectedMoveToday = expectedMove(spot, ivUsed, 1)
+  const expectedMoveTodayPct = spot > 0 ? expectedMoveToday / spot : 0
+  let realizedMoveToday: number | undefined
+  let realizedMoveTodayPct: number | undefined
+  let realizedPctOfToday: number | undefined
+  if (prevClose != null && prevClose > 0) {
+    realizedMoveToday = spot - prevClose
+    realizedMoveTodayPct = realizedMoveToday / prevClose
+    realizedPctOfToday = expectedMoveToday > 0
+      ? Math.abs(realizedMoveToday) / expectedMoveToday
+      : 0
+  }
+
   return {
     matrix: {
       ticker: ticker.toUpperCase(),
@@ -858,6 +890,13 @@ function buildMatrix(
       expected_move: em,
       expected_move_pct: emPct,
       pinning_probability: pin,
+      iv_used: ivUsed,
+      prev_close: prevClose ?? null,
+      expected_move_today: expectedMoveToday,
+      expected_move_today_pct: expectedMoveTodayPct,
+      realized_move_today: realizedMoveToday,
+      realized_move_today_pct: realizedMoveTodayPct,
+      realized_pct_of_today: realizedPctOfToday,
       net_velocity: null,
     },
   }

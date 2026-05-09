@@ -33,6 +33,11 @@ export default function PositionDetail() {
   // trade's expiration. Non-blocking; the rest of the page renders
   // without waiting.
   const [wallInfo, setWallInfo] = useState(null)
+  // Move context derived from the same compute-gex fetch — today's
+  // realized move vs the option market's expected move, plus an
+  // expected move scaled to the trade's remaining DTE (using iv_used
+  // returned from the matrix payload).
+  const [moveInfo, setMoveInfo] = useState(null)
 
   async function load() {
     setLoading(true)
@@ -103,6 +108,36 @@ export default function PositionDetail() {
         interpretation,
         spot: data.data.spot,
         netGex: data.data.net_gex,
+      })
+
+      // Move context. Server returns prev_close + 1-day expected
+      // move; we scale to the trade's remaining DTE locally so we
+      // don't need a separate cache key per DTE on the server.
+      const ivUsed = data.data.iv_used
+      const spot = data.data.spot
+      const prevClose = data.data.prev_close
+      const expectedToday = data.data.expected_move_today
+      const expectedTodayPct = data.data.expected_move_today_pct
+      const realizedToday = data.data.realized_move_today
+      const realizedTodayPct = data.data.realized_move_today_pct
+      const realizedPctOfToday = data.data.realized_pct_of_today
+      // sqrt-of-time scaling for the trade's remaining DTE
+      const expectedTrade = ivUsed && tradeDte > 0
+        ? spot * ivUsed * Math.sqrt(tradeDte / 365)
+        : null
+      const expectedTradePct = expectedTrade && spot > 0 ? expectedTrade / spot : null
+      setMoveInfo({
+        spot,
+        prevClose: prevClose ?? null,
+        expectedToday: expectedToday ?? null,
+        expectedTodayPct: expectedTodayPct ?? null,
+        realizedToday: realizedToday ?? null,
+        realizedTodayPct: realizedTodayPct ?? null,
+        realizedPctOfToday: realizedPctOfToday ?? null,
+        expectedTrade,
+        expectedTradePct,
+        tradeDte,
+        ivUsed: ivUsed ?? null,
       })
     })()
     return () => { cancelled = true }
@@ -240,6 +275,84 @@ export default function PositionDetail() {
           {pos.last_poll_source === 'yahoo' && ' (15-min delayed)'}
         </div>
       </div>
+
+      {moveInfo && (moveInfo.realizedToday != null || moveInfo.expectedTrade != null) && (
+        <div className="bg-card border border-border rounded-xl p-3 space-y-2">
+          <div className="text-[10px] uppercase tracking-wider text-muted">
+            Move context
+          </div>
+          {moveInfo.realizedToday != null && moveInfo.expectedToday != null && (
+            <div className="space-y-1">
+              <div className="text-xs flex items-baseline justify-between">
+                <span className="text-subtle">Today realized</span>
+                <span
+                  className={`font-mono-tab ${
+                    moveInfo.realizedToday >= 0 ? 'text-green-400' : 'text-crimson'
+                  }`}
+                >
+                  {moveInfo.realizedToday >= 0 ? '+' : ''}${Math.abs(moveInfo.realizedToday).toFixed(2)}
+                  {moveInfo.realizedTodayPct != null && (
+                    <span className="text-muted ml-1">
+                      ({moveInfo.realizedTodayPct >= 0 ? '+' : ''}
+                      {(moveInfo.realizedTodayPct * 100).toFixed(2)}%)
+                    </span>
+                  )}
+                </span>
+              </div>
+              <div className="text-xs flex items-baseline justify-between">
+                <span className="text-subtle">Today expected ±</span>
+                <span className="font-mono-tab text-fg">
+                  ${moveInfo.expectedToday.toFixed(2)}
+                  {moveInfo.expectedTodayPct != null && (
+                    <span className="text-muted ml-1">
+                      ({(moveInfo.expectedTodayPct * 100).toFixed(2)}%)
+                    </span>
+                  )}
+                </span>
+              </div>
+              {moveInfo.realizedPctOfToday != null && (
+                <div className="text-[11px] text-subtle leading-relaxed pt-1">
+                  {moveInfo.realizedPctOfToday >= 1 ? (
+                    <span className="text-amber-400">
+                      Already past today's expected range ({(moveInfo.realizedPctOfToday * 100).toFixed(0)}% consumed) — vol expansion in progress.
+                    </span>
+                  ) : moveInfo.realizedPctOfToday >= 0.7 ? (
+                    <>
+                      <span className="text-amber-400">{(moveInfo.realizedPctOfToday * 100).toFixed(0)}% of today's expected range consumed</span>
+                      {' '}— most of the day's move is in the books; remaining drift likely small.
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-fg">{(moveInfo.realizedPctOfToday * 100).toFixed(0)}% of today's expected range consumed</span>
+                      {' '}— room left for the day's expected move.
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+          {moveInfo.expectedTrade != null && moveInfo.tradeDte > 0 && (
+            <div className="text-xs flex items-baseline justify-between pt-2 border-t border-border">
+              <span className="text-subtle">
+                Expected ± over remaining {moveInfo.tradeDte}d
+              </span>
+              <span className="font-mono-tab text-fg">
+                ${moveInfo.expectedTrade.toFixed(2)}
+                {moveInfo.expectedTradePct != null && (
+                  <span className="text-muted ml-1">
+                    ({(moveInfo.expectedTradePct * 100).toFixed(1)}%)
+                  </span>
+                )}
+              </span>
+            </div>
+          )}
+          {moveInfo.prevClose == null && (
+            <div className="text-[10px] text-muted italic">
+              Previous close not yet available — realized move pending.
+            </div>
+          )}
+        </div>
+      )}
 
       {wallInfo && (
         <div className="bg-card border border-border rounded-xl p-3 space-y-2">
