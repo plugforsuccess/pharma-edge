@@ -147,17 +147,54 @@ serve(async (req) => {
     // we don't leak existence to a probing caller.
     return json({ success: false, error: 'signal not found' }, 404)
   }
-  if (!signal.tastytrade_account_number) {
-    // Manual log without a broker handoff — no working orders to
-    // surface. Return empty list rather than erroring.
-    return json({ success: true, data: { working_orders: [], reason: 'no_broker_link' } })
+  // Account-number resolution. Cash Moves writes
+  // signals.tastytrade_account_number when place-order submits a trade
+  // through the app — but most users place positions (and brackets)
+  // manually on Tastytrade and only use Cash Moves to log + analyze.
+  // Those signals start with a null account_number, so we fall back to
+  // discovering the account via /customers/me/accounts (the same call
+  // get-account uses). The OAuth refresh-token grant is
+  // one-account-per-user in this setup, so there's no ambiguity —
+  // pick the first non-closed account. Multi-account support would
+  // need a user-level default column on profiles; defer.
+  let accountNumber = signal.tastytrade_account_number as string | null
+  if (!accountNumber) {
+    let acctsResp: Response
+    try {
+      acctsResp = await tastytradeFetch(
+        adminClient,
+        '/customers/me/accounts',
+        { method: 'GET' },
+      )
+    } catch (err) {
+      const reason = err instanceof TastytradeError ? err.message : String(err)
+      return json({ success: false, error: `account lookup failed: ${reason}` }, 502)
+    }
+    if (!acctsResp.ok) {
+      return json({ success: true, data: { working_orders: [], reason: 'no_broker_link' } })
+    }
+    const acctsBody = await acctsResp.json().catch(() => null) as
+      | { data?: { items?: Array<Record<string, unknown>> } }
+      | null
+    const items = acctsBody?.data?.items ?? []
+    // Tastytrade nests the account fields under .account on each item.
+    // Skip closed accounts; the API returns them with `is-closed: true`.
+    const firstActive = items.find((it) => {
+      const acct = (it.account ?? it) as Record<string, unknown>
+      return !acct['is-closed']
+    })
+    const acct = (firstActive?.account ?? firstActive) as Record<string, unknown> | undefined
+    accountNumber = acct ? String(acct['account-number'] ?? '') : ''
+    if (!accountNumber) {
+      return json({ success: true, data: { working_orders: [], reason: 'no_broker_link' } })
+    }
   }
 
   let resp: Response
   try {
     resp = await tastytradeFetch(
       adminClient,
-      `/accounts/${encodeURIComponent(signal.tastytrade_account_number)}/orders/live`,
+      `/accounts/${encodeURIComponent(accountNumber)}/orders/live`,
       { method: 'GET' },
     )
   } catch (err) {
@@ -215,7 +252,7 @@ serve(async (req) => {
     const price = priceRaw == null ? null : Number(priceRaw)
     normalized.push({
       tastytrade_order_id: String(raw.id ?? ''),
-      account_number: signal.tastytrade_account_number,
+      account_number: accountNumber,
       order_type: orderType,
       status: status || null,
       price: Number.isFinite(price) ? (price as number) : null,
@@ -231,7 +268,7 @@ serve(async (req) => {
     success: true,
     data: {
       working_orders: normalized,
-      account_number: signal.tastytrade_account_number,
+      account_number: accountNumber,
       ticker: signal.ticker,
       expiration: targetExpiry,
     },
