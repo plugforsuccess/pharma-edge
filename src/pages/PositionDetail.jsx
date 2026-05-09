@@ -791,8 +791,16 @@ function DistanceToActionCard({ pos, moveInfo }) {
   const spotMoveToStop = spreadDeltaToStop / NET_DELTA_ESTIMATE
 
   const dirSign = g.isCall ? 1 : -1   // bull call needs spot up, bear put needs spot down
+  // The direction is already encoded in the spread-delta values:
+  //   spotMoveToTarget is POSITIVE — spread needs to rise to hit target
+  //   spotMoveToStop is NEGATIVE — spread needs to fall to hit stop
+  // Multiplying by dirSign translates spread-direction into spot-direction.
+  // Bull call (+1): positive target → spot up, negative stop → spot down.
+  // Bear put (−1): positive target → spot down, negative stop → spot up.
+  // Same formula for both anchors — the earlier `spot - … * dirSign`
+  // flipped the sign twice and put bull-call stops ABOVE current spot.
   const targetSpot = spot + spotMoveToTarget * dirSign
-  const stopSpot = spot - spotMoveToStop * dirSign  // stop fires when spread DROPS, opposite of target
+  const stopSpot = spot + spotMoveToStop * dirSign
 
   return (
     <div className="bg-card border border-border rounded-xl p-3 space-y-2">
