@@ -38,6 +38,12 @@ export default function PositionDetail() {
   // expected move scaled to the trade's remaining DTE (using iv_used
   // returned from the matrix payload).
   const [moveInfo, setMoveInfo] = useState(null)
+  // Per-leg Greeks pulled from dxlink_quotes. Populated when the
+  // worker is subscribed to the spread's strikes; shows "—" otherwise.
+  // Per-spread net = long − short (long-leg Greeks dominate exposure
+  // for debit spreads). Multiply by 100 × contracts for total dollar-
+  // denominated values where the card calls them out explicitly.
+  const [legGreeks, setLegGreeks] = useState(null)
 
   async function load() {
     setLoading(true)
@@ -138,6 +144,46 @@ export default function PositionDetail() {
         expectedTradePct,
         tradeDte,
         ivUsed: ivUsed ?? null,
+      })
+    })()
+    return () => { cancelled = true }
+  }, [pos?.ticker, pos?.expiration, pos?.long_strike, pos?.short_strike, pos?.strategy_type])
+
+  // Per-leg Greeks fetch from dxlink_quotes. The worker subscribes to
+  // front-2 expirations within ATM ± 25%, so this only finds rows for
+  // spreads inside that window — far-OTM or back-month legs come back
+  // null and the NetGreeksCard renders "—" honestly. Match by OCC
+  // symbol when present (most accurate); otherwise fall back to the
+  // (underlying, expiration_date, strike, option_type) compound key.
+  useEffect(() => {
+    if (!pos?.ticker || !pos?.expiration || !pos?.long_strike || !pos?.short_strike) return
+    let cancelled = false
+    ;(async () => {
+      const isCall = (pos.strategy_type || '').toLowerCase().includes('call')
+      const optionType = isCall ? 'C' : 'P'
+      let query = supabase
+        .from('dxlink_quotes')
+        .select('symbol, strike, option_type, delta, gamma, theta, vega, iv, mid, updated_at')
+        .eq('underlying', pos.ticker)
+        .eq('kind', 'option')
+        .eq('expiration_date', pos.expiration)
+        .eq('option_type', optionType)
+        .in('strike', [Number(pos.long_strike), Number(pos.short_strike)])
+      const { data, error: gErr } = await query
+      if (cancelled) return
+      if (gErr || !Array.isArray(data) || data.length === 0) {
+        setLegGreeks({ long: null, short: null, available: false })
+        return
+      }
+      const longRow = data.find((r) => Number(r.strike) === Number(pos.long_strike))
+      const shortRow = data.find((r) => Number(r.strike) === Number(pos.short_strike))
+      setLegGreeks({
+        long: longRow ?? null,
+        short: shortRow ?? null,
+        // We consider the data "available" only when BOTH legs return
+        // a row. A one-sided fetch produces a misleading net (the
+        // missing leg's Greeks aren't zero, they're unknown).
+        available: Boolean(longRow && shortRow),
       })
     })()
     return () => { cancelled = true }
@@ -284,6 +330,8 @@ export default function PositionDetail() {
       <TimePressureCard pos={pos} />
 
       <AccountContextCard pos={pos} profile={profile} />
+
+      <NetGreeksCard pos={pos} legGreeks={legGreeks} />
 
       {moveInfo && (moveInfo.realizedToday != null || moveInfo.expectedTrade != null) && (
         <div className="bg-card border border-border rounded-xl p-3 space-y-2">
@@ -996,6 +1044,117 @@ function ProbCell({ label, pct, tone }) {
       <div className={`font-mono-tab text-sm font-semibold ${toneClass}`}>
         {(pct * 100).toFixed(0)}%
       </div>
+    </div>
+  )
+}
+
+// Net per-spread Greeks. Long-leg minus short-leg, since a debit
+// spread is "long the closer leg, short the farther leg." Reads from
+// the dxlink_quotes cache (front-2 expirations × ATM ± 25%); shows
+// "—" for spreads outside that window. Dollar-denominated theta/vega
+// surface "$ per day" / "$ per IV-point" at the position level
+// (× 100 × contracts) since that's the only unit traders reason in.
+function NetGreeksCard({ pos, legGreeks }) {
+  const contracts = Math.max(1, Number(pos?.contracts) || 1)
+  // Per-share Greeks straight from dxFeed; valid only when both legs
+  // returned a row. One-sided fetches produce misleading nets.
+  const long = legGreeks?.long
+  const short = legGreeks?.short
+  const available = legGreeks?.available
+  const fmtSigned = (v, digits = 2) =>
+    v == null || !Number.isFinite(v)
+      ? '—'
+      : `${v >= 0 ? '+' : ''}${v.toFixed(digits)}`
+  const fmtDollar = (v) =>
+    v == null || !Number.isFinite(v)
+      ? '—'
+      : `${v >= 0 ? '+' : '−'}$${Math.abs(v).toFixed(2)}`
+
+  // Net per share. Position-level theta/vega multiply by 100 ×
+  // contracts to land in the dollar units traders track.
+  const netDelta = available ? Number(long.delta) - Number(short.delta) : null
+  const netGamma = available ? Number(long.gamma) - Number(short.gamma) : null
+  const netTheta = available ? Number(long.theta) - Number(short.theta) : null
+  const netVega = available ? Number(long.vega) - Number(short.vega) : null
+  const positionTheta =
+    netTheta != null && Number.isFinite(netTheta) ? netTheta * 100 * contracts : null
+  const positionVega =
+    netVega != null && Number.isFinite(netVega) ? netVega * 100 * contracts : null
+  const stalest = (() => {
+    const ts = [long?.updated_at, short?.updated_at].filter(Boolean)
+    if (ts.length === 0) return null
+    return ts.reduce((acc, t) => (acc && acc > t ? acc : t), null)
+  })()
+
+  return (
+    <div className="bg-card border border-border rounded-xl p-3 space-y-2">
+      <div className="flex items-baseline justify-between">
+        <div className="text-[10px] uppercase tracking-wider text-muted">
+          Net Greeks
+        </div>
+        {stalest && (
+          <div className="text-[10px] text-muted">
+            updated {agoString(stalest)}
+          </div>
+        )}
+      </div>
+      {!available ? (
+        <p className="text-[11px] text-subtle leading-relaxed">
+          {legGreeks == null
+            ? 'Loading…'
+            : 'No live Greeks for these strikes — the streaming worker only subscribes to the front 2 expirations within ATM ± 25%. Spread is outside that window or the data hasn\'t arrived yet.'}
+        </p>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            <GreekCell
+              label="Net delta"
+              value={fmtSigned(netDelta, 2)}
+              hint="per share, both legs combined"
+            />
+            <GreekCell
+              label="Net gamma"
+              value={fmtSigned(netGamma, 4)}
+              hint="rate-of-change of delta"
+            />
+            <GreekCell
+              label="Position theta"
+              value={fmtDollar(positionTheta)}
+              hint={`per day · ${contracts} contracts`}
+              tone={positionTheta != null && positionTheta < 0 ? 'red' : 'green'}
+            />
+            <GreekCell
+              label="Position vega"
+              value={fmtDollar(positionVega)}
+              hint={`per IV-point · ${contracts} contracts`}
+              tone={positionVega != null && positionVega > 0 ? 'green' : 'red'}
+            />
+          </div>
+          <p className="text-[11px] text-subtle leading-relaxed pt-1">
+            {netDelta != null && Math.abs(netDelta) < 0.1
+              ? 'Near delta-neutral — the spread\'s P&L hinges on time decay and IV more than direction.'
+              : netDelta != null && netDelta > 0
+                ? 'Positive net delta — the spread gains as the underlying rises.'
+                : 'Negative net delta — the spread gains as the underlying falls.'}
+          </p>
+        </>
+      )}
+    </div>
+  )
+}
+
+function GreekCell({ label, value, hint, tone }) {
+  const toneClass =
+    tone === 'red' ? 'text-crimson' : tone === 'green' ? 'text-green-400' : 'text-fg'
+  return (
+    <div className="bg-bg/50 border border-border/50 rounded-lg p-2">
+      <div className="text-[10px] uppercase tracking-wider text-muted">
+        {label}
+      </div>
+      <div className={`text-sm font-mono-tab font-semibold ${toneClass} mt-0.5`}>
+        {value}
+      </div>
+      {hint && <div className="text-[10px] text-muted mt-0.5">{hint}</div>}
     </div>
   )
 }
