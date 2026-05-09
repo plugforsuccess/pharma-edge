@@ -31,6 +31,25 @@ const MAX_TOKENS = 2000
 const RATE_LIMIT_PER_HOUR = Number(Deno.env.get('CLAUDE_RATE_LIMIT_PER_HOUR') ?? '30')
 const CACHE_TTL_MS = 5 * 60 * 1000
 
+// Anthropic per-1M-token pricing for Sonnet 4.6. Update when prices
+// change; historical claude_calls rows preserve the cost they were
+// charged at because we write cost_usd at insert time.
+const PRICING_PER_1M: Record<string, { input: number; output: number; cache_creation: number; cache_read: number }> = {
+  'claude-sonnet-4-6': { input: 3, output: 15, cache_creation: 3.75, cache_read: 0.30 },
+}
+
+function computeClaudeCost(model: string, usage: Record<string, number | undefined>): number {
+  const p = PRICING_PER_1M[model]
+  if (!p) return 0
+  const M = 1_000_000
+  return (
+    ((usage.input_tokens ?? 0) * p.input) / M +
+    ((usage.output_tokens ?? 0) * p.output) / M +
+    ((usage.cache_creation_input_tokens ?? 0) * p.cache_creation) / M +
+    ((usage.cache_read_input_tokens ?? 0) * p.cache_read) / M
+  )
+}
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
@@ -804,11 +823,22 @@ serve(async (req) => {
     }
   }
 
-  // Account for the call against the rate-limit ledger
+  // Account for the call against the rate-limit ledger + cost
+  // attribution. Token counts come from claudeBody.usage; cost is
+  // computed at write time using the model's per-token rates so
+  // historical rows preserve the price the call was charged at.
+  const usage = (claudeBody?.usage ?? {}) as Record<string, number | undefined>
+  const cost = computeClaudeCost(CLAUDE_MODEL, usage)
   await adminClient.from('claude_calls').insert({
     user_id: user.id,
     function_name: 'suggest-plays',
     called_at: new Date().toISOString(),
+    model: CLAUDE_MODEL,
+    input_tokens: usage.input_tokens ?? 0,
+    output_tokens: usage.output_tokens ?? 0,
+    cache_creation_tokens: usage.cache_creation_input_tokens ?? 0,
+    cache_read_tokens: usage.cache_read_input_tokens ?? 0,
+    cost_usd: cost,
   }).then(() => {})
 
   // Cache the result

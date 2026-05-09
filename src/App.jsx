@@ -27,6 +27,7 @@ const GammaFlipTrading = lazy(() => import('./pages/learn/GammaFlipTrading'))
 const ZeroDtePinningStrategy = lazy(() => import('./pages/learn/ZeroDtePinningStrategy'))
 const VannaExposureExplained = lazy(() => import('./pages/learn/VannaExposureExplained'))
 const BestGexTools = lazy(() => import('./pages/learn/BestGexTools'))
+const Admin = lazy(() => import('./pages/Admin'))
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -93,6 +94,7 @@ export default function App() {
             <Route path="learn/best-gex-tools" element={<BestGexTools /> } />
             <Route path="glossary" element={<Glossary />} />
             <Route path="position/:id" element={<PositionDetail />} />
+            <Route path="admin" element={<Admin />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

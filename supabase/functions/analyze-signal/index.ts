@@ -29,6 +29,25 @@ const RATE_LIMIT_PER_HOUR = Number(Deno.env.get('CLAUDE_RATE_LIMIT_PER_HOUR') ??
 const WEB_SEARCH_MAX_USES = Number(Deno.env.get('WEB_SEARCH_MAX_USES') ?? '4')
 const KEEPALIVE_MS = 4_000
 
+// Anthropic per-1M-token pricing for Sonnet 4.6. Update when prices
+// change; historical claude_calls rows preserve the cost they were
+// charged at because we write cost_usd at insert time.
+const PRICING_PER_1M: Record<string, { input: number; output: number; cache_creation: number; cache_read: number }> = {
+  'claude-sonnet-4-6': { input: 3, output: 15, cache_creation: 3.75, cache_read: 0.30 },
+}
+
+function computeClaudeCost(model: string, usage: Record<string, number | undefined>): number {
+  const p = PRICING_PER_1M[model]
+  if (!p) return 0
+  const M = 1_000_000
+  return (
+    ((usage.input_tokens ?? 0) * p.input) / M +
+    ((usage.output_tokens ?? 0) * p.output) / M +
+    ((usage.cache_creation_input_tokens ?? 0) * p.cache_creation) / M +
+    ((usage.cache_read_input_tokens ?? 0) * p.cache_read) / M
+  )
+}
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
@@ -286,6 +305,16 @@ serve(async (req) => {
         const citations: unknown[] = []
         let searchCount = 0
         let stopReason: string | null = null
+        // Anthropic streams usage in message_start (initial input) and
+        // message_delta (cumulative). The last message_delta before
+        // message_stop holds the final totals — we keep updating these
+        // as deltas arrive and snapshot at the end.
+        const usage: Record<string, number> = {
+          input_tokens: 0,
+          output_tokens: 0,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 0,
+        }
 
         while (true) {
           const { value, done } = await reader.read()
@@ -337,9 +366,28 @@ serve(async (req) => {
                 const c = (delta as { citation?: unknown }).citation
                 if (c) citations.push(c)
               }
+            } else if (t === 'message_start') {
+              // Initial usage snapshot (input + cache tokens).
+              const msg = evt.message as Record<string, unknown> | undefined
+              const u = msg?.usage as Record<string, number> | undefined
+              if (u) {
+                if (typeof u.input_tokens === 'number') usage.input_tokens = u.input_tokens
+                if (typeof u.cache_creation_input_tokens === 'number') usage.cache_creation_input_tokens = u.cache_creation_input_tokens
+                if (typeof u.cache_read_input_tokens === 'number') usage.cache_read_input_tokens = u.cache_read_input_tokens
+                if (typeof u.output_tokens === 'number') usage.output_tokens = u.output_tokens
+              }
             } else if (t === 'message_delta') {
               const d = evt.delta as Record<string, unknown> | undefined
               if (d?.stop_reason) stopReason = d.stop_reason as string
+              // Cumulative usage on each message_delta — the final
+              // delta before message_stop has the true totals.
+              const u = (evt as { usage?: Record<string, number> }).usage
+              if (u) {
+                if (typeof u.input_tokens === 'number') usage.input_tokens = u.input_tokens
+                if (typeof u.output_tokens === 'number') usage.output_tokens = u.output_tokens
+                if (typeof u.cache_creation_input_tokens === 'number') usage.cache_creation_input_tokens = u.cache_creation_input_tokens
+                if (typeof u.cache_read_input_tokens === 'number') usage.cache_read_input_tokens = u.cache_read_input_tokens
+              }
             } else if (t === 'message_stop') {
               // wrap up below
             } else if (t === 'error') {
@@ -368,8 +416,20 @@ serve(async (req) => {
         }
 
         // Log the successful Claude call AFTER the stream completes
-        // so failed/aborted calls don't count against quota.
-        await adminClient.from('claude_calls').insert({ user_id: user.id })
+        // so failed/aborted calls don't count against quota. Token
+        // attribution + cost are written on the same row so the
+        // /admin cost ledger doesn't need a second source of truth.
+        const cost = computeClaudeCost(CLAUDE_MODEL, usage)
+        await adminClient.from('claude_calls').insert({
+          user_id: user.id,
+          function_name: 'analyze-signal',
+          model: CLAUDE_MODEL,
+          input_tokens: usage.input_tokens,
+          output_tokens: usage.output_tokens,
+          cache_creation_tokens: usage.cache_creation_input_tokens,
+          cache_read_tokens: usage.cache_read_input_tokens,
+          cost_usd: cost,
+        })
 
         send('complete', {
           analysis,

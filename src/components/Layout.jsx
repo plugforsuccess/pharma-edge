@@ -8,9 +8,11 @@ import {
   Plus,
   Settings,
   Sparkles,
+  Shield,
 } from 'lucide-react'
 import InstallPrompt from './InstallPrompt'
 import Spinner from './Spinner'
+import { useAuth } from '../context/AuthContext'
 import clsx from 'clsx'
 
 // Bottom nav (mobile) + sidebar nav (desktop). Naming conventions per
@@ -48,6 +50,13 @@ const navFull = [
 
 export default function Layout() {
   const navigate = useNavigate()
+  const { profile } = useAuth()
+  // Owner-only Admin link; appended to the desktop sidebar nav when
+  // the signed-in user has profiles.is_admin = true. Mobile users
+  // reach /admin by typing the URL — it's a low-frequency surface.
+  const sidebarNav = profile?.is_admin
+    ? [...navFull, { to: '/admin', icon: Shield, label: 'Admin' }]
+    : navFull
   return (
     <div className="min-h-screen flex">
       {/* Desktop sidebar — visible at lg: and up. Mirrors the bottom-nav
@@ -75,7 +84,7 @@ export default function Layout() {
             <Plus size={15} strokeWidth={2.5} />
             Log a Move
           </button>
-          {navFull.map(({ to, icon: Icon, label }) => (
+          {sidebarNav.map(({ to, icon: Icon, label }) => (
             <NavLink
               key={to}
               to={to}
