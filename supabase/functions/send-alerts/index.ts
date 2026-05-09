@@ -34,7 +34,8 @@ const ALLOWED_TYPES = new Set([
   'position_profit_50',
   'position_profit_100',
   'position_profit_200',
-  'position_dte_21',
+  // 'position_dte_21' retired 2026-05-09 — see PositionDetail
+  // TimePressureCard for the actionable late-trade warning.
   'position_expiring_tomorrow',
   'position_filled',
   'position_closed',
@@ -222,12 +223,6 @@ serve(async (req) => {
         pushBody = `${ticker} ${strategy} at +200%. Sell 75% per Cash Moves ladder.`
         htmlBody = positionAlertHtml(ticker, strategy, longK, shortK, pnlStr,
           'Profit ladder: +200%', 'Sell 75% per profit ladder.', clickUrl)
-        break
-      case 'position_dte_21':
-        subject = `${ticker} now 21 DTE — review`
-        pushBody = `${ticker} ${strategy} at 21 DTE. Review per the entry rule.`
-        htmlBody = positionAlertHtml(ticker, strategy, longK, shortK, pnlStr,
-          '21 DTE crossed', 'Review the position. Theta acceleration zone.', clickUrl)
         break
       case 'position_expiring_tomorrow':
         subject = `${ticker} expires tomorrow — close`
