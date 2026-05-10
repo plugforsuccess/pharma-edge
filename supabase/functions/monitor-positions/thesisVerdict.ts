@@ -56,17 +56,41 @@ export function computeThesisVerdict(
     state = 'invalidated'
   }
 
-  const isCall = (trade.strategy_type || '').includes('CALL')
-  const isPut = (trade.strategy_type || '').includes('PUT')
+  // Wall pierced — context-aware. See src/utils/thesisVerdict.js
+  // for the full rationale; mirror in lock-step.
+  const PIERCE = 0.5
+  const wallGex = entry.largest_wall?.gex_net
+  const isBullish = ['BULL_CALL', 'BULL_PUT_CREDIT'].includes(trade.strategy_type)
+  const isBearish = ['BEAR_PUT', 'BEAR_CALL_CREDIT'].includes(trade.strategy_type)
+  const wallType: 'call' | 'put' | null =
+    Number.isFinite(wallGex) && (wallGex as number) > 0
+      ? 'call'
+      : Number.isFinite(wallGex) && (wallGex as number) < 0
+        ? 'put'
+        : isBullish
+          ? 'call'
+          : isBearish
+            ? 'put'
+            : null
   const entryWallStrike = entry.largest_wall?.strike
-  if (Number.isFinite(entryWallStrike) && entryWallStrike != null) {
-    if (isCall && live.spot! >= entryWallStrike + 0.5 && entry.spot! < entryWallStrike) {
-      reasons.push(`Spot pierced the entry call wall at ${formatStrike(entryWallStrike)}. Dealer resistance broken.`)
-      state = 'invalidated'
+  if (Number.isFinite(entryWallStrike) && entryWallStrike != null && wallType) {
+    const crossedUp = entry.spot! < entryWallStrike && live.spot! >= entryWallStrike + PIERCE
+    const crossedDown = entry.spot! > entryWallStrike && live.spot! <= entryWallStrike - PIERCE
+    if (wallType === 'call' && crossedUp) {
+      if (isBullish) {
+        reasons.push(`Spot broke through the entry call wall at ${formatStrike(entryWallStrike)} — resistance failed, structural target zone. Check the P&L card.`)
+      } else if (isBearish) {
+        reasons.push(`Spot pierced the entry call wall at ${formatStrike(entryWallStrike)}. Bullish breakout — bearish thesis broken.`)
+        state = 'invalidated'
+      }
     }
-    if (isPut && live.spot! <= entryWallStrike - 0.5 && entry.spot! > entryWallStrike) {
-      reasons.push(`Spot pierced the entry put wall at ${formatStrike(entryWallStrike)}. Dealer support broken.`)
-      state = 'invalidated'
+    if (wallType === 'put' && crossedDown) {
+      if (isBearish) {
+        reasons.push(`Spot broke through the entry put wall at ${formatStrike(entryWallStrike)} — support failed, structural target zone. Check the P&L card.`)
+      } else if (isBullish) {
+        reasons.push(`Spot pierced the entry put wall at ${formatStrike(entryWallStrike)}. Bearish breakdown — bullish thesis broken.`)
+        state = 'invalidated'
+      }
     }
   }
 

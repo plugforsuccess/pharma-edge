@@ -81,28 +81,66 @@ export function computeThesisVerdict(entry, live, trade) {
     state = 'invalidated'
   }
 
-  // ── 2. Target wall pierced — also invalidating ──────────────────
-  // For a debit call spread the trade needs spot to RISE through the
-  // long strike toward the short strike. If spot has already moved
-  // BEYOND the short strike (the structural target wall on the
-  // upside), max profit is locked in — the trade has played out and
-  // the "thesis" of dealer pin is no longer applicable. Symmetric on
-  // the put side.
+  // ── 2. Wall pierced — context-aware ────────────────────────────
+  // Spot crossing the entry wall has TWO different meanings depending
+  // on (a) the wall type (call wall = positive GEX cluster /
+  // resistance vs put wall = negative GEX / support) and (b) the
+  // trade's directional bias (bull vs bear).
   //
-  // We also check the entry snapshot's `largest_wall` — if spot
-  // pierced the dominant wall the trade was anchored to, that's an
-  // invalidation regardless of whether it was the short strike.
-  const isCall = (trade.strategy_type || '').includes('CALL')
-  const isPut = (trade.strategy_type || '').includes('PUT')
+  //   call wall pierced UP from below:
+  //     bullish trade → resistance failed, structural target reached
+  //                     (NOT an invalidation — this is the thesis
+  //                      working; check the P&L card)
+  //     bearish trade → bullish breakout, your bearish thesis broke
+  //
+  //   put wall pierced DOWN from above:
+  //     bearish trade → support failed, structural target reached
+  //     bullish trade → bearish breakdown, your bullish thesis broke
+  //
+  // Earlier versions of this function fired `invalidated` whenever
+  // any wall pierced regardless of whether the trade STRUCTURALLY
+  // wanted that move — break-the-wall debit spreads (long at the
+  // wall, short above) would always misfire as invalidated when
+  // they hit max profit.
+  const PIERCE = 0.5
+  const wallGex = entry.largest_wall?.gex_net
+  // Wall type from the GEX sign when known. When the snapshot
+  // doesn't carry a sign (manual backfills, older payloads), fall
+  // back to inferring from the trade's directional bias — bullish
+  // trades typically anchored to call walls, bearish to put walls.
+  const isBullish = ['BULL_CALL', 'BULL_PUT_CREDIT'].includes(trade.strategy_type)
+  const isBearish = ['BEAR_PUT', 'BEAR_CALL_CREDIT'].includes(trade.strategy_type)
+  const wallType =
+    Number.isFinite(wallGex) && wallGex > 0
+      ? 'call'
+      : Number.isFinite(wallGex) && wallGex < 0
+        ? 'put'
+        : isBullish
+          ? 'call'
+          : isBearish
+            ? 'put'
+            : null
   const entryWallStrike = entry.largest_wall?.strike
-  if (Number.isFinite(entryWallStrike)) {
-    if (isCall && live.spot >= entryWallStrike + 0.5 && entry.spot < entryWallStrike) {
-      reasons.push(`Spot pierced the entry call wall at ${formatStrike(entryWallStrike)}. Dealer resistance broken.`)
-      state = 'invalidated'
+  if (Number.isFinite(entryWallStrike) && wallType) {
+    const crossedUp = entry.spot < entryWallStrike && live.spot >= entryWallStrike + PIERCE
+    const crossedDown = entry.spot > entryWallStrike && live.spot <= entryWallStrike - PIERCE
+    if (wallType === 'call' && crossedUp) {
+      if (isBullish) {
+        reasons.push(`Spot broke through the entry call wall at ${formatStrike(entryWallStrike)} — resistance failed, structural target zone. Check the P&L card.`)
+        // bullish + wall broken upward = thesis SUCCESS, not invalidation
+      } else if (isBearish) {
+        reasons.push(`Spot pierced the entry call wall at ${formatStrike(entryWallStrike)}. Bullish breakout — bearish thesis broken.`)
+        state = 'invalidated'
+      }
     }
-    if (isPut && live.spot <= entryWallStrike - 0.5 && entry.spot > entryWallStrike) {
-      reasons.push(`Spot pierced the entry put wall at ${formatStrike(entryWallStrike)}. Dealer support broken.`)
-      state = 'invalidated'
+    if (wallType === 'put' && crossedDown) {
+      if (isBearish) {
+        reasons.push(`Spot broke through the entry put wall at ${formatStrike(entryWallStrike)} — support failed, structural target zone. Check the P&L card.`)
+        // bearish + wall broken downward = thesis SUCCESS, not invalidation
+      } else if (isBullish) {
+        reasons.push(`Spot pierced the entry put wall at ${formatStrike(entryWallStrike)}. Bearish breakdown — bullish thesis broken.`)
+        state = 'invalidated'
+      }
     }
   }
 
