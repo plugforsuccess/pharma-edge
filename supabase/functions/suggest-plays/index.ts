@@ -92,6 +92,15 @@ SECONDARY GREEKS (VEX / CEX / DEX) — second-order CONFIRMATION or DISQUALIFICA
 - ALIGNMENT bonus: when GEX, DEX, and flow all agree on the same strike, it's a high-conviction setup — say so in rationale.
 - CONTRADICTION downgrade: when GEX says one regime and DEX/VEX point the other way, treat it as a transition signal, half-size, or skip.
 
+VELOCITY (∆GEX over the last N minutes) — short-horizon CONFIRMATION ONLY, never primary:
+- Velocity tells you where dealer positioning is SHIFTING right now, not where it sits. A "static" GEX read is a snapshot; velocity is the derivative.
+- Strong positive velocity at a forming call wall = wall is being BUILT; treat the wall as more reliable resistance, favor structures that lean against it (bull-call into the wall, iron-condor anchored under it).
+- Strong negative velocity at a standing call wall = wall is being TORN DOWN (closing/rolling). Downgrade conviction on pin trades anchored there; consider that a breakout setup is forming.
+- Symmetric logic for put walls: building (more negative ∆GEX at the put strike) = stronger support; tearing down = breakdown risk.
+- If velocity contradicts the static GEX read at the strike you're trading toward (wall structure intact in static, but velocity is decaying it), say so in rationale and either pick a different strike or downgrade conviction.
+- Velocity of zero / near-zero is fine; it just means dealer positioning is stable and the static GEX read is the full story. Do NOT manufacture a velocity narrative when there isn't a clear shift.
+- If the VELOCITY block says "not available," ignore — do not speculate about velocity.
+
 CASH MOVES RULES — NEVER VIOLATE:
 - SPREADS ONLY. No naked options.
 - R/R ≥ 1:1.5 is the OBJECTIVE FUNCTION. The server filters every
@@ -187,6 +196,13 @@ interface MatrixData {
   net_vex?: number
   net_cex?: number
   net_dex?: number
+  // Velocity = ∆GEX vs the most recent prior snapshot in gex_history.
+  // Populated when we ask compute-gex with include_velocity:true AND a
+  // prior snapshot exists within the lookback window. First call of the
+  // session day will be null.
+  velocity_cells?: (number | null)[][] | null
+  velocity_window_minutes?: number | null
+  net_velocity?: number | null
   largest: { strike: number; expiration: string; gex_net: number } | null
 }
 
@@ -334,6 +350,26 @@ TOP DEX STRIKES (by |value|):
 ${topDex}`
 }
 
+// Velocity block — top 5 strikes by |∆GEX| over the lookback window.
+// Returns null when velocity is unavailable (first snapshot of the
+// session, no prior history rows, or compute-gex didn't compute it)
+// so the caller can omit the block entirely instead of feeding Claude
+// a misleading "0 / 0 / 0".
+function buildVelocitySection(matrix: MatrixData): string | null {
+  if (!matrix.velocity_cells || matrix.velocity_window_minutes == null) {
+    return null
+  }
+  const fmtRow = (c: { strike: number; expiration: string; val: number }) =>
+    `  ${c.strike} @ ${c.expiration}: ${fmtMillions(c.val)}`
+  const top = topGreekStrikes(matrix.velocity_cells, matrix, 5).map(fmtRow).join('\n')
+  if (!top) return null
+  return `VELOCITY (∆GEX over the last ${matrix.velocity_window_minutes} min — where dealer positioning is shifting RIGHT NOW):
+
+NET VELOCITY: ${fmtMillions(matrix.net_velocity)}
+TOP MOVERS (by |∆GEX|):
+${top}`
+}
+
 function buildUserPrompt(matrix: MatrixData, accountSize: number, flow: FlowRow[]): string {
   // Compact matrix representation — Claude doesn't need every cell, just
   // structure + the highlights. Cuts token count ~80%.
@@ -415,6 +451,7 @@ DOMINANT GEX EXPIRATION: ${dominantExp ? `${dominantExp} (${dominantSharePct}% o
 GAMMA ROLL-OFF NOTE: any play with expiration > ${dominantExp ?? 'the dominant expiration above'} MUST set gamma_rolloff_risk=true and explain it in rolloff_note. The pinning/regime behavior driving the thesis ends when the dominant expiry rolls off.
 
 ${buildSecondaryGreeksSection(matrix)}
+${buildVelocitySection(matrix) ?? 'VELOCITY: not available (first snapshot of session or no prior history within lookback window).'}
 ${formatFlowSection(flow, chainOI)}
 
 INTERPRETATION HINTS:
@@ -708,7 +745,7 @@ serve(async (req) => {
       apikey: SUPABASE_ANON_KEY!,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ ticker, matrix: true }),
+    body: JSON.stringify({ ticker, matrix: true, include_velocity: true }),
   })
   if (!gexResp.ok) {
     const detail = await gexResp.text().catch(() => '')
