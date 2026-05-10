@@ -446,6 +446,15 @@ export default function PositionDetail() {
         <DataFreshnessRow pos={pos} />
       </div>
 
+      <DebugBanner
+        searchParams={searchParams}
+        pos={pos}
+        signalRow={signalRow}
+        wallInfo={wallInfo}
+        moveInfo={moveInfo}
+        verdict={verdict}
+      />
+
       {/* ── TIER 1 — DECIDE ─────────────────────────────────────────
           Surfaces that answer "what should I do this minute?". The
           eye lands on the verdict, drops to the locked thesis (so
@@ -748,6 +757,41 @@ function spreadGeometry(pos) {
 // open_positions.last_verdict on each cron tick; the push notifications
 // fire on transitions there, not here. This client-side computation
 // just gives the user an immediate read on page load.
+// Dev-only diagnostic banner. Shown only when ?debug=1 is in the
+// URL — not gated on environment so we can debug live PWA-cached
+// installs without redeploying. Surfaces the data-load state of every
+// piece the verdict useMemo depends on so we can tell at a glance
+// whether the issue is "data missing in DB" / "fetch failed" / "old
+// cached bundle missing the new SELECT" / "verdict logic bailed early".
+function DebugBanner({ searchParams, pos, signalRow, wallInfo, moveInfo, verdict }) {
+  if (searchParams.get('debug') !== '1') return null
+  const checks = [
+    ['pos loaded', !!pos, pos ? `id=${String(pos.id).slice(0, 8)} signal_id=${pos.signal_id ? String(pos.signal_id).slice(0, 8) : 'null'}` : 'null'],
+    ['signalRow loaded', !!signalRow, signalRow ? `id=${String(signalRow.id ?? '').slice(0, 8)}` : 'null (fetch pending or RLS denied)'],
+    ['entry_gex_snapshot', !!signalRow?.entry_gex_snapshot, signalRow?.entry_gex_snapshot ? `spot=${signalRow.entry_gex_snapshot.spot} net_gex=${signalRow.entry_gex_snapshot.net_gex}` : 'null'],
+    ['target_thesis_kind', signalRow?.target_thesis_kind != null, signalRow?.target_thesis_kind ?? 'null (heuristic path)'],
+    ['target_strike', signalRow?.target_strike != null, signalRow?.target_strike ?? 'null'],
+    ['wallInfo', !!wallInfo, wallInfo ? `spot=${wallInfo.spot} netGex=${wallInfo.netGex} wall=${wallInfo.wallStrike}@${wallInfo.wallExp}` : 'null (compute-gex returned no `largest`)'],
+    ['moveInfo.spot', Number.isFinite(moveInfo?.spot), moveInfo?.spot ?? 'undefined'],
+    ['verdict', !!verdict, verdict ? `state=${verdict.state} reasons=${verdict.reasons?.length ?? 0}` : 'null'],
+  ]
+  return (
+    <div className="bg-amber-950/30 border border-amber-400/40 rounded-lg p-2 text-[10px] font-mono space-y-0.5">
+      <div className="text-amber-400 uppercase tracking-wider font-semibold text-[9px]">
+        Debug · ?debug=1
+      </div>
+      {checks.map(([label, ok, detail]) => (
+        <div key={label} className="flex items-baseline justify-between gap-2">
+          <span className={ok ? 'text-green-400' : 'text-crimson'}>
+            {ok ? '✓' : '✗'} {label}
+          </span>
+          <span className="text-muted text-right truncate ml-2">{String(detail)}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function ThesisVerdictBanner({ verdict, signalRow }) {
   if (!verdict) return null
 
