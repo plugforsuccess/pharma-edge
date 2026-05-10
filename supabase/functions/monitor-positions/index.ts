@@ -846,7 +846,7 @@ serve(async (req) => {
     if (pos.signal_id) {
       const { data: sigRow } = await supabase
         .from('signals')
-        .select('entry_gex_snapshot')
+        .select('entry_gex_snapshot, target_king_node, target_strike, target_expiration, target_thesis_kind, regime_at_entry')
         .eq('id', pos.signal_id)
         .maybeSingle()
       const entrySnap = sigRow?.entry_gex_snapshot ?? null
@@ -864,6 +864,13 @@ serve(async (req) => {
           short_strike: pos.short_strike,
           strategy_type: pos.strategy_type,
           expiration: pos.expiration,
+          // Phase 3a structured thesis fields. When the signal carries
+          // these, the verdict takes the structured fast-path.
+          target_king_node: sigRow?.target_king_node ?? null,
+          target_strike: sigRow?.target_strike ?? null,
+          target_expiration: sigRow?.target_expiration ?? null,
+          target_thesis_kind: sigRow?.target_thesis_kind ?? null,
+          regime_at_entry: sigRow?.regime_at_entry ?? null,
         },
       )
       verdictUpdate = {

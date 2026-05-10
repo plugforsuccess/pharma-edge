@@ -262,6 +262,18 @@ export default function LogSignal() {
       // 20260509000002_signals_entry_gex_snapshot.sql for the
       // rationale.
       entry_gex_snapshot: entryGexSnapshot,
+      // ── Phase 3a structured thesis fields ────────────────────────
+      // Captured from Suggested Plays prefill so the locked signal
+      // declares explicitly what it's anchored to + what spot needs to
+      // do to win. Drives the dynamic verdict on the position page.
+      // NOT in the signal_hash payload (Phase 3b would promote them).
+      // Fields are nullable for manual logs without Suggested Plays
+      // context — verdict falls back to heuristics for those.
+      target_king_node: prefill.target_king_node ?? null,
+      target_strike: prefill.target_strike ?? null,
+      target_expiration: prefill.target_expiration ?? null,
+      target_thesis_kind: prefill.target_thesis_kind ?? null,
+      regime_at_entry: prefill.regime_at_entry ?? null,
       // signal_hash + logged_at intentionally omitted: DB trigger
       // computes the canonical hash on INSERT and logged_at defaults to NOW().
     }

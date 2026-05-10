@@ -176,7 +176,7 @@ export default function PositionDetail() {
     ;(async () => {
       const { data } = await supabase
         .from('signals')
-        .select('id, entry_gex_snapshot, logged_at, signal_source')
+        .select('id, entry_gex_snapshot, logged_at, signal_source, target_king_node, target_strike, target_expiration, target_thesis_kind, regime_at_entry')
         .eq('id', pos.signal_id)
         .maybeSingle()
       if (!cancelled) setSignalRow(data ?? null)
@@ -310,8 +310,22 @@ export default function PositionDetail() {
       short_strike: Number(pos?.short_strike),
       strategy_type: pos?.strategy_type,
       expiration: pos?.expiration ?? null,
+      // Phase 3a structured thesis fields. When present, the verdict
+      // takes the structured path; when null, falls back to heuristics.
+      target_king_node: signalRow?.target_king_node ?? null,
+      target_strike: signalRow?.target_strike ?? null,
+      target_expiration: signalRow?.target_expiration ?? null,
+      target_thesis_kind: signalRow?.target_thesis_kind ?? null,
+      regime_at_entry: signalRow?.regime_at_entry ?? null,
     })
-  }, [pos, wallInfo, signalRow?.entry_gex_snapshot])
+  }, [
+    pos,
+    wallInfo,
+    signalRow?.entry_gex_snapshot,
+    signalRow?.target_king_node,
+    signalRow?.target_strike,
+    signalRow?.target_thesis_kind,
+  ])
 
   if (loading) {
     return (
