@@ -280,6 +280,38 @@ export default function PositionDetail() {
     setCloseMode(false)
   }
 
+  // Dynamic thesis verdict — computed client-side from already-loaded
+  // data so the banner renders the moment the page is interactive.
+  // Server-side monitor-positions writes the same value to
+  // pos.last_verdict on every poll for push-notification transitions;
+  // we surface the live computation here so users don't have to wait
+  // for the next cron tick to see drift.
+  //
+  // CRITICAL: this useMemo MUST sit before the early returns below.
+  // React's Rules of Hooks require hook calls to happen in the same
+  // order on every render. If we hit `if (loading) return` before
+  // useMemo on the first render and only call useMemo on later
+  // renders, the hook count changes and React crashes the page.
+  const verdict = useMemo(() => {
+    if (!pos) return null
+    const liveSnapshot = wallInfo
+      ? {
+          spot: wallInfo.spot,
+          net_gex: wallInfo.netGex,
+          largest_wall: {
+            strike: wallInfo.wallStrike,
+            expiration: wallInfo.wallExp,
+            gex_net: 0, // not used by verdict
+          },
+        }
+      : null
+    return computeThesisVerdict(signalRow?.entry_gex_snapshot, liveSnapshot, {
+      long_strike: Number(pos?.long_strike),
+      short_strike: Number(pos?.short_strike),
+      strategy_type: pos?.strategy_type,
+    })
+  }, [pos, wallInfo, signalRow?.entry_gex_snapshot])
+
   if (loading) {
     return (
       <div className="px-4 lg:px-6 py-12 max-w-md lg:max-w-3xl mx-auto flex items-center justify-center gap-2">
@@ -315,32 +347,6 @@ export default function PositionDetail() {
   const triggers = Object.entries(pos.triggers_fired || {}).filter(
     ([type]) => niceTriggerLabel(type) != null,
   )
-
-  // Dynamic thesis verdict — computed client-side from already-loaded
-  // data so the banner renders the moment the page is interactive.
-  // Server-side monitor-positions writes the same value to
-  // pos.last_verdict on every poll for push-notification transitions;
-  // we surface the live computation here so users don't have to wait
-  // for the next cron tick to see drift.
-  const verdict = useMemo(() => {
-    if (!pos) return null
-    const liveSnapshot = wallInfo
-      ? {
-          spot: wallInfo.spot,
-          net_gex: wallInfo.netGex,
-          largest_wall: {
-            strike: wallInfo.wallStrike,
-            expiration: wallInfo.wallExp,
-            gex_net: 0, // not used by verdict
-          },
-        }
-      : null
-    return computeThesisVerdict(signalRow?.entry_gex_snapshot, liveSnapshot, {
-      long_strike: Number(pos.long_strike),
-      short_strike: Number(pos.short_strike),
-      strategy_type: pos.strategy_type,
-    })
-  }, [pos, wallInfo, signalRow?.entry_gex_snapshot])
 
   return (
     <div className="px-4 lg:px-6 py-5 max-w-md lg:max-w-3xl mx-auto space-y-4">
