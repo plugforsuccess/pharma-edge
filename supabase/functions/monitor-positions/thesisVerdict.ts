@@ -48,11 +48,14 @@ export function computeThesisVerdict(
   live: LiveSnapshot | null,
   trade: TradeShape,
 ): Verdict {
-  if (!entry || !Number.isFinite(entry.spot) || !Number.isFinite(entry.net_gex)) {
+  // Hard gates — only spot is required on both sides. net_gex is
+  // OPTIONAL because compute-gex's Yahoo fallback path doesn't always
+  // populate it. See src/utils/thesisVerdict.js for the full rationale.
+  if (!entry || !Number.isFinite(entry.spot)) {
     return { state: 'not_evaluable', reasons: ['No entry snapshot — signal logged before dynamic-thesis tracking landed.'] }
   }
-  if (!live || !Number.isFinite(live.spot) || !Number.isFinite(live.net_gex)) {
-    return { state: 'not_evaluable', reasons: ['No live GEX data right now.'] }
+  if (!live || !Number.isFinite(live.spot)) {
+    return { state: 'not_evaluable', reasons: ['No live spot price right now — try refreshing in a moment.'] }
   }
 
   const reasons: string[] = []
@@ -64,11 +67,14 @@ export function computeThesisVerdict(
     return computeStructuredVerdict(entry, live, trade)
   }
 
-  const entryRegime = trade.regime_at_entry ?? regimeFromNetGex(entry.net_gex!)
-  const liveRegime = regimeFromNetGex(live.net_gex!)
-  if (entryRegime !== liveRegime && entryRegime !== 'mixed' && liveRegime !== 'mixed') {
-    reasons.push(`Regime flipped ${entryRegime} → ${liveRegime} since entry. Dealer hedging dynamics have inverted.`)
-    state = 'invalidated'
+  // Regime-flip — skip when net_gex unavailable on either side.
+  if (Number.isFinite(entry.net_gex) && Number.isFinite(live.net_gex)) {
+    const entryRegime = trade.regime_at_entry ?? regimeFromNetGex(entry.net_gex!)
+    const liveRegime = regimeFromNetGex(live.net_gex!)
+    if (entryRegime !== liveRegime && entryRegime !== 'mixed' && liveRegime !== 'mixed') {
+      reasons.push(`Regime flipped ${entryRegime} → ${liveRegime} since entry. Dealer hedging dynamics have inverted.`)
+      state = 'invalidated'
+    }
   }
 
   // Wall pierced — context-aware. See src/utils/thesisVerdict.js
@@ -178,12 +184,16 @@ function computeStructuredVerdict(
   const liveSpot = Number(live.spot)
   const entrySpot = Number(entry.spot)
 
-  const entryRegime = trade.regime_at_entry ?? regimeFromNetGex(entry.net_gex!)
-  const liveRegime = regimeFromNetGex(live.net_gex!)
-  if (entryRegime !== liveRegime && entryRegime !== 'mixed' && liveRegime !== 'mixed') {
-    reasons.push(`Regime flipped ${entryRegime} → ${liveRegime} since entry. Dealer hedging dynamics have inverted.`)
-    state = 'invalidated'
-    return { state, reasons }
+  // Regime-flip check requires net_gex on both sides; skip silently
+  // when missing (Yahoo fallback case).
+  if (Number.isFinite(entry.net_gex) && Number.isFinite(live.net_gex)) {
+    const entryRegime = trade.regime_at_entry ?? regimeFromNetGex(entry.net_gex!)
+    const liveRegime = regimeFromNetGex(live.net_gex!)
+    if (entryRegime !== liveRegime && entryRegime !== 'mixed' && liveRegime !== 'mixed') {
+      reasons.push(`Regime flipped ${entryRegime} → ${liveRegime} since entry. Dealer hedging dynamics have inverted.`)
+      state = 'invalidated'
+      return { state, reasons }
+    }
   }
 
   let breakThroughFired = false

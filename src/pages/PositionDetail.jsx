@@ -294,6 +294,13 @@ export default function PositionDetail() {
   // renders, the hook count changes and React crashes the page.
   const verdict = useMemo(() => {
     if (!pos) return null
+    // Build the live snapshot from whatever data we have. Prefer
+    // wallInfo (which carries the wall strike/expiration), but fall
+    // back to moveInfo when wallInfo is null — happens whenever
+    // compute-gex's Yahoo path returns a payload without `largest`,
+    // which leaves wallInfo unset. moveInfo only carries spot, but
+    // the structured verdict's break_through path only needs spot
+    // anyway, so we can still render a meaningful verdict.
     const liveSnapshot = wallInfo
       ? {
           spot: wallInfo.spot,
@@ -304,7 +311,13 @@ export default function PositionDetail() {
             gex_net: 0, // not used by verdict
           },
         }
-      : null
+      : Number.isFinite(moveInfo?.spot)
+        ? {
+            spot: moveInfo.spot,
+            net_gex: null,
+            largest_wall: null,
+          }
+        : null
     return computeThesisVerdict(signalRow?.entry_gex_snapshot, liveSnapshot, {
       long_strike: Number(pos?.long_strike),
       short_strike: Number(pos?.short_strike),
@@ -321,6 +334,7 @@ export default function PositionDetail() {
   }, [
     pos,
     wallInfo,
+    moveInfo?.spot,
     signalRow?.entry_gex_snapshot,
     signalRow?.target_king_node,
     signalRow?.target_strike,
@@ -432,7 +446,7 @@ export default function PositionDetail() {
         <DataFreshnessRow pos={pos} />
       </div>
 
-      <ThesisVerdictBanner verdict={verdict} thesis={pos.thesis} signalRow={signalRow} />
+      <ThesisVerdictBanner verdict={verdict} signalRow={signalRow} />
 
       <PinRiskWarning pos={pos} moveInfo={moveInfo} />
 
@@ -570,9 +584,14 @@ export default function PositionDetail() {
         </div>
       )}
 
-      {/* The standalone thesis card is gone — ThesisVerdictBanner at
-          the top of the page renders both the dynamic verdict AND the
-          original frozen thesis text inline. */}
+      {pos.thesis && (
+        <div className="bg-card border border-border rounded-xl p-3 space-y-1">
+          <div className="text-[10px] uppercase tracking-wider text-muted">
+            Thesis
+          </div>
+          <p className="text-xs text-subtle leading-relaxed">{pos.thesis}</p>
+        </div>
+      )}
 
       {pos.status === 'open' && !closeMode && (
         <button
@@ -706,7 +725,7 @@ function spreadGeometry(pos) {
 // open_positions.last_verdict on each cron tick; the push notifications
 // fire on transitions there, not here. This client-side computation
 // just gives the user an immediate read on page load.
-function ThesisVerdictBanner({ verdict, thesis, signalRow }) {
+function ThesisVerdictBanner({ verdict, signalRow }) {
   if (!verdict) return null
 
   const palette = (() => {
@@ -763,14 +782,6 @@ function ThesisVerdictBanner({ verdict, thesis, signalRow }) {
             </li>
           ))}
         </ul>
-      )}
-      {thesis && (
-        <div className="pt-1.5 border-t border-border/60 space-y-0.5">
-          <div className="text-[10px] uppercase tracking-wider text-muted">
-            Original thesis (locked)
-          </div>
-          <p className="text-[11px] text-subtle leading-relaxed">{thesis}</p>
-        </div>
       )}
       {signalRow?.entry_gex_snapshot && verdict.state !== 'not_evaluable' && (
         <div className="text-[10px] text-muted">
