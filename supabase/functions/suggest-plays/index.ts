@@ -152,7 +152,16 @@ OUTPUT — STRICT JSON, NO PROSE:
       "what_invalidates": "1 sentence — what move or event kills this thesis",
       "gamma_rolloff_risk": <boolean>,
       "rolloff_note": "<string, REQUIRED when gamma_rolloff_risk=true; empty string otherwise>",
-      "entry_pop_bp": <integer 0-10000, OPTIONAL — server overwrites this with a computed value from live IV. You may include your own estimate but it will be replaced.>
+      "entry_pop_bp": <integer 0-10000, OPTIONAL — server overwrites this with a computed value from live IV. You may include your own estimate but it will be replaced.>,
+
+      "// STRUCTURED THESIS FIELDS — required, drives the dynamic verdict on the position page": "",
+      "target_king_node": "call_wall" | "put_wall" | "flip",
+      "target_strike": <number, the strike the wall sits at — NOT the trade's strike, the WALL's strike>,
+      "target_expiration": "YYYY-MM-DD, the wall's expiration. Often DIFFERENT from the play's expiration. Example: a bull call expiring 5/12 anchored to a 5/8 wall that's expected to roll off — target_expiration is 5/8, play.expiration is 5/12.",
+      "target_thesis_kind": "pin_to" | "break_through" | "fade",
+      "// pin_to:        wall holds, spot stays at/near target_strike (Iron Condor, credit spreads at the wall)": "",
+      "// break_through: wall fails as resistance/support, spot crosses it (debit spreads structured to push through a wall)": "",
+      "// fade:          spot returns from extreme back to the wall (mean-reversion plays away from a stretched move)": ""
     }
   ]
 }
@@ -574,6 +583,13 @@ function validatePlays(parsed: any, matrix: MatrixData): any {
   // it, we know the dominant expiration and can fill in the boolean
   // ourselves. The rolloff_note still needs Claude — we don't try to
   // synthesize one here, we just leave a generic fallback.
+  // Validate + backfill structured thesis fields. Phase 3a — these
+  // drive the dynamic verdict on the position page. Each play MUST
+  // declare what it's anchored to and what spot needs to do for the
+  // trade to win. We backfill defensively with the trade's structural
+  // target when Claude omits a field, so the verdict never sees null.
+  const VALID_KING_NODES = new Set(['call_wall', 'put_wall', 'flip'])
+  const VALID_THESIS_KINDS = new Set(['pin_to', 'break_through', 'fade'])
   for (const p of parsed.plays) {
     if (typeof p.gamma_rolloff_risk !== 'boolean') {
       p.gamma_rolloff_risk = dominantExp != null && p.expiration > dominantExp
@@ -582,6 +598,38 @@ function validatePlays(parsed: any, matrix: MatrixData): any {
       p.rolloff_note = `Expires after the dominant gamma expiration (${dominantExp ?? 'n/a'}); the pinning regime anchoring this thesis rolls off mid-trade.`
     }
     if (!p.gamma_rolloff_risk) p.rolloff_note = ''
+
+    // ── Structured thesis backfill ────────────────────────────────
+    // target_king_node: defaults align with strategy convention.
+    if (!VALID_KING_NODES.has(p.target_king_node)) {
+      const t = p.type
+      p.target_king_node =
+        t === 'BULL_CALL' || t === 'BULL_PUT_CREDIT'
+          ? 'call_wall'
+          : t === 'BEAR_PUT' || t === 'BEAR_CALL_CREDIT'
+            ? 'put_wall'
+            : 'flip' // iron condor or unknown
+    }
+    // target_thesis_kind: debit spreads = break_through (long below
+    // short, betting the wall fails). Credit spreads + condors = pin_to.
+    if (!VALID_THESIS_KINDS.has(p.target_thesis_kind)) {
+      const t = p.type
+      p.target_thesis_kind =
+        t === 'BULL_CALL' || t === 'BEAR_PUT'
+          ? 'break_through'
+          : 'pin_to'
+    }
+    // target_strike: Claude should emit this; backfill with the trade's
+    // short strike (the structural target for both debit and credit
+    // verticals) when missing.
+    if (!Number.isFinite(Number(p.target_strike))) {
+      p.target_strike = p.short_strike
+    }
+    // target_expiration: backfill with play.expiration (matches the
+    // trade's expiration as a sane default).
+    if (typeof p.target_expiration !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(p.target_expiration)) {
+      p.target_expiration = p.expiration
+    }
   }
   return parsed
 }

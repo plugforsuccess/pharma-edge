@@ -679,6 +679,53 @@ export default function Glossary() {
         </p>
       </Term>
 
+      <Term
+        title="Target king node + thesis kind"
+        short="The structured 'what is this trade actually betting on' that drives the dynamic verdict."
+      >
+        <p>
+          Every signal logged via Suggested Plays now records FOUR
+          structured fields at lock time so the verdict can reason
+          semantically about the trade instead of guessing from
+          strategy_type:
+        </p>
+        <ul className="list-disc pl-5 space-y-1.5">
+          <li>
+            <strong className="text-fg">target_king_node</strong> —{' '}
+            <span className="text-muted">call_wall / put_wall / flip.</span>{' '}
+            Which type of king node the trade is anchored to.
+          </li>
+          <li>
+            <strong className="text-fg">target_strike</strong> —{' '}
+            <span className="text-muted">the strike the king node sits at.</span>{' '}
+            Often differs from your spread strikes (you can target a
+            wall the trade is meant to push through, not pin to).
+          </li>
+          <li>
+            <strong className="text-fg">target_expiration</strong> —{' '}
+            <span className="text-muted">the wall's expiration, not the trade's.</span>{' '}
+            A bull call expiring 5/12 anchored to a 5/8 wall the trade
+            EXPECTS to roll off has target_expiration = 5/8.
+          </li>
+          <li>
+            <strong className="text-fg">target_thesis_kind</strong> —{' '}
+            <span className="text-muted">pin_to / break_through / fade.</span>{' '}
+            The single most important field — what spot needs to do
+            for the trade to win.
+          </li>
+        </ul>
+        <p className="text-subtle">
+          <strong className="text-fg">pin_to:</strong> wall holds, spot
+          stays at/near target_strike (Iron Condor, credit spreads at
+          the wall).<br />
+          <strong className="text-fg">break_through:</strong> wall
+          fails as resistance/support, spot crosses target_strike in
+          trade direction (debit spreads pushing through).<br />
+          <strong className="text-fg">fade:</strong> spot returns from
+          extreme back to target_strike (mean-reversion plays).
+        </p>
+      </Term>
+
       <div className="pt-4 border-t border-border space-y-2">
         <p className="text-[11px] text-subtle leading-relaxed">
           <strong className="text-fg">Quick read of the heatmap:</strong>{' '}

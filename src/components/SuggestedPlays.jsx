@@ -216,7 +216,7 @@ export default function SuggestedPlays({ ticker, isPro }) {
               key={i}
               play={play}
               ticker={ticker}
-              onLogSignal={() => logAsSignal(navigate, play, ticker, data.spot)}
+              onLogSignal={() => logAsSignal(navigate, play, ticker, data.spot, data.regime)}
             />
           ))}
 
@@ -563,7 +563,7 @@ const PLAY_TYPE_TO_PREFILL = {
   BEAR_CALL_CREDIT: { direction: 'long_put',  structure: 'bear_call_credit' },
 }
 
-function logAsSignal(navigate, play, ticker, spot) {
+function logAsSignal(navigate, play, ticker, spot, regime) {
   const mapped = PLAY_TYPE_TO_PREFILL[play.type] || PLAY_TYPE_TO_PREFILL.BEAR_PUT
   // Derive a per-share premium from suggest-plays' dollar-denominated
   // max-loss / max-profit fields so the calculator opens with EVERY
@@ -603,6 +603,17 @@ function logAsSignal(navigate, play, ticker, spot) {
         // the user lands on a fully-populated form, not one with three
         // fields still blank.
         premium: premiumPerShare,
+        // ── Phase 3a structured thesis fields ───────────────────────
+        // Suggest-plays now emits these per play; pass them through
+        // to LogSignal so the locked signal row carries explicit
+        // declarations of what the trade is anchored to and what
+        // spot needs to do for it to win. Verdict logic on the
+        // position page reads these to replace the older heuristics.
+        target_king_node: play.target_king_node ?? null,
+        target_strike: play.target_strike ?? null,
+        target_expiration: play.target_expiration ?? null,
+        target_thesis_kind: play.target_thesis_kind ?? null,
+        regime_at_entry: regime ?? null, // top-level regime from suggest-plays response
       },
     },
   })

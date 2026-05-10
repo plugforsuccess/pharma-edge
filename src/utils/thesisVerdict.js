@@ -74,10 +74,25 @@ export function computeThesisVerdict(entry, live, trade) {
   const reasons = []
   let state = 'intact'
 
+  // ── Phase 3a: structured thesis fast-path ──────────────────────
+  // When the trade carries explicit structured fields (target_thesis_kind,
+  // target_strike, target_expiration), use them to evaluate verdict
+  // semantically instead of falling back to the heuristics below. The
+  // structured path replaces guesses about "what this trade was trying
+  // to do" with the user's explicit declaration at lock time.
+  if (trade.target_thesis_kind && Number.isFinite(Number(trade.target_strike))) {
+    return computeStructuredVerdict(entry, live, trade)
+  }
+
+  // ── Heuristic path (legacy v1/v2 signals) ──────────────────────
+  // Same logic that's been on main since PR #112/#113. Used for
+  // signals locked before Phase 3a landed (no target_thesis_kind on
+  // the row) so historical verdicts stay stable.
+
   // ── 1. Regime flip — most severe ────────────────────────────────
   // Entry regime: A if net_gex > 0, B if < 0. Bracketing zero (within
   // ±5% of |entry.net_gex|) we treat as 'mixed' — too noisy to call.
-  const entryRegime = regimeFromNetGex(entry.net_gex)
+  const entryRegime = trade.regime_at_entry ?? regimeFromNetGex(entry.net_gex)
   const liveRegime = regimeFromNetGex(live.net_gex)
   if (entryRegime !== liveRegime && entryRegime !== 'mixed' && liveRegime !== 'mixed') {
     reasons.push(`Regime flipped ${entryRegime} → ${liveRegime} since entry. Dealer hedging dynamics have inverted.`)
@@ -220,6 +235,108 @@ export function computeThesisVerdict(entry, live, trade) {
 
   if (state === 'intact' && reasons.length === 0) {
     reasons.push('Entry-time positioning still holds. Wall, flip, and regime are all intact.')
+  }
+
+  return { state, reasons }
+}
+
+// Structured-thesis verdict (Phase 3a). Reads trade.target_thesis_kind,
+// target_strike, target_expiration directly to decide "is this trade
+// thesis playing out, drifting, or broken" — no inference from
+// strategy_type required.
+//
+// trade.target_thesis_kind values:
+//   'pin_to'        wall holds, spot stays at/near target_strike (Iron
+//                   Condor, credit spreads at the wall)
+//   'break_through' wall fails, spot crosses target_strike in trade's
+//                   intended direction (debit spreads pushing through)
+//   'fade'          spot returns from extreme back to target_strike
+//                   (mean-reversion plays away from a stretched move)
+function computeStructuredVerdict(entry, live, trade) {
+  const reasons = []
+  let state = 'intact'
+
+  const targetStrike = Number(trade.target_strike)
+  const targetKind = trade.target_thesis_kind
+  const liveSpot = Number(live.spot)
+  const entrySpot = Number(entry.spot)
+
+  // Regime flip is invalidating regardless of thesis kind — when the
+  // dealer-hedging dynamics invert, the structural premise of any
+  // trade-vs-wall thesis is questionable.
+  const entryRegime = trade.regime_at_entry ?? regimeFromNetGex(entry.net_gex)
+  const liveRegime = regimeFromNetGex(live.net_gex)
+  if (entryRegime !== liveRegime && entryRegime !== 'mixed' && liveRegime !== 'mixed') {
+    reasons.push(`Regime flipped ${entryRegime} → ${liveRegime} since entry. Dealer hedging dynamics have inverted.`)
+    state = 'invalidated'
+    return { state, reasons }
+  }
+
+  // Per-thesis-kind logic
+  let breakThroughFired = false
+  if (targetKind === 'break_through') {
+    // Trade wins when spot pierces target_strike in the intended
+    // direction. Direction inferred from where entry spot sat
+    // relative to target — entry below = needs to rise; entry above
+    // = needs to fall.
+    const PIERCE = 0.5
+    const wantsUp = entrySpot < targetStrike
+    const wantsDown = entrySpot > targetStrike
+    if (wantsUp && liveSpot >= targetStrike + PIERCE) {
+      reasons.push(`Spot has broken through the target wall at ${formatStrike(targetStrike)} — structural target reached. Check the P&L card.`)
+      breakThroughFired = true
+      // thesis playing out — state stays intact
+    } else if (wantsDown && liveSpot <= targetStrike - PIERCE) {
+      reasons.push(`Spot has broken through the target wall at ${formatStrike(targetStrike)} — structural target reached. Check the P&L card.`)
+      breakThroughFired = true
+    } else if (wantsUp && liveSpot < entrySpot - 1) {
+      // Spot moved AWAY from the target — thesis weakening
+      reasons.push(`Spot drifted from ${entrySpot.toFixed(2)} → ${liveSpot.toFixed(2)} — moving away from the target wall at ${formatStrike(targetStrike)}.`)
+      state = 'drifting'
+    } else if (wantsDown && liveSpot > entrySpot + 1) {
+      reasons.push(`Spot drifted from ${entrySpot.toFixed(2)} → ${liveSpot.toFixed(2)} — moving away from the target wall at ${formatStrike(targetStrike)}.`)
+      state = 'drifting'
+    }
+    // else: spot still between entry and target → thesis in progress, intact
+  } else if (targetKind === 'pin_to') {
+    // Trade wins when spot stays at or near target_strike at
+    // expiration. Wall break in EITHER direction = thesis broken.
+    const PIERCE_THRESHOLD = 1.0  // tighter for pin trades
+    if (Math.abs(liveSpot - targetStrike) >= PIERCE_THRESHOLD * 5) {
+      // Spot meaningfully away from the pin
+      const direction = liveSpot > targetStrike ? 'above' : 'below'
+      reasons.push(`Spot at ${liveSpot.toFixed(2)} is ${direction} the pin target ${formatStrike(targetStrike)} by ${Math.abs(liveSpot - targetStrike).toFixed(2)}. Pin thesis weakening.`)
+      state = liveSpot > targetStrike + 8 || liveSpot < targetStrike - 8 ? 'invalidated' : 'drifting'
+    }
+  } else if (targetKind === 'fade') {
+    // Trade wins when spot mean-reverts toward target_strike. Closer
+    // to the target = thesis playing out; further = thesis weakening.
+    const entryDistance = Math.abs(entrySpot - targetStrike)
+    const liveDistance = Math.abs(liveSpot - targetStrike)
+    if (liveDistance < entryDistance * 0.3) {
+      reasons.push(`Spot has reverted to ${liveSpot.toFixed(2)} — close to the fade target ${formatStrike(targetStrike)}. Thesis playing out.`)
+    } else if (liveDistance > entryDistance * 1.5) {
+      reasons.push(`Spot at ${liveSpot.toFixed(2)} has stretched further from the fade target ${formatStrike(targetStrike)} — thesis weakening.`)
+      state = 'drifting'
+    }
+  }
+
+  // Live-wall migration — only relevant when the structural target
+  // hasn't been reached yet. Once a break_through has fired, the
+  // trade is in P&L management mode (you've hit your structural
+  // target), so the next dominant cluster is informational, not a
+  // drift event. Same for pin_to / fade where the verdict is already
+  // expressing the relevant dynamics in the per-thesis branch above.
+  if (live.largest_wall && !breakThroughFired && state === 'intact') {
+    const liveWallStrike = Number(live.largest_wall.strike)
+    if (Number.isFinite(liveWallStrike) && Math.abs(liveWallStrike - targetStrike) >= 5) {
+      reasons.push(`Live dominant wall is at ${formatStrike(liveWallStrike)} — your target was ${formatStrike(targetStrike)}. Different cluster anchoring the regime now.`)
+      state = 'drifting'
+    }
+  }
+
+  if (state === 'intact' && reasons.length === 0) {
+    reasons.push('Entry-time thesis still holds. Wall, regime, and price action all consistent with the structural target.')
   }
 
   return { state, reasons }
