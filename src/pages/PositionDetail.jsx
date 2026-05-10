@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { ArrowLeft, X, AlertTriangle, RefreshCw, Check, Clock, Target, Shield } from 'lucide-react'
+import { ArrowLeft, X, AlertTriangle, RefreshCw, Check, Clock, Target, Shield, Info } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import Spinner from '../components/Spinner'
@@ -876,6 +876,7 @@ function Tick({ pct, label, tone }) {
 // option chain Greeks loaded on this page.
 function DistanceToActionCard({ pos, moveInfo }) {
   const g = spreadGeometry(pos)
+  const [showDetail, setShowDetail] = useState(false)
   if (!g) return null
   const spot = moveInfo?.spot
   if (!Number.isFinite(spot)) return null
@@ -916,9 +917,10 @@ function DistanceToActionCard({ pos, moveInfo }) {
 
   return (
     <div className="bg-card border border-border rounded-xl p-3 space-y-2.5">
-      <div className="flex items-baseline justify-between gap-2">
-        <div className="text-[10px] uppercase tracking-wider text-muted flex items-center gap-1">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[10px] uppercase tracking-wider text-muted flex items-center gap-1.5">
           <Target size={10} /> Distance to action
+          <InfoToggle open={showDetail} onToggle={() => setShowDetail((s) => !s)} label="Show distance-to-action detail" />
         </div>
         <div className="text-[11px] text-muted font-mono-tab">
           spot ${spot.toFixed(2)}
@@ -960,10 +962,12 @@ function DistanceToActionCard({ pos, moveInfo }) {
           </span>
         </div>
       </div>
-      <p className="text-[11px] text-subtle leading-relaxed">
-        Estimated using a midpoint delta — actual fill prices may
-        differ on deep ITM or far OTM spreads.
-      </p>
+      {showDetail && (
+        <p className="text-[11px] text-subtle leading-relaxed">
+          Estimated using a midpoint delta — actual fill prices may
+          differ on deep ITM or far OTM spreads.
+        </p>
+      )}
     </div>
   )
 }
@@ -974,14 +978,16 @@ function DistanceToActionCard({ pos, moveInfo }) {
 // from there instead.
 function ExitPlanReminderCard({ pos }) {
   const g = spreadGeometry(pos)
+  const [showDetail, setShowDetail] = useState(false)
   if (!g) return null
   const target = g.entry + g.maxProfit * 0.5
   const stop = g.entry * 0.5
   return (
     <div className="bg-card border border-border rounded-xl p-3 space-y-2.5">
-      <div className="flex items-baseline justify-between gap-2">
-        <div className="text-[10px] uppercase tracking-wider text-muted flex items-center gap-1">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[10px] uppercase tracking-wider text-muted flex items-center gap-1.5">
           <Shield size={10} /> Exit plan
+          <InfoToggle open={showDetail} onToggle={() => setShowDetail((s) => !s)} label="Show exit-plan detail" />
         </div>
         <div className="text-[11px] text-muted font-mono-tab">
           standard
@@ -1020,10 +1026,12 @@ function ExitPlanReminderCard({ pos }) {
           </span>
         </div>
       </div>
-      <p className="text-[11px] text-subtle leading-relaxed">
-        Defaults from RISK_MANAGEMENT.md. Your broker bracket should
-        mirror the profit/stop levels above.
-      </p>
+      {showDetail && (
+        <p className="text-[11px] text-subtle leading-relaxed">
+          Defaults from RISK_MANAGEMENT.md. Your broker bracket should
+          mirror the profit/stop levels above.
+        </p>
+      )}
     </div>
   )
 }
@@ -1070,6 +1078,7 @@ function PlanRow({ label, detail, value, tone }) {
 function WallTimingCard({ pos, wallInfo }) {
   const tradeExp = pos.expiration
   const wallExp = wallInfo.wallExp
+  const [showDetail, setShowDetail] = useState(false)
   const tone =
     wallInfo.tone === 'amber'
       ? 'text-amber-400'
@@ -1085,12 +1094,16 @@ function WallTimingCard({ pos, wallInfo }) {
     gapAbs <= 1
       ? 'text-green-400 border-green-400/30 bg-green-400/10'
       : 'text-amber-400 border-amber-400/30 bg-amber-400/10'
+  const hasInterpretation = Boolean(wallInfo.interpretation)
 
   return (
     <div className="bg-card border border-border rounded-xl p-3 space-y-2.5">
-      <div className="flex items-baseline justify-between gap-2">
-        <div className="text-[10px] uppercase tracking-wider text-muted">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[10px] uppercase tracking-wider text-muted flex items-center gap-1.5">
           Wall timing
+          {hasInterpretation && (
+            <InfoToggle open={showDetail} onToggle={() => setShowDetail((s) => !s)} label="Show wall-timing detail" />
+          )}
         </div>
         <div className="text-[11px] text-muted font-mono-tab">
           ${formatStrike(wallInfo.wallStrike)} · {formatFriendlyDate(wallExp)}
@@ -1128,16 +1141,39 @@ function WallTimingCard({ pos, wallInfo }) {
           </span>
         </div>
       </div>
-      {wallInfo.interpretation && wallInfo.tone !== 'amber' && (
-        // Drop the paragraph for the aligned (amber) case where the
-        // headline already says everything — keep it for misaligned
-        // cases where the trading implication isn't obvious from the
-        // numbers alone.
+      {showDetail && wallInfo.interpretation && (
+        // Folded behind the (i) toggle. The headline at the top of the
+        // card already says the key result; this paragraph adds the
+        // trading-context rationale for users who want it.
         <p className="text-[11px] text-subtle leading-relaxed">
           {wallInfo.interpretation}
         </p>
       )}
     </div>
+  )
+}
+
+// Reusable (i) info toggle. Renders as a small bordered chip next to
+// a card's header, tap to toggle a `showDetail` state the card reads.
+// Used to fold long explanatory paragraphs ("Theta accelerates each
+// day…", "Full wall magnetism in force…", etc.) behind a deliberate
+// reveal so the page reads compactly by default but the rationale is
+// one tap away when the user wants it.
+function InfoToggle({ open, onToggle, label = 'Show details' }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-label={open ? 'Hide details' : label}
+      aria-expanded={open}
+      className={`shrink-0 w-5 h-5 rounded-full border flex items-center justify-center transition ${
+        open
+          ? 'border-amber-400/50 text-amber-400 bg-amber-400/10'
+          : 'border-border text-muted hover:text-fg hover:border-border-hover'
+      }`}
+    >
+      <Info size={11} strokeWidth={2.25} />
+    </button>
   )
 }
 
@@ -1166,11 +1202,12 @@ function formatFriendlyDate(iso, opts = {}) {
 // trading sessions by skipping weekends (no holidays handled).
 function TimePressureCard({ pos }) {
   const dte = daysUntil(pos.expiration)
-  if (dte <= 0) return null
   const sessions = tradingSessionsUntil(pos.expiration)
   const finalDay = sessions <= 1
   const tightWindow = sessions <= 3
+  const [showDetail, setShowDetail] = useState(false)
 
+  if (dte <= 0) return null
   if (!tightWindow) return null  // only surface this card when time is tight
 
   // Three-tier headline + tone, matching the WallTimingCard pattern.
@@ -1206,9 +1243,10 @@ function TimePressureCard({ pos }) {
 
   return (
     <div className="bg-card border border-border rounded-xl p-3 space-y-2.5">
-      <div className="flex items-baseline justify-between gap-2">
-        <div className="text-[10px] uppercase tracking-wider text-muted flex items-center gap-1">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[10px] uppercase tracking-wider text-muted flex items-center gap-1.5">
           <Clock size={10} /> Time pressure
+          <InfoToggle open={showDetail} onToggle={() => setShowDetail((s) => !s)} label="Show time-pressure detail" />
         </div>
         <div className="text-[11px] text-muted font-mono-tab">
           {formatFriendlyDate(pos.expiration)}
@@ -1240,7 +1278,9 @@ function TimePressureCard({ pos }) {
           </span>
         </div>
       </div>
-      <p className="text-[11px] text-subtle leading-relaxed">{detail}</p>
+      {showDetail && (
+        <p className="text-[11px] text-subtle leading-relaxed">{detail}</p>
+      )}
     </div>
   )
 }
@@ -1270,6 +1310,7 @@ function tradingSessionsUntil(date) {
 // profile.account_size set in Settings.
 function AccountContextCard({ pos, profile }) {
   const accountSize = Number(profile?.account_size)
+  const [showDetail, setShowDetail] = useState(false)
   if (!Number.isFinite(accountSize) || accountSize <= 0) return null
   const g = spreadGeometry(pos)
   if (!g) return null
@@ -1282,9 +1323,12 @@ function AccountContextCard({ pos, profile }) {
 
   return (
     <div className="bg-card border border-border rounded-xl p-3 space-y-2.5">
-      <div className="flex items-baseline justify-between gap-2">
-        <div className="text-[10px] uppercase tracking-wider text-muted">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[10px] uppercase tracking-wider text-muted flex items-center gap-1.5">
           Account context
+          {overSized && (
+            <InfoToggle open={showDetail} onToggle={() => setShowDetail((s) => !s)} label="Show sizing detail" />
+          )}
         </div>
         <div className="text-[11px] text-muted font-mono-tab">
           ${fmt(accountSize)} acct
@@ -1322,7 +1366,7 @@ function AccountContextCard({ pos, profile }) {
           </span>
         </div>
       </div>
-      {overSized && (
+      {showDetail && overSized && (
         <p className="text-[11px] text-subtle leading-relaxed">
           Consider sizing down on future entries — see RISK_MANAGEMENT.md.
         </p>
@@ -1370,6 +1414,7 @@ function PinRiskWarning({ pos, moveInfo }) {
 // distort these probabilities meaningfully.
 function ProbabilityConeCard({ pos, moveInfo }) {
   const g = spreadGeometry(pos)
+  const [showDetail, setShowDetail] = useState(false)
   if (!g) return null
   const spot = moveInfo?.spot
   const sigma = moveInfo?.expectedTrade  // 1-sigma $ move over remaining DTE
@@ -1399,18 +1444,23 @@ function ProbabilityConeCard({ pos, moveInfo }) {
 
   return (
     <div className="bg-card border border-border rounded-xl p-3 space-y-2">
-      <div className="text-[10px] uppercase tracking-wider text-muted">
-        Probability cone (by expiration)
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[10px] uppercase tracking-wider text-muted flex items-center gap-1.5">
+          Probability cone (by expiration)
+          <InfoToggle open={showDetail} onToggle={() => setShowDetail((s) => !s)} label="Show probability-cone caveat" />
+        </div>
       </div>
       <div className="grid grid-cols-3 gap-2 text-xs">
         <ProbCell label="Max profit" pct={pMaxProfit} tone="pos" />
         <ProbCell label="≥ breakeven" pct={pBreakeven} tone="amber" />
         <ProbCell label="Max loss" pct={pMaxLoss} tone="neg" />
       </div>
-      <p className="text-[10px] text-muted leading-relaxed pt-1 border-t border-border">
-        IV-implied probabilities. Pin/wall regimes distort the
-        distribution — treat as a rough baseline, not a guarantee.
-      </p>
+      {showDetail && (
+        <p className="text-[10px] text-muted leading-relaxed pt-1 border-t border-border">
+          IV-implied probabilities. Pin/wall regimes distort the
+          distribution — treat as a rough baseline, not a guarantee.
+        </p>
+      )}
     </div>
   )
 }
@@ -1438,6 +1488,7 @@ function ProbCell({ label, pct, tone }) {
 // surface "$ per day" / "$ per IV-point" at the position level
 // (× 100 × contracts) since that's the only unit traders reason in.
 function NetGreeksCard({ pos, legGreeks }) {
+  const [showDetail, setShowDetail] = useState(false)
   const contracts = Math.max(1, Number(pos?.contracts) || 1)
   // Per-share Greeks straight from dxFeed; valid only when both legs
   // returned a row. One-sided fetches produce misleading nets.
@@ -1471,9 +1522,12 @@ function NetGreeksCard({ pos, legGreeks }) {
 
   return (
     <div className="bg-card border border-border rounded-xl p-3 space-y-2">
-      <div className="flex items-baseline justify-between">
-        <div className="text-[10px] uppercase tracking-wider text-muted">
+      <div className="flex items-center justify-between">
+        <div className="text-[10px] uppercase tracking-wider text-muted flex items-center gap-1.5">
           Net Greeks
+          {available && (
+            <InfoToggle open={showDetail} onToggle={() => setShowDetail((s) => !s)} label="Show net-Greek interpretation" />
+          )}
         </div>
         {stalest && (
           <div className="text-[10px] text-muted">
@@ -1513,13 +1567,15 @@ function NetGreeksCard({ pos, legGreeks }) {
               tone={positionVega != null && positionVega > 0 ? 'green' : 'red'}
             />
           </div>
-          <p className="text-[11px] text-subtle leading-relaxed pt-1">
-            {netDelta != null && Math.abs(netDelta) < 0.1
-              ? 'Near delta-neutral — the spread\'s P&L hinges on time decay and IV more than direction.'
-              : netDelta != null && netDelta > 0
-                ? 'Positive net delta — the spread gains as the underlying rises.'
-                : 'Negative net delta — the spread gains as the underlying falls.'}
-          </p>
+          {showDetail && (
+            <p className="text-[11px] text-subtle leading-relaxed pt-1">
+              {netDelta != null && Math.abs(netDelta) < 0.1
+                ? 'Near delta-neutral — the spread\'s P&L hinges on time decay and IV more than direction.'
+                : netDelta != null && netDelta > 0
+                  ? 'Positive net delta — the spread gains as the underlying rises.'
+                  : 'Negative net delta — the spread gains as the underlying falls.'}
+            </p>
+          )}
         </>
       )}
     </div>
@@ -1673,6 +1729,12 @@ function BracketEditModal({ order, signalId, onClose, onSaved }) {
     }
     setBusy(true)
     setErr(null)
+    // supabase.functions.invoke returns FunctionsHttpError when the
+    // edge fn returns a non-2xx response. The error.message is the
+    // status reason; the actual detail comes back in error.context
+    // (a Response we have to await .json() on). We try to dig it out
+    // so users see Tastytrade's actual rejection reason instead of a
+    // generic "something went wrong".
     const { data, error: invokeErr } = await supabase.functions.invoke('modify-order', {
       body: {
         signal_id: signalId,
@@ -1682,11 +1744,21 @@ function BracketEditModal({ order, signalId, onClose, onSaved }) {
     })
     setBusy(false)
     if (invokeErr) {
-      setErr(invokeErr.message ?? 'broker write failed')
+      // Try to read the JSON body the edge fn returned on a non-2xx.
+      let body = null
+      try {
+        body = await invokeErr.context?.json?.()
+      } catch {
+        /* not JSON, fall back to message */
+      }
+      const msg = body?.error ?? invokeErr.message ?? 'broker write failed'
+      const detail = body?.detail ? ` — ${String(body.detail).slice(0, 280)}` : ''
+      setErr(`${msg}${detail}`)
       return
     }
     if (!data?.success) {
-      setErr(data?.error ?? 'broker write failed')
+      const detail = data?.detail ? ` — ${String(data.detail).slice(0, 280)}` : ''
+      setErr(`${data?.error ?? 'broker write failed'}${detail}`)
       return
     }
     onSaved?.()
