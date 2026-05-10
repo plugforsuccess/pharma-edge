@@ -25,6 +25,7 @@ export interface TradeShape {
   long_strike: number
   short_strike: number
   strategy_type: string
+  expiration?: string | null
 }
 
 export type VerdictState = 'intact' | 'drifting' | 'invalidated' | 'not_evaluable'
@@ -98,17 +99,37 @@ export function computeThesisVerdict(
     return { state, reasons }
   }
 
+  // Drift — context-aware. See src/utils/thesisVerdict.js for the
+  // full rationale; mirror in lock-step.
   if (entry.largest_wall && live.largest_wall) {
     const entryStrike = Number(entry.largest_wall.strike)
     const liveStrike = Number(live.largest_wall.strike)
+    const targetStrike = Number(trade.short_strike)
+    const tradeExpiration = trade.expiration ?? null
+    const STRIKE_TARGET_TOLERANCE = 1
+    const liveAtTradeTarget =
+      Number.isFinite(targetStrike) &&
+      Math.abs(liveStrike - targetStrike) <= STRIKE_TARGET_TOLERANCE
+    const liveExpAtTradeExp =
+      tradeExpiration != null && live.largest_wall.expiration === tradeExpiration
+
     if (Number.isFinite(entryStrike) && Number.isFinite(liveStrike)) {
       const strikeDrift = Math.abs(liveStrike - entryStrike)
       if (strikeDrift >= STRIKE_DRIFT_THRESHOLD) {
-        reasons.push(`Dominant wall shifted from ${formatStrike(entryStrike)} → ${formatStrike(liveStrike)}. Thesis anchor moved.`)
-        state = 'drifting'
+        if (liveAtTradeTarget && liveExpAtTradeExp) {
+          reasons.push(`Dominant wall has migrated to ${formatStrike(liveStrike)} @ ${live.largest_wall.expiration} — your structural target zone. Thesis playing out.`)
+        } else if (liveAtTradeTarget) {
+          reasons.push(`Dominant wall now at ${formatStrike(liveStrike)} — your trade's short strike. Strike target reached.`)
+        } else {
+          reasons.push(`Dominant wall shifted from ${formatStrike(entryStrike)} → ${formatStrike(liveStrike)}. Thesis anchor moved.`)
+          state = 'drifting'
+        }
       }
     }
-    if (entry.largest_wall.expiration !== live.largest_wall.expiration) {
+    if (
+      entry.largest_wall.expiration !== live.largest_wall.expiration &&
+      !(liveAtTradeTarget && liveExpAtTradeExp)
+    ) {
       reasons.push(`Dominant wall expiration moved from ${entry.largest_wall.expiration} → ${live.largest_wall.expiration}. Different cluster anchoring the regime now.`)
       state = 'drifting'
     }

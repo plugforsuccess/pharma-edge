@@ -309,6 +309,7 @@ export default function PositionDetail() {
       long_strike: Number(pos?.long_strike),
       short_strike: Number(pos?.short_strike),
       strategy_type: pos?.strategy_type,
+      expiration: pos?.expiration ?? null,
     })
   }, [pos, wallInfo, signalRow?.entry_gex_snapshot])
 

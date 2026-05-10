@@ -48,6 +48,9 @@ export const VERDICT_STATES = ['intact', 'drifting', 'invalidated', 'not_evaluab
  * @property {number} long_strike
  * @property {number} short_strike
  * @property {string} strategy_type   - BULL_CALL / BEAR_PUT / etc.
+ * @property {string|null} [expiration] - YYYY-MM-DD; used by drift
+ *   logic to detect "wall migrated to my expiration" (thesis playing
+ *   out) vs "wall moved to a different cluster" (real drift).
  *
  * @typedef {Object} Verdict
  * @property {'intact'|'drifting'|'invalidated'|'not_evaluable'} state
@@ -150,18 +153,55 @@ export function computeThesisVerdict(entry, live, trade) {
     return { state, reasons }
   }
 
-  // ── 3. Dominant wall drift ──────────────────────────────────────
+  // ── 3. Dominant wall drift — context-aware ─────────────────────
+  // A "drift" is only a thesis problem if the wall moved AWAY from
+  // where the trade was structurally aiming. The trade's structural
+  // target is the SHORT strike (max-profit anchor for both debit and
+  // credit verticals) at the trade's expiration — that's the wall
+  // the trade is trying to be ANCHORED TO at exit, regardless of
+  // what the dominant wall happened to be at entry.
+  //
+  // Cameron's QQQ trade is the canonical case: bought a bull call
+  // $710/$725 on 5/8 when the largest wall was $710 @ 5/8 (rolling
+  // off same day). He correctly anticipated the wall would migrate
+  // to $725 @ 5/12 once $710 expired. Today the live wall IS
+  // $725 @ 5/12 — that's the thesis playing out exactly as designed,
+  // not anchor drift. Old logic flagged this as "drifting" because
+  // it only knew the entry vs live strike numbers. New logic checks
+  // whether the live wall has migrated to the trade's structural
+  // target and treats that as "thesis playing out" instead.
   if (entry.largest_wall && live.largest_wall) {
     const entryStrike = Number(entry.largest_wall.strike)
     const liveStrike = Number(live.largest_wall.strike)
+    const targetStrike = Number(trade.short_strike)
+    const tradeExpiration = trade.expiration ?? null
+    const STRIKE_TARGET_TOLERANCE = 1   // within $1 = effectively at the target
+    const liveAtTradeTarget =
+      Number.isFinite(targetStrike) &&
+      Math.abs(liveStrike - targetStrike) <= STRIKE_TARGET_TOLERANCE
+    const liveExpAtTradeExp =
+      tradeExpiration != null && live.largest_wall.expiration === tradeExpiration
+
     if (Number.isFinite(entryStrike) && Number.isFinite(liveStrike)) {
       const strikeDrift = Math.abs(liveStrike - entryStrike)
       if (strikeDrift >= STRIKE_DRIFT_THRESHOLD) {
-        reasons.push(`Dominant wall shifted from ${formatStrike(entryStrike)} → ${formatStrike(liveStrike)}. Thesis anchor moved.`)
-        state = 'drifting'
+        if (liveAtTradeTarget && liveExpAtTradeExp) {
+          // Wall migrated to the trade's structural target. Thesis playing out.
+          reasons.push(`Dominant wall has migrated to ${formatStrike(liveStrike)} @ ${live.largest_wall.expiration} — your structural target zone. Thesis playing out.`)
+          // do NOT set state = 'drifting'
+        } else if (liveAtTradeTarget) {
+          reasons.push(`Dominant wall now at ${formatStrike(liveStrike)} — your trade's short strike. Strike target reached.`)
+          // close enough — call this intact, the strike is what matters
+        } else {
+          reasons.push(`Dominant wall shifted from ${formatStrike(entryStrike)} → ${formatStrike(liveStrike)}. Thesis anchor moved.`)
+          state = 'drifting'
+        }
       }
     }
-    if (entry.largest_wall.expiration !== live.largest_wall.expiration) {
+    if (
+      entry.largest_wall.expiration !== live.largest_wall.expiration &&
+      !(liveAtTradeTarget && liveExpAtTradeExp)
+    ) {
       reasons.push(`Dominant wall expiration moved from ${entry.largest_wall.expiration} → ${live.largest_wall.expiration}. Different cluster anchoring the regime now.`)
       state = 'drifting'
     }

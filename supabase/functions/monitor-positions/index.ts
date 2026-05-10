@@ -863,6 +863,7 @@ serve(async (req) => {
           long_strike: pos.long_strike,
           short_strike: pos.short_strike,
           strategy_type: pos.strategy_type,
+          expiration: pos.expiration,
         },
       )
       verdictUpdate = {
