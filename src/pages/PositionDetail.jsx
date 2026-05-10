@@ -446,7 +446,26 @@ export default function PositionDetail() {
         <DataFreshnessRow pos={pos} />
       </div>
 
+      {/* ── TIER 1 — DECIDE ─────────────────────────────────────────
+          Surfaces that answer "what should I do this minute?". The
+          eye lands on the verdict, drops to the locked thesis (so
+          the verdict's "intact / drifting / invalidated" reads
+          against what was actually committed), then descends through
+          emergency + actionable cards. Pin Risk and Time Pressure
+          self-hide when their condition isn't met — when they DO
+          render, they're near the top because acting on them is
+          urgent. */}
+
       <ThesisVerdictBanner verdict={verdict} signalRow={signalRow} />
+
+      {pos.thesis && (
+        <div className="bg-card border border-border rounded-xl p-3 space-y-1">
+          <div className="text-[10px] uppercase tracking-wider text-muted">
+            Thesis
+          </div>
+          <p className="text-xs text-subtle leading-relaxed">{pos.thesis}</p>
+        </div>
+      )}
 
       <PinRiskWarning pos={pos} moveInfo={moveInfo} />
 
@@ -454,31 +473,20 @@ export default function PositionDetail() {
 
       <DistanceToActionCard pos={pos} moveInfo={moveInfo} />
 
-      <ExitPlanReminderCard pos={pos} />
-
       <TimePressureCard pos={pos} />
 
-      <AccountContextCard pos={pos} profile={profile} />
+      {/* ── TIER 2 — CONTEXT ────────────────────────────────────────
+          Why does the trade look the way it does. Wall timing first
+          (anchors the rest of the page's framing), then drift +
+          Greek surfaces. None of these are gated on a condition —
+          they're always-visible reference data. */}
 
-      <NetGreeksCard pos={pos} legGreeks={legGreeks} />
+      {wallInfo && <WallTimingCard pos={pos} wallInfo={wallInfo} />}
 
-      <BracketOrderStatusCard
-        pos={pos}
-        workingOrders={workingOrders}
-        loading={workingOrdersLoading}
-        error={workingOrdersError}
-        onRefresh={loadWorkingOrders}
-        onEdit={(o) => setEditingOrder(o)}
-      />
-
-      <BracketEditModal
-        order={editingOrder}
-        signalId={pos?.signal_id}
-        onClose={() => setEditingOrder(null)}
-        onSaved={() => {
-          setEditingOrder(null)
-          loadWorkingOrders()
-        }}
+      <EntrySnapshotDiffCard
+        snapshot={signalRow?.entry_gex_snapshot}
+        moveInfo={moveInfo}
+        wallInfo={wallInfo}
       />
 
       {moveInfo && (moveInfo.realizedToday != null || moveInfo.expectedTrade != null) && (
@@ -559,15 +567,37 @@ export default function PositionDetail() {
         </div>
       )}
 
-      <EntrySnapshotDiffCard
-        snapshot={signalRow?.entry_gex_snapshot}
-        moveInfo={moveInfo}
-        wallInfo={wallInfo}
-      />
+      <NetGreeksCard pos={pos} legGreeks={legGreeks} />
 
       <ProbabilityConeCard pos={pos} moveInfo={moveInfo} />
 
-      {wallInfo && <WallTimingCard pos={pos} wallInfo={wallInfo} />}
+      {/* ── TIER 3 — PLAN + ADMIN ───────────────────────────────────
+          Reference, not decision input. Exit-plan + sizing first
+          (the rules), then broker-side admin (working orders +
+          historical triggers). */}
+
+      <ExitPlanReminderCard pos={pos} />
+
+      <AccountContextCard pos={pos} profile={profile} />
+
+      <BracketOrderStatusCard
+        pos={pos}
+        workingOrders={workingOrders}
+        loading={workingOrdersLoading}
+        error={workingOrdersError}
+        onRefresh={loadWorkingOrders}
+        onEdit={(o) => setEditingOrder(o)}
+      />
+
+      <BracketEditModal
+        order={editingOrder}
+        signalId={pos?.signal_id}
+        onClose={() => setEditingOrder(null)}
+        onSaved={() => {
+          setEditingOrder(null)
+          loadWorkingOrders()
+        }}
+      />
 
       {triggers.length > 0 && (
         <div className="bg-card border border-border rounded-xl p-3 space-y-2">
@@ -584,14 +614,7 @@ export default function PositionDetail() {
         </div>
       )}
 
-      {pos.thesis && (
-        <div className="bg-card border border-border rounded-xl p-3 space-y-1">
-          <div className="text-[10px] uppercase tracking-wider text-muted">
-            Thesis
-          </div>
-          <p className="text-xs text-subtle leading-relaxed">{pos.thesis}</p>
-        </div>
-      )}
+      {/* ── TIER 4 — ACTION ─────────────────────────────────────── */}
 
       {pos.status === 'open' && !closeMode && (
         <button
