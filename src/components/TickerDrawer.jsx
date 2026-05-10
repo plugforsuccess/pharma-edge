@@ -133,12 +133,12 @@ export default function TickerDrawer({
 
         <div className="overflow-y-auto px-2 pb-3 flex-1">
           {filteredWatchlist.length > 0 && (
-            <Section label="Your Watchlist">
+            <Section label="Tracking">
               {filteredWatchlist.map((sym) => (
                 <Row
                   key={`wl-${sym}`}
                   symbol={sym}
-                  label="Tracked from your scanner queue"
+                  label="From your Tracking list"
                   starred
                   active={selected === sym}
                   onClick={() => {

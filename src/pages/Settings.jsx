@@ -425,7 +425,7 @@ function SubscriptionSection({ tier, isPro }) {
               </p>
             </div>
             <ul className="text-subtle text-xs space-y-1 list-disc list-inside">
-              <li>Full HeatPulse™ ticker list + watchlist</li>
+              <li>Full HeatPulse™ ticker list + Tracking</li>
               <li>Live options Flow + UOA detection</li>
               <li>Suggested Plays (GEX-driven spread setups)</li>
               <li>Tastytrade execution</li>
