@@ -412,7 +412,7 @@ export default function Markets() {
 
       {!isPro && (
         <UpgradeNotice
-          message={`Free tier: ${limits.marketsTickerCap} tickers. Pro unlocks the full list, watchlist tickers, scanner queue, and broker execution.`}
+          message={`Free tier: ${limits.marketsTickerCap} tickers. Pro unlocks the full HeatPulse™ list, Tracking, Suggested Plays, and broker execution.`}
           cta="Go Pro"
         />
       )}
