@@ -64,27 +64,33 @@ export const VERDICT_STATES = ['intact', 'drifting', 'invalidated', 'not_evaluab
  * @returns {Verdict}
  */
 export function computeThesisVerdict(entry, live, trade) {
-  if (!entry || !Number.isFinite(entry.spot) || !Number.isFinite(entry.net_gex)) {
+  // Hard gates — only spot is required on both sides. net_gex is
+  // OPTIONAL because compute-gex's Yahoo fallback path doesn't always
+  // populate it (the cached snapshot can store spot alone). When
+  // net_gex is missing on the live side, the structured verdict
+  // still runs — only the regime-flip check skips. Better than
+  // pinning every position at "not_evaluable" whenever the worker is
+  // offline + Yahoo's response is thin.
+  if (!entry || !Number.isFinite(entry.spot)) {
     return { state: 'not_evaluable', reasons: ['No entry snapshot — signal logged before dynamic-thesis tracking landed.'] }
   }
-  if (!live || !Number.isFinite(live.spot) || !Number.isFinite(live.net_gex)) {
-    return { state: 'not_evaluable', reasons: ['No live GEX data right now.'] }
+  if (!live || !Number.isFinite(live.spot)) {
+    return { state: 'not_evaluable', reasons: ['No live spot price right now — try refreshing in a moment.'] }
   }
 
   const reasons = []
   let state = 'intact'
 
   // ── Phase 3a: structured thesis fast-path ──────────────────────
-  // When the trade carries explicit structured fields (target_thesis_kind,
-  // target_strike, target_expiration), use them to evaluate verdict
-  // semantically instead of falling back to the heuristics below. The
-  // structured path replaces guesses about "what this trade was trying
-  // to do" with the user's explicit declaration at lock time.
   if (trade.target_thesis_kind && Number.isFinite(Number(trade.target_strike))) {
     return computeStructuredVerdict(entry, live, trade)
   }
 
   // ── Heuristic path (legacy v1/v2 signals) ──────────────────────
+  // The heuristic path needs net_gex on both sides for the regime
+  // check. When missing we treat regime as "unknown" and skip the
+  // flip detection — better to under-fire than crash the verdict.
+  const haveNetGex = Number.isFinite(entry.net_gex) && Number.isFinite(live.net_gex)
   // Same logic that's been on main since PR #112/#113. Used for
   // signals locked before Phase 3a landed (no target_thesis_kind on
   // the row) so historical verdicts stay stable.
@@ -92,11 +98,14 @@ export function computeThesisVerdict(entry, live, trade) {
   // ── 1. Regime flip — most severe ────────────────────────────────
   // Entry regime: A if net_gex > 0, B if < 0. Bracketing zero (within
   // ±5% of |entry.net_gex|) we treat as 'mixed' — too noisy to call.
-  const entryRegime = trade.regime_at_entry ?? regimeFromNetGex(entry.net_gex)
-  const liveRegime = regimeFromNetGex(live.net_gex)
-  if (entryRegime !== liveRegime && entryRegime !== 'mixed' && liveRegime !== 'mixed') {
-    reasons.push(`Regime flipped ${entryRegime} → ${liveRegime} since entry. Dealer hedging dynamics have inverted.`)
-    state = 'invalidated'
+  // Skipped when haveNetGex is false (Yahoo fallback case).
+  if (haveNetGex) {
+    const entryRegime = trade.regime_at_entry ?? regimeFromNetGex(entry.net_gex)
+    const liveRegime = regimeFromNetGex(live.net_gex)
+    if (entryRegime !== liveRegime && entryRegime !== 'mixed' && liveRegime !== 'mixed') {
+      reasons.push(`Regime flipped ${entryRegime} → ${liveRegime} since entry. Dealer hedging dynamics have inverted.`)
+      state = 'invalidated'
+    }
   }
 
   // ── 2. Wall pierced — context-aware ────────────────────────────
@@ -263,13 +272,17 @@ function computeStructuredVerdict(entry, live, trade) {
 
   // Regime flip is invalidating regardless of thesis kind — when the
   // dealer-hedging dynamics invert, the structural premise of any
-  // trade-vs-wall thesis is questionable.
-  const entryRegime = trade.regime_at_entry ?? regimeFromNetGex(entry.net_gex)
-  const liveRegime = regimeFromNetGex(live.net_gex)
-  if (entryRegime !== liveRegime && entryRegime !== 'mixed' && liveRegime !== 'mixed') {
-    reasons.push(`Regime flipped ${entryRegime} → ${liveRegime} since entry. Dealer hedging dynamics have inverted.`)
-    state = 'invalidated'
-    return { state, reasons }
+  // trade-vs-wall thesis is questionable. Skipped when net_gex is
+  // unavailable on either side (Yahoo fallback case where the cached
+  // payload only carries spot).
+  if (Number.isFinite(entry.net_gex) && Number.isFinite(live.net_gex)) {
+    const entryRegime = trade.regime_at_entry ?? regimeFromNetGex(entry.net_gex)
+    const liveRegime = regimeFromNetGex(live.net_gex)
+    if (entryRegime !== liveRegime && entryRegime !== 'mixed' && liveRegime !== 'mixed') {
+      reasons.push(`Regime flipped ${entryRegime} → ${liveRegime} since entry. Dealer hedging dynamics have inverted.`)
+      state = 'invalidated'
+      return { state, reasons }
+    }
   }
 
   // Per-thesis-kind logic
