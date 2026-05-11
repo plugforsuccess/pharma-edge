@@ -122,18 +122,18 @@ export default function SuggestedPlays({ ticker, isPro }) {
 
   return (
     <div className="bg-card border border-border rounded-xl overflow-hidden">
-      <div className="px-4 py-3 flex items-center justify-between border-b border-border">
-        <div className="flex items-center gap-2 min-w-0">
-          <Sparkles size={14} className="text-amber-400 shrink-0" />
-          <h2 className="text-sm font-semibold shrink-0">Suggested Plays</h2>
-          {data?._computed_at && (
+      <div className="px-4 py-3 flex items-center gap-2 border-b border-border">
+        <Sparkles size={14} className="text-amber-400 shrink-0" />
+        <h2 className="text-sm font-semibold shrink-0">Suggested Plays</h2>
+        {data?._computed_at && (
+          <div className="flex-1 min-w-0">
             <CacheTimer computedAt={data._computed_at} />
-          )}
-        </div>
+          </div>
+        )}
         <button
           onClick={fetchPlays}
           disabled={loading}
-          className="text-xs text-amber-400 hover:text-amber-300 disabled:opacity-50 transition shrink-0"
+          className="text-xs text-amber-400 hover:text-amber-300 disabled:opacity-50 transition shrink-0 ml-auto"
         >
           {loading ? 'Thinking…' : data ? 'Re-analyze' : 'Generate'}
         </button>
