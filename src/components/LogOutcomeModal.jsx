@@ -42,22 +42,26 @@ const EXIT_REASONS = [
   { value: 'manual', label: 'Manual exit' },
 ]
 
-export default function LogOutcomeModal({ signal, onClose, onComplete }) {
+export default function LogOutcomeModal({ signal, prefill, onClose, onComplete }) {
   const { user } = useAuth()
   const [loading, setLoading] = useState(false)
-  const [step, setStep] = useState(1)
+  // Step 0 is the new "auto-derived review" screen — one-tap confirm
+  // or edit-details escape hatch into the existing 3-step flow.
+  // Modal opens on step 0 when a prefill was passed in; otherwise
+  // step 1 (the legacy manual flow) as before.
+  const [step, setStep] = useState(prefill ? 0 : 1)
   const [error, setError] = useState('')
 
   const [form, setForm] = useState({
-    catalyst_result: '',
+    catalyst_result: prefill?.catalyst_result ?? '',
     stock_price_at_outcome: '',
     option_price_at_outcome: '',
-    exit_price: '',
-    pnl_dollars: '',
-    pnl_percent: '',
-    thesis_correct: null,
-    exit_reason: '',
-    rules_followed: true,
+    exit_price: prefill?.exit_price != null ? String(prefill.exit_price.toFixed(2)) : '',
+    pnl_dollars: prefill?.pnl_dollars != null ? String(prefill.pnl_dollars.toFixed(2)) : '',
+    pnl_percent: prefill?.pnl_percent != null ? String(prefill.pnl_percent.toFixed(2)) : '',
+    thesis_correct: prefill?.thesis_correct ?? null,
+    exit_reason: prefill?.exit_reason ?? '',
+    rules_followed: prefill?.rules_followed ?? true,
     rules_broken: '',
     post_trade_notes: '',
   })
@@ -172,17 +176,32 @@ export default function LogOutcomeModal({ signal, onClose, onComplete }) {
             </button>
           </div>
 
-          <div className="flex gap-1 mb-6" aria-hidden="true">
-            {[1, 2, 3].map((s) => (
-              <div
-                key={s}
-                className={clsx(
-                  'h-1 flex-1 rounded-full',
-                  s <= step ? 'bg-red-500' : 'bg-zinc-800',
-                )}
-              />
-            ))}
-          </div>
+          {step > 0 && (
+            <div className="flex gap-1 mb-6" aria-hidden="true">
+              {[1, 2, 3].map((s) => (
+                <div
+                  key={s}
+                  className={clsx(
+                    'h-1 flex-1 rounded-full',
+                    s <= step ? 'bg-red-500' : 'bg-zinc-800',
+                  )}
+                />
+              ))}
+            </div>
+          )}
+
+          {step === 0 && prefill && (
+            <AutoReviewScreen
+              prefill={prefill}
+              form={form}
+              signal={signal}
+              onPostTradeNotes={(v) => setForm((p) => ({ ...p, post_trade_notes: v }))}
+              onEdit={() => setStep(1)}
+              onConfirm={submitOutcome}
+              loading={loading}
+              error={error}
+            />
+          )}
 
           {step === 1 && (
             <div className="space-y-4">
@@ -434,6 +453,124 @@ function NumberInput({ label, value, onChange, prefix, suffix }) {
           </span>
         )}
       </div>
+    </div>
+  )
+}
+
+// One-tap confirm screen. Renders when the OutcomeInbox handed us a
+// prefill payload — i.e. the system reconstructed everything from
+// order_history + auto_triggers and just needs the user to confirm
+// (and optionally add a "lessons learned" note before locking).
+//
+// Falls through to the legacy 3-step manual flow when the user taps
+// "Edit details" (sets step=1 in the parent).
+function AutoReviewScreen({ prefill, form, signal, onPostTradeNotes, onEdit, onConfirm, loading, error }) {
+  const labelByCategory = {
+    wall_held: 'Wall held / pin succeeded',
+    target_broken_in_favor: 'Target wall broken (favorable)',
+    profit_target_hit: 'Profit target hit',
+    wall_broken_against: 'Wall broke against thesis',
+    stop_loss: 'Stop loss triggered',
+    regime_flipped: 'Regime flipped mid-trade',
+    theta_decay: "Theta decay (spot didn't move)",
+    vol_crush: 'Vol crush',
+    other: 'Other',
+  }
+  const category = labelByCategory[prefill.catalyst_result] ?? prefill.catalyst_result
+  const pnlPositive = (prefill.pnl_dollars ?? 0) >= 0
+  const pnlTone = pnlPositive ? 'text-green-400' : 'text-crimson'
+  const trigKind = prefill._meta?.triggered_by_kind
+  const isAutoClose = prefill.exit_reason === 'auto_trigger'
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h3 className="text-white text-sm font-semibold mb-1">Confirm outcome</h3>
+        <p className="text-[11px] text-subtle leading-relaxed">
+          {isAutoClose
+            ? `Auto-derived from your ${trigKind?.replace(/_/g, ' ') ?? 'auto-trigger'} close + broker fills. Tap confirm to lock, or edit if anything's off.`
+            : 'Auto-derived from your broker close fills. Pick a category and tap confirm.'}
+        </p>
+      </div>
+
+      <div className="bg-zinc-900/60 border border-zinc-800 rounded-xl divide-y divide-zinc-800">
+        <Row label="What happened" value={category} />
+        <Row
+          label="Thesis correct"
+          value={
+            prefill.thesis_correct === true ? '✓ Yes' :
+            prefill.thesis_correct === false ? '✗ No' :
+            '—'
+          }
+          tone={prefill.thesis_correct === true ? 'text-green-400' : prefill.thesis_correct === false ? 'text-crimson' : 'text-subtle'}
+        />
+        {Number.isFinite(prefill.pnl_dollars) && (
+          <Row
+            label="Realized P&L"
+            value={`${pnlPositive ? '+' : ''}$${Math.abs(prefill.pnl_dollars).toFixed(0)}${
+              Number.isFinite(prefill.pnl_percent)
+                ? ` (${pnlPositive ? '+' : ''}${prefill.pnl_percent.toFixed(0)}%)`
+                : ''
+            }`}
+            tone={pnlTone}
+          />
+        )}
+        {Number.isFinite(prefill.exit_price) && (
+          <Row label="Avg exit price" value={`$${prefill.exit_price.toFixed(2)}`} />
+        )}
+        {prefill._meta?.total_contracts_closed > 0 && (
+          <Row
+            label="Contracts closed"
+            value={`${prefill._meta.total_contracts_closed} of ${prefill._meta.original_contracts}`}
+          />
+        )}
+        {prefill.rules_followed === true && (
+          <Row label="Rules followed" value="✓ All 10 attested at entry" tone="text-green-400" />
+        )}
+      </div>
+
+      <label className="block">
+        <span className="text-[11px] uppercase tracking-wider text-muted mb-1.5 inline-block">
+          Lessons learned (optional)
+        </span>
+        <textarea
+          rows={3}
+          value={form.post_trade_notes}
+          onChange={(e) => onPostTradeNotes(e.target.value)}
+          placeholder="What worked, what didn't, anything to remember next time…"
+          className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-fg placeholder:text-muted focus:outline-none focus:border-amber-400/40"
+        />
+      </label>
+
+      {error && (
+        <div className="text-xs text-crimson">{error}</div>
+      )}
+
+      <div className="flex gap-2 pt-1">
+        <button
+          onClick={onConfirm}
+          disabled={loading}
+          className="flex-1 bg-amber-400 hover:bg-amber-300 disabled:opacity-50 text-bg font-semibold text-sm rounded-lg py-3 transition"
+        >
+          {loading ? 'Locking…' : 'Confirm + Lock'}
+        </button>
+        <button
+          onClick={onEdit}
+          disabled={loading}
+          className="flex-1 border border-zinc-700 text-subtle hover:text-fg disabled:opacity-50 text-sm font-medium rounded-lg py-3 transition"
+        >
+          Edit details
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function Row({ label, value, tone = 'text-fg' }) {
+  return (
+    <div className="px-3 py-2 flex items-baseline justify-between gap-3">
+      <span className="text-[11px] uppercase tracking-wider text-muted">{label}</span>
+      <span className={clsx('text-sm font-medium text-right', tone)}>{value}</span>
     </div>
   )
 }

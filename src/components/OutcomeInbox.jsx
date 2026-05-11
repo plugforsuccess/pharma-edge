@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { CheckCircle, AlertCircle } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import { deriveOutcomePrefill } from '../utils/deriveOutcome'
 import LogOutcomeModal from './LogOutcomeModal'
 
 // Outcome inbox.
@@ -28,6 +29,26 @@ export default function OutcomeInbox() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [activeSignal, setActiveSignal] = useState(null)
+  const [activePrefill, setActivePrefill] = useState(null)
+  const [openingId, setOpeningId] = useState(null)
+
+  // Tap handler: derive the outcome prefill from execution data
+  // (order_history + auto_triggers + position math) BEFORE opening
+  // the modal, so the user lands on the one-tap review screen with
+  // everything filled in. Falls back to the manual 3-step flow when
+  // the prefill can't be derived with confidence (no broker fills,
+  // credit spread, etc.) — deriveOutcomePrefill returns null and
+  // the modal opens on step 1.
+  async function openModalFor(sig) {
+    setOpeningId(sig.id)
+    try {
+      const prefill = await deriveOutcomePrefill(sig.id)
+      setActivePrefill(prefill)
+      setActiveSignal(sig)
+    } finally {
+      setOpeningId(null)
+    }
+  }
 
   const load = useCallback(async () => {
     if (!user) return
@@ -130,7 +151,8 @@ export default function OutcomeInbox() {
             return (
               <button
                 key={s.id}
-                onClick={() => setActiveSignal(s)}
+                onClick={() => openModalFor(s)}
+                disabled={openingId === s.id}
                 className="w-full px-4 py-3 flex items-baseline justify-between gap-2 hover:bg-bg/30 transition text-left"
               >
                 <div className="min-w-0 flex-1">
@@ -153,9 +175,14 @@ export default function OutcomeInbox() {
       {activeSignal && (
         <LogOutcomeModal
           signal={activeSignal}
-          onClose={() => setActiveSignal(null)}
+          prefill={activePrefill}
+          onClose={() => {
+            setActiveSignal(null)
+            setActivePrefill(null)
+          }}
           onComplete={() => {
             setActiveSignal(null)
+            setActivePrefill(null)
             // Realtime sub will refetch; load() here is a belt-and-
             // suspenders refresh for the case where realtime is slow.
             load()
