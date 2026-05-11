@@ -33,6 +33,12 @@ export default function PositionDetail() {
   // surface the relationship between the wall's expiration and the
   // trade's expiration. Non-blocking; the rest of the page renders
   // without waiting.
+  // Bumped by the header Refresh button (and the auto-refresh
+  // interval below) to force the compute-gex effect to re-fetch
+  // live wall/spot/move data. Without this the effect only re-runs
+  // when pos.ticker/expiration/strikes change — which they don't
+  // across a refresh — so tapping Refresh felt like a no-op.
+  const [refreshTick, setRefreshTick] = useState(0)
   const [wallInfo, setWallInfo] = useState(null)
   // Move context derived from the same compute-gex fetch — today's
   // realized move vs the option market's expected move, plus an
@@ -162,7 +168,22 @@ export default function PositionDetail() {
       })
     })()
     return () => { cancelled = true }
-  }, [pos?.ticker, pos?.expiration, pos?.long_strike, pos?.short_strike, pos?.strategy_type])
+  }, [pos?.ticker, pos?.expiration, pos?.long_strike, pos?.short_strike, pos?.strategy_type, refreshTick])
+
+  // Auto-refresh the live data every 60s while the tab is visible.
+  // compute-gex has a 5-min server cache so most ticks are cheap; the
+  // point is to make sure the spot/wall/move data tracks the market
+  // without forcing the user to keep tapping Refresh. Pauses when the
+  // tab is backgrounded so we don't burn bandwidth in a stale tab.
+  useEffect(() => {
+    if (!pos?.ticker) return
+    const id = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        setRefreshTick((t) => t + 1)
+      }
+    }, 60_000)
+    return () => clearInterval(id)
+  }, [pos?.ticker])
 
   // Pull the linked signal so the entry-vs-now diff card can read
   // signal.entry_gex_snapshot. Best-effort: rows without a signal_id
@@ -248,7 +269,7 @@ export default function PositionDetail() {
       })
     })()
     return () => { cancelled = true }
-  }, [pos?.ticker, pos?.expiration, pos?.long_strike, pos?.short_strike, pos?.strategy_type])
+  }, [pos?.ticker, pos?.expiration, pos?.long_strike, pos?.short_strike, pos?.strategy_type, refreshTick])
 
   async function handleClose() {
     if (!pos || !exitCredit) return
@@ -395,11 +416,16 @@ export default function PositionDetail() {
           </p>
         </div>
         <button
-          onClick={load}
-          className="p-2 text-subtle hover:text-fg"
+          onClick={() => {
+            setRefreshTick((t) => t + 1)
+            load()
+            loadWorkingOrders()
+          }}
+          disabled={loading}
+          className="p-2 text-subtle hover:text-fg disabled:opacity-50"
           aria-label="Refresh"
         >
-          <RefreshCw size={16} />
+          <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
         </button>
       </div>
 
