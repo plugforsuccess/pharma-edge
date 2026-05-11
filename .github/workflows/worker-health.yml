@@ -1,0 +1,48 @@
+# Dead-man switch. Runs every 15 min during US RTH and asks the
+# worker-health edge function whether the streaming pipeline (dxlink)
+# and polling pipeline (monitor-positions) are still writing.
+#
+# The function itself decides whether to email — this workflow just
+# calls it on a schedule. Cooldown lives in the function (1 email per
+# 60 min while stale).
+
+name: Worker health (dead-man)
+
+on:
+  schedule:
+    # Every 15 min during US RTH, weekdays.
+    # 13:30–20:00 UTC = 9:30–16:00 ET during DST (Mar–Nov).
+    # The edge function double-checks RTH using America/New_York, so a
+    # slightly-overshooting cron window is fine — extra runs that hit
+    # outside RTH return `skipped: outside RTH` with no work done.
+    - cron: '30,45 13 * * 1-5'
+    - cron: '0,15,30,45 14-19 * * 1-5'
+    - cron: '0 20 * * 1-5'
+  workflow_dispatch:
+
+concurrency:
+  group: worker-health
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Invoke worker-health edge function
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          resp=$(curl -sS -w "\n%{http_code}" -X POST \
+            "${SUPABASE_URL}/functions/v1/worker-health" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{}')
+          http=$(echo "$resp" | tail -n1)
+          body=$(echo "$resp" | head -n -1)
+          echo "worker-health status=${http} body=${body}"
+          if [ "$http" != "200" ]; then
+            echo "::error::worker-health returned ${http}"
+            exit 1
+          fi
