@@ -1,0 +1,239 @@
+[
+  {
+    "name": "not_evaluable_no_entry",
+    "note": "No entry snapshot at all — early-stage signals before snapshot tracking landed.",
+    "input": {
+      "entry": null,
+      "live": { "spot": 100, "net_gex": 50000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 10000000 } },
+      "trade": { "long_strike": 100, "short_strike": 105, "strategy_type": "BULL_CALL", "expiration": "2026-06-01" }
+    },
+    "expected": {
+      "state": "not_evaluable",
+      "reasons_contains_any": ["No entry snapshot"]
+    }
+  },
+  {
+    "name": "not_evaluable_no_live_spot",
+    "note": "Entry present, but live snapshot is missing spot (e.g. compute-gex returned empty).",
+    "input": {
+      "entry": { "spot": 100, "net_gex": 50000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 10000000 } },
+      "live": { "spot": null, "net_gex": null, "largest_wall": null },
+      "trade": { "long_strike": 100, "short_strike": 105, "strategy_type": "BULL_CALL", "expiration": "2026-06-01" }
+    },
+    "expected": {
+      "state": "not_evaluable",
+      "reasons_contains_any": ["No live spot price"]
+    }
+  },
+  {
+    "name": "heuristic_intact_unchanged",
+    "note": "Heuristic path (no structured fields). Spot drifted slightly, wall + regime unchanged → intact.",
+    "input": {
+      "entry": { "spot": 100, "net_gex": 50000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 10000000 } },
+      "live":  { "spot": 101, "net_gex": 48000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 9500000 } },
+      "trade": { "long_strike": 100, "short_strike": 105, "strategy_type": "BULL_CALL", "expiration": "2026-06-01" }
+    },
+    "expected": {
+      "state": "intact",
+      "reasons_contains_any": ["Entry-time positioning still holds"]
+    }
+  },
+  {
+    "name": "heuristic_regime_flip_invalidated",
+    "note": "Heuristic path. Net GEX flipped from positive to negative → regime A → B → invalidated.",
+    "input": {
+      "entry": { "spot": 100, "net_gex": 80000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 20000000 } },
+      "live":  { "spot": 99,  "net_gex": -60000000, "largest_wall": { "strike": 95, "expiration": "2026-06-01", "gex_net": -15000000 } },
+      "trade": { "long_strike": 100, "short_strike": 105, "strategy_type": "BULL_CALL", "expiration": "2026-06-01" }
+    },
+    "expected": {
+      "state": "invalidated",
+      "reasons_contains_any": ["Regime flipped A → B"]
+    }
+  },
+  {
+    "name": "heuristic_bullish_call_wall_pierced_up_is_success_not_invalidated",
+    "note": "Heuristic path. Bullish trade, call wall, spot crossed UP through the wall = THESIS SUCCESS, not invalidation. Critical regression: earlier versions fired invalidated here.",
+    "input": {
+      "entry": { "spot": 100, "net_gex": 50000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 20000000 } },
+      "live":  { "spot": 106, "net_gex": 45000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 18000000 } },
+      "trade": { "long_strike": 100, "short_strike": 105, "strategy_type": "BULL_CALL", "expiration": "2026-06-01" }
+    },
+    "expected": {
+      "state_not": "invalidated",
+      "reasons_contains_any": ["broke through the entry call wall", "resistance failed"]
+    }
+  },
+  {
+    "name": "heuristic_bearish_call_wall_pierced_up_is_invalidated",
+    "note": "Heuristic path. Bearish trade, call wall, spot crossed UP = bullish breakout = bearish thesis BROKEN.",
+    "input": {
+      "entry": { "spot": 100, "net_gex": 50000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 20000000 } },
+      "live":  { "spot": 106, "net_gex": 45000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 18000000 } },
+      "trade": { "long_strike": 105, "short_strike": 100, "strategy_type": "BEAR_PUT", "expiration": "2026-06-01" }
+    },
+    "expected": {
+      "state": "invalidated",
+      "reasons_contains_any": ["Bullish breakout", "bearish thesis broken"]
+    }
+  },
+  {
+    "name": "heuristic_wall_migrated_to_trade_target_is_thesis_playing_out",
+    "note": "Heuristic path. Wall migrated 5 strikes, but landed AT the trade's short strike (target) at the trade's expiration = thesis playing out. Regression: earlier versions called this drift.",
+    "input": {
+      "entry": { "spot": 100, "net_gex": 50000000, "largest_wall": { "strike": 100, "expiration": "2026-05-08", "gex_net": 30000000 } },
+      "live":  { "spot": 103, "net_gex": 55000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 25000000 } },
+      "trade": { "long_strike": 100, "short_strike": 105, "strategy_type": "BULL_CALL", "expiration": "2026-06-01" }
+    },
+    "expected": {
+      "state_not": "drifting",
+      "reasons_contains_any": ["migrated to", "structural target"]
+    }
+  },
+  {
+    "name": "heuristic_wall_drift_away_from_target_is_drifting",
+    "note": "Heuristic path. Wall migrated 5 strikes AWAY from the trade target → drifting.",
+    "input": {
+      "entry": { "spot": 100, "net_gex": 50000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 20000000 } },
+      "live":  { "spot": 100, "net_gex": 48000000, "largest_wall": { "strike": 95,  "expiration": "2026-06-01", "gex_net": 18000000 } },
+      "trade": { "long_strike": 100, "short_strike": 105, "strategy_type": "BULL_CALL", "expiration": "2026-06-01" }
+    },
+    "expected": {
+      "state": "drifting",
+      "reasons_contains_any": ["Thesis anchor moved"]
+    }
+  },
+  {
+    "name": "structured_break_through_target_reached",
+    "note": "Phase 3a structured path. break_through thesis, spot crossed target_strike upward = thesis playing out, stays intact.",
+    "input": {
+      "entry": { "spot": 100, "net_gex": 50000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 20000000 } },
+      "live":  { "spot": 106, "net_gex": 45000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 18000000 } },
+      "trade": {
+        "long_strike": 100, "short_strike": 105,
+        "strategy_type": "BULL_CALL", "expiration": "2026-06-01",
+        "target_king_node": "call_wall", "target_strike": 105,
+        "target_expiration": "2026-06-01", "target_thesis_kind": "break_through",
+        "regime_at_entry": "A"
+      }
+    },
+    "expected": {
+      "state": "intact",
+      "reasons_contains_any": ["broken through the target wall", "structural target reached"]
+    }
+  },
+  {
+    "name": "structured_break_through_moved_away_drifting",
+    "note": "Phase 3a structured. break_through wantsUp, but live spot dropped 2 below entry → drifting.",
+    "input": {
+      "entry": { "spot": 100, "net_gex": 50000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 20000000 } },
+      "live":  { "spot": 97,  "net_gex": 48000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 18000000 } },
+      "trade": {
+        "long_strike": 100, "short_strike": 105,
+        "strategy_type": "BULL_CALL", "expiration": "2026-06-01",
+        "target_king_node": "call_wall", "target_strike": 105,
+        "target_expiration": "2026-06-01", "target_thesis_kind": "break_through",
+        "regime_at_entry": "A"
+      }
+    },
+    "expected": {
+      "state": "drifting",
+      "reasons_contains_any": ["moving away from the target wall"]
+    }
+  },
+  {
+    "name": "structured_pin_drifting_7_away",
+    "note": "Phase 3a structured. pin_to, spot drifted 7 from target (≥5 trigger, <8 still drifting).",
+    "input": {
+      "entry": { "spot": 100, "net_gex": 50000000, "largest_wall": { "strike": 100, "expiration": "2026-06-01", "gex_net": 20000000 } },
+      "live":  { "spot": 107, "net_gex": 45000000, "largest_wall": { "strike": 100, "expiration": "2026-06-01", "gex_net": 18000000 } },
+      "trade": {
+        "long_strike": 95, "short_strike": 100,
+        "strategy_type": "BULL_PUT_CREDIT", "expiration": "2026-06-01",
+        "target_king_node": "call_wall", "target_strike": 100,
+        "target_expiration": "2026-06-01", "target_thesis_kind": "pin_to",
+        "regime_at_entry": "A"
+      }
+    },
+    "expected": {
+      "state": "drifting",
+      "reasons_contains_any": ["above the pin target"]
+    }
+  },
+  {
+    "name": "structured_pin_invalidated_10_away",
+    "note": "Phase 3a structured. pin_to, spot 10 below target → past the 8 invalidation line.",
+    "input": {
+      "entry": { "spot": 100, "net_gex": 50000000, "largest_wall": { "strike": 100, "expiration": "2026-06-01", "gex_net": 20000000 } },
+      "live":  { "spot": 89,  "net_gex": 40000000, "largest_wall": { "strike": 100, "expiration": "2026-06-01", "gex_net": 15000000 } },
+      "trade": {
+        "long_strike": 95, "short_strike": 100,
+        "strategy_type": "BULL_PUT_CREDIT", "expiration": "2026-06-01",
+        "target_king_node": "call_wall", "target_strike": 100,
+        "target_expiration": "2026-06-01", "target_thesis_kind": "pin_to",
+        "regime_at_entry": "A"
+      }
+    },
+    "expected": {
+      "state": "invalidated",
+      "reasons_contains_any": ["below the pin target"]
+    }
+  },
+  {
+    "name": "structured_fade_playing_out",
+    "note": "Phase 3a structured. fade, spot reverted from 110 → 102 toward target 100.",
+    "input": {
+      "entry": { "spot": 110, "net_gex": 50000000, "largest_wall": { "strike": 100, "expiration": "2026-06-01", "gex_net": 20000000 } },
+      "live":  { "spot": 102, "net_gex": 48000000, "largest_wall": { "strike": 100, "expiration": "2026-06-01", "gex_net": 19000000 } },
+      "trade": {
+        "long_strike": 105, "short_strike": 100,
+        "strategy_type": "BEAR_PUT", "expiration": "2026-06-01",
+        "target_king_node": "call_wall", "target_strike": 100,
+        "target_expiration": "2026-06-01", "target_thesis_kind": "fade",
+        "regime_at_entry": "A"
+      }
+    },
+    "expected": {
+      "state": "intact",
+      "reasons_contains_any": ["reverted to", "Thesis playing out"]
+    }
+  },
+  {
+    "name": "structured_regime_flip_invalidated_short_circuit",
+    "note": "Phase 3a structured. Regime flip invalidates regardless of thesis kind. Returns immediately, no per-kind branch run.",
+    "input": {
+      "entry": { "spot": 100, "net_gex": 80000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 20000000 } },
+      "live":  { "spot": 99,  "net_gex": -60000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 18000000 } },
+      "trade": {
+        "long_strike": 100, "short_strike": 105,
+        "strategy_type": "BULL_CALL", "expiration": "2026-06-01",
+        "target_king_node": "call_wall", "target_strike": 105,
+        "target_expiration": "2026-06-01", "target_thesis_kind": "break_through",
+        "regime_at_entry": "A"
+      }
+    },
+    "expected": {
+      "state": "invalidated",
+      "reasons_contains_any": ["Regime flipped A → B"]
+    }
+  },
+  {
+    "name": "structured_yahoo_fallback_no_netgex",
+    "note": "compute-gex Yahoo fallback path: live.net_gex is null. Structured break_through still runs from spot alone — should NOT fire regime check, should still detect target reached.",
+    "input": {
+      "entry": { "spot": 100, "net_gex": 50000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 20000000 } },
+      "live":  { "spot": 106, "net_gex": null, "largest_wall": null },
+      "trade": {
+        "long_strike": 100, "short_strike": 105,
+        "strategy_type": "BULL_CALL", "expiration": "2026-06-01",
+        "target_king_node": "call_wall", "target_strike": 105,
+        "target_expiration": "2026-06-01", "target_thesis_kind": "break_through",
+        "regime_at_entry": "A"
+      }
+    },
+    "expected": {
+      "state": "intact",
+      "reasons_contains_any": ["broken through the target wall"]
+    }
+  }
+]

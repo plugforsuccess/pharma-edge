@@ -1,0 +1,50 @@
+# Mechanical drift guard for the verdict logic.
+#
+# The verdict ladder is duplicated across two files — the client
+# (src/utils/thesisVerdict.js) and the server
+# (supabase/functions/monitor-positions/thesisVerdict.ts) — because
+# Vite and Deno don't share a module system. They must agree on every
+# decision; if they don't, the UI banner and the auto_triggers / push
+# notifications diverge, which destroys user trust in both.
+#
+# This workflow runs scripts/check-verdict-{client,server} against
+# the shared scripts/verdict-fixtures.json on every PR touching any
+# of those files. CI fails on either runner's first mismatch.
+#
+# See AUTO_TRADE_MANAGEMENT.md §9 for the rationale.
+
+name: Verdict fixtures
+
+on:
+  pull_request:
+    paths:
+      - 'src/utils/thesisVerdict.js'
+      - 'supabase/functions/monitor-positions/thesisVerdict.ts'
+      - 'scripts/verdict-fixtures.json'
+      - 'scripts/check-verdict-client.mjs'
+      - 'scripts/check-verdict-server.ts'
+      - '.github/workflows/verdict-fixtures.yml'
+  workflow_dispatch:
+
+jobs:
+  client:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Run client fixtures
+        run: node scripts/check-verdict-client.mjs
+
+  server:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v1
+        with:
+          deno-version: v1.x
+      - name: Run server fixtures
+        run: deno run --allow-read scripts/check-verdict-server.ts
