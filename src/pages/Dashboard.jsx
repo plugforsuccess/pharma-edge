@@ -78,11 +78,18 @@ export default function Dashboard() {
         .eq('direction', 'watch')
         .order('logged_at', { ascending: false })
         .limit(10),
+      // Open count for the stats strip. Counts CURRENTLY OPEN POSITIONS,
+      // not active signals — those drift apart after a position closes
+      // (close-order flips open_positions.status='closed' via the DB
+      // trigger, but signals.status stays 'active' until the user logs
+      // an outcome). Reading from open_positions matches the source of
+      // truth the <OpenPositions/> card directly above the strip uses,
+      // so the two surfaces never disagree.
       supabase
-        .from('signals')
+        .from('open_positions')
         .select('id', { count: 'exact', head: true })
         .eq('user_id', user.id)
-        .eq('status', 'active'),
+        .eq('status', 'open'),
       supabase.from('outcomes').select('thesis_correct').eq('user_id', user.id),
     ])
 
