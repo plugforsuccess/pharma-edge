@@ -1470,14 +1470,72 @@ function tradingSessionsUntil(date) {
   return sessions
 }
 
-// Account-level context — shows risk and max-gain as a percentage
-// of the user's set account size. Helps right-size mental tilt
-// (a $400 loss is meaningful at $5k, trivial at $500k). Pulls from
-// profile.account_size set in Settings.
+// Account-level context — shows risk and max-gain as a percentage of
+// the user's account size. Prefers LIVE broker NLV via get-account
+// (same pattern as StrikePriceCalculator). Falls back to the manual
+// profile.account_size value when:
+//   - get-account fails / returns no accounts
+//   - the connection is on the Tastytrade sandbox (the cert endpoint
+//     returns a fake $100K NLV that would silently mislead 2%-rule
+//     sizing)
+//
+// Without this, a Pro user whose profile.account_size is stale or a
+// placeholder (Cameron's was $1M) sees every position render as
+// trivially small ("0.04% · within 2% rule") regardless of what their
+// real broker NLV is. The 2%-rule badge was lying.
 function AccountContextCard({ pos, profile }) {
-  const accountSize = Number(profile?.account_size)
+  const [liveNlv, setLiveNlv] = useState(null)
+  const [liveSandbox, setLiveSandbox] = useState(false)
+  const [nlvError, setNlvError] = useState(null)
+  const [nlvLoading, setNlvLoading] = useState(true)
   const [showDetail, setShowDetail] = useState(false)
-  if (!Number.isFinite(accountSize) || accountSize <= 0) return null
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { data, error } = await supabase.functions.invoke('get-account')
+        if (cancelled) return
+        if (error || !data?.success) {
+          setNlvError(error?.message || data?.error || 'broker fetch failed')
+          return
+        }
+        const accounts = (data.accounts || []).slice()
+        accounts.sort(
+          (a, b) =>
+            Number(b.net_liquidating_value ?? 0) - Number(a.net_liquidating_value ?? 0),
+        )
+        const primary = accounts.find((a) => !a.is_paper) || accounts[0]
+        if (!primary) {
+          setNlvError('no broker accounts on file')
+          return
+        }
+        const sandbox = Boolean(
+          data.is_sandbox ?? primary.is_sandbox ?? primary.is_paper,
+        )
+        const nlv = Number(primary.net_liquidating_value)
+        // Refuse the sandbox's fake $100K NLV — silently sizing
+        // positions against it is exactly the failure mode this card
+        // is meant to prevent.
+        setLiveNlv(sandbox || !Number.isFinite(nlv) ? null : nlv)
+        setLiveSandbox(sandbox)
+      } catch (e) {
+        if (!cancelled) setNlvError(e?.message || 'broker fetch failed')
+      } finally {
+        if (!cancelled) setNlvLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const manualSize = Number(profile?.account_size)
+  const accountSize = liveNlv ?? (Number.isFinite(manualSize) ? manualSize : null)
+  const source =
+    liveNlv != null ? 'broker' : Number.isFinite(manualSize) && manualSize > 0 ? 'manual' : null
+
+  if (!accountSize || accountSize <= 0) return null
   const g = spreadGeometry(pos)
   if (!g) return null
 
@@ -1485,7 +1543,7 @@ function AccountContextCard({ pos, profile }) {
   const totalMaxGain = g.maxProfit * pos.contracts * 100
   const riskPct = (totalRisk / accountSize) * 100
   const gainPct = (totalMaxGain / accountSize) * 100
-  const overSized = riskPct > 2.1  // 2% rule with small float
+  const overSized = riskPct > 2.1
 
   return (
     <div className="bg-card border border-border rounded-xl p-3 space-y-2.5">
@@ -1496,8 +1554,21 @@ function AccountContextCard({ pos, profile }) {
             <InfoToggle open={showDetail} onToggle={() => setShowDetail((s) => !s)} label="Show sizing detail" />
           )}
         </div>
-        <div className="text-[11px] text-muted font-mono-tab">
-          ${fmt(accountSize)} acct
+        <div className="text-right">
+          <div className="text-[11px] text-muted font-mono-tab">
+            ${fmt(accountSize)} acct
+          </div>
+          <div className="text-[9px] uppercase tracking-wider text-muted">
+            {nlvLoading
+              ? 'syncing…'
+              : source === 'broker'
+              ? 'live · broker NLV'
+              : liveSandbox
+              ? 'sandbox NLV ignored · using manual'
+              : nlvError
+              ? 'broker unreachable · using manual'
+              : 'manual (Settings)'}
+          </div>
         </div>
       </div>
       {overSized && (
