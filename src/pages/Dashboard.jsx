@@ -8,6 +8,7 @@ import { daysUntil } from '../utils/dates'
 import { catalystLabel, directionLabel } from '../lib/design'
 import NotificationCenter from '../components/NotificationCenter'
 import OpenPositions from '../components/OpenPositions'
+import OutcomeInbox from '../components/OutcomeInbox'
 import SuggestedPlays from '../components/SuggestedPlays'
 import MarketPulse from '../components/MarketPulse'
 import TapeTickerRow from '../components/TapeTickerRow'
@@ -193,6 +194,7 @@ export default function Dashboard() {
           stacked below Plays on mobile. */}
       <div className="flex flex-col lg:grid lg:grid-cols-[2fr_1fr] lg:gap-x-6 lg:gap-y-5">
         <div className="order-2 lg:col-start-2 lg:row-start-1 mb-5 lg:mb-0">
+          <OutcomeInbox />
           <OpenPositions />
         </div>
 
