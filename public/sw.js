@@ -1,4 +1,4 @@
-const CACHE = 'pharma-edge-v1'
+const CACHE = 'pharma-edge-v2'
 const ASSETS = ['/', '/manifest.json']
 
 self.addEventListener('install', (event) => {
