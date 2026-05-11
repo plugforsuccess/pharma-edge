@@ -4,16 +4,31 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import clsx from 'clsx'
 
-const CATALYST_RESULTS = [
-  { value: 'approved', label: 'FDA Approved', positive: true },
-  { value: 'rejected', label: 'FDA Rejected', positive: false },
-  { value: 'complete_response_letter', label: 'Complete Response Letter', positive: false },
-  { value: 'positive_data', label: 'Positive Trial Data', positive: true },
-  { value: 'negative_data', label: 'Negative Trial Data', positive: false },
-  { value: 'mixed_data', label: 'Mixed Data', positive: null },
-  { value: 'delayed', label: 'Decision Delayed', positive: null },
-  { value: 'withdrawn', label: 'Drug Withdrawn', positive: false },
-  { value: 'other', label: 'Other', positive: null },
+// Outcome categories for GEX/options-flow spread trades. The biotech
+// list (FDA Approved / Trial Data / etc.) was retired alongside the
+// biotech-catalyst pipeline on 2026-05-09 but the modal kept
+// rendering them — fixed here.
+//
+// Each entry carries its OWN `thesis_correct` value rather than
+// inferring through a per-direction `positive` flag like the old
+// list did. The old flag (was-spot-up = was-thesis-right-if-bullish)
+// doesn't map cleanly to outcomes like "regime flipped" or
+// "vol crush" where direction isn't the dispositive question.
+// thesis_correct stays nullable so the user can override on the
+// confirmation step before submitting.
+//
+// `catalyst_result` is the DB column (free-form text). Historical
+// biotech values stay readable; new rows use the values below.
+const SPREAD_OUTCOMES = [
+  { value: 'wall_held',              label: 'Wall held / pin succeeded',          thesisCorrect: true },
+  { value: 'target_broken_in_favor', label: 'Target wall broken (favorable)',     thesisCorrect: true },
+  { value: 'profit_target_hit',      label: 'Profit target hit (per playbook)',   thesisCorrect: true },
+  { value: 'wall_broken_against',    label: 'Wall broke against thesis',          thesisCorrect: false },
+  { value: 'stop_loss',              label: 'Stop loss triggered',                thesisCorrect: false },
+  { value: 'regime_flipped',         label: 'Regime flipped mid-trade',           thesisCorrect: false },
+  { value: 'theta_decay',            label: "Theta decay (spot didn't move)",     thesisCorrect: null },
+  { value: 'vol_crush',              label: 'Vol crush',                          thesisCorrect: null },
+  { value: 'other',                  label: 'Other',                              thesisCorrect: null },
 ]
 
 const EXIT_REASONS = [
@@ -66,14 +81,14 @@ export default function LogOutcomeModal({ signal, onClose, onComplete }) {
   }
 
   function selectCatalystResult(result) {
-    setForm((prev) => {
-      let thesisCorrect = null
-      if (result.positive !== null) {
-        if (signal.direction === 'long_put') thesisCorrect = result.positive === false
-        else if (signal.direction === 'long_call') thesisCorrect = result.positive === true
-      }
-      return { ...prev, catalyst_result: result.value, thesis_correct: thesisCorrect }
-    })
+    // SPREAD_OUTCOMES entries carry an explicit `thesisCorrect`
+    // (true / false / null) so we don't have to map through a
+    // direction-aware truth table the way the biotech list did.
+    setForm((prev) => ({
+      ...prev,
+      catalyst_result: result.value,
+      thesis_correct: result.thesisCorrect ?? null,
+    }))
   }
 
   async function submitOutcome() {
@@ -144,7 +159,7 @@ export default function LogOutcomeModal({ signal, onClose, onComplete }) {
             <div>
               <h2 className="text-white font-bold">Log Outcome</h2>
               <p className="text-subtle text-xs">
-                {signal.ticker} — {signal.direction.replace('_', ' ').toUpperCase()}
+                {signal.ticker} — {(signal.structure ?? signal.direction ?? '').replace(/_/g, ' ').toUpperCase()}
               </p>
             </div>
             <button
@@ -174,7 +189,7 @@ export default function LogOutcomeModal({ signal, onClose, onComplete }) {
               <h3 className="text-white text-sm font-semibold">What happened?</h3>
 
               <div className="space-y-2">
-                {CATALYST_RESULTS.map((result) => (
+                {SPREAD_OUTCOMES.map((result) => (
                   <button
                     key={result.value}
                     type="button"
