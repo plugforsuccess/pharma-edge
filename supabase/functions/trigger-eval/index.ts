@@ -95,6 +95,14 @@ interface Position {
   entry_debit_per_spread: number
   status: string
   last_mid_per_spread: number | null
+  // Verdict state cached by monitor-positions every 5 min. This is
+  // the SAME computation the client renders in the verdict banner,
+  // so when trigger-eval fires thesis_invalidated the user can't
+  // open the page and see "intact" — the banner already says
+  // invalidated by the time the push arrives.
+  last_verdict: 'intact' | 'drifting' | 'invalidated' | 'not_evaluable' | null
+  last_verdict_reasons: string[] | null
+  last_verdict_at: string | null
 }
 
 // Maps a trip kind to the number of contracts to close. Scales out
@@ -207,9 +215,10 @@ async function fanOutPush(
     .from('push_subscriptions')
     .select('id, endpoint, p256dh, auth')
     .eq('user_id', userId)
-  const title = kind === 'stop_loss_50'
-    ? `${ticker}: stop loss tripped`
-    : `${ticker}: profit target hit`
+  const title =
+    kind === 'stop_loss_50' ? `${ticker}: stop loss tripped` :
+    kind === 'thesis_invalidated' ? `${ticker}: thesis invalidated` :
+    `${ticker}: profit target hit`
   const payload = {
     title,
     body: reason,
@@ -272,7 +281,7 @@ serve(async (req) => {
 
   const { data: positions, error: posErr } = await supabase
     .from('open_positions')
-    .select('id, user_id, signal_id, ticker, strategy_type, long_strike, short_strike, expiration, contracts, contracts_remaining, entry_debit_per_spread, status, last_mid_per_spread')
+    .select('id, user_id, signal_id, ticker, strategy_type, long_strike, short_strike, expiration, contracts, contracts_remaining, entry_debit_per_spread, status, last_mid_per_spread, last_verdict, last_verdict_reasons, last_verdict_at')
     .eq('status', 'open')
     .returns<Position[]>()
   if (posErr) {
@@ -285,12 +294,114 @@ serve(async (req) => {
     skipped_credit_spread: 0,
     triggers_created: [] as Array<{ position_id: string; kind: string; reason: string }>,
     triggers_idempotent_skip: 0,
+    thesis_invalidated_fired: 0,
+  }
+
+  // Helper: best-effort insert of a single trigger row, with push
+  // fan-out + idempotency-skip accounting. Captured in a closure so
+  // both the P&L rules and the thesis-invalidated rule reuse it
+  // without duplicating the boilerplate.
+  async function fireTrigger(
+    pos: Position,
+    kind: string,
+    reason: string,
+    proposedAction: Record<string, unknown>,
+    observed: Record<string, unknown>,
+  ) {
+    const { error: insertErr, data: inserted } = await supabase
+      .from('auto_triggers')
+      .insert({
+        user_id: pos.user_id,
+        position_id: pos.id,
+        signal_id: pos.signal_id,
+        kind,
+        reason,
+        proposed_action: proposedAction,
+        observed,
+      })
+      .select('id')
+      .maybeSingle()
+
+    if (insertErr) {
+      if (insertErr.code === '23505') {
+        summary.triggers_idempotent_skip++
+        return
+      }
+      console.warn('[trigger-eval] insert failed', pos.id, kind, insertErr.message)
+      return
+    }
+    if (inserted?.id) {
+      summary.triggers_created.push({ position_id: pos.id, kind, reason })
+      await fanOutPush(supabase, pos.user_id, pos.id, inserted.id, pos.ticker, kind, reason)
+    }
   }
 
   for (const pos of positions ?? []) {
     summary.evaluated++
 
-    // Pull both legs from dxlink_quotes in one query.
+    // ── 1. thesis_invalidated — independent of leg-quote availability ──
+    // monitor-positions caches the verdict on open_positions every 5 min
+    // using the same algorithm the client UI displays. We just read the
+    // cached state; the verdict doesn't need leg mids, only spot + the
+    // GEX matrix, both of which monitor-positions handles. As a result
+    // this rule fires even when dxlink quotes are stale or the spread
+    // is a credit (which the P&L rules skip).
+    //
+    // Stale-verdict guard: if last_verdict_at is older than 30 min we
+    // skip — the cache might be from before a market event we'd want
+    // to reflect first. monitor-positions runs every 5 min so the only
+    // way to be >30 min stale is if it's down, in which case the
+    // dead-man switch (worker-health) is already alerting on it.
+    const VERDICT_STALE_MS = 30 * 60_000
+    const verdictAge = pos.last_verdict_at
+      ? Date.now() - new Date(pos.last_verdict_at).getTime()
+      : Infinity
+    if (pos.last_verdict === 'invalidated' && verdictAge <= VERDICT_STALE_MS) {
+      // The verdict can compute without a live spread mid, but we
+      // STILL need a sane limit_price for the close order. Try the
+      // current dxlink mid first; if that's missing, fall back to
+      // pos.last_mid_per_spread (broker-polled, possibly delayed).
+      // If we have NEITHER, defer — the UI can't submit a close
+      // without a price.
+      const { data: quotesForLimit } = await supabase
+        .from('dxlink_quotes')
+        .select('symbol, strike, option_type, mid, updated_at')
+        .eq('underlying', pos.ticker)
+        .eq('kind', 'option')
+        .eq('expiration_date', pos.expiration)
+        .in('strike', [Number(pos.long_strike), Number(pos.short_strike)])
+        .returns<QuoteRow[]>()
+      const livePnlForLimit = computeLivePnl(pos, quotesForLimit ?? [])
+      const limitPrice = livePnlForLimit?.currentMid
+        ?? (Number.isFinite(Number(pos.last_mid_per_spread))
+          ? Number(pos.last_mid_per_spread)
+          : null)
+      if (Number.isFinite(limitPrice) && (limitPrice as number) > 0) {
+        const reasons = pos.last_verdict_reasons ?? []
+        const summary_line = reasons[0] ?? 'Entry-time thesis no longer holds.'
+        const reason = `Thesis invalidated. ${summary_line} Cash Moves rule: exit when thesis breaks, regardless of P&L.`
+        await fireTrigger(
+          pos,
+          'thesis_invalidated',
+          reason,
+          {
+            position_id: pos.id,
+            contracts: pos.contracts_remaining,
+            limit_price: Number((limitPrice as number).toFixed(2)),
+          },
+          {
+            last_verdict: pos.last_verdict,
+            last_verdict_at: pos.last_verdict_at,
+            last_verdict_reasons: reasons,
+            limit_source: livePnlForLimit?.currentMid != null ? 'live' : 'last_polled',
+            contracts_remaining_at_trip: pos.contracts_remaining,
+          },
+        )
+        summary.thesis_invalidated_fired++
+      }
+    }
+
+    // ── 2. P&L-based rules — stop loss + profit take ladder ────────────
     const { data: quotes } = await supabase
       .from('dxlink_quotes')
       .select('symbol, strike, option_type, mid, updated_at')
@@ -302,8 +413,6 @@ serve(async (req) => {
 
     const pnl = computeLivePnl(pos, quotes ?? [])
     if (!pnl) {
-      // Either credit spread (we don't eval those in phase 1) or
-      // stale/missing quotes. Both cases: skip.
       const strat = pos.strategy_type.toLowerCase()
       if (strat !== 'bull_call_spread' && strat !== 'bear_put_spread') {
         summary.skipped_credit_spread++
@@ -316,24 +425,8 @@ serve(async (req) => {
     const trip = evaluateRules(pnl.pnlPct)
     if (!trip) continue
 
-    // Build the proposed_action body. close-order takes
-    // { position_id, account_number, contracts, limit_price,
-    //   trigger_id }. We don't know the user's preferred account
-    // here — they may have multiple — so we omit account_number and
-    // let the UI fill it in from their selected account on
-    // PositionDetail.
-    //
-    // contracts is sized per the playbook scale-out rules and
-    // against contracts_remaining (not the original `contracts`),
-    // so a second profit trigger after a partial scale-out doesn't
-    // accidentally close more than the runner has left.
-    //
-    // limit_price = current spread mid (we'll receive this).
     const targetContracts = contractsToScaleOut(trip.kind, pos.contracts_remaining)
     if (targetContracts <= 0) {
-      // Nothing left to scale out — runner already fully closed
-      // via prior triggers or manual exit. Skip; idempotency unique
-      // index covers re-eval correctness on its own.
       continue
     }
     const proposed_action = {
@@ -342,51 +435,20 @@ serve(async (req) => {
       limit_price: Number(pnl.currentMid.toFixed(2)),
     }
 
-    const { error: insertErr, data: inserted } = await supabase
-      .from('auto_triggers')
-      .insert({
-        user_id: pos.user_id,
-        position_id: pos.id,
-        signal_id: pos.signal_id,
-        kind: trip.kind,
-        reason: trip.reason,
-        proposed_action,
-        observed: {
-          pnl_pct: Number(pnl.pnlPct.toFixed(2)),
-          current_mid: Number(pnl.currentMid.toFixed(2)),
-          entry_debit: Number(pos.entry_debit_per_spread),
-          contracts_remaining_at_trip: pos.contracts_remaining,
-          scaling_out: targetContracts,
-          as_of: pnl.asOf,
-        },
-      })
-      .select('id')
-      .maybeSingle()
-
-    if (insertErr) {
-      // Most common: 23505 unique violation from the partial
-      // index → there's already a pending trigger of this kind.
-      // Idempotency working as intended.
-      if (insertErr.code === '23505') {
-        summary.triggers_idempotent_skip++
-        continue
-      }
-      console.warn('[trigger-eval] insert failed', pos.id, trip.kind, insertErr.message)
-      continue
-    }
-
-    if (inserted?.id) {
-      summary.triggers_created.push({
-        position_id: pos.id,
-        kind: trip.kind,
-        reason: trip.reason,
-      })
-      // Fire the push notification — best-effort, never fails the
-      // eval if push delivery has hiccups.
-      await fanOutPush(
-        supabase, pos.user_id, pos.id, inserted.id, pos.ticker, trip.kind, trip.reason,
-      )
-    }
+    await fireTrigger(
+      pos,
+      trip.kind,
+      trip.reason,
+      proposed_action,
+      {
+        pnl_pct: Number(pnl.pnlPct.toFixed(2)),
+        current_mid: Number(pnl.currentMid.toFixed(2)),
+        entry_debit: Number(pos.entry_debit_per_spread),
+        contracts_remaining_at_trip: pos.contracts_remaining,
+        scaling_out: targetContracts,
+        as_of: pnl.asOf,
+      },
+    )
   }
 
   return json({ success: true, rth, force, summary })

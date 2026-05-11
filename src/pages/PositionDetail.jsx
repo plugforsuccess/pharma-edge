@@ -982,10 +982,15 @@ function AutoTriggersCard({ pos, live, refreshTick }) {
   return (
     <div className="space-y-2">
       {triggers.map((trig) => {
-        const isStop = trig.kind === 'stop_loss_50'
-        const tone = isStop ? 'crimson' : 'amber'
+        // Stop loss and thesis-invalidated both render as "exit
+        // now" with the crimson tone — they're both protect-capital
+        // events. Profit takes stay amber (good news, but still
+        // action-required to follow the playbook scale-out).
+        const isExitNow = trig.kind === 'stop_loss_50' || trig.kind === 'thesis_invalidated'
+        const tone = isExitNow ? 'crimson' : 'amber'
         const kindLabel =
           trig.kind === 'stop_loss_50' ? 'Stop loss' :
+          trig.kind === 'thesis_invalidated' ? 'Thesis invalidated' :
           trig.kind === 'profit_take_100' ? 'Profit target +100%' :
           trig.kind === 'profit_take_200' ? 'Profit target +200%' :
           trig.kind
@@ -1005,7 +1010,7 @@ function AutoTriggersCard({ pos, live, refreshTick }) {
           <div
             key={trig.id}
             className={`border rounded-xl p-3 space-y-2 ${
-              isStop
+              isExitNow
                 ? 'bg-crimson/10 border-crimson/40'
                 : 'bg-amber-950/30 border-amber-400/40'
             }`}
@@ -1026,7 +1031,7 @@ function AutoTriggersCard({ pos, live, refreshTick }) {
                 onClick={() => approve(trig)}
                 disabled={actingId === trig.id}
                 className={`flex-1 text-xs font-semibold rounded-lg py-2 transition disabled:opacity-50 ${
-                  isStop
+                  isExitNow
                     ? 'bg-crimson hover:bg-crimson/80 text-white'
                     : 'bg-amber-400 hover:bg-amber-300 text-bg'
                 }`}
