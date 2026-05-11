@@ -42,7 +42,6 @@ export default function PlaceOrderPanel({ signal, calculation, onOrderPlaced }) 
   const effectiveTotalGain = effectiveContracts * perContractMaxGain
   const acctSize = Number(calculation?.account_size_used) || 0
   const pctOfAccount = acctSize > 0 ? (effectiveTotalCost / acctSize) * 100 : null
-  const violatesRule = pctOfAccount != null && pctOfAccount > 2
   const [liveConfirm, setLiveConfirm] = useState('')
 
   const existingOrderInFlight = useMemo(() => {
@@ -252,32 +251,19 @@ export default function PlaceOrderPanel({ signal, calculation, onOrderPlaced }) 
 
         {step === 'idle' && selectedAccount && !existingOrderInFlight && (
           <>
-            {/* Manual contract count input — the calculator's
-                computed value (under the 2% rule) defaults here, but
-                the user can override. Necessary for two cases:
-                  1. Small NLV where the 2% rule rounds to 0 and the
-                     user wants to take 1 contract anyway (informed
-                     rule violation).
-                  2. User wants smaller size than the rule allows
-                     (e.g. low-conviction trade). */}
+            {/* Manual contract count input. The 2%-rule auto-fill +
+                "exceeds the 2% rule" gate were removed 2026-05-11 at
+                Cameron's request — sizing is user-driven. We still
+                surface "X% of account at risk" as informational so
+                the trader sees what fraction of NLV is on the line,
+                but no judgement and no auto-default beyond 1. */}
             <div className="bg-bg border border-border rounded-xl p-4">
-              <div className="flex items-center justify-between mb-2">
-                <label
-                  htmlFor="po-contracts"
-                  className="text-muted text-[10px] uppercase tracking-wider"
-                >
-                  Contracts
-                </label>
-                {Number(calculation?.contracts) > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setManualContracts('')}
-                    className="text-[10px] text-subtle hover:text-fg"
-                  >
-                    Reset to 2% rule ({calculation.contracts})
-                  </button>
-                )}
-              </div>
+              <label
+                htmlFor="po-contracts"
+                className="text-muted text-[10px] uppercase tracking-wider mb-2 block"
+              >
+                Contracts
+              </label>
               <input
                 id="po-contracts"
                 type="number"
@@ -287,31 +273,18 @@ export default function PlaceOrderPanel({ signal, calculation, onOrderPlaced }) 
                 value={
                   manualContracts !== ''
                     ? manualContracts
-                    : (calculation?.contracts ?? '')
+                    : (calculation?.contracts ?? 1)
                 }
                 onChange={(e) => setManualContracts(e.target.value)}
                 placeholder="1"
                 className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm font-mono-tab text-fg focus:outline-none focus:border-amber-400/40"
               />
-              <p
-                className={clsx(
-                  'text-[10px] mt-2 leading-relaxed',
-                  violatesRule ? 'text-red-400' : 'text-muted',
-                )}
-              >
-                {effectiveContracts === 0 ? (
-                  'Enter at least 1 contract to place this order.'
-                ) : pctOfAccount != null ? (
-                  violatesRule ? (
-                    <>
-                      ⚠ {pctOfAccount.toFixed(1)}% of account at risk —
-                      exceeds the 2% rule. Reduce size or accept the
-                      breach knowingly.
-                    </>
-                  ) : (
-                    <>{pctOfAccount.toFixed(1)}% of account at risk · within 2% rule.</>
-                  )
-                ) : null}
+              <p className="text-[10px] mt-2 leading-relaxed text-muted">
+                {effectiveContracts === 0
+                  ? 'Enter at least 1 contract to place this order.'
+                  : pctOfAccount != null
+                    ? `${pctOfAccount.toFixed(1)}% of account at risk`
+                    : null}
               </p>
             </div>
 
@@ -386,7 +359,7 @@ export default function PlaceOrderPanel({ signal, calculation, onOrderPlaced }) 
                 {[
                   'I have verified the strike prices',
                   'I have verified the expiry date',
-                  'Position is within my 2% rule',
+                  'Contract size is what I intended',
                   'I have a pre-planned exit',
                   `Trading on ${selectedAccount.is_paper ? 'paper' : 'LIVE'} account`,
                 ].map((item, i) => (
