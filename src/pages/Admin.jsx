@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Navigate } from 'react-router-dom'
-import { Activity, DollarSign, Users, TrendingUp, Clock, AlertCircle } from 'lucide-react'
+import { Activity, DollarSign, Users, TrendingUp, Clock, AlertCircle, Zap } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import Spinner from '../components/Spinner'
@@ -21,6 +21,7 @@ export default function Admin() {
   const [users, setUsers] = useState(null)
   const [funnel, setFunnel] = useState(null)
   const [cron, setCron] = useState(null)
+  const [autoTrades, setAutoTrades] = useState(null)
 
   useEffect(() => {
     if (profile && !profile.is_admin) return
@@ -30,17 +31,19 @@ export default function Admin() {
       setLoading(true)
       setError(null)
       try {
-        const [costData, usersData, funnelData, cronData] = await Promise.all([
+        const [costData, usersData, funnelData, cronData, autoTradesData] = await Promise.all([
           loadCost(),
           loadUsers(),
           loadFunnel(),
           loadCron(),
+          loadAutoTrades(),
         ])
         if (cancelled) return
         setCost(costData)
         setUsers(usersData)
         setFunnel(funnelData)
         setCron(cronData)
+        setAutoTrades(autoTradesData)
       } catch (e) {
         if (!cancelled) setError(e.message ?? String(e))
       } finally {
@@ -77,6 +80,7 @@ export default function Admin() {
       )}
 
       {cost && <CostCard cost={cost} />}
+      {autoTrades && <AutoTradesCard data={autoTrades} />}
       {users && <UsersCard users={users} />}
       {funnel && <FunnelCard funnel={funnel} />}
       {cron && <CronCard cron={cron} />}
@@ -323,6 +327,176 @@ function CronCard({ cron }) {
       )}
     </div>
   )
+}
+
+// ─── Auto-trades telemetry ──────────────────────────────────────
+//
+// Reads the last 14 days of auto_triggers + the auto-executed/auto-
+// dismissed split. Built to back the §7.3 calibration checklist in
+// AUTO_TRADE_MANAGEMENT.md — gives us "how many of my triggers fired
+// per kind?", "what's the dismiss-vs-execute ratio?", "how long does
+// the user take to act?", "any failed orders?" — without having to
+// query the DB by hand. Read-only; admin SELECT policies on
+// auto_triggers + open_positions cover the access.
+
+async function loadAutoTrades() {
+  const since = new Date(Date.now() - 14 * 86_400_000).toISOString()
+  const { data, error } = await supabase
+    .from('auto_triggers')
+    .select('id, kind, status, created_at, resolved_at, executed_at, dismissed_at, observed, execution_result, position_id, open_positions!inner(ticker, strategy_type)')
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+  if (error) throw new Error(`auto_triggers: ${error.message}`)
+  const rows = data ?? []
+
+  // Counts by kind and by status.
+  const byKind = {}
+  const byStatus = {}
+  for (const r of rows) {
+    byKind[r.kind] = (byKind[r.kind] ?? 0) + 1
+    byStatus[r.status] = (byStatus[r.status] ?? 0) + 1
+  }
+
+  // Median time-to-action: created_at → resolved_at, for any row that
+  // has resolved_at populated (executed, failed, dismissed). Ignores
+  // pending rows (no end timestamp yet) and expired (cron-cleared, no
+  // user signal).
+  const ttaMs = rows
+    .filter((r) => r.resolved_at && ['executed', 'failed', 'dismissed'].includes(r.status))
+    .map((r) => new Date(r.resolved_at).getTime() - new Date(r.created_at).getTime())
+    .sort((a, b) => a - b)
+  const medianTtaMs = ttaMs.length === 0
+    ? null
+    : ttaMs[Math.floor(ttaMs.length / 2)]
+
+  return {
+    total: rows.length,
+    byKind,
+    byStatus,
+    medianTtaMs,
+    recent: rows.slice(0, 10),
+  }
+}
+
+function AutoTradesCard({ data }) {
+  const { total, byKind, byStatus, medianTtaMs, recent } = data
+  const executed = byStatus.executed ?? 0
+  const dismissed = byStatus.dismissed ?? 0
+  const failed = byStatus.failed ?? 0
+  const pending = byStatus.pending ?? 0
+  const executeRate = total > 0 ? Math.round((executed / total) * 100) : 0
+
+  return (
+    <div className="bg-card border border-border rounded-xl p-4 space-y-3">
+      <div className="flex items-center gap-2">
+        <Zap size={14} className="text-amber-400" />
+        <h2 className="text-sm font-semibold">Auto-trades · 14d</h2>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-2">
+        <BigStat label="Fired" value={total} />
+        <BigStat
+          label="Executed"
+          value={executed}
+          sub={total > 0 ? `${executeRate}% of fired` : undefined}
+        />
+        <BigStat label="Dismissed" value={dismissed} />
+        <BigStat label="Failed" value={failed} />
+        <BigStat
+          label="Median time-to-action"
+          value={medianTtaMs == null ? '—' : fmtDuration(medianTtaMs)}
+          sub={pending > 0 ? `${pending} still pending` : undefined}
+        />
+      </div>
+
+      {/* By kind breakdown — surfaces which triggers are firing most.
+          Order matches the rule book in AUTO_TRADE_MANAGEMENT.md §6. */}
+      <div className="border-t border-border pt-3 space-y-1.5">
+        <div className="text-[10px] uppercase tracking-wider text-muted mb-1">By kind</div>
+        {[
+          ['stop_loss_50', 'Stop loss'],
+          ['thesis_invalidated', 'Thesis invalidated'],
+          ['profit_take_100', 'Profit target +100%'],
+          ['profit_take_200', 'Profit target +200%'],
+        ].map(([k, label]) => {
+          const n = byKind[k] ?? 0
+          if (n === 0) return (
+            <div key={k} className="flex items-baseline justify-between text-[11px] text-muted">
+              <span>{label}</span>
+              <span className="font-mono-tab">—</span>
+            </div>
+          )
+          const tone =
+            k === 'stop_loss_50' || k === 'thesis_invalidated'
+              ? 'text-crimson'
+              : 'text-amber-400'
+          return (
+            <div key={k} className="flex items-baseline justify-between text-[11px]">
+              <span className={tone}>{label}</span>
+              <span className="font-mono-tab text-fg">{n}</span>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Recent 10 — most actionable view. Each row links into the
+          position so admin can audit case-by-case. */}
+      <div className="border-t border-border pt-3 space-y-1">
+        <div className="text-[10px] uppercase tracking-wider text-muted mb-1">
+          Most recent ({recent.length})
+        </div>
+        {recent.length === 0 ? (
+          <div className="text-[11px] text-subtle">No triggers in the last 14 days.</div>
+        ) : (
+          <div className="space-y-1">
+            {recent.map((r) => {
+              const tone =
+                r.status === 'executed' ? 'text-green-400' :
+                r.status === 'failed' ? 'text-crimson' :
+                r.status === 'dismissed' ? 'text-muted' :
+                'text-amber-400'
+              return (
+                <a
+                  key={r.id}
+                  href={`/position/${r.position_id}`}
+                  className="block border-b border-border/50 pb-1 text-[11px] hover:bg-bg/30 -mx-1 px-1 rounded"
+                >
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="font-medium text-fg">
+                      {r.open_positions?.ticker ?? '—'}
+                    </span>
+                    <span className={`uppercase text-[9px] tracking-wider ${tone}`}>
+                      {r.status}
+                    </span>
+                  </div>
+                  <div className="flex items-baseline justify-between text-muted text-[10px]">
+                    <span>{kindShortLabel(r.kind)}</span>
+                    <span>{ago(r.created_at)}</span>
+                  </div>
+                </a>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function kindShortLabel(k) {
+  if (k === 'stop_loss_50') return 'stop'
+  if (k === 'thesis_invalidated') return 'thesis'
+  if (k === 'profit_take_100') return 'pt +100%'
+  if (k === 'profit_take_200') return 'pt +200%'
+  return k
+}
+
+function fmtDuration(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return '—'
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s`
+  if (ms < 3600_000) return `${Math.round(ms / 60_000)}m`
+  if (ms < 86_400_000) return `${(ms / 3600_000).toFixed(1)}h`
+  return `${(ms / 86_400_000).toFixed(1)}d`
 }
 
 // ─── Helpers ────────────────────────────────────────────────────
