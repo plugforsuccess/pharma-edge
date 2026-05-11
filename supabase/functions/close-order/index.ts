@@ -98,7 +98,7 @@ serve(async (req) => {
   // Validate ownership + that it's still open.
   const { data: pos, error: posErr } = await adminClient
     .from('open_positions')
-    .select('id, user_id, signal_id, ticker, strategy_type, long_strike, short_strike, expiration, contracts, status, long_occ_symbol, short_occ_symbol')
+    .select('id, user_id, signal_id, ticker, strategy_type, long_strike, short_strike, expiration, contracts, contracts_remaining, status, long_occ_symbol, short_occ_symbol')
     .eq('id', positionId)
     .eq('user_id', user.id)
     .maybeSingle()
@@ -111,8 +111,14 @@ serve(async (req) => {
   if (pos.status !== 'open') {
     return json({ success: false, error: `position is not open (status=${pos.status})` }, 400)
   }
-  if (contracts > pos.contracts) {
-    return json({ success: false, error: `contracts (${contracts}) exceeds position size (${pos.contracts})` }, 400)
+  // Validate against contracts_remaining, not the original contracts —
+  // after a partial scale-out the same position is still status='open'
+  // but with fewer contracts left to close.
+  if (contracts > pos.contracts_remaining) {
+    return json(
+      { success: false, error: `contracts (${contracts}) exceeds remaining size (${pos.contracts_remaining})` },
+      400,
+    )
   }
 
   const meta = strategyMeta(pos.strategy_type)

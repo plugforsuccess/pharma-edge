@@ -91,9 +91,26 @@ interface Position {
   short_strike: number
   expiration: string
   contracts: number
+  contracts_remaining: number
   entry_debit_per_spread: number
   status: string
   last_mid_per_spread: number | null
+}
+
+// Maps a trip kind to the number of contracts to close. Scales out
+// against REMAINING contracts, not original — so a second profit
+// trigger doesn't accidentally close more than the runner has left.
+//   stop_loss_50      → full remaining (exit the whole thing)
+//   profit_take_100   → ceil(50% of remaining)   ride 50%
+//   profit_take_200   → ceil(75% of remaining)   ride 25%
+// Returns 0 if there's nothing to scale out, signalling caller to
+// skip the trigger insert (avoids creating a useless 0-contract row).
+function contractsToScaleOut(kind: string, remaining: number): number {
+  if (remaining <= 0) return 0
+  if (kind === 'stop_loss_50') return remaining
+  if (kind === 'profit_take_100') return Math.ceil(remaining * 0.5)
+  if (kind === 'profit_take_200') return Math.ceil(remaining * 0.75)
+  return remaining
 }
 
 interface QuoteRow {
@@ -255,7 +272,7 @@ serve(async (req) => {
 
   const { data: positions, error: posErr } = await supabase
     .from('open_positions')
-    .select('id, user_id, signal_id, ticker, strategy_type, long_strike, short_strike, expiration, contracts, entry_debit_per_spread, status, last_mid_per_spread')
+    .select('id, user_id, signal_id, ticker, strategy_type, long_strike, short_strike, expiration, contracts, contracts_remaining, entry_debit_per_spread, status, last_mid_per_spread')
     .eq('status', 'open')
     .returns<Position[]>()
   if (posErr) {
@@ -304,14 +321,24 @@ serve(async (req) => {
     //   trigger_id }. We don't know the user's preferred account
     // here — they may have multiple — so we omit account_number and
     // let the UI fill it in from their selected account on
-    // PositionDetail. contracts default = full close.
+    // PositionDetail.
     //
-    // limit_price = current spread mid (we'll receive this). For
-    // partial closes the UI can reduce contracts but keep the same
-    // mid price.
+    // contracts is sized per the playbook scale-out rules and
+    // against contracts_remaining (not the original `contracts`),
+    // so a second profit trigger after a partial scale-out doesn't
+    // accidentally close more than the runner has left.
+    //
+    // limit_price = current spread mid (we'll receive this).
+    const targetContracts = contractsToScaleOut(trip.kind, pos.contracts_remaining)
+    if (targetContracts <= 0) {
+      // Nothing left to scale out — runner already fully closed
+      // via prior triggers or manual exit. Skip; idempotency unique
+      // index covers re-eval correctness on its own.
+      continue
+    }
     const proposed_action = {
       position_id: pos.id,
-      contracts: pos.contracts,
+      contracts: targetContracts,
       limit_price: Number(pnl.currentMid.toFixed(2)),
     }
 
@@ -328,6 +355,8 @@ serve(async (req) => {
           pnl_pct: Number(pnl.pnlPct.toFixed(2)),
           current_mid: Number(pnl.currentMid.toFixed(2)),
           entry_debit: Number(pos.entry_debit_per_spread),
+          contracts_remaining_at_trip: pos.contracts_remaining,
+          scaling_out: targetContracts,
           as_of: pnl.asOf,
         },
       })
