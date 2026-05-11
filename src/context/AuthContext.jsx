@@ -6,6 +6,7 @@ const AuthContext = createContext({})
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [profile, setProfile] = useState(null)
+  const [profileLoaded, setProfileLoaded] = useState(false)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -38,16 +39,23 @@ export function AuthProvider({ children }) {
       void fetchProfile(nextUser.id)
     } else {
       setProfile(null)
+      setProfileLoaded(true)
     }
   }
 
   async function fetchProfile(userId) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('profiles')
       .select('*')
       .eq('id', userId)
       .maybeSingle()
+    if (error) {
+      console.error('[auth] fetchProfile failed:', error.message, error)
+    } else if (!data) {
+      console.warn('[auth] fetchProfile returned no row for user', userId)
+    }
     setProfile(data ?? null)
+    setProfileLoaded(true)
   }
 
   async function signIn(email, password) {
@@ -64,7 +72,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, profile, loading, signIn, signUp, signOut, fetchProfile }}
+      value={{ user, profile, profileLoaded, loading, signIn, signUp, signOut, fetchProfile }}
     >
       {children}
     </AuthContext.Provider>
