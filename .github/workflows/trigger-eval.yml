@@ -1,0 +1,51 @@
+# Phase 1 of automated trade management. Every 5 min during US RTH,
+# asks the trigger-eval edge function to scan open positions and
+# write `auto_triggers` rows for any that tripped a stop-loss /
+# profit-take rule.
+#
+# Same curl-the-edge-function pattern as monitor-positions.yml /
+# worker-health.yml. The edge function double-checks RTH and skips
+# silently outside hours, so an overshoot cron tick is a no-op.
+
+name: Evaluate auto-trade triggers
+
+on:
+  schedule:
+    - cron: '35,40,45,50,55 13 * * 1-5'   # 13:35–13:55 UTC = 9:35–9:55 ET (DST)
+    - cron: '*/5 14-20 * * 1-5'           # 14:00–20:55 UTC = 10:00–16:55 ET
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Force-evaluate even outside RTH (for dev / wiring tests)'
+        type: boolean
+        default: false
+
+concurrency:
+  group: trigger-eval
+  cancel-in-progress: false
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Invoke trigger-eval edge function
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          FORCE: ${{ inputs.force == true }}
+        run: |
+          body='{}'
+          if [ "$FORCE" = "true" ]; then body='{"force":true}'; fi
+          resp=$(curl -sS -w "\n%{http_code}" -X POST \
+            "${SUPABASE_URL}/functions/v1/trigger-eval" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "$body")
+          http=$(echo "$resp" | tail -n1)
+          payload=$(echo "$resp" | head -n -1)
+          echo "trigger-eval status=${http} body=${payload}"
+          if [ "$http" != "200" ]; then
+            echo "::error::trigger-eval returned ${http}"
+            exit 1
+          fi
