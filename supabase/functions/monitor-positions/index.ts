@@ -578,7 +578,7 @@ async function pollOpenOrders(
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
   const { data: orders } = await supabase
     .from('order_history')
-    .select('id, signal_id, user_id, tastytrade_order_id, account_number, status, contracts, ticker, auto_executed, auto_close_strategy, limit_price')
+    .select('id, signal_id, position_id, order_type, user_id, tastytrade_order_id, account_number, status, contracts, ticker, auto_executed, auto_close_strategy, limit_price')
     .gte('submitted_at', since)
     .in('status', ['submitted', 'pending', 'partial_fill'])
     .not('tastytrade_order_id', 'is', null)
@@ -607,6 +607,49 @@ async function pollOpenOrders(
       }
       await supabase.from('order_history').update(updates).eq('id', o.id)
       updated++
+
+      // CLOSE-order reconciliation: when a close order transitions
+      // to 'filled', decrement the position's contracts_remaining
+      // by however many contracts this order represents. The DB
+      // trigger open_positions_close_on_zero_remaining auto-flips
+      // status='closed' when remaining hits 0, so no extra status
+      // update needed here.
+      //
+      // Idempotent by construction: the surrounding `normalised ===
+      // o.status → continue` check above only runs this block on the
+      // first poll that sees the transition. Subsequent polls of the
+      // same order short-circuit before reaching here.
+      //
+      // For partial_fill we deliberately do NOTHING — the order
+      // hasn't terminated yet. Tastytrade Day orders eventually
+      // resolve to filled or cancelled, and the decrement happens
+      // on that terminal state. (A user who cancels mid-partial-fill
+      // is a phase-2 edge case to wire up via filled-quantity.)
+      if (
+        o.order_type === 'close' &&
+        normalised === 'filled' &&
+        o.position_id &&
+        Number.isFinite(Number(o.contracts)) &&
+        Number(o.contracts) > 0
+      ) {
+        const { data: posRow, error: posReadErr } = await supabase
+          .from('open_positions')
+          .select('contracts_remaining')
+          .eq('id', o.position_id)
+          .maybeSingle()
+        if (posReadErr) {
+          console.warn('[poll-orders] position read failed:', posReadErr.message)
+        } else if (posRow) {
+          const next = Math.max(0, Number(posRow.contracts_remaining) - Number(o.contracts))
+          const { error: posUpdErr } = await supabase
+            .from('open_positions')
+            .update({ contracts_remaining: next })
+            .eq('id', o.position_id)
+          if (posUpdErr) {
+            console.warn('[poll-orders] contracts_remaining decrement failed:', posUpdErr.message)
+          }
+        }
+      }
 
       // Fire fill alert for auto-executed orders that just filled.
       if (normalised === 'filled' && o.auto_executed) {

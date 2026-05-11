@@ -448,8 +448,10 @@ export default function PositionDetail() {
         <div className="flex-1">
           <h1 className="text-lg font-semibold leading-tight">{pos.ticker}</h1>
           <p className="text-xs text-subtle">
-            {pos.strategy_type.replace(/_/g, ' ')} · {pos.contracts} contract
-            {pos.contracts > 1 ? 's' : ''}
+            {pos.strategy_type.replace(/_/g, ' ')} ·{' '}
+            {pos.contracts_remaining != null && pos.contracts_remaining !== pos.contracts
+              ? `${pos.contracts_remaining} of ${pos.contracts} contracts`
+              : `${pos.contracts} contract${pos.contracts > 1 ? 's' : ''}`}
           </p>
         </div>
         <button
@@ -988,6 +990,17 @@ function AutoTriggersCard({ pos, live, refreshTick }) {
           trig.kind === 'profit_take_200' ? 'Profit target +200%' :
           trig.kind
         const observedPct = trig.observed?.pnl_pct
+        // Pull the contract count off the proposed_action. The
+        // trigger-eval cron sizes this per the playbook scale-out
+        // rules — full close for stop, ~50% for +100%, ~75% for
+        // +200%. We surface it in the button label so the user
+        // sees what they're approving before tapping.
+        const scaleContracts = Number(trig.proposed_action?.contracts) || pos.contracts
+        const remainingAtTrip = Number(trig.observed?.contracts_remaining_at_trip) || pos.contracts_remaining || pos.contracts
+        const isPartial = scaleContracts < remainingAtTrip
+        const scaleLabel = isPartial
+          ? `Scale out ${scaleContracts}/${remainingAtTrip}`
+          : 'Close all'
         return (
           <div
             key={trig.id}
@@ -1018,7 +1031,7 @@ function AutoTriggersCard({ pos, live, refreshTick }) {
                     : 'bg-amber-400 hover:bg-amber-300 text-bg'
                 }`}
               >
-                {actingId === trig.id ? 'Submitting…' : 'Close now'}
+                {actingId === trig.id ? 'Submitting…' : scaleLabel}
               </button>
               <button
                 onClick={() => dismiss(trig)}
