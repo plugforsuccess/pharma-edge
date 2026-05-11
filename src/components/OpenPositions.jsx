@@ -104,7 +104,9 @@ function PositionRow({ p, onClick, onCloseShortcut }) {
     pnl == null ? 'text-subtle' : pnl >= 0 ? 'text-green-400' : 'text-crimson'
   const PnlIcon = pnl != null && pnl < 0 ? TrendingDown : TrendingUp
   const showStopWarning = pnl != null && pnl <= -50
-  const showDteWarning = dte <= 21
+  // 21 DTE rule was retired 2026-05-11 — DTE shown plain, no
+  // amber tint. Stop-loss warning at -50% retained.
+  const showDteWarning = false
 
   // Outer is a non-button div so we can nest a separate close button
   // without producing invalid markup. Click on the main area still

@@ -544,10 +544,12 @@ export default function StrikePriceCalculator({
       const upperBe = shortCall + prem
       const riskReward =
         maxLossPerContract > 0 ? maxGainPerContract / maxLossPerContract : 0
-      const contracts =
-        maxPositionDollars != null && maxLossPerContract > 0
-          ? Math.floor(maxPositionDollars / maxLossPerContract)
-          : null
+      // Default to 1 contract. The 2%-rule auto-fill was removed
+      // 2026-05-11 — Cameron asked for sizing decisions to be user-
+      // driven rather than computed against a placeholder account
+      // size. The contracts input on PlaceOrderPanel + LogSignal
+      // still accepts any number; the user types what they want.
+      const contracts = 1
 
       const dteWarning = computeDteWarning(catalystDate, expiry)
       const dte = computeDte(expiry)
@@ -668,10 +670,8 @@ export default function StrikePriceCalculator({
     const breakEven = config.breakEven(buy, sell, prem)
     const riskReward =
       maxLossPerContract > 0 ? maxGainPerContract / maxLossPerContract : 0
-    const contracts =
-      maxPositionDollars != null && maxLossPerContract > 0
-        ? Math.floor(maxPositionDollars / maxLossPerContract)
-        : null
+    // Default to 1 contract — see note in the structured branch above.
+    const contracts = 1
 
     const dteWarning = computeDteWarning(catalystDate, expiry)
     const dte = expiry ? computeDte(expiry) : null
@@ -1386,65 +1386,32 @@ function ResultPanel({ result, config, expiry, sellStrike, buyStrike, premium })
 //   - contracts === 0: 2% allows nothing without violating, same UX
 //   - contracts >= 1: standard breakdown, with a "X% of account" tag
 //     so the user always sees how much sizing they're consuming
+// Position sizing summary. The 2% rule auto-fill + "Skip this trade"
+// hard gate were removed 2026-05-11 at Cameron's request — sizing
+// is now user-driven. The calculator defaults to 1 contract and the
+// user types whatever count they want on the contracts input above.
+// We still show "X% of account" as informational so the trader knows
+// what fraction of their NLV is on the line, but no judgement.
 function SizingPanel({ result }) {
   const acct = result.account_size_used
   const pct = result.premium_per_contract_pct
-  const violatesRule = pct != null && pct > 2
-  if (acct == null) {
-    return (
-      <div className="bg-bg border border-border rounded-xl p-4">
-        <p className="text-muted text-[10px] uppercase tracking-wider mb-1.5">
-          Position sizing
-        </p>
-        <p className="text-subtle text-xs">
-          Set Account Size or sync the broker for 2%-rule contract recommendations.
-        </p>
-      </div>
-    )
-  }
-  if (violatesRule) {
-    return (
-      <div className="bg-red-950/20 border border-red-900/40 rounded-xl p-4">
-        <p className="text-red-400 text-[10px] uppercase tracking-wider font-bold mb-1.5">
-          Skip this trade
-        </p>
-        <p className="text-red-400 text-xs leading-relaxed">
-          One contract risks ${Number(result.maxLossPerContract).toFixed(0)} —{' '}
-          <span className="font-semibold">{pct.toFixed(1)}% of your ${Math.round(acct)} account</span>.
-          The 2% rule mathematically forbids any size at this strike/premium.
-          Widen the spread or wait for a smaller candidate.
-        </p>
-      </div>
-    )
-  }
-  if (result.contracts === 0 || result.contracts == null) {
-    return (
-      <div className="bg-yellow-950/20 border border-yellow-900/40 rounded-xl p-4">
-        <p className="text-yellow-400 text-[10px] uppercase tracking-wider font-bold mb-1.5">
-          0 contracts at 2% rule
-        </p>
-        <p className="text-yellow-400 text-xs leading-relaxed">
-          Account too small for this trade as configured. Reduce premium, widen
-          the spread, or pick a cheaper underlying.
-        </p>
-      </div>
-    )
-  }
+  const contracts = result.contracts ?? 1
+  const totalPct = pct != null ? pct * contracts : null
   return (
     <div className="bg-bg border border-border rounded-xl p-4">
       <div className="flex items-center justify-between mb-3">
         <p className="text-muted text-[10px] uppercase tracking-wider">
-          Your position (2% rule)
+          Your position
         </p>
-        {pct != null && (
+        {totalPct != null && acct != null && (
           <span className="text-[10px] text-subtle">
-            {(pct * result.contracts).toFixed(1)}% of account
+            {totalPct.toFixed(1)}% of ${Math.round(acct).toLocaleString()} account
           </span>
         )}
       </div>
       <div className="grid grid-cols-3 gap-3 text-center">
         <div>
-          <p className="text-white font-bold text-xl">{result.contracts}</p>
+          <p className="text-white font-bold text-xl">{contracts}</p>
           <p className="text-muted text-[10px]">Contracts</p>
         </div>
         <div>
@@ -1600,13 +1567,11 @@ function computeDte(expiryDate) {
 // "Never enter under 21 DTE" — the rule is about absolute DTE on entry,
 // independent of catalyst date. Returns null if DTE is unknown or
 // already comfortable (≥ 21).
-function computeExpiryDteWarning(dte) {
-  if (dte == null) return null
-  if (dte < 7) {
-    return { kind: 'block', text: `${dte} DTE — far below the 21 DTE rule. Gamma/theta will eat this trade in days.` }
-  }
-  if (dte < 21) {
-    return { kind: 'warn', text: `${dte} DTE violates the 21 DTE rule. Roll out to a later expiry.` }
-  }
+// Per-trade DTE warnings (the "21 DTE rule" red banner) were removed
+// 2026-05-11 at Cameron's request — short-DTE pin trades and 0DTE
+// scalps are legitimate Cash Moves setups and the blanket "21 DTE
+// floor" was misfiring on them. The DTE number is still shown
+// prominently in the trade summary; the user can choose.
+function computeExpiryDteWarning() {
   return null
 }
