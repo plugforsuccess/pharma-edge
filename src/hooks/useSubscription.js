@@ -25,9 +25,14 @@ export const PRO_TIER_LIMITS = {
 }
 
 export function useSubscription() {
-  const { profile, loading } = useAuth()
+  const { profile, profileLoaded, loading } = useAuth()
   const tier = profile?.subscription_tier ?? 'free'
   const isPro = tier === 'pro'
   const limits = isPro ? PRO_TIER_LIMITS : FREE_TIER_LIMITS
-  return { tier, isPro, limits, loading }
+  // `loading` from AuthContext only tracks the session bootstrap. `profileLoaded`
+  // tracks whether the profiles-table fetch has resolved (success or fail). Gating
+  // logic should wait for profileLoaded — otherwise the very first render hits
+  // `tier='free'` (default) and locks Pro users out of features until the row
+  // arrives a tick later.
+  return { tier, isPro, limits, loading, profileLoaded }
 }

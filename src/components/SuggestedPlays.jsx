@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Sparkles, FileText, AlertCircle, Lock } from 'lucide-react'
 import InfoTip from './InfoTip'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import { useSubscription } from '../hooks/useSubscription'
 
 // Ask Claude for 0-3 spread trade ideas based on the live GEX matrix
 // for the current ticker. Renders each as a card with strikes, expiry,
@@ -53,9 +54,18 @@ function saveCachedPlays(ticker, data) {
   }
 }
 
-export default function SuggestedPlays({ ticker, isPro }) {
+export default function SuggestedPlays({ ticker, isPro: isProProp }) {
   const { profile } = useAuth()
+  // Read tier state from useSubscription directly rather than trusting the
+  // prop alone. Caller is responsible for passing the latest isPro, but if
+  // it ever drifts from auth state we want to fail open to Pro behavior
+  // for users whose DB row says they're Pro. The prop is kept as an override
+  // (e.g. Storybook / tests) — if explicitly passed false we honor that.
+  const { isPro: isProSub, profileLoaded, tier } = useSubscription()
+  const isPro = typeof isProProp === 'boolean' ? isProProp || isProSub : isProSub
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const debug = searchParams.get('debug') === '1'
   const [data, setData] = useState(() => loadCachedPlays(ticker))
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -103,9 +113,23 @@ export default function SuggestedPlays({ ticker, isPro }) {
     }
   }
 
-  if (!isPro) {
+  // Only render the locked teaser AFTER we've actually loaded the profile
+  // row. Otherwise the first frame after page load sees `tier='free'` (the
+  // default from `profile?.subscription_tier ?? 'free'`) and locks Pro
+  // users out until the AuthContext fetch resolves a tick later — which
+  // on slow networks or stale sessions looks identical to "permanently
+  // locked." profileLoaded gates that race correctly.
+  if (profileLoaded && !isPro) {
     return (
       <div className="bg-card border border-amber-400/20 rounded-xl p-4 space-y-2">
+        {debug && (
+          <DebugStrip
+            isPro={isPro}
+            tier={tier}
+            profileLoaded={profileLoaded}
+            profile={profile}
+          />
+        )}
         <div className="flex items-center gap-2">
           <Lock size={14} className="text-amber-400" />
           <h2 className="text-sm font-semibold">Suggested Plays</h2>
@@ -122,6 +146,16 @@ export default function SuggestedPlays({ ticker, isPro }) {
 
   return (
     <div className="bg-card border border-border rounded-xl overflow-hidden">
+      {debug && (
+        <div className="px-4 pt-3">
+          <DebugStrip
+            isPro={isPro}
+            tier={tier}
+            profileLoaded={profileLoaded}
+            profile={profile}
+          />
+        </div>
+      )}
       <div className="px-4 py-3 flex items-center gap-2 border-b border-border">
         <Sparkles size={14} className="text-amber-400 shrink-0" />
         <h2 className="text-sm font-semibold shrink-0">Suggested Plays</h2>
@@ -617,4 +651,36 @@ function logAsSignal(navigate, play, ticker, spot, regime) {
       },
     },
   })
+}
+
+
+// ?debug=1 surface — surfaces gating state inline since iOS PWA has no
+// DevTools. Renders a compact red/green checklist showing whether the
+// component thinks the user is Pro, what tier was read, whether the
+// profile row has finished loading, and the raw subscription_tier
+// value from the profile object. Lets us debug "why is the locked
+// teaser showing" without console access.
+function DebugStrip({ isPro, tier, profileLoaded, profile }) {
+  const rows = [
+    ['profileLoaded', profileLoaded, String(profileLoaded)],
+    ['profile loaded', !!profile, profile ? `id=${String(profile.id ?? '').slice(0, 8)}` : 'null (RLS or fetch failed)'],
+    ['raw subscription_tier', profile?.subscription_tier === 'pro', profile?.subscription_tier ?? 'null'],
+    ['useSubscription.tier', tier === 'pro', tier],
+    ['isPro (rendered)', isPro === true, String(isPro)],
+  ]
+  return (
+    <div className="bg-amber-950/30 border border-amber-400/40 rounded-lg p-2 text-[10px] font-mono space-y-0.5 mb-2">
+      <div className="text-amber-400 uppercase tracking-wider font-semibold text-[9px]">
+        Debug · ?debug=1
+      </div>
+      {rows.map(([label, ok, detail]) => (
+        <div key={label} className="flex items-baseline justify-between gap-2">
+          <span className={ok ? 'text-green-400' : 'text-crimson'}>
+            {ok ? '✓' : '✗'} {label}
+          </span>
+          <span className="text-muted text-right truncate ml-2">{detail}</span>
+        </div>
+      ))}
+    </div>
+  )
 }
