@@ -343,7 +343,7 @@ async function loadAutoTrades() {
   const since = new Date(Date.now() - 14 * 86_400_000).toISOString()
   const { data, error } = await supabase
     .from('auto_triggers')
-    .select('id, kind, status, created_at, resolved_at, executed_at, dismissed_at, observed, execution_result, position_id, open_positions!inner(ticker, strategy_type)')
+    .select('id, kind, status, created_at, resolved_at, executed_at, approved_at, observed, execution_result, position_id, open_positions!inner(ticker, strategy_type)')
     .gte('created_at', since)
     .order('created_at', { ascending: false })
   if (error) throw new Error(`auto_triggers: ${error.message}`)
