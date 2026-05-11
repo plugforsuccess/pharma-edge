@@ -25,14 +25,20 @@ export const PRO_TIER_LIMITS = {
 }
 
 export function useSubscription() {
-  const { profile, profileLoaded, loading } = useAuth()
-  const tier = profile?.subscription_tier ?? 'free'
-  const isPro = tier === 'pro'
+  const { user, profile, profileLoaded, loading } = useAuth()
+  // There is no free tier — every authenticated user has full access.
+  // The `subscription_tier` column is kept in the DB for future-tier
+  // work (Inner Circle, etc.) and for billing audit, but the customer-
+  // facing app treats "logged in" as "Pro." Unauthenticated visitors
+  // are kept on /login and never reach gated surfaces.
+  //
+  // Bound to `!!user` rather than `profile?.subscription_tier` so a
+  // stale/anon-role profile fetch (which would strip the
+  // subscription_tier column from the response) can't accidentally
+  // lock a paying user out of their own product. The DB row is still
+  // surfaced as `tier` for the Settings/Admin views that show it.
+  const tier = profile?.subscription_tier ?? (user ? 'pro' : 'free')
+  const isPro = !!user
   const limits = isPro ? PRO_TIER_LIMITS : FREE_TIER_LIMITS
-  // `loading` from AuthContext only tracks the session bootstrap. `profileLoaded`
-  // tracks whether the profiles-table fetch has resolved (success or fail). Gating
-  // logic should wait for profileLoaded — otherwise the very first render hits
-  // `tier='free'` (default) and locks Pro users out of features until the row
-  // arrives a tick later.
   return { tier, isPro, limits, loading, profileLoaded }
 }
