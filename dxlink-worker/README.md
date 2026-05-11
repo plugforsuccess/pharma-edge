@@ -1,5 +1,10 @@
 # Cash Moves — DXLink Quote Worker
 
+> Touch any file under `dxlink-worker/` and push to `main` to trigger
+> a redeploy via `.github/workflows/deploy-dxlink-worker.yml`. The
+> worker is a single Fly.io machine — when it OOMs or its refresh
+> token rotates, a no-op commit to this directory is the cheapest fix.
+
 Long-running Deno process that maintains a single WebSocket connection
 to Tastytrade's dxFeed (DXLink) gateway and streams real-time quotes,
 greeks, and open interest (seeded from Yahoo's chain endpoint on boot
