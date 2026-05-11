@@ -387,8 +387,45 @@ export default function PositionDetail() {
 
   if (!pos) return null
 
+  // Compute live P&L from the per-leg mid prices the dxlink-worker
+  // streams into dxlink_quotes. The DB columns `pos.last_mid_per_spread`
+  // and `pos.last_pnl_pct` are only updated by a periodic worker (every
+  // few minutes at best, and not at all outside RTH), so reading those
+  // gave users a stale P&L. legGreeks.long.mid + legGreeks.short.mid
+  // refresh every 60s via the auto-refresh effect and are typically
+  // <30s stale during RTH.
+  //
+  // Only computed for debit spreads (BULL_CALL / BEAR_PUT) — credit
+  // spreads use a different entry sign convention worth handling
+  // separately. Falls back to the stale DB columns whenever live data
+  // isn't available (legs out of streaming window, worker down, both
+  // legs >5 min stale, etc).
+  const live = (() => {
+    if (!legGreeks?.available) return null
+    const longMid = Number(legGreeks.long?.mid)
+    const shortMid = Number(legGreeks.short?.mid)
+    if (!Number.isFinite(longMid) || !Number.isFinite(shortMid)) return null
+    const strat = (pos.strategy_type || '').toLowerCase()
+    const isDebit = strat === 'bull_call_spread' || strat === 'bear_put_spread'
+    if (!isDebit) return null
+    const currentMid = longMid - shortMid
+    const entry = Number(pos.entry_debit_per_spread)
+    if (!Number.isFinite(entry) || entry <= 0) return null
+    const pnlPerSpread = currentMid - entry
+    const pnlPct = (pnlPerSpread / entry) * 100
+    const pnlDollars = pnlPerSpread * pos.contracts * 100
+    const newest = Math.max(
+      legGreeks.long?.updated_at ? new Date(legGreeks.long.updated_at).getTime() : 0,
+      legGreeks.short?.updated_at ? new Date(legGreeks.short.updated_at).getTime() : 0,
+    )
+    const stale = newest > 0 && Date.now() - newest > 5 * 60_000
+    if (stale) return null
+    return { currentMid, pnlPerSpread, pnlPct, pnlDollars, asOf: newest }
+  })()
+
   const dte = daysUntil(pos.expiration)
-  const pnl = pos.last_pnl_pct
+  const pnl = live?.pnlPct ?? pos.last_pnl_pct
+  const currentMid = live?.currentMid ?? pos.last_mid_per_spread
   const pnlTone =
     pnl == null ? 'text-fg' : pnl >= 0 ? 'text-green-400' : 'text-crimson'
   // Filter out trigger types we've retired so legacy JSONB rows
@@ -450,14 +487,18 @@ export default function PositionDetail() {
               {pnl != null ? `${pnl >= 0 ? '+' : ''}${pnl.toFixed(0)}%` : '—'}
             </div>
             <div className="text-[10px] text-subtle">
-              {pos.last_polled_at ? agoString(pos.last_polled_at) : 'awaiting first poll'}
+              {live?.asOf
+                ? `live · ${agoString(new Date(live.asOf).toISOString())}`
+                : pos.last_polled_at
+                ? `delayed · ${agoString(pos.last_polled_at)}`
+                : 'awaiting first poll'}
             </div>
           </div>
         </div>
 
         <div className="grid grid-cols-2 gap-2 text-xs pt-2 border-t border-border">
           <Stat label="Entry debit" value={`$${fmt(pos.entry_debit_per_spread)}`} />
-          <Stat label="Current mid" value={pos.last_mid_per_spread != null ? `$${fmt(pos.last_mid_per_spread)}` : '—'} />
+          <Stat label="Current mid" value={currentMid != null ? `$${fmt(currentMid)}` : '—'} />
           <Stat
             label="Total risk"
             value={`$${fmt(pos.entry_debit_per_spread * pos.contracts * 100)}`}
@@ -465,7 +506,7 @@ export default function PositionDetail() {
           />
           <Stat
             label="Live value"
-            value={pos.last_mid_per_spread != null ? `$${fmt(pos.last_mid_per_spread * pos.contracts * 100)}` : '—'}
+            value={currentMid != null ? `$${fmt(currentMid * pos.contracts * 100)}` : '—'}
           />
         </div>
 
