@@ -466,6 +466,8 @@ export default function PositionDetail() {
         </button>
       </div>
 
+      <AutoTriggersCard pos={pos} live={live} refreshTick={refreshTick} />
+
       <div className="bg-card border border-border rounded-xl p-4 space-y-3">
         <div className="flex items-baseline justify-between">
           <div>
@@ -830,6 +832,212 @@ function spreadGeometry(pos) {
 // piece the verdict useMemo depends on so we can tell at a glance
 // whether the issue is "data missing in DB" / "fetch failed" / "old
 // cached bundle missing the new SELECT" / "verdict logic bailed early".
+// Phase 1 auto-trade surface. Subscribes to public.auto_triggers
+// for this position and renders any PENDING rows as a banner with a
+// one-tap "Close now" + "Dismiss" pair. The trigger-eval cron does
+// the rule detection server-side; this card just makes the user's
+// approval cheap.
+//
+// On approve: fetch the user's broker accounts (same get-account
+// pattern as PlaceOrderPanel), pick the non-paper account if any,
+// POST close-order with the proposed_action body + the user's
+// account_number + trigger_id. close-order marks the auto_triggers
+// row 'executed' on success → realtime sub pulls it out of the
+// pending list → card disappears. On dismiss: client UPDATE on the
+// auto_triggers row (allowed by RLS for status='pending' → status
+// ='dismissed').
+//
+// Refreshes when:
+//   - position page mounts
+//   - the parent's refreshTick changes (every 60s + manual Refresh)
+//   - a realtime INSERT/UPDATE comes in on the user's row
+function AutoTriggersCard({ pos, live, refreshTick }) {
+  const [triggers, setTriggers] = useState([])
+  const [actingId, setActingId] = useState(null)
+  const [actError, setActError] = useState(null)
+  const [accountNumber, setAccountNumber] = useState(null)
+
+  useEffect(() => {
+    if (!pos?.id) return
+    let cancelled = false
+    ;(async () => {
+      const { data } = await supabase
+        .from('auto_triggers')
+        .select('id, kind, reason, proposed_action, observed, status, created_at')
+        .eq('position_id', pos.id)
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false })
+      if (!cancelled) setTriggers(data ?? [])
+    })()
+    return () => { cancelled = true }
+  }, [pos?.id, refreshTick])
+
+  useEffect(() => {
+    if (!pos?.id) return
+    const channel = supabase
+      .channel(`auto_triggers:position:${pos.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'auto_triggers', filter: `position_id=eq.${pos.id}` },
+        () => {
+          // On any change, refetch the pending list. Cheaper than
+          // splicing manually and avoids the "INSERT then UPDATE in
+          // same window" out-of-order pitfall.
+          supabase
+            .from('auto_triggers')
+            .select('id, kind, reason, proposed_action, observed, status, created_at')
+            .eq('position_id', pos.id)
+            .eq('status', 'pending')
+            .order('created_at', { ascending: false })
+            .then(({ data }) => setTriggers(data ?? []))
+        },
+      )
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [pos?.id])
+
+  // Resolve the user's broker account number once. We avoid showing
+  // the account picker in this card (keep the UI dead simple); if
+  // the user has multiple, we default to the largest non-paper
+  // account — same pattern as StrikePriceCalculator.
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { data } = await supabase.functions.invoke('get-account')
+        if (cancelled || !data?.success) return
+        const accounts = (data.accounts ?? []).slice()
+        accounts.sort(
+          (a, b) =>
+            Number(b.net_liquidating_value ?? 0) - Number(a.net_liquidating_value ?? 0),
+        )
+        const primary = accounts.find((a) => !a.is_paper) || accounts[0]
+        if (primary?.account_number) setAccountNumber(primary.account_number)
+      } catch { /* surface inline only when the user taps Close */ }
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  if (triggers.length === 0) return null
+
+  async function approve(trig) {
+    if (!accountNumber) {
+      setActError('No Tastytrade account linked. Connect a broker in Settings first.')
+      return
+    }
+    setActingId(trig.id)
+    setActError(null)
+    try {
+      // Use the live mid if we've got it fresher than the proposed
+      // action snapshot — markets move between trigger creation and
+      // approval. Falls back to the proposed_action.limit_price.
+      const limit_price = live?.currentMid != null
+        ? Number(live.currentMid.toFixed(2))
+        : trig.proposed_action.limit_price
+      const { data, error } = await supabase.functions.invoke('close-order', {
+        body: {
+          ...trig.proposed_action,
+          account_number: accountNumber,
+          limit_price,
+          trigger_id: trig.id,
+        },
+      })
+      if (error) {
+        let msg = error.message || 'order failed'
+        try {
+          const body = await error.context?.json?.()
+          if (body?.error) msg = body.error
+        } catch { /* */ }
+        throw new Error(msg)
+      }
+      if (!data?.success) throw new Error(data?.error || 'order failed')
+      // close-order already updated the trigger row → realtime sub
+      // will remove it. No optimistic splice needed.
+    } catch (e) {
+      setActError(e.message || 'order failed')
+    } finally {
+      setActingId(null)
+    }
+  }
+
+  async function dismiss(trig) {
+    setActingId(trig.id)
+    setActError(null)
+    try {
+      const { error } = await supabase
+        .from('auto_triggers')
+        .update({ status: 'dismissed', resolved_at: new Date().toISOString() })
+        .eq('id', trig.id)
+      if (error) throw error
+      // Realtime will pull it out of the pending list.
+    } catch (e) {
+      setActError(e.message || 'dismiss failed')
+    } finally {
+      setActingId(null)
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      {triggers.map((trig) => {
+        const isStop = trig.kind === 'stop_loss_50'
+        const tone = isStop ? 'crimson' : 'amber'
+        const kindLabel =
+          trig.kind === 'stop_loss_50' ? 'Stop loss' :
+          trig.kind === 'profit_take_100' ? 'Profit target +100%' :
+          trig.kind === 'profit_take_200' ? 'Profit target +200%' :
+          trig.kind
+        const observedPct = trig.observed?.pnl_pct
+        return (
+          <div
+            key={trig.id}
+            className={`border rounded-xl p-3 space-y-2 ${
+              isStop
+                ? 'bg-crimson/10 border-crimson/40'
+                : 'bg-amber-950/30 border-amber-400/40'
+            }`}
+          >
+            <div className="flex items-baseline justify-between gap-2">
+              <span className={`text-[10px] uppercase tracking-wider font-semibold text-${tone}`}>
+                {kindLabel} tripped
+              </span>
+              {Number.isFinite(observedPct) && (
+                <span className="text-[10px] font-mono-tab text-subtle">
+                  P&L {observedPct >= 0 ? '+' : ''}{observedPct.toFixed(0)}%
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-fg leading-relaxed">{trig.reason}</p>
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => approve(trig)}
+                disabled={actingId === trig.id}
+                className={`flex-1 text-xs font-semibold rounded-lg py-2 transition disabled:opacity-50 ${
+                  isStop
+                    ? 'bg-crimson hover:bg-crimson/80 text-white'
+                    : 'bg-amber-400 hover:bg-amber-300 text-bg'
+                }`}
+              >
+                {actingId === trig.id ? 'Submitting…' : 'Close now'}
+              </button>
+              <button
+                onClick={() => dismiss(trig)}
+                disabled={actingId === trig.id}
+                className="flex-1 text-xs font-medium rounded-lg py-2 border border-border text-subtle hover:text-fg transition disabled:opacity-50"
+              >
+                Dismiss
+              </button>
+            </div>
+            {actError && (
+              <div className="text-[11px] text-crimson pt-1">{actError}</div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 function DebugBanner({ searchParams, pos, signalRow, wallInfo, moveInfo, verdict }) {
   if (searchParams.get('debug') !== '1') return null
   const checks = [
