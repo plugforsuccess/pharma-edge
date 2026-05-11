@@ -38,9 +38,19 @@ export default function OutcomeInbox() {
       // (if any). The !left embed ensures signals with no outcome row
       // still come back — we filter to those client-side. Cheaper than
       // a NOT EXISTS subquery and keeps the query as one round-trip.
+      //
+      // Schema note: signals carries `structure` (not strategy_type),
+      // `strike_price` (single number — for legacy single-leg rows),
+      // and `expiry_date` (not expiration). Long/short strikes live
+      // on `open_positions`, not signals — we embed that side for
+      // closed signals that had a position.
       const { data, error: err } = await supabase
         .from('signals')
-        .select('id, ticker, strategy_type, logged_at, expiration, long_strike, short_strike, status, outcomes(id)')
+        .select(
+          'id, ticker, direction, structure, strike_price, expiry_date, logged_at, status, ' +
+            'outcomes(id), ' +
+            'open_positions(long_strike, short_strike, expiration)',
+        )
         .eq('user_id', user.id)
         .eq('status', 'closed')
         .order('logged_at', { ascending: false })
@@ -103,10 +113,20 @@ export default function OutcomeInbox() {
         </div>
         <div className="divide-y divide-border">
           {pending.map((s) => {
-            const strikes =
-              Number.isFinite(Number(s.long_strike)) && Number.isFinite(Number(s.short_strike))
-                ? `${Number(s.long_strike)}/${Number(s.short_strike)}`
+            // Prefer the linked position's strikes when present (most
+            // common — the trade entered Tastytrade with both legs).
+            // Fall back to the signal's single strike_price for legacy
+            // single-leg rows. Watch-only signals have neither and
+            // render structure + expiry only.
+            const pos = Array.isArray(s.open_positions) ? s.open_positions[0] : s.open_positions
+            const longK = Number(pos?.long_strike)
+            const shortK = Number(pos?.short_strike)
+            const strikes = Number.isFinite(longK) && Number.isFinite(shortK)
+              ? `${longK}/${shortK}`
+              : Number.isFinite(Number(s.strike_price))
+                ? String(Number(s.strike_price))
                 : null
+            const expiry = pos?.expiration ?? s.expiry_date
             return (
               <button
                 key={s.id}
@@ -116,9 +136,9 @@ export default function OutcomeInbox() {
                 <div className="min-w-0 flex-1">
                   <div className="text-sm font-medium text-fg">{s.ticker}</div>
                   <div className="text-[10px] text-subtle truncate">
-                    {(s.strategy_type ?? '').replace(/_/g, ' ')}
+                    {(s.structure ?? '').replace(/_/g, ' ')}
                     {strikes && ` · ${strikes}`}
-                    {s.expiration && ` · exp ${s.expiration}`}
+                    {expiry && ` · exp ${expiry}`}
                   </div>
                 </div>
                 <span className="text-[11px] text-amber-400 font-medium shrink-0">
