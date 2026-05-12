@@ -457,22 +457,11 @@ async function submitAutoClose(
   pos: Position,
   triggerType: string,
   currentMid: number,
-  dte: number,
 ): Promise<{ submitted: boolean; reason?: string }> {
   if (!AUTO_CLOSE_TRIGGERS.has(triggerType)) return { submitted: false, reason: 'not an auto-close trigger' }
   if (!pos.signal_id) return { submitted: false, reason: 'no signal_id (manual position)' }
   const structure = structureFor(pos.strategy_type)
   if (!structure) return { submitted: false, reason: `unsupported strategy: ${pos.strategy_type}` }
-
-  // 0/1 DTE drift-exit guard. Theta is dominant in the final 24-48
-  // hours; chasing the bid to exit a position that's about to settle
-  // either way is mostly slippage. The drift alert still fires (the
-  // trigger row above runs fireAlert), but the auto-execute is
-  // skipped. Stop-loss and profit-take ladder are EXEMPT from this
-  // gate — stop-loss in particular needs to fire regardless of DTE.
-  if (triggerType === 'position_thesis_drift_exit' && dte <= 1) {
-    return { submitted: false, reason: `drift-exit suppressed: DTE ≤ 1 (let theta finish)` }
-  }
 
   // Pull broker account from the linked signal. If the signal was
   // never wired to a Tastytrade account (paper trade or older signal),
@@ -1133,7 +1122,7 @@ serve(async (req) => {
         // the user always gets a push regardless of whether the auto-
         // close attempt succeeds — no silent failures.
         if (AUTO_CLOSE_TRIGGERS.has(t.type)) {
-          const ac = await submitAutoClose(supabase, pos, t.type, mid, dte)
+          const ac = await submitAutoClose(supabase, pos, t.type, mid)
           if (!ac.submitted) {
             console.log(
               `[auto-close] ${pos.ticker} ${t.type}: skipped — ${ac.reason}`,
