@@ -12,15 +12,15 @@
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { tastytradeFetch, TastytradeError } from './tastytrade.ts'
+import { tastytradeFetch, TastytradeError, isSandboxEnv, type TtEnv } from '../_shared/tastytrade.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
 
-const TASTYTRADE_BASE_URL =
-  Deno.env.get('TASTYTRADE_BASE_URL') || 'https://api.cert.tastyworks.com'
-const IS_SANDBOX = TASTYTRADE_BASE_URL.includes('cert.tastyworks.com')
+// Default env is 'live' (prod). Callers can override with body:{env:'cert'}
+// or query ?env=cert to list sandbox accounts instead. The UI now calls
+// get-account twice (once per env) and merges the results.
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -56,9 +56,22 @@ serve(async (req) => {
 
   const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
+  // Pick env from body or query string; default 'live'.
+  let envParam = 'live'
+  try {
+    const body = await req.clone().json().catch(() => ({}))
+    if (typeof body?.env === 'string') envParam = body.env
+  } catch { /* no body */ }
+  try {
+    const u = new URL(req.url)
+    const qEnv = u.searchParams.get('env')
+    if (qEnv) envParam = qEnv
+  } catch { /* no query */ }
+  const env: TtEnv = envParam === 'cert' ? 'cert' : 'live'
+
   let accountsResp: Response
   try {
-    accountsResp = await tastytradeFetch(adminClient, '/customers/me/accounts')
+    accountsResp = await tastytradeFetch(adminClient, '/customers/me/accounts', {}, env)
   } catch (err) {
     const reason = err instanceof TastytradeError ? err.message : String(err)
     return json({ success: false, error: reason }, 502)
@@ -86,6 +99,8 @@ serve(async (req) => {
         const bResp = await tastytradeFetch(
           adminClient,
           `/accounts/${encodeURIComponent(number)}/balances`,
+          {},
+          env,
         )
         if (bResp.ok) {
           const bBody = await bResp.json()
@@ -94,17 +109,16 @@ serve(async (req) => {
       } catch {
         balance = null
       }
-      // Sandbox (cert) is itself a paper environment — everything in it is
-      // simulated. Tastytrade's is-test-drive flag describes paper
-      // subaccounts within the LIVE system, so it's false on sandbox even
-      // though no real money is at risk. Treat all sandbox accounts as
-      // paper for UX-warning purposes.
-      const isPaper = IS_SANDBOX || Boolean(acc['is-test-drive'])
+      // Cert (sandbox) is itself a paper environment. Within prod,
+      // is-test-drive marks paper subaccounts. Either case = is_paper.
+      const isSandbox = isSandboxEnv(env)
+      const isPaper = isSandbox || Boolean(acc['is-test-drive'])
       return {
         account_number: number,
         account_type: acc['account-type-name'] ?? null,
         is_paper: isPaper,
-        is_sandbox: IS_SANDBOX,
+        is_sandbox: isSandbox,
+        env,
         net_liquidating_value: balance?.['net-liquidating-value'] ?? null,
         cash_balance: balance?.['cash-balance'] ?? null,
         buying_power: balance?.['derivative-buying-power'] ?? null,
@@ -112,5 +126,5 @@ serve(async (req) => {
     }),
   )
 
-  return json({ success: true, accounts })
+  return json({ success: true, env, is_sandbox: isSandboxEnv(env), accounts })
 })

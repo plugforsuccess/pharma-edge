@@ -356,6 +356,10 @@ serve(async (req) => {
       body: JSON.stringify({
         position_id: pos.id,
         account_number: accountNumber,
+        // env stored on the position row at open time; exits route to
+        // the same env (cert sandbox or live prod) where the position
+        // opened, regardless of any later bot_config.mode flip.
+        env: (pos.env === 'cert' || pos.env === 'live') ? pos.env : 'live',
         contracts: decision.contracts_to_close,
         limit_price: quote.mid,
         market: decision.market,

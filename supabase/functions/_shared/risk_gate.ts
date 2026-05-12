@@ -19,7 +19,7 @@
 // — the caller uses nlv + per_trade_cap_dollars to size contracts.
 
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { tastytradeFetch, IS_SANDBOX } from './tastytrade.ts'
+import { tastytradeFetch, envFromMode, type TtEnv } from './tastytrade.ts'
 
 export interface BotConfig {
   enabled?: boolean
@@ -59,6 +59,7 @@ export interface RiskCheckResult {
   per_trade_cap_dollars: number
   strategy_cap_dollars: number
   account_number: string | null
+  env: TtEnv
 }
 
 function todayNyDate(): string {
@@ -77,10 +78,11 @@ function startOfWeekIso(now: Date): string {
 export async function resolveLiveNlv(
   supabase: SupabaseClient,
   fallbackAccountSize: number | null,
+  env: TtEnv = 'live',
 ): Promise<{ nlv: number; source: RiskCheckResult['nlv_source'] }> {
   const manual = Number(fallbackAccountSize) || 0
   try {
-    const accountsResp = await tastytradeFetch(supabase, '/customers/me/accounts')
+    const accountsResp = await tastytradeFetch(supabase, '/customers/me/accounts', {}, env)
     if (!accountsResp.ok) return { nlv: manual, source: manual > 0 ? 'profile_fallback' : 'none' }
     const accountsBody = await accountsResp.json().catch(() => ({}))
     const items = ((accountsBody?.data as Record<string, unknown>)?.items ?? []) as Array<{ account?: Record<string, unknown> }>
@@ -89,14 +91,15 @@ export async function resolveLiveNlv(
       const number = String(item.account?.['account-number'] ?? '')
       if (!number) continue
       try {
-        const bResp = await tastytradeFetch(supabase, `/accounts/${encodeURIComponent(number)}/balances`)
+        const bResp = await tastytradeFetch(supabase, `/accounts/${encodeURIComponent(number)}/balances`, {}, env)
         if (!bResp.ok) continue
         const bBody = await bResp.json()
         const v = Number((bBody?.data as Record<string, unknown>)?.['net-liquidating-value'] ?? 0)
         if (Number.isFinite(v) && v > 0) nlvs.push(v)
       } catch { /* per-account failure */ }
     }
-    if (IS_SANDBOX) return { nlv: manual, source: manual > 0 ? 'broker_sandbox_skipped' : 'none' }
+    // For cert env, returned NLV is simulated — that's fine for sizing
+    // against, since orders fill against the same simulated balance.
     if (nlvs.length === 0) return { nlv: manual, source: manual > 0 ? 'profile_fallback' : 'none' }
     return { nlv: Math.max(...nlvs), source: 'broker_live' }
   } catch {
@@ -114,9 +117,11 @@ export async function evaluateRisk(
 
   const accountNumber: string | null =
     (cfg.mode === 'live' ? cfg.live_account_number : cfg.sandbox_account_number) ?? null
+  const env: TtEnv = envFromMode(cfg.mode)
 
   const blank: RiskCheckResult = {
     allowed: false,
+    env,
     nlv: 0,
     nlv_source: 'none',
     per_trade_cap_dollars: 0,
@@ -140,7 +145,7 @@ export async function evaluateRisk(
     return { ...blank, skipReason: `no_${cfg.mode ?? 'paper'}_account_configured`, status: 'skipped_caps' }
   }
 
-  const nlvResult = await resolveLiveNlv(supabase, profile.account_size)
+  const nlvResult = await resolveLiveNlv(supabase, profile.account_size, env)
   const nlv = nlvResult.nlv
   if (nlv <= 0) {
     return { ...blank, skipReason: `no_nlv (${nlvResult.source})`, status: 'skipped_caps' }
@@ -209,6 +214,7 @@ export async function evaluateRisk(
 
   return {
     allowed: true,
+    env,
     nlv,
     nlv_source: nlvResult.source,
     per_trade_cap_dollars: perTradeCapDollars,

@@ -17,7 +17,7 @@
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { buildOccSymbol, tastytradeFetch, TastytradeError } from './tastytrade.ts'
+import { buildOccSymbol, tastytradeFetch, TastytradeError, type TtEnv } from '../_shared/tastytrade.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
@@ -73,6 +73,9 @@ serve(async (req) => {
 
   const userId = String(body.user_id ?? '')
   const accountNumber = String(body.account_number ?? '')
+  // Env defaults to 'live' for back-compat. Orchestrators always pass
+  // it explicitly (derived from bot_config.mode → envFromMode).
+  const env = (String(body.env ?? 'live') === 'cert' ? 'cert' : 'live') as TtEnv
   const ticker = String(body.ticker ?? '').toUpperCase()
   const optionType = String(body.option_type ?? '') as 'C' | 'P'
   const strike = Number(body.strike)
@@ -124,6 +127,7 @@ serve(async (req) => {
       supabase,
       `/accounts/${encodeURIComponent(accountNumber)}/orders`,
       { method: 'POST', body: JSON.stringify(orderPayload) },
+      env,
     )
   } catch (err) {
     const reason = err instanceof TastytradeError ? err.message : String(err)
@@ -143,6 +147,7 @@ serve(async (req) => {
       api_response: { error: reason, alert_id: alertId },
       auto_executed: true,
       auto_close_strategy: 'whale_tail',
+      env,
     })
     return json({ success: false, error: reason }, 502)
   }
@@ -165,6 +170,7 @@ serve(async (req) => {
       api_response: { ...orderData, alert_id: alertId },
       auto_executed: true,
       auto_close_strategy: 'whale_tail',
+      env,
     })
     return json({ success: false, error: `tastytrade ${orderResp.status}`, detail: orderData }, 502)
   }
@@ -194,6 +200,7 @@ serve(async (req) => {
       api_response: { ...orderData, alert_id: alertId },
       auto_executed: true,
       auto_close_strategy: 'whale_tail',
+      env,
     })
     .select('id')
     .maybeSingle()
