@@ -123,6 +123,11 @@ export default function BotSettingsSection({ profile, onProfileChange }) {
   // (we don't poll continuously — it's a settings page, not live data).
   const [liveNlv, setLiveNlv] = useState(null)
   const [liveNlvSource, setLiveNlvSource] = useState('loading')
+  // Pick the account that matches the currently-active bot mode. If the
+  // mode is 'paper', the sandbox/paper account_number is the source of
+  // truth for the risk envelope (because that's where orders will fire).
+  // Falls back to the largest non-paper account if the configured number
+  // isn't found, so the display is never blank during initial setup.
   useEffect(() => {
     let cancelled = false
     ;(async () => {
@@ -138,18 +143,28 @@ export default function BotSettingsSection({ profile, onProfileChange }) {
           (a, b) =>
             Number(b.net_liquidating_value ?? 0) - Number(a.net_liquidating_value ?? 0),
         )
-        const primary = accounts.find((a) => !a.is_paper) || accounts[0]
-        const isSandbox = Boolean(
-          data.is_sandbox ?? primary?.is_sandbox ?? primary?.is_paper,
+        const targetNumber = config.mode === 'live'
+          ? config.live_account_number
+          : config.sandbox_account_number
+        const matched = targetNumber
+          ? accounts.find((a) => String(a.account_number) === String(targetNumber))
+          : null
+        const primary = matched || accounts.find((a) => !a.is_paper) || accounts[0]
+        const isCertSandbox = Boolean(
+          data.is_sandbox ?? primary?.is_sandbox,
         )
-        if (isSandbox) {
+        if (isCertSandbox) {
           setLiveNlvSource('sandbox_skipped')
           return
         }
         const nlv = Number(primary?.net_liquidating_value)
         if (Number.isFinite(nlv) && nlv > 0) {
           setLiveNlv(nlv)
-          setLiveNlvSource('broker_live')
+          setLiveNlvSource(
+            matched
+              ? (primary.is_paper ? 'broker_paper' : 'broker_live')
+              : 'broker_fallback',
+          )
         } else {
           setLiveNlvSource('broker_no_balance')
         }
@@ -158,7 +173,7 @@ export default function BotSettingsSection({ profile, onProfileChange }) {
       }
     })()
     return () => { cancelled = true }
-  }, [profile?.id])
+  }, [profile?.id, config.mode, config.live_account_number, config.sandbox_account_number])
 
   const manualNlv = Number(profile?.account_size) || 0
   const nlv = liveNlv ?? manualNlv
@@ -646,7 +661,7 @@ function BotStatusBadge({ config, isHalted }) {
 //   4. broker_no_balance  — broker returned no usable balance
 //   5. loading            — get-account call still in flight
 function NlvIndicator({ nlv, source, liveNlv, manualNlv }) {
-  const isLive = source === 'broker_live'
+  const isLive = source === 'broker_live' || source === 'broker_paper'
   const isFallback = !isLive && source !== 'loading'
   return (
     <div
@@ -670,8 +685,14 @@ function NlvIndicator({ nlv, source, liveNlv, manualNlv }) {
         {source === 'broker_live' && (
           <span className="text-green-400">live broker NLV ✓</span>
         )}
+        {source === 'broker_paper' && (
+          <span className="text-green-400">paper account NLV ✓</span>
+        )}
+        {source === 'broker_fallback' && (
+          <span className="text-amber-400">account # not found · using largest</span>
+        )}
         {source === 'sandbox_skipped' && (
-          <span className="text-amber-400">sandbox NLV ignored · using manual</span>
+          <span className="text-amber-400">cert sandbox · using manual</span>
         )}
         {source === 'broker_unreachable' && (
           <span className="text-amber-400">broker unreachable · using manual</span>

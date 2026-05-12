@@ -200,9 +200,12 @@ function BotStatusCard({ profile, todayRun, openCount, onHalt, killSwitchBusy, k
   // Live broker NLV — same pattern as BotSettingsSection + AccountContextCard.
   // The stale profile.account_size is a $1M placeholder; without this the
   // risk envelope reads as 4%/20%/35% of $1M instead of the user's actual
-  // Tastytrade balance (which can be ~$450 in a fresh live account).
-  // Falls back to account_size only when the broker is unreachable or
-  // when the configured base URL is the cert (sandbox) endpoint.
+  // Tastytrade balance.
+  //
+  // Account selection: when mode='paper', look up sandbox_account_number;
+  // when mode='live', look up live_account_number. Falls back to the
+  // largest non-paper account if the configured number isn't found in the
+  // broker response (catches the unconfigured case + stale account numbers).
   const [liveNlv, setLiveNlv] = useState(null)
   const [liveNlvSource, setLiveNlvSource] = useState('loading')
   useEffect(() => {
@@ -220,18 +223,31 @@ function BotStatusCard({ profile, todayRun, openCount, onHalt, killSwitchBusy, k
           (a, b) =>
             Number(b.net_liquidating_value ?? 0) - Number(a.net_liquidating_value ?? 0),
         )
-        const primary = accounts.find((a) => !a.is_paper) || accounts[0]
-        const isSandbox = Boolean(
-          data.is_sandbox ?? primary?.is_sandbox ?? primary?.is_paper,
+        // Pick the account that matches the bot's currently-active number
+        // for the current mode. If not found (or unset), fall back to the
+        // largest non-paper account so the display is never blank.
+        const targetNumber = mode === 'live'
+          ? config.live_account_number
+          : config.sandbox_account_number
+        const matched = targetNumber
+          ? accounts.find((a) => String(a.account_number) === String(targetNumber))
+          : null
+        const primary = matched || accounts.find((a) => !a.is_paper) || accounts[0]
+        const isCertSandbox = Boolean(
+          data.is_sandbox ?? primary?.is_sandbox,
         )
-        if (isSandbox) {
+        if (isCertSandbox) {
           setLiveNlvSource('sandbox_skipped')
           return
         }
         const nlv = Number(primary?.net_liquidating_value)
         if (Number.isFinite(nlv) && nlv > 0) {
           setLiveNlv(nlv)
-          setLiveNlvSource('broker_live')
+          setLiveNlvSource(
+            matched
+              ? (primary.is_paper ? 'broker_paper' : 'broker_live')
+              : 'broker_fallback',
+          )
         } else {
           setLiveNlvSource('broker_no_balance')
         }
@@ -240,7 +256,7 @@ function BotStatusCard({ profile, todayRun, openCount, onHalt, killSwitchBusy, k
       }
     })()
     return () => { cancelled = true }
-  }, [profile?.id])
+  }, [profile?.id, mode, config.live_account_number, config.sandbox_account_number])
 
   const manualNlv = Number(profile?.account_size) || 0
   const nlv = liveNlv ?? manualNlv
@@ -489,7 +505,9 @@ function nlvSourceLabel(source) {
   switch (source) {
     case 'loading':            return 'loading…'
     case 'broker_live':        return 'broker live'
-    case 'sandbox_skipped':    return 'sandbox skipped'
+    case 'broker_paper':       return 'broker paper'
+    case 'broker_fallback':    return 'broker (no match)'
+    case 'sandbox_skipped':    return 'cert sandbox skipped'
     case 'broker_no_balance':  return 'broker no balance'
     case 'broker_unreachable': return 'profile fallback'
     default:                   return source
