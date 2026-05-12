@@ -15,6 +15,25 @@
 const POLYGON_BASE = Deno.env.get('POLYGON_BASE_URL') || 'https://api.polygon.io'
 const MASSIVE_API_KEY = Deno.env.get('MASSIVE_API_KEY')
 
+// Map app-internal ticker symbols to Polygon's options-snapshot
+// underlying ticker. Polygon's `/v3/snapshot/options/{underlying}`
+// expects the SPOT underlying, not the options root.
+//   * SPXW (S&P 500 Weekly options root) → SPX (the index)
+//   * Yahoo-style ^SPX → SPX
+//   * VIXW / VIX → VIX (index, served as I:VIX on some endpoints)
+// Add mappings as we discover more cases. Unknown tickers pass through.
+const POLYGON_UNDERLYING_OVERRIDES: Record<string, string> = {
+  SPXW: 'SPX',
+  '^SPX': 'SPX',
+  VIXW: 'VIX',
+  '^VIX': 'VIX',
+}
+
+function polygonUnderlying(t: string): string {
+  const up = t.toUpperCase()
+  return POLYGON_UNDERLYING_OVERRIDES[up] ?? up
+}
+
 export interface PolygonStrike {
   strike: number
   callOI: number
@@ -78,7 +97,7 @@ async function fetchSnapshot(
   if (!MASSIVE_API_KEY) {
     throw new PolygonError('MASSIVE_API_KEY not set in Supabase secrets', 500)
   }
-  const url = new URL(`${POLYGON_BASE}/v3/snapshot/options/${underlying.toUpperCase()}`)
+  const url = new URL(`${POLYGON_BASE}/v3/snapshot/options/${polygonUnderlying(underlying)}`)
   url.searchParams.set('expiration_date.gte', expiryFrom)
   url.searchParams.set('expiration_date.lte', expiryTo)
   // API-side strike filter when caller passes a window — drops 80-90%
@@ -120,7 +139,7 @@ async function fetchSnapshot(
 // /v2/aggs/.../prev returns the previous regular-session close.
 async function fetchPrevClose(underlying: string): Promise<number | null> {
   if (!MASSIVE_API_KEY) return null
-  const url = new URL(`${POLYGON_BASE}/v2/aggs/ticker/${underlying.toUpperCase()}/prev`)
+  const url = new URL(`${POLYGON_BASE}/v2/aggs/ticker/${polygonUnderlying(underlying)}/prev`)
   url.searchParams.set('adjusted', 'true')
   url.searchParams.set('apiKey', MASSIVE_API_KEY)
   try {
