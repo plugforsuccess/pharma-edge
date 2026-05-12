@@ -30,14 +30,25 @@ export default function TickerDrawer({
 }) {
   const [query, setQuery] = useState('')
 
+  // Reset search ONLY when the drawer transitions from closed → open.
+  // Deps must be just [open] — if we included onClose, parents passing
+  // an inline `() => setOpen(false)` would give a new function
+  // reference on every render and this effect would re-run mid-type,
+  // wiping the user's query (the "results appear then disappear" bug).
+  useEffect(() => {
+    if (open) setQuery('')
+  }, [open])
+
+  // Keyboard listener for ESC dismiss. Separate effect because it
+  // legitimately depends on the latest onClose, but doesn't touch
+  // local state, so re-attaching the listener on parent re-renders
+  // is harmless.
   useEffect(() => {
     if (!open) return
     const onKey = (e) => {
       if (e.key === 'Escape') onClose()
     }
     window.addEventListener('keydown', onKey)
-    // reset search when reopening
-    setQuery('')
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onClose])
 
