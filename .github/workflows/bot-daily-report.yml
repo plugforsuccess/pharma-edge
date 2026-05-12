@@ -1,0 +1,40 @@
+# Bot daily report — runs at 4:15 PM ET, emails each user-with-bot
+# their daily activity recap.
+#
+# Same cron pattern as send-catalyst-alerts.yml / worker-health.yml.
+# Two cron entries cover DST + standard time without code changes.
+
+name: Bot daily report
+
+on:
+  schedule:
+    - cron: '15 20 * * 1-5'   # 4:15 PM ET during DST (Mar–Nov)
+    - cron: '15 21 * * 1-5'   # 4:15 PM ET during EST (Nov–Mar)
+  workflow_dispatch:
+
+concurrency:
+  group: bot-daily-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Invoke bot-daily-report edge function
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          resp=$(curl -sS -w "\n%{http_code}" -X POST \
+            "${SUPABASE_URL}/functions/v1/bot-daily-report" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{}')
+          http=$(echo "$resp" | tail -n1)
+          body=$(echo "$resp" | head -n -1)
+          echo "bot-daily-report status=${http} body=${body}"
+          if [ "$http" != "200" ]; then
+            echo "::error::bot-daily-report returned ${http}"
+            exit 1
+          fi
