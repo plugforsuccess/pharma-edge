@@ -14,16 +14,28 @@
 // Verdict ladder (most severe wins):
 //   1. invalidated — regime flipped, OR spot pierced the trade's
 //      target wall (the strike the trade was structurally relying on)
-//   2. drifting    — dominant wall shifted ≥ STRIKE_DRIFT_THRESHOLD,
-//      OR spot crossed the flip strike (transition zone), OR the
-//      dominant wall's expiration changed
-//   3. intact      — none of the above; entry positioning still holds
+//   2. drifting    — dominant wall shifted ≥ STRIKE_DRIFT_THRESHOLD
+//      AWAY from the target, OR spot crossed the flip strike
+//      (transition zone), OR the dominant wall's expiration changed
+//      AWAY from the trade expiration, OR the wall AT the trade's
+//      short strike melted to <50% of entry / flipped sign, OR net
+//      DEX flipped against the trade's directional bias
+//   3. intact      — none of the above; entry positioning still holds.
+//      Sub-reasons surface POSITIVE signals (wall reinforcing,
+//      structural target reached, DEX tailwind) without changing state.
 //   4. not_evaluable — no entry snapshot, or no live data
 //
 // Heuristic, not perfect. Phase 3 (structured thesis schema) is what
 // makes this semantically precise — until then we're inferring "what
 // the trade depended on" from strikes + direction + the entry
 // snapshot, which is good enough for ~80% of cases.
+//
+// The wall-pierced branch (section 2) sets a `breakThroughFired`
+// flag when the trade's directional wall breaks IN THE TRADE'S FAVOR;
+// the post-pierce drift checks (section 3+) skip when that flag is
+// set, because any further wall migration is informational once the
+// structural target has been hit (otherwise winning trades misfire as
+// "drifting" — exactly the 93% gain that motivated this refactor).
 
 // How many strikes the dominant wall can shift before we call it drift.
 // Tuned for index ETFs ($1 strikes); SPXW ($5 strikes) gets a coarser
@@ -31,17 +43,43 @@
 // natural wiggle.
 const STRIKE_DRIFT_THRESHOLD = 3
 
+// Wall-at-your-strike thresholds. The dominant wall in the matrix may
+// drift, but the question that matters for a debit/credit spread is
+// "is the wall AT MY STRIKE still there?" Reinforcement (>1.3× entry)
+// surfaces as a positive intact-state reason; melt (<0.5× entry) or
+// sign flip surfaces as drift.
+const STRIKE_GEX_REINFORCE_RATIO = 1.3
+const STRIKE_GEX_MELT_RATIO = 0.5
+
+// Net DEX is an independent axis from GEX. A sign flip with meaningful
+// magnitude (>10% of entry |DEX|) tells us dealer hedging behavior has
+// inverted — buy-the-dip regime → sell-the-rip, or vice versa. Tiny
+// flips around zero are noise (DEX hovers near zero at flip-strike
+// crossings) so we gate on the magnitude threshold.
+const DEX_FLIP_MAGNITUDE_RATIO = 0.1
+
 export const VERDICT_STATES = ['intact', 'drifting', 'invalidated', 'not_evaluable']
 
 /**
  * @typedef {Object} EntrySnapshot
  * @property {number|null} spot
  * @property {number|null} net_gex
+ * @property {number|null} [net_dex]  - signed dealer-book net delta exposure.
+ *   Calls contribute positively, puts negatively; same convention as
+ *   compute-gex's MatrixOutput. Optional for legacy snapshots that
+ *   pre-date the field.
+ * @property {number|null} [wall_gex_at_short_strike] - signed GEX at the
+ *   trade's short strike, summed across the matrix's expirations.
+ *   This is the trade-specific anchor health metric (vs `largest_wall`
+ *   which tracks the marketwide dominant wall). Optional for legacy
+ *   snapshots.
  * @property {{strike:number,expiration:string,gex_net:number}|null} largest_wall
  *
  * @typedef {Object} LiveSnapshot
  * @property {number|null} spot
  * @property {number|null} net_gex
+ * @property {number|null} [net_dex]
+ * @property {number|null} [wall_gex_at_short_strike]
  * @property {{strike:number,expiration:string,gex_net:number}|null} largest_wall
  *
  * @typedef {Object} TradeShape
@@ -147,6 +185,12 @@ export function computeThesisVerdict(entry, live, trade) {
           : isBearish
             ? 'put'
             : null
+  // Tracks whether spot pierced the trade's directional wall IN THE
+  // TRADE'S FAVOR. When true, the post-pierce drift checks (sections
+  // 3+) are suppressed: any wall migration after the structural target
+  // has been hit is informational, not a drift event. Mirrors the
+  // structured-path's `breakThroughFired` gating.
+  let breakThroughFired = false
   const entryWallStrike = entry.largest_wall?.strike
   if (Number.isFinite(entryWallStrike) && wallType) {
     const crossedUp = entry.spot < entryWallStrike && live.spot >= entryWallStrike + PIERCE
@@ -155,6 +199,7 @@ export function computeThesisVerdict(entry, live, trade) {
       if (isBullish) {
         reasons.push(`Spot broke through the entry call wall at ${formatStrike(entryWallStrike)} — resistance failed, structural target zone. Check the P&L card.`)
         // bullish + wall broken upward = thesis SUCCESS, not invalidation
+        breakThroughFired = true
       } else if (isBearish) {
         reasons.push(`Spot pierced the entry call wall at ${formatStrike(entryWallStrike)}. Bullish breakout — bearish thesis broken.`)
         state = 'invalidated'
@@ -164,6 +209,7 @@ export function computeThesisVerdict(entry, live, trade) {
       if (isBearish) {
         reasons.push(`Spot broke through the entry put wall at ${formatStrike(entryWallStrike)} — support failed, structural target zone. Check the P&L card.`)
         // bearish + wall broken downward = thesis SUCCESS, not invalidation
+        breakThroughFired = true
       } else if (isBullish) {
         reasons.push(`Spot pierced the entry put wall at ${formatStrike(entryWallStrike)}. Bearish breakdown — bullish thesis broken.`)
         state = 'invalidated'
@@ -194,7 +240,7 @@ export function computeThesisVerdict(entry, live, trade) {
   // it only knew the entry vs live strike numbers. New logic checks
   // whether the live wall has migrated to the trade's structural
   // target and treats that as "thesis playing out" instead.
-  if (entry.largest_wall && live.largest_wall) {
+  if (entry.largest_wall && live.largest_wall && !breakThroughFired) {
     const entryStrike = Number(entry.largest_wall.strike)
     const liveStrike = Number(live.largest_wall.strike)
     const targetStrike = Number(trade.short_strike)
@@ -222,22 +268,113 @@ export function computeThesisVerdict(entry, live, trade) {
         }
       }
     }
+    // Expiration safe-harbor was previously `(liveAtTradeTarget &&
+    // liveExpAtTradeExp)`, which only suppressed the alert when BOTH
+    // strike and expiration matched. The strike check is already
+    // handled above (and is direction-aware via the migrated-to-target
+    // branch); the expiration-changed signal needs its own safe-harbor:
+    // if the live dominant wall now sits at the trade's expiration,
+    // that's the cluster migrating TOWARD the trade, not away — keep
+    // the verdict intact regardless of strike.
     if (
       entry.largest_wall.expiration !== live.largest_wall.expiration &&
-      !(liveAtTradeTarget && liveExpAtTradeExp)
+      !liveExpAtTradeExp
     ) {
       reasons.push(`Dominant wall expiration moved from ${entry.largest_wall.expiration} → ${live.largest_wall.expiration}. Different cluster anchoring the regime now.`)
       state = 'drifting'
     }
   }
 
+  // ── 3b. Wall at YOUR strike (anchor health) ─────────────────────
+  // The dominant wall in section 3 tracks the marketwide structure;
+  // section 3b tracks the trade-specific anchor. A spread cares about
+  // the wall AT its short strike — when that strike's GEX is melting
+  // or has flipped sign, the trade's structural premise is eroding
+  // regardless of where THE dominant wall ended up.
+  //
+  // Direction-symmetric: works for both bullish trades anchored to
+  // call walls (positive GEX) and bearish trades anchored to put
+  // walls (negative GEX) because we compare absolute magnitudes plus
+  // an explicit sign-flip check.
+  //
+  // Suppressed when breakThroughFired — once the structural target's
+  // been hit, the anchor-health metric is moot.
+  if (
+    !breakThroughFired &&
+    Number.isFinite(entry.wall_gex_at_short_strike) &&
+    Number.isFinite(live.wall_gex_at_short_strike) &&
+    Math.abs(entry.wall_gex_at_short_strike) > 0
+  ) {
+    const entryGAtK = entry.wall_gex_at_short_strike
+    const liveGAtK = live.wall_gex_at_short_strike
+    const signFlipped =
+      Math.sign(entryGAtK) !== 0 &&
+      Math.sign(liveGAtK) !== 0 &&
+      Math.sign(entryGAtK) !== Math.sign(liveGAtK)
+    const magnitudeRatio = Math.abs(liveGAtK) / Math.abs(entryGAtK)
+    if (signFlipped) {
+      reasons.push(`Wall at your ${formatStrike(trade.short_strike)} strike flipped sign (${fmtMillions(entryGAtK)} → ${fmtMillions(liveGAtK)}). Structure inverted since entry.`)
+      state = 'drifting'
+    } else if (magnitudeRatio < STRIKE_GEX_MELT_RATIO) {
+      reasons.push(`Wall at your ${formatStrike(trade.short_strike)} strike melted to ${Math.round(magnitudeRatio * 100)}% of entry. Anchor eroding.`)
+      state = 'drifting'
+    } else if (magnitudeRatio > STRIKE_GEX_REINFORCE_RATIO) {
+      // Positive signal — surfaces as an intact-state reason. Does NOT
+      // change state. Helps the UI banner explain WHY the verdict's
+      // intact when other signals were marginal.
+      reasons.push(`Wall at your ${formatStrike(trade.short_strike)} strike reinforcing (+${Math.round((magnitudeRatio - 1) * 100)}% since entry).`)
+    }
+  }
+
+  // ── 3c. Net DEX flip (dealer hedging regime) ────────────────────
+  // Net DEX is an independent axis from GEX. Sign + magnitude tells us
+  // how dealers hedge underlying moves:
+  //   net_dex > 0 → option book long-call-delta heavy → dealers short
+  //     delta → BUY on rallies (trend-supportive, tailwind for trends)
+  //   net_dex < 0 → put-delta heavy → dealers long delta → SELL on
+  //     rallies (pin-supportive, headwind for trends)
+  // For a bullish trade we want net_dex > 0; bearish wants < 0. A
+  // flip against the trade's direction with meaningful magnitude is
+  // real drift even when GEX walls look intact.
+  //
+  // Suppressed when breakThroughFired — same reasoning as 3b.
+  if (
+    !breakThroughFired &&
+    Number.isFinite(entry.net_dex) &&
+    Number.isFinite(live.net_dex) &&
+    Math.abs(entry.net_dex) > 0
+  ) {
+    const entryDex = entry.net_dex
+    const liveDex = live.net_dex
+    const dexSignFlipped =
+      Math.sign(entryDex) !== 0 &&
+      Math.sign(liveDex) !== 0 &&
+      Math.sign(entryDex) !== Math.sign(liveDex)
+    const liveDexMeaningful =
+      Math.abs(liveDex) > DEX_FLIP_MAGNITUDE_RATIO * Math.abs(entryDex)
+    if (dexSignFlipped && liveDexMeaningful) {
+      const dealerBehavior = liveDex > 0 ? 'now buy rallies' : 'now sell rallies'
+      const againstTrade =
+        (isBullish && liveDex < 0) || (isBearish && liveDex > 0)
+      if (againstTrade) {
+        reasons.push(`Net DEX flipped ${fmtMillions(entryDex)} → ${fmtMillions(liveDex)}. Dealers ${dealerBehavior} — headwind for your direction.`)
+        state = 'drifting'
+      } else if (isBullish || isBearish) {
+        // Flip in the trade's favor — informational, state unchanged.
+        reasons.push(`Net DEX flipped ${fmtMillions(entryDex)} → ${fmtMillions(liveDex)}. Dealers ${dealerBehavior} — tailwind for your direction.`)
+      }
+    }
+  }
+
   // ── 4. Net GEX in transition zone ───────────────────────────────
   // Live net_gex is "near zero" if its magnitude is small relative to
   // the entry value. Signals impending regime flip — half-size or
-  // wait for direction.
+  // wait for direction. Suppressed when breakThroughFired (sub-20%
+  // net GEX is expected when spot has rocketed past the call wall —
+  // the marketwide gamma profile reshuffled, but the trade already won).
   const entryAbs = Math.abs(entry.net_gex)
   const liveAbs = Math.abs(live.net_gex)
-  if (entryAbs > 0 && liveAbs / entryAbs < 0.2 && state === 'intact') {
+  if (!breakThroughFired && entryAbs > 0 && liveAbs / entryAbs < 0.2 && state === 'intact') {
     reasons.push(`Net GEX collapsed from ${fmtMillions(entry.net_gex)} to ${fmtMillions(live.net_gex)} — transition zone.`)
     state = 'drifting'
   }
