@@ -1,0 +1,40 @@
+# Multileg exit-rule evaluator — runs every 10 min during US RTH.
+#
+# Sibling of bot-evaluate-exits (single-leg whale). Handles
+# 2-leg credit verticals and 4-leg iron condors / butterflies
+# for iv_meanrev, earnings_crush, opex_pin strategies.
+
+name: Bot — evaluate multileg exits
+
+on:
+  schedule:
+    - cron: '40,50 13 * * 1-5'        # 9:40, 9:50 ET (DST)
+    - cron: '*/10 14-20 * * 1-5'      # 10:00–16:55 ET (DST)
+  workflow_dispatch:
+
+concurrency:
+  group: bot-evaluate-multileg-exits
+  cancel-in-progress: false
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Invoke bot-evaluate-multileg-exits edge function
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          resp=$(curl -sS -w "\n%{http_code}" -X POST \
+            "${SUPABASE_URL}/functions/v1/bot-evaluate-multileg-exits" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{}')
+          http=$(echo "$resp" | tail -n1)
+          payload=$(echo "$resp" | head -n -1)
+          echo "status=${http} body=${payload}"
+          if [ "$http" != "200" ]; then
+            echo "::error::bot-evaluate-multileg-exits returned ${http}"
+            exit 1
+          fi

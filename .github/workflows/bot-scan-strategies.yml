@@ -1,0 +1,88 @@
+# Per-strategy scanners.
+#
+# IV mean-reversion runs every 15 min during RTH.
+# Earnings IV crush runs once a day at 15:30 ET (BMO trades opened the
+# afternoon before announcement).
+# OPEX pin runs only on OPEX days at 10:00 ET (third Friday).
+
+name: Bot — strategy scanners
+
+on:
+  schedule:
+    # IV mean-reversion: every 15 min during RTH
+    - cron: '*/15 14-19 * * 1-5'      # 10:00–15:45 ET (DST)
+    - cron: '45 13 * * 1-5'           # 9:45 ET (DST)
+    # Earnings: every weekday at 15:30 ET (DST = 19:30 UTC; standard = 20:30 UTC)
+    - cron: '30 19,20 * * 1-5'
+    # OPEX day check: every weekday at 10:00 ET (DST = 14:00 UTC). The scanner
+    # itself queries opex_dates and no-ops if today isn't an OPEX day.
+    - cron: '0 14,15 * * 5'
+  workflow_dispatch:
+    inputs:
+      which:
+        description: 'Which scanner to run'
+        type: choice
+        options: [all, iv_meanrev, earnings_crush, opex_pin]
+        default: all
+
+concurrency:
+  group: bot-scan-strategies
+  cancel-in-progress: false
+
+jobs:
+  scan-iv-meanrev:
+    if: ${{ github.event_name == 'schedule' || inputs.which == 'all' || inputs.which == 'iv_meanrev' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Invoke bot-scan-iv-meanrev
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          resp=$(curl -sS -w "\n%{http_code}" -X POST \
+            "${SUPABASE_URL}/functions/v1/bot-scan-iv-meanrev" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{}')
+          http=$(echo "$resp" | tail -n1)
+          body=$(echo "$resp" | head -n -1)
+          echo "iv_meanrev status=${http} body=${body}"
+
+  scan-earnings:
+    if: ${{ github.event_name == 'schedule' || inputs.which == 'all' || inputs.which == 'earnings_crush' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Invoke bot-scan-earnings
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          resp=$(curl -sS -w "\n%{http_code}" -X POST \
+            "${SUPABASE_URL}/functions/v1/bot-scan-earnings" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{}')
+          http=$(echo "$resp" | tail -n1)
+          body=$(echo "$resp" | head -n -1)
+          echo "earnings status=${http} body=${body}"
+
+  scan-opex:
+    if: ${{ github.event_name == 'schedule' || inputs.which == 'all' || inputs.which == 'opex_pin' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Invoke bot-scan-opex
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          resp=$(curl -sS -w "\n%{http_code}" -X POST \
+            "${SUPABASE_URL}/functions/v1/bot-scan-opex" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{}')
+          http=$(echo "$resp" | tail -n1)
+          body=$(echo "$resp" | head -n -1)
+          echo "opex status=${http} body=${body}"

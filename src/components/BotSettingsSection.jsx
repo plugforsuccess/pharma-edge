@@ -24,9 +24,43 @@ import { evaluateRisk } from '../utils/botRiskEval'
 const EVENT_BLOCK_OPTIONS = ['FOMC', 'CPI', 'NFP', 'OPEX']
 const LIVE_CONFIRM = 'GO LIVE'
 
+const DEFAULT_STRATEGIES = {
+  whale_tail: {
+    enabled: true,
+    capital_allocation_pct: 50,
+    kill_switch: false,
+  },
+  iv_meanrev: {
+    enabled: false,
+    capital_allocation_pct: 20,
+    kill_switch: false,
+    min_iv_percentile: 80,
+    target_dte: 30,
+    wing_width_pct: 5,
+    body_width_pct: 2,
+  },
+  earnings_crush: {
+    enabled: false,
+    capital_allocation_pct: 15,
+    kill_switch: false,
+    min_iv_percentile: 70,
+    bmo_only: true,
+    skip_if_consensus_eps_estimates_lt: 3,
+  },
+  opex_pin: {
+    enabled: false,
+    capital_allocation_pct: 15,
+    kill_switch: false,
+    regime_a_only: true,
+    min_gex_wall_distance_pct: 2,
+    max_dte: 5,
+  },
+}
+
 const DEFAULT_CONFIG = {
   enabled: false,
   mode: 'paper',
+  dry_run: false,
   max_concurrent_positions: 3,
   max_concurrent_exposure_pct: 30,
   per_trade_max_loss_pct: 4,
@@ -51,7 +85,15 @@ const DEFAULT_CONFIG = {
   earnings_skip_window_days: 7,
   sandbox_account_number: null,
   live_account_number: null,
+  strategies: DEFAULT_STRATEGIES,
 }
+
+const STRATEGY_META = [
+  { key: 'whale_tail',     label: 'Whale-tail',      desc: 'Tail UW prints ≥$500K on Polygon options-flow feed.' },
+  { key: 'iv_meanrev',     label: 'IV mean-reversion', desc: 'Short iron condors when 30d IV > 80th %ile in Regime A.' },
+  { key: 'earnings_crush', label: 'Earnings IV crush', desc: 'Short ICs into BMO earnings; close at the open next morning.' },
+  { key: 'opex_pin',       label: 'OPEX pin',         desc: 'Short iron butterflies on Regime A names at monthly/quarterly OPEX.' },
+]
 
 export default function BotSettingsSection({ profile, onProfileChange }) {
   const initial = useMemo(
@@ -319,6 +361,26 @@ export default function BotSettingsSection({ profile, onProfileChange }) {
           onConfirmLive={confirmLiveMode}
           confirmingLive={confirmingLive}
         />
+        <ToggleRow
+          label="Dry-run"
+          help="Log proposed entries to auto_triggers without calling the broker. Use for paper-paper validation."
+          value={!!config.dry_run}
+          onChange={(v) => update('dry_run', v)}
+        />
+      </Subsection>
+
+      {/* ─── Strategies ────────────────────────────────────── */}
+      <Subsection title="Strategies">
+        <StrategyAllocationSummary strategies={config.strategies ?? {}} />
+        {STRATEGY_META.map(({ key, label, desc }) => (
+          <StrategyRow
+            key={key}
+            label={label}
+            desc={desc}
+            value={config.strategies?.[key] ?? DEFAULT_STRATEGIES[key]}
+            onChange={(next) => update('strategies', { ...(config.strategies ?? {}), [key]: next })}
+          />
+        ))}
       </Subsection>
 
       {/* ─── Risk caps ─────────────────────────────────────── */}
@@ -904,4 +966,81 @@ function formatDollars(n) {
   if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`
   if (Math.abs(n) >= 1_000) return `$${(n / 1_000).toFixed(1)}K`
   return `$${n.toFixed(0)}`
+}
+
+function StrategyAllocationSummary({ strategies }) {
+  const enabled = Object.entries(strategies).filter(([, v]) => v?.enabled && !v?.kill_switch)
+  const total = enabled.reduce((s, [, v]) => s + (Number(v.capital_allocation_pct) || 0), 0)
+  if (enabled.length === 0) {
+    return (
+      <div className="text-[10px] text-muted bg-card/50 border border-dashed border-border rounded px-2 py-1.5">
+        No strategies active. Enable at least one to let the bot place trades.
+      </div>
+    )
+  }
+  const over = total > 100
+  return (
+    <div className={clsx(
+      'text-[10px] rounded px-2 py-1.5 border',
+      over ? 'text-amber-300 bg-amber-400/10 border-amber-400/30' : 'text-subtle bg-card/50 border-border',
+    )}>
+      Active: <span className="font-mono-tab">{enabled.map(([k]) => k).join(', ')}</span>
+      {' · '}allocation <span className="font-mono-tab">{total}%</span>
+      {over && ' · overallocated (sum > 100%)'}
+    </div>
+  )
+}
+
+function StrategyRow({ label, desc, value, onChange }) {
+  const enabled = !!value?.enabled
+  const kill = !!value?.kill_switch
+  return (
+    <div className="space-y-1.5 border-t border-border pt-2 first:border-t-0 first:pt-0">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="text-xs font-medium text-fg">{label}</div>
+          <div className="text-[10px] text-muted">{desc}</div>
+        </div>
+        <button
+          type="button"
+          onClick={() => onChange({ ...value, enabled: !enabled })}
+          className={clsx(
+            'text-[10px] px-2 py-1 rounded border font-semibold transition shrink-0',
+            enabled
+              ? 'bg-green-500/15 text-green-300 border-green-500/40'
+              : 'bg-card text-subtle border-border hover:text-fg'
+          )}
+        >
+          {enabled ? 'ON' : 'OFF'}
+        </button>
+      </div>
+      {enabled && (
+        <div className="flex items-center gap-2 pl-1">
+          <label className="text-[10px] text-subtle">Allocation</label>
+          <input
+            type="number"
+            value={Number(value?.capital_allocation_pct ?? 0)}
+            onChange={(e) => onChange({ ...value, capital_allocation_pct: Number(e.target.value) })}
+            min={0}
+            max={100}
+            step={5}
+            className="w-16 bg-card border border-border rounded px-1.5 py-0.5 text-[11px] font-mono-tab text-right"
+          />
+          <span className="text-[10px] text-muted">% of NLV</span>
+          <button
+            type="button"
+            onClick={() => onChange({ ...value, kill_switch: !kill })}
+            className={clsx(
+              'ml-auto text-[10px] px-1.5 py-0.5 rounded border transition',
+              kill
+                ? 'bg-crimson/15 text-crimson border-crimson/40'
+                : 'bg-card text-subtle border-border hover:text-amber-300 hover:border-amber-400/40'
+            )}
+          >
+            {kill ? 'Killed — restore' : 'Kill switch'}
+          </button>
+        </div>
+      )}
+    </div>
+  )
 }
