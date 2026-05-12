@@ -10,6 +10,7 @@ import {
   pushPermissionStatus,
 } from '../utils/pwa'
 import clsx from 'clsx'
+import BotSettingsSection from '../components/BotSettingsSection'
 
 function slugify(value) {
   return String(value || '')
@@ -101,6 +102,13 @@ export default function Settings() {
       </Section>
 
       <SubscriptionSection tier={tier} isPro={isPro} />
+
+      {profile && (
+        <BotSettingsSection
+          profile={profile}
+          onProfileChange={() => fetchProfile?.(user.id)}
+        />
+      )}
 
       <Section title="Profile">
         <div className="grid grid-cols-2 gap-2">
