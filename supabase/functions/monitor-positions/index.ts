@@ -332,6 +332,14 @@ const AUTO_CLOSE_TRIGGERS = new Set([
   'position_stop_loss',
   'position_profit_100',
   'position_profit_200',
+  // Thesis-drift partial close: 10% of original contracts when the
+  // verdict first transitions intact → drifting. Fires once per
+  // position (idempotent via triggers_fired). Does NOT fire on
+  // subsequent re-drifts after a recovery — avoids compounding sells
+  // on an oscillating boundary signal. Re-entering "drifting" after
+  // an intact recovery still sends a push alert; only the auto-close
+  // is rate-limited to the first crossing.
+  'position_thesis_drift_close',
 ])
 
 // Pct of ORIGINAL contracts to close at each trigger. Cumulative
@@ -339,9 +347,10 @@ const AUTO_CLOSE_TRIGGERS = new Set([
 // already closed 50%, so this 25% gets us to 75% closed total.
 // Stop loss closes everything still open.
 function targetClosePct(triggerType: string): number {
-  if (triggerType === 'position_stop_loss') return 1.0      // close everything
-  if (triggerType === 'position_profit_100') return 0.5     // close 50% of original
-  if (triggerType === 'position_profit_200') return 0.25    // close another 25% (75% total)
+  if (triggerType === 'position_stop_loss') return 1.0          // close everything
+  if (triggerType === 'position_profit_100') return 0.5         // close 50% of original
+  if (triggerType === 'position_profit_200') return 0.25        // close another 25% (75% total)
+  if (triggerType === 'position_thesis_drift_close') return 0.1 // close 10% on first drift
   return 0
 }
 
@@ -944,6 +953,13 @@ serve(async (req) => {
     // invalidated) — not on every poll. This is what stops the user
     // from getting 50 pings a day if a wall wiggles back and forth.
     let verdictUpdate: { last_verdict?: VerdictState; last_verdict_reasons?: string[]; last_verdict_at?: string } = {}
+    // Drives the 10%-on-drift auto-close trigger below. We only auto-
+    // execute on the canonical first-drift event (prior intact → new
+    // drifting), not on recoveries (e.g. invalidated → drifting) or
+    // escalations (drifting → invalidated). Drift trigger ALSO won't
+    // fire if the position lacks a signal_id — there's nothing for
+    // the verdict to compare against in that case.
+    let verdictTransitionedToDrifting = false
     if (pos.signal_id) {
       const { data: sigRow } = await supabase
         .from('signals')
@@ -1000,6 +1016,12 @@ serve(async (req) => {
         prior &&
         (prior === 'drifting' || prior === 'invalidated') &&
         verdict.state === 'intact'
+      // Canonical "first drift" — used to auto-execute the 10%
+      // partial close. Tighter than transitionedToWorse: only fires
+      // on intact → drifting, not on invalidated → drifting (which
+      // is a recovery, not a fresh drift event).
+      verdictTransitionedToDrifting =
+        prior === 'intact' && verdict.state === 'drifting'
       const alertType = transitionedToBetter
         ? 'position_thesis_recovered'
         : verdict.state === 'invalidated'
@@ -1042,6 +1064,33 @@ serve(async (req) => {
 
     // Evaluate triggers
     const triggers = evaluateTriggers(pos, pnlPct, dte)
+
+    // Thesis-drift partial-close trigger: append to the trigger list
+    // when the verdict JUST transitioned intact → drifting AND we
+    // haven't already fired this trigger on this position. Reuses
+    // the existing auto-close pipeline (submitAutoClose below); the
+    // strategy gate inside structureFor() means credit verticals +
+    // iron condors silently skip the broker call and surface as an
+    // alert-only event, same as the +50% rung.
+    //
+    // Why "first transition only": the verdict can oscillate around
+    // its boundaries (a wall reinforces, then re-erodes; DEX wobbles
+    // near zero). Compounding 10% sells on every flip would whittle
+    // a position to zero on a noisy signal. Once the first 10% is
+    // taken off, subsequent drift transitions still ping the user
+    // via the existing alert path — they just don't auto-execute.
+    const driftTriggerAlreadyFired =
+      !!(pos.triggers_fired || {})['position_thesis_drift_close']
+    if (
+      verdictTransitionedToDrifting &&
+      !driftTriggerAlreadyFired
+    ) {
+      triggers.push({
+        type: 'position_thesis_drift_close',
+        fired: true,
+        message: `${pos.ticker} ${pos.strategy_type}: thesis first transitioned to drifting — selling 10% per drift rule`,
+      })
+    }
     if (triggers.length > 0) {
       const newFired = { ...pos.triggers_fired }
       if (regimeShiftFired) {
