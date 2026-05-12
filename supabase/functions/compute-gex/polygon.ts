@@ -72,6 +72,8 @@ async function fetchSnapshot(
   underlying: string,
   expiryFrom: string,
   expiryTo: string,
+  strikeMin?: number,
+  strikeMax?: number,
 ): Promise<SnapshotContract[]> {
   if (!MASSIVE_API_KEY) {
     throw new PolygonError('MASSIVE_API_KEY not set in Supabase secrets', 500)
@@ -79,10 +81,22 @@ async function fetchSnapshot(
   const url = new URL(`${POLYGON_BASE}/v3/snapshot/options/${underlying.toUpperCase()}`)
   url.searchParams.set('expiration_date.gte', expiryFrom)
   url.searchParams.set('expiration_date.lte', expiryTo)
+  // API-side strike filter when caller passes a window — drops 80-90%
+  // of the payload for liquid names. Without this, SPY's 90d chain
+  // pages out to 10K+ contracts, and the prior 5000-row cap was
+  // truncating multi-expiry coverage (only 0DTE made it through).
+  if (Number.isFinite(strikeMin)) {
+    url.searchParams.set('strike_price.gte', String(Math.floor(strikeMin!)))
+  }
+  if (Number.isFinite(strikeMax)) {
+    url.searchParams.set('strike_price.lte', String(Math.ceil(strikeMax!)))
+  }
   url.searchParams.set('limit', '250')
   url.searchParams.set('apiKey', MASSIVE_API_KEY)
 
-  // Polygon paginates via next_url. Walk all pages.
+  // Polygon paginates via next_url. Walk every page so all expirations
+  // are returned. The strike filter above prevents this from being
+  // pathological.
   let nextUrl: string | null = url.toString()
   const all: SnapshotContract[] = []
   while (nextUrl) {
@@ -98,7 +112,6 @@ async function fetchSnapshot(
     if (Array.isArray(body.results)) all.push(...body.results)
     // next_url already includes the apiKey from our original call.
     nextUrl = body.next_url ?? null
-    if (all.length > 5000) break  // safety guard — should never hit
   }
   return all
 }
@@ -162,13 +175,21 @@ export async function fetchPolygonChain(
   preferredDte: number,
   expirationOverride?: string | null,
 ): Promise<PolygonChain> {
-  // Pull a 90d window so we have multi-expiry context for the matrix.
+  // 60d horizon — plenty for /reasoning single-strike views.
   const today = new Date().toISOString().slice(0, 10)
   const horizon = new Date()
-  horizon.setUTCDate(horizon.getUTCDate() + 120)
+  horizon.setUTCDate(horizon.getUTCDate() + 60)
   const horizonStr = horizon.toISOString().slice(0, 10)
 
-  const contracts = await fetchSnapshot(ticker, today, horizonStr)
+  // Pre-filter strikes API-side using prev_close as a spot approximation.
+  // ±35% window covers volatility blow-ups while still cutting the chain
+  // payload by ~70%. The downstream STRIKE_WINDOW_PCT in compute-gex/index.ts
+  // narrows further once we know the actual spot.
+  const prevClose = await fetchPrevClose(ticker)
+  const strikeMin = prevClose ? prevClose * 0.65 : undefined
+  const strikeMax = prevClose ? prevClose * 1.35 : undefined
+
+  const contracts = await fetchSnapshot(ticker, today, horizonStr, strikeMin, strikeMax)
   if (contracts.length === 0) {
     throw new PolygonError(`no option contracts returned for ${ticker}`, 502)
   }
@@ -279,12 +300,21 @@ export async function fetchPolygonMatrixChain(
   maxExpirations: number,
   strikeWindowPct: number,
 ): Promise<PolygonMatrixChain> {
+  // 60d horizon — enough for the HeatPulse heatmap (further-out expiries
+  // contribute negligible gamma anyway).
   const today = new Date().toISOString().slice(0, 10)
   const horizon = new Date()
-  horizon.setUTCDate(horizon.getUTCDate() + 120)
+  horizon.setUTCDate(horizon.getUTCDate() + 60)
   const horizonStr = horizon.toISOString().slice(0, 10)
 
-  const contracts = await fetchSnapshot(ticker, today, horizonStr)
+  // Pre-filter strikes API-side. Use ±2× the eventual narrow window so
+  // we have slack for spot drift between prev_close and current spot.
+  const prevClose = await fetchPrevClose(ticker)
+  const buffer = Math.max(strikeWindowPct * 2, 0.10)
+  const strikeMin = prevClose ? prevClose * (1 - buffer) : undefined
+  const strikeMax = prevClose ? prevClose * (1 + buffer) : undefined
+
+  const contracts = await fetchSnapshot(ticker, today, horizonStr, strikeMin, strikeMax)
   if (contracts.length === 0) {
     throw new PolygonError(`no option contracts returned for ${ticker}`, 502)
   }
