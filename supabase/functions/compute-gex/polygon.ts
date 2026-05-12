@@ -232,8 +232,6 @@ export async function fetchPolygonChain(
   }
   if (!spot) throw new PolygonError(`no spot price for ${ticker}`, 502)
 
-  const prevClose = await fetchPrevClose(ticker)
-
   // Build the available-expirations list + pick the one we want.
   const expirySet = new Set<string>()
   for (const c of contracts) {
@@ -354,7 +352,6 @@ export async function fetchPolygonMatrixChain(
     if (Number.isFinite(s) && s > 0) { spot = s; break }
   }
   if (!spot) throw new PolygonError(`no spot price for ${ticker}`, 502)
-  const prevClose = await fetchPrevClose(ticker)
 
   const lo = spot * (1 - strikeWindowPct)
   const hi = spot * (1 + strikeWindowPct)
