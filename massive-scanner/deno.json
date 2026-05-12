@@ -1,0 +1,17 @@
+{
+  "tasks": {
+    "dev": "deno run --allow-net --allow-env --watch src/main.ts",
+    "start": "deno run --allow-net --allow-env src/main.ts"
+  },
+  "compilerOptions": {
+    "lib": ["deno.window"],
+    "strict": true
+  },
+  "fmt": {
+    "useTabs": false,
+    "lineWidth": 90,
+    "indentWidth": 2,
+    "singleQuote": true,
+    "semiColons": false
+  }
+}

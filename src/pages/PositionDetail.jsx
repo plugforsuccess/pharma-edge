@@ -474,10 +474,12 @@ export default function PositionDetail() {
         <div className="flex items-baseline justify-between">
           <div>
             <div className="text-[10px] uppercase tracking-wider text-muted">
-              Spread
+              {legCountFor(pos) === 4 ? 'Iron condor / butterfly'
+                : legCountFor(pos) === 1 ? 'Long option'
+                : 'Spread'}
             </div>
             <div className="font-mono-tab text-base font-medium">
-              ${formatStrike(pos.long_strike)} / ${formatStrike(pos.short_strike)}
+              {renderStrikes(pos)}
             </div>
             <div className="text-[10px] text-subtle">
               {pos.expiration} · <span className={dte <= 21 ? 'text-amber-400' : ''}>{dte}d</span>
@@ -2530,6 +2532,47 @@ function formatStrike(v) {
   const n = Number(v)
   if (!Number.isFinite(n)) return '—'
   return n >= 1000 ? n.toFixed(0) : n.toFixed(1)
+}
+
+// Count the legs on a position. Whale-tail = single-leg long option,
+// verticals = 2 legs, iron condor / butterfly = 4 legs. Used by the
+// header to label "Long option" vs "Spread" vs "Iron condor".
+function legCountFor(pos) {
+  if (!pos) return 0
+  const st = String(pos.strategy_type || '').toLowerCase()
+  if (st.startsWith('whale_long')) return 1
+  if (pos.short_call_strike != null && pos.long_call_strike != null
+      && pos.long_strike != null && pos.short_strike != null) {
+    return 4
+  }
+  if (pos.long_strike != null && pos.short_strike != null) return 2
+  if (pos.long_strike != null) return 1
+  return 0
+}
+
+// Render strikes in a way that fits each structure:
+//   whale_long_call → "150 C"
+//   bull_call etc.  → "145 / 150"
+//   iron condor     → "140 / 145 / 155 / 160"
+//   iron butterfly  → "140 / 150 / 160"  (short put = short call)
+function renderStrikes(pos) {
+  const st = String(pos.strategy_type || '').toLowerCase()
+  if (st.startsWith('whale_long')) {
+    return `$${formatStrike(pos.long_strike)} ${st.endsWith('call') ? 'C' : 'P'}`
+  }
+  if (pos.short_call_strike != null && pos.long_call_strike != null
+      && pos.long_strike != null && pos.short_strike != null) {
+    const longP = Number(pos.long_strike)
+    const shortP = Number(pos.short_strike)
+    const shortC = Number(pos.short_call_strike)
+    const longC = Number(pos.long_call_strike)
+    if (shortP === shortC) {
+      // butterfly
+      return `$${formatStrike(longP)} / $${formatStrike(shortP)} / $${formatStrike(longC)}`
+    }
+    return `$${formatStrike(longP)} / $${formatStrike(shortP)} / $${formatStrike(shortC)} / $${formatStrike(longC)}`
+  }
+  return `$${formatStrike(pos.long_strike)} / $${formatStrike(pos.short_strike)}`
 }
 
 function daysUntil(date) {
