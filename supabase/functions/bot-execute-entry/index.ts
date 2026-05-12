@@ -32,7 +32,8 @@
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { buildOccSymbol } from './tastytrade.ts'
+import { buildOccSymbol, tastytradeFetch } from './tastytrade.ts'
+// (buildOccSymbol + tastytradeFetch imported above)
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
@@ -90,6 +91,69 @@ interface BotConfig {
   event_block_days?: string[]
   sandbox_account_number?: string | null
   live_account_number?: string | null
+}
+
+// Resolve the user's NLV for risk-cap math.
+//
+//   1. Call Tastytrade /customers/me/accounts via the existing OAuth
+//      helper. tastytradeFetch reads its config from Supabase secrets;
+//      pulls the same access token used by place-order / close-order.
+//   2. For each account that comes back, fetch /accounts/:id/balances
+//      and read net-liquidating-value. Pick the largest.
+//   3. If the configured base URL is the cert (sandbox) endpoint,
+//      ignore the broker NLV — sandbox returns a fake $100K that would
+//      mislead 2%-rule-style sizing. Same guard StrikePriceCalculator
+//      uses on the client.
+//   4. On any failure or sandbox-only case, fall back to
+//      profile.account_size. Surface source in the return value so the
+//      caller logs which lane fired.
+//
+// Same architectural shape as get-account, but in-process so the
+// service-role bot doesn't have to invoke a JWT-gated edge function.
+const TASTYTRADE_BASE = Deno.env.get('TASTYTRADE_BASE_URL') || 'https://api.cert.tastyworks.com'
+const IS_SANDBOX = /cert\.tastyworks/.test(TASTYTRADE_BASE)
+
+async function resolveLiveNlv(
+  supabase: ReturnType<typeof createClient>,
+  fallbackAccountSize: number | null,
+): Promise<{ nlv: number; source: 'broker_live' | 'broker_sandbox_skipped' | 'profile_fallback' | 'none' }> {
+  const manual = Number(fallbackAccountSize) || 0
+  try {
+    const accountsResp = await tastytradeFetch(supabase, '/customers/me/accounts')
+    if (!accountsResp.ok) {
+      return { nlv: manual, source: manual > 0 ? 'profile_fallback' : 'none' }
+    }
+    const accountsBody = await accountsResp.json().catch(() => ({}))
+    const items = ((accountsBody?.data as Record<string, unknown>)?.items ?? []) as Array<{ account?: Record<string, unknown> }>
+
+    // Fetch balances for each account.
+    const nlvs: number[] = []
+    for (const item of items) {
+      const number = String(item.account?.['account-number'] ?? '')
+      if (!number) continue
+      try {
+        const bResp = await tastytradeFetch(
+          supabase,
+          `/accounts/${encodeURIComponent(number)}/balances`,
+        )
+        if (!bResp.ok) continue
+        const bBody = await bResp.json()
+        const v = Number((bBody?.data as Record<string, unknown>)?.['net-liquidating-value'] ?? 0)
+        if (Number.isFinite(v) && v > 0) nlvs.push(v)
+      } catch { /* per-account failure, skip */ }
+    }
+    // Sandbox NLV is fake — never size against it.
+    if (IS_SANDBOX) {
+      return { nlv: manual, source: manual > 0 ? 'broker_sandbox_skipped' : 'none' }
+    }
+    if (nlvs.length === 0) {
+      return { nlv: manual, source: manual > 0 ? 'profile_fallback' : 'none' }
+    }
+    const liveNlv = Math.max(...nlvs)
+    return { nlv: liveNlv, source: 'broker_live' }
+  } catch {
+    return { nlv: manual, source: manual > 0 ? 'profile_fallback' : 'none' }
+  }
 }
 
 serve(async (req) => {
@@ -163,8 +227,15 @@ serve(async (req) => {
     if (until > Date.now()) return skip(`halted: ${profile.bot_paused_reason ?? 'paused'}`, 'skipped_caps')
   }
 
-  const nlv = Number(profile.account_size) || 0
-  if (nlv <= 0) return skip('no_nlv', 'skipped_caps')
+  // Resolve NLV from live broker, falling back to profile.account_size
+  // only when broker is unreachable or returns sandbox-only data.
+  // Same pattern as src/components/StrikePriceCalculator.jsx — paper
+  // mode still sizes against REAL NLV (sandbox fills are simulated;
+  // sizing has to reflect the actual capital the strategy is being
+  // validated against).
+  const nlvResult = await resolveLiveNlv(supabase, profile.account_size)
+  const nlv = nlvResult.nlv
+  if (nlv <= 0) return skip(`no_nlv (${nlvResult.source})`, 'skipped_caps')
 
   // Today's run row (create if missing)
   const { data: runRow } = await supabase
@@ -344,6 +415,7 @@ serve(async (req) => {
         vol_oi_ratio: Number(alert.vol_oi_ratio),
         spot_at_print: Number(alert.spot_at_print),
         nlv_at_entry: nlv,
+        nlv_source: nlvResult.source,
         per_trade_cap_dollars: perTradeMaxLossDollars,
       },
       status: 'executed',
