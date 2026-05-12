@@ -1,3 +1,4 @@
+// deploy-trigger: 2026-05-12 (manual workflow nudge)
 // bot-place-multileg-exit — submit a 2-leg or 4-leg CLOSING order.
 //
 // Reads the open_positions row, reconstructs the legs (with Sell to

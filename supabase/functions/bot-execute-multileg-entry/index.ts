@@ -1,3 +1,4 @@
+// deploy-trigger: 2026-05-12 (manual workflow nudge)
 // bot-execute-multileg-entry — orchestrator for non-whale strategies.
 //
 // Called by each strategy scanner (bot-scan-iv-meanrev,

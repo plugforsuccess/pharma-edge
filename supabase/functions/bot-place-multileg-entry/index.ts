@@ -1,3 +1,4 @@
+// deploy-trigger: 2026-05-12 (manual workflow nudge)
 // bot-place-multileg-entry — submit a 2-leg or 4-leg opening order
 // to Tastytrade for IV mean-reversion, earnings IV crush, and OPEX
 // pin strategies.
