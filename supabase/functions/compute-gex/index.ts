@@ -32,6 +32,13 @@ import {
   PolygonError,
   type PolygonStrike,
 } from './polygon.ts'
+
+// Polygon (Massive) path is gated behind the MASSIVE_API_KEY env var.
+// When unset OR when SKIP_POLYGON=true, the dispatch skips Polygon
+// entirely and falls through to DXLink → Yahoo. Defensive guard so
+// a missing edge-function secret can't 503 the entire endpoint.
+const POLYGON_ENABLED =
+  !!Deno.env.get('MASSIVE_API_KEY') && Deno.env.get('SKIP_POLYGON') !== 'true'
 import {
   bsCallDelta,
   bsCharm,
@@ -1213,12 +1220,16 @@ serve(async (req) => {
     let pgErr: string | null = null
     let dxErr: string | null = null
     let yhErr: string | null = null
-    try {
-      const pg = await computeMatrixFromPolygon(ticker, matrixOpts)
-      if (pg.matrix) matrix = pg.matrix
-      else pgErr = pg.error ?? 'polygon unknown error'
-    } catch (e) {
-      pgErr = e instanceof Error ? e.message : 'polygon threw'
+    if (POLYGON_ENABLED) {
+      try {
+        const pg = await computeMatrixFromPolygon(ticker, matrixOpts)
+        if (pg.matrix) matrix = pg.matrix
+        else pgErr = pg.error ?? 'polygon unknown error'
+      } catch (e) {
+        pgErr = e instanceof Error ? e.message : 'polygon threw'
+      }
+    } else {
+      pgErr = 'polygon disabled (no MASSIVE_API_KEY)'
     }
     if (!matrix) {
       try {
@@ -1318,16 +1329,22 @@ serve(async (req) => {
   }
 
   // Try Polygon (Massive) first — real-time chain with every ticker.
-  // Fall back to DXLink cache, then Yahoo on any failure.
+  // Fall back to DXLink cache, then Yahoo on any failure. Polygon is
+  // gated behind MASSIVE_API_KEY presence so a missing secret won't
+  // 503 the endpoint.
   let result: ComputeOutput | null = null
   let polygonError: string | null = null
   let dxLinkError: string | null = null
-  try {
-    const pg = await computeFromPolygon({ ticker, preferredDte, expirationOverride })
-    if (pg.result) result = pg.result
-    else polygonError = pg.error ?? 'polygon unknown error'
-  } catch (e) {
-    polygonError = e instanceof Error ? e.message : 'polygon threw'
+  if (POLYGON_ENABLED) {
+    try {
+      const pg = await computeFromPolygon({ ticker, preferredDte, expirationOverride })
+      if (pg.result) result = pg.result
+      else polygonError = pg.error ?? 'polygon unknown error'
+    } catch (e) {
+      polygonError = e instanceof Error ? e.message : 'polygon threw'
+    }
+  } else {
+    polygonError = 'polygon disabled (no MASSIVE_API_KEY)'
   }
 
   if (!result) {
