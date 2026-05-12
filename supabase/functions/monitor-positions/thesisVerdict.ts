@@ -152,11 +152,21 @@ export function computeThesisVerdict(
 
     if (Number.isFinite(entryStrike) && Number.isFinite(liveStrike)) {
       const strikeDrift = Math.abs(liveStrike - entryStrike)
+      // Wall-running-past-target safe-harbor. See src/utils/thesisVerdict.js
+      // for the full rationale; mirror in lock-step.
+      const liveWallPastTargetInFavor =
+        Number.isFinite(targetStrike) &&
+        ((isBullish && liveStrike > targetStrike + STRIKE_TARGET_TOLERANCE) ||
+          (isBearish && liveStrike < targetStrike - STRIKE_TARGET_TOLERANCE))
+
       if (strikeDrift >= STRIKE_DRIFT_THRESHOLD) {
         if (liveAtTradeTarget && liveExpAtTradeExp) {
           reasons.push(`Dominant wall has migrated to ${formatStrike(liveStrike)} @ ${live.largest_wall.expiration} — your structural target zone. Thesis playing out.`)
         } else if (liveAtTradeTarget) {
           reasons.push(`Dominant wall now at ${formatStrike(liveStrike)} — your trade's short strike. Strike target reached.`)
+        } else if (liveWallPastTargetInFavor) {
+          const direction = isBullish ? 'above' : 'below'
+          reasons.push(`Dominant wall has run to ${formatStrike(liveStrike)} — past your ${formatStrike(targetStrike)} target ${direction} entry's level. Dealer book reconcentrated in your direction.`)
         } else {
           reasons.push(`Dominant wall shifted from ${formatStrike(entryStrike)} → ${formatStrike(liveStrike)}. Thesis anchor moved.`)
           state = 'drifting'
