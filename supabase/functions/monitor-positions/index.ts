@@ -176,6 +176,16 @@ type Regime = 'A' | 'B' | 'mixed'
 export interface LiveSnapshotForVerdict {
   spot: number
   net_gex: number
+  // Signed dealer-book net delta. Calls contribute positively (positive
+  // delta × OI), puts negatively (negative delta × OI), then scaled by
+  // spot. Same convention compute-gex's MatrixOutput uses. Drives the
+  // DEX-flip drift check in thesisVerdict.
+  net_dex: number
+  // Per-strike net GEX for the front expiration. Used to compute the
+  // trade-specific `wall_gex_at_short_strike` value passed to the
+  // verdict module (each position has its own short strike, so the
+  // lookup happens at the call site, not here).
+  gex_by_strike: Map<number, number>
   largest_wall: { strike: number; expiration: string; gex_net: number } | null
   regime: Regime
 }
@@ -186,7 +196,7 @@ async function deriveSnapshotForTicker(
 ): Promise<LiveSnapshotForVerdict | null> {
   const { data: rows } = await supabase
     .from('dxlink_quotes')
-    .select('kind, expiration_date, strike, option_type, gamma, open_interest, mid, bid, ask, updated_at')
+    .select('kind, expiration_date, strike, option_type, gamma, delta, open_interest, mid, bid, ask, updated_at')
     .or(`symbol.eq.${ticker},underlying.eq.${ticker}`)
   if (!rows || rows.length === 0) return null
 
@@ -211,24 +221,61 @@ async function deriveSnapshotForTicker(
   ).sort() as string[]
   if (futureExps.length === 0) return null
   const frontExp = futureExps[0]
-  const frontRows = optionRows.filter((r: any) => r.expiration_date === frontExp)
 
-  // Aggregate per-strike net GEX. Same formula as compute-gex.
+  // Aggregate per-strike net GEX + cumulative net DEX. Same formulas
+  // as compute-gex's dxlink path — calls contribute positively, puts
+  // negatively. GEX uses gamma × OI × spot²; DEX uses delta × OI ×
+  // spot. dxFeed's Quote events deliver both Greeks; we don't refit.
+  //
+  // Two GEX maps:
+  //   * `byStrikeFront` — front-expiration only. Drives regime
+  //     classification (regime A/B/mixed is anchored to the front
+  //     gamma profile, same as compute-gex's `compute_regime`).
+  //   * `byStrikeAllExp` — cross-expiration aggregate. Drives the
+  //     wall-at-your-strike check in thesisVerdict so the entry-side
+  //     and live-side recipes match (LogSignal sums across the
+  //     matrix's expirations at lock time; this matches it).
   const dN = spot * spot
-  const byStrike = new Map<number, number>()
-  for (const r of frontRows) {
+  const byStrikeFront = new Map<number, number>()
+  const byStrikeAllExp = new Map<number, number>()
+  let netDex = 0
+  const accumGex = (
+    map: Map<number, number>,
+    strike: number,
+    oi: number,
+    gamma: number,
+    type: string,
+  ) => {
+    if (!Number.isFinite(gamma) || gamma <= 0) return
+    const sign = type === 'C' ? 1 : -1
+    map.set(strike, (map.get(strike) ?? 0) + sign * oi * gamma * dN)
+  }
+  for (const r of optionRows) {
     if (r.strike == null) continue
     const oi = r.open_interest ?? 0
     const g = r.gamma ?? 0
-    if (oi === 0 || !Number.isFinite(g) || g <= 0) continue
-    const sign = r.option_type === 'C' ? 1 : -1
-    byStrike.set(r.strike, (byStrike.get(r.strike) ?? 0) + sign * oi * g * dN)
+    const d = r.delta ?? 0
+    if (oi === 0) continue
+    if (r.expiration_date === frontExp) {
+      accumGex(byStrikeFront, r.strike, oi, g, r.option_type)
+    }
+    accumGex(byStrikeAllExp, r.strike, oi, g, r.option_type)
+    // DEX accumulation: the call/put sign is already encoded in the
+    // delta value itself (puts come back negative from dxFeed). Net
+    // DEX uses the full chain — same as compute-gex's MatrixOutput.
+    if (Number.isFinite(d)) {
+      netDex += oi * d * spot
+    }
   }
-  if (byStrike.size === 0) return null
+  if (byStrikeFront.size === 0) return null
 
-  // Net GEX: sum across all strikes.
+  // Net GEX: sum across all front-expiration strikes (regime metric).
   let netGex = 0
-  for (const v of byStrike.values()) netGex += v
+  for (const v of byStrikeFront.values()) netGex += v
+  // Alias used below for the wall + flip calculation. Keeps the
+  // existing code shape intact; the new cross-expiration map is
+  // exposed separately via the return value.
+  const byStrike = byStrikeFront
 
   // Zero-gamma flip: walk strikes ascending, track running cumulative,
   // find the first strike where cumulative crosses zero.
@@ -269,6 +316,8 @@ async function deriveSnapshotForTicker(
   return {
     spot,
     net_gex: netGex,
+    net_dex: netDex,
+    gex_by_strike: byStrikeAllExp,
     largest_wall: largestStrike != null
       ? { strike: largestStrike, expiration: frontExp, gex_net: largestNet }
       : null,
@@ -902,12 +951,20 @@ serve(async (req) => {
         .eq('id', pos.signal_id)
         .maybeSingle()
       const entrySnap = sigRow?.entry_gex_snapshot ?? null
+      // Per-position wall-at-strike lookup. liveSnapshot.gex_by_strike
+      // is built once per ticker by deriveSnapshotForTicker; each
+      // position picks its own short_strike out of it. Returns null
+      // when the cache doesn't carry the strike (window too narrow).
+      const liveWallAtShort =
+        liveSnapshot?.gex_by_strike?.get(pos.short_strike) ?? null
       const verdict = computeThesisVerdict(
         entrySnap,
         liveSnapshot
           ? {
               spot: liveSnapshot.spot,
               net_gex: liveSnapshot.net_gex,
+              net_dex: liveSnapshot.net_dex,
+              wall_gex_at_short_strike: liveWallAtShort,
               largest_wall: liveSnapshot.largest_wall,
             }
           : null,

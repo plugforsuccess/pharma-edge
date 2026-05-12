@@ -104,6 +104,109 @@
     }
   },
   {
+    "name": "heuristic_bullish_wall_past_target_after_pierce_is_intact",
+    "note": "Canonical winning-trade case. Bullish call spread, spot rallied through the entry call wall, the new dominant wall is 10 strikes PAST the short strike. Old logic flagged this drifting because liveAtTradeTarget was false; new logic suppresses drift checks once breakThroughFired.",
+    "input": {
+      "entry": { "spot": 100, "net_gex": 50000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 20000000 } },
+      "live":  { "spot": 108, "net_gex": 40000000, "largest_wall": { "strike": 115, "expiration": "2026-06-01", "gex_net": 18000000 } },
+      "trade": { "long_strike": 100, "short_strike": 105, "strategy_type": "BULL_CALL", "expiration": "2026-06-01" }
+    },
+    "expected": {
+      "state": "intact",
+      "reasons_contains_any": ["broke through the entry call wall", "structural target zone"]
+    }
+  },
+  {
+    "name": "heuristic_bearish_wall_past_target_after_pierce_is_intact",
+    "note": "Mirror of the bullish case. Bearish put spread, spot broke down through the entry put wall, new dominant wall is past the short strike (further south). Must stay intact.",
+    "input": {
+      "entry": { "spot": 100, "net_gex": -50000000, "largest_wall": { "strike": 95,  "expiration": "2026-06-01", "gex_net": -20000000 } },
+      "live":  { "spot": 92,  "net_gex": -45000000, "largest_wall": { "strike": 85,  "expiration": "2026-06-01", "gex_net": -22000000 } },
+      "trade": { "long_strike": 100, "short_strike": 95, "strategy_type": "BEAR_PUT", "expiration": "2026-06-01" }
+    },
+    "expected": {
+      "state": "intact",
+      "reasons_contains_any": ["broke through the entry put wall", "structural target zone"]
+    }
+  },
+  {
+    "name": "heuristic_wall_expiration_migrated_to_trade_exp_is_intact",
+    "note": "Expiration safe-harbor loosened. Wall expiration migrated FROM some other date TO the trade's expiration (movement toward the trade) — old logic still fired drift because the strike was off by 5; new logic only requires the expiration to match.",
+    "input": {
+      "entry": { "spot": 100, "net_gex": 50000000, "largest_wall": { "strike": 100, "expiration": "2026-05-08", "gex_net": 20000000 } },
+      "live":  { "spot": 100, "net_gex": 48000000, "largest_wall": { "strike": 100, "expiration": "2026-06-01", "gex_net": 18000000 } },
+      "trade": { "long_strike": 100, "short_strike": 105, "strategy_type": "BULL_CALL", "expiration": "2026-06-01" }
+    },
+    "expected": {
+      "state": "intact"
+    }
+  },
+  {
+    "name": "heuristic_bullish_wall_at_short_strike_reinforcing_is_intact",
+    "note": "Wall at the trade's short strike grew 1.5× since entry — informational positive signal. State stays intact; reason surfaces the reinforcement.",
+    "input": {
+      "entry": { "spot": 100, "net_gex": 50000000, "wall_gex_at_short_strike": 20000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 20000000 } },
+      "live":  { "spot": 101, "net_gex": 52000000, "wall_gex_at_short_strike": 30000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 30000000 } },
+      "trade": { "long_strike": 100, "short_strike": 105, "strategy_type": "BULL_CALL", "expiration": "2026-06-01" }
+    },
+    "expected": {
+      "state": "intact",
+      "reasons_contains_any": ["reinforcing"]
+    }
+  },
+  {
+    "name": "heuristic_bullish_wall_at_short_strike_melted_is_drifting",
+    "note": "Wall at the trade's short strike dropped to 30% of entry — anchor eroding even though the dominant wall might be elsewhere.",
+    "input": {
+      "entry": { "spot": 100, "net_gex": 50000000, "wall_gex_at_short_strike": 20000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 20000000 } },
+      "live":  { "spot": 100, "net_gex": 48000000, "wall_gex_at_short_strike": 6000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 18000000 } },
+      "trade": { "long_strike": 100, "short_strike": 105, "strategy_type": "BULL_CALL", "expiration": "2026-06-01" }
+    },
+    "expected": {
+      "state": "drifting",
+      "reasons_contains_any": ["melted"]
+    }
+  },
+  {
+    "name": "heuristic_bullish_wall_at_short_strike_sign_flipped_is_drifting",
+    "note": "Wall at the trade's short strike flipped from call-wall (+GEX) to put-cluster (−GEX). Structural inversion — flag drift regardless of magnitude.",
+    "input": {
+      "entry": { "spot": 100, "net_gex": 50000000, "wall_gex_at_short_strike": 20000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 20000000 } },
+      "live":  { "spot": 100, "net_gex": 30000000, "wall_gex_at_short_strike": -15000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 12000000 } },
+      "trade": { "long_strike": 100, "short_strike": 105, "strategy_type": "BULL_CALL", "expiration": "2026-06-01" }
+    },
+    "expected": {
+      "state": "drifting",
+      "reasons_contains_any": ["flipped sign", "Structure inverted"]
+    }
+  },
+  {
+    "name": "heuristic_bullish_dex_flipped_against_is_drifting",
+    "note": "Net DEX flipped from positive (dealers buy rallies, bullish tailwind) to negative (dealers sell rallies, headwind). Magnitude meaningful (>10% of entry).",
+    "input": {
+      "entry": { "spot": 100, "net_gex": 50000000, "net_dex": 100000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 20000000 } },
+      "live":  { "spot": 100, "net_gex": 48000000, "net_dex": -50000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 19000000 } },
+      "trade": { "long_strike": 100, "short_strike": 105, "strategy_type": "BULL_CALL", "expiration": "2026-06-01" }
+    },
+    "expected": {
+      "state": "drifting",
+      "reasons_contains_any": ["Net DEX flipped", "headwind"]
+    }
+  },
+  {
+    "name": "heuristic_bullish_dex_flipped_in_favor_is_intact",
+    "note": "Net DEX flipped FROM negative (initial headwind) TO positive (now tailwind). Same magnitude condition, opposite direction — surfaces as informational tailwind reason, state unchanged.",
+    "input": {
+      "entry": { "spot": 100, "net_gex": 50000000, "net_dex": -50000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 20000000 } },
+      "live":  { "spot": 100, "net_gex": 48000000, "net_dex": 80000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 19000000 } },
+      "trade": { "long_strike": 100, "short_strike": 105, "strategy_type": "BULL_CALL", "expiration": "2026-06-01" }
+    },
+    "expected": {
+      "state": "intact",
+      "reasons_contains_any": ["tailwind"]
+    }
+  },
+  {
     "name": "structured_break_through_target_reached",
     "note": "Phase 3a structured path. break_through thesis, spot crossed target_strike upward = thesis playing out, stays intact.",
     "input": {

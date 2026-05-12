@@ -8,16 +8,28 @@
 // See the frontend file for the full rationale + verdict ladder.
 
 const STRIKE_DRIFT_THRESHOLD = 3
+const STRIKE_GEX_REINFORCE_RATIO = 1.3
+const STRIKE_GEX_MELT_RATIO = 0.5
+const DEX_FLIP_MAGNITUDE_RATIO = 0.1
 
 export interface EntrySnapshot {
   spot: number | null
   net_gex: number | null
+  // Signed dealer-book net delta. Calls positive, puts negative; same
+  // convention as compute-gex's MatrixOutput. Optional for legacy
+  // snapshots predating the field.
+  net_dex?: number | null
+  // Signed GEX at the trade's short strike, summed across the matrix's
+  // expirations. Optional for legacy snapshots.
+  wall_gex_at_short_strike?: number | null
   largest_wall: { strike: number; expiration: string; gex_net: number } | null
 }
 
 export interface LiveSnapshot {
   spot: number | null
   net_gex: number | null
+  net_dex?: number | null
+  wall_gex_at_short_strike?: number | null
   largest_wall: { strike: number; expiration: string; gex_net: number } | null
 }
 
@@ -93,6 +105,9 @@ export function computeThesisVerdict(
           : isBearish
             ? 'put'
             : null
+  // Tracks whether spot pierced the trade's directional wall IN THE
+  // TRADE'S FAVOR. Mirrors src/utils/thesisVerdict.js — same gating.
+  let breakThroughFired = false
   const entryWallStrike = entry.largest_wall?.strike
   if (Number.isFinite(entryWallStrike) && entryWallStrike != null && wallType) {
     const crossedUp = entry.spot! < entryWallStrike && live.spot! >= entryWallStrike + PIERCE
@@ -100,6 +115,7 @@ export function computeThesisVerdict(
     if (wallType === 'call' && crossedUp) {
       if (isBullish) {
         reasons.push(`Spot broke through the entry call wall at ${formatStrike(entryWallStrike)} — resistance failed, structural target zone. Check the P&L card.`)
+        breakThroughFired = true
       } else if (isBearish) {
         reasons.push(`Spot pierced the entry call wall at ${formatStrike(entryWallStrike)}. Bullish breakout — bearish thesis broken.`)
         state = 'invalidated'
@@ -108,6 +124,7 @@ export function computeThesisVerdict(
     if (wallType === 'put' && crossedDown) {
       if (isBearish) {
         reasons.push(`Spot broke through the entry put wall at ${formatStrike(entryWallStrike)} — support failed, structural target zone. Check the P&L card.`)
+        breakThroughFired = true
       } else if (isBullish) {
         reasons.push(`Spot pierced the entry put wall at ${formatStrike(entryWallStrike)}. Bearish breakdown — bullish thesis broken.`)
         state = 'invalidated'
@@ -121,7 +138,7 @@ export function computeThesisVerdict(
 
   // Drift — context-aware. See src/utils/thesisVerdict.js for the
   // full rationale; mirror in lock-step.
-  if (entry.largest_wall && live.largest_wall) {
+  if (entry.largest_wall && live.largest_wall && !breakThroughFired) {
     const entryStrike = Number(entry.largest_wall.strike)
     const liveStrike = Number(live.largest_wall.strike)
     const targetStrike = Number(trade.short_strike)
@@ -146,18 +163,75 @@ export function computeThesisVerdict(
         }
       }
     }
+    // Loosened safe-harbor: wall expiration migrating TO the trade's
+    // expiration is movement toward the trade, regardless of strike.
     if (
       entry.largest_wall.expiration !== live.largest_wall.expiration &&
-      !(liveAtTradeTarget && liveExpAtTradeExp)
+      !liveExpAtTradeExp
     ) {
       reasons.push(`Dominant wall expiration moved from ${entry.largest_wall.expiration} → ${live.largest_wall.expiration}. Different cluster anchoring the regime now.`)
       state = 'drifting'
     }
   }
 
+  // Wall at YOUR strike — trade-specific anchor health. See client
+  // module for full rationale; mirror in lock-step.
+  const entryGAtK = entry.wall_gex_at_short_strike ?? null
+  const liveGAtK = live.wall_gex_at_short_strike ?? null
+  if (
+    !breakThroughFired &&
+    Number.isFinite(entryGAtK) &&
+    Number.isFinite(liveGAtK) &&
+    Math.abs(entryGAtK as number) > 0
+  ) {
+    const e = entryGAtK as number
+    const l = liveGAtK as number
+    const signFlipped =
+      Math.sign(e) !== 0 && Math.sign(l) !== 0 && Math.sign(e) !== Math.sign(l)
+    const magnitudeRatio = Math.abs(l) / Math.abs(e)
+    if (signFlipped) {
+      reasons.push(`Wall at your ${formatStrike(trade.short_strike)} strike flipped sign (${fmtMillions(e)} → ${fmtMillions(l)}). Structure inverted since entry.`)
+      state = 'drifting'
+    } else if (magnitudeRatio < STRIKE_GEX_MELT_RATIO) {
+      reasons.push(`Wall at your ${formatStrike(trade.short_strike)} strike melted to ${Math.round(magnitudeRatio * 100)}% of entry. Anchor eroding.`)
+      state = 'drifting'
+    } else if (magnitudeRatio > STRIKE_GEX_REINFORCE_RATIO) {
+      reasons.push(`Wall at your ${formatStrike(trade.short_strike)} strike reinforcing (+${Math.round((magnitudeRatio - 1) * 100)}% since entry).`)
+    }
+  }
+
+  // Net DEX flip — independent axis from GEX. See client module for
+  // full rationale; mirror in lock-step.
+  const entryDexVal = entry.net_dex ?? null
+  const liveDexVal = live.net_dex ?? null
+  if (
+    !breakThroughFired &&
+    Number.isFinite(entryDexVal) &&
+    Number.isFinite(liveDexVal) &&
+    Math.abs(entryDexVal as number) > 0
+  ) {
+    const eD = entryDexVal as number
+    const lD = liveDexVal as number
+    const dexSignFlipped =
+      Math.sign(eD) !== 0 && Math.sign(lD) !== 0 && Math.sign(eD) !== Math.sign(lD)
+    const liveDexMeaningful = Math.abs(lD) > DEX_FLIP_MAGNITUDE_RATIO * Math.abs(eD)
+    if (dexSignFlipped && liveDexMeaningful) {
+      const dealerBehavior = lD > 0 ? 'now buy rallies' : 'now sell rallies'
+      const againstTrade = (isBullish && lD < 0) || (isBearish && lD > 0)
+      if (againstTrade) {
+        reasons.push(`Net DEX flipped ${fmtMillions(eD)} → ${fmtMillions(lD)}. Dealers ${dealerBehavior} — headwind for your direction.`)
+        state = 'drifting'
+      } else if (isBullish || isBearish) {
+        reasons.push(`Net DEX flipped ${fmtMillions(eD)} → ${fmtMillions(lD)}. Dealers ${dealerBehavior} — tailwind for your direction.`)
+      }
+    }
+  }
+
+  // Net GEX transition-zone collapse. Suppressed when breakThroughFired
+  // for the same reason as the wall checks above.
   const entryAbs = Math.abs(entry.net_gex!)
   const liveAbs = Math.abs(live.net_gex!)
-  if (entryAbs > 0 && liveAbs / entryAbs < 0.2 && state === 'intact') {
+  if (!breakThroughFired && entryAbs > 0 && liveAbs / entryAbs < 0.2 && state === 'intact') {
     reasons.push(`Net GEX collapsed from ${fmtMillions(entry.net_gex!)} to ${fmtMillions(live.net_gex!)} — transition zone.`)
     state = 'drifting'
   }

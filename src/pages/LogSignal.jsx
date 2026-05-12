@@ -204,6 +204,29 @@ export default function LogSignal() {
       )
       if (!gexErr && gexResp?.success && gexResp?.data) {
         const m = gexResp.data
+        // GEX at the trade's short strike (the trade-specific anchor),
+        // summed across the matrix's expirations. Drives the
+        // wall-at-your-strike check in thesisVerdict — see
+        // src/utils/thesisVerdict.js §3b. Null when the matrix doesn't
+        // carry the short strike (window narrower than the form value)
+        // or the cells row is missing.
+        const shortStrikeNum = Number(form.short_strike)
+        let wallGexAtShortStrike = null
+        if (
+          Number.isFinite(shortStrikeNum) &&
+          Array.isArray(m.strikes) &&
+          Array.isArray(m.cells)
+        ) {
+          const idx = m.strikes.findIndex((s) => Number(s) === shortStrikeNum)
+          if (idx >= 0 && Array.isArray(m.cells[idx])) {
+            let sum = 0
+            let any = false
+            for (const v of m.cells[idx]) {
+              if (Number.isFinite(v)) { sum += v; any = true }
+            }
+            wallGexAtShortStrike = any ? sum : null
+          }
+        }
         entryGexSnapshot = {
           spot: m.spot ?? null,
           source: m.source ?? null,
@@ -220,6 +243,7 @@ export default function LogSignal() {
                 gex_net: m.largest.gex_net,
               }
             : null,
+          wall_gex_at_short_strike: wallGexAtShortStrike,
           captured_at: new Date().toISOString(),
         }
       }
