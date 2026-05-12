@@ -960,13 +960,20 @@ serve(async (req) => {
     // invalidated) — not on every poll. This is what stops the user
     // from getting 50 pings a day if a wall wiggles back and forth.
     let verdictUpdate: { last_verdict?: VerdictState; last_verdict_reasons?: string[]; last_verdict_at?: string } = {}
-    // Drives the 10%-on-drift auto-close trigger below. We only auto-
-    // execute on the canonical first-drift event (prior intact → new
-    // drifting), not on recoveries (e.g. invalidated → drifting) or
-    // escalations (drifting → invalidated). Drift trigger ALSO won't
-    // fire if the position lacks a signal_id — there's nothing for
-    // the verdict to compare against in that case.
-    let verdictTransitionedToDrifting = false
+    // Drives the auto-exit trigger below. The rule is state-based,
+    // not transition-based: if the verdict reads ANY non-intact
+    // state (`drifting` or `invalidated`), the bot exits 100%. Not
+    // restricted to the canonical intact → drifting transition —
+    // a position that's been drifting all day still triggers on the
+    // first poll we run, and an outright `invalidated` verdict
+    // triggers without having to step through `drifting` first.
+    //
+    // Excluded states:
+    //   * `intact`           → keep holding (the only "ok" state)
+    //   * `not_evaluable`    → data missing; deferring is safer than
+    //                          exiting on missing data
+    let shouldAutoExitOnVerdict = false
+    let exitReasonState: 'drifting' | 'invalidated' | null = null
     if (pos.signal_id) {
       const { data: sigRow } = await supabase
         .from('signals')
@@ -1023,12 +1030,14 @@ serve(async (req) => {
         prior &&
         (prior === 'drifting' || prior === 'invalidated') &&
         verdict.state === 'intact'
-      // Canonical "first drift" — used to auto-execute the 10%
-      // partial close. Tighter than transitionedToWorse: only fires
-      // on intact → drifting, not on invalidated → drifting (which
-      // is a recovery, not a fresh drift event).
-      verdictTransitionedToDrifting =
-        prior === 'intact' && verdict.state === 'drifting'
+      // State-based auto-exit gate. Any non-intact state where we
+      // also have a meaningful read (not `not_evaluable`) triggers
+      // the close. Idempotency is enforced downstream via
+      // triggers_fired — we'll only fire once per position.
+      if (verdict.state === 'drifting' || verdict.state === 'invalidated') {
+        shouldAutoExitOnVerdict = true
+        exitReasonState = verdict.state
+      }
       const alertType = transitionedToBetter
         ? 'position_thesis_recovered'
         : verdict.state === 'invalidated'
@@ -1072,31 +1081,30 @@ serve(async (req) => {
     // Evaluate triggers
     const triggers = evaluateTriggers(pos, pnlPct, dte)
 
-    // Thesis-drift FULL-EXIT trigger: append to the trigger list
-    // when the verdict JUST transitioned intact → drifting AND we
-    // haven't already fired this trigger on this position. Reuses
-    // the existing auto-close pipeline (submitAutoClose below);
-    // submitAutoClose's isImmediateExit branch closes all remaining
-    // contracts at mid×0.95 to ensure fill, same shape as
-    // position_stop_loss. The strategy gate inside structureFor()
+    // Thesis non-intact FULL-EXIT trigger: append to the trigger
+    // list whenever the verdict reads `drifting` or `invalidated`
+    // AND we haven't already fired this trigger on this position.
+    // Reuses the existing auto-close pipeline (submitAutoClose
+    // below); submitAutoClose's isImmediateExit branch closes all
+    // remaining contracts at mid×0.95 to ensure fill, same shape
+    // as position_stop_loss. The strategy gate inside structureFor()
     // means credit verticals + iron condors silently skip the
     // broker call and surface as an alert-only event.
     //
-    // Why "first transition only": idempotency — the trigger fires
-    // a full close, so there's nothing left to close on a second
-    // intact ↔ drifting oscillation. The triggers_fired check is
-    // defensive only; in practice the position will be marked
-    // closed before any second drift event lands.
+    // Idempotency: triggers_fired is the ledger — once fired, this
+    // trigger won't re-fire on subsequent polls. In practice the
+    // full-exit closes the position before a second poll would
+    // re-evaluate, so this is defensive.
     const driftTriggerAlreadyFired =
       !!(pos.triggers_fired || {})['position_thesis_drift_exit']
     if (
-      verdictTransitionedToDrifting &&
+      shouldAutoExitOnVerdict &&
       !driftTriggerAlreadyFired
     ) {
       triggers.push({
         type: 'position_thesis_drift_exit',
         fired: true,
-        message: `${pos.ticker} ${pos.strategy_type}: thesis transitioned to drifting — closing 100% per drift-exit rule`,
+        message: `${pos.ticker} ${pos.strategy_type}: thesis is ${exitReasonState ?? 'non-intact'} — closing 100% per verdict-exit rule`,
       })
     }
     if (triggers.length > 0) {
