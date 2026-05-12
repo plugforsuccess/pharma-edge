@@ -332,25 +332,25 @@ const AUTO_CLOSE_TRIGGERS = new Set([
   'position_stop_loss',
   'position_profit_100',
   'position_profit_200',
-  // Thesis-drift partial close: 10% of original contracts when the
-  // verdict first transitions intact → drifting. Fires once per
-  // position (idempotent via triggers_fired). Does NOT fire on
-  // subsequent re-drifts after a recovery — avoids compounding sells
-  // on an oscillating boundary signal. Re-entering "drifting" after
-  // an intact recovery still sends a push alert; only the auto-close
-  // is rate-limited to the first crossing.
-  'position_thesis_drift_close',
+  // Thesis-drift full exit: closes the entire remaining position
+  // when the verdict first transitions intact → drifting. Mirrors
+  // the stop-loss treatment — once the dealer-positioning backdrop
+  // the trade was built on starts eroding, we're out. Idempotent
+  // via triggers_fired; fires once per position lifetime.
+  'position_thesis_drift_exit',
 ])
 
 // Pct of ORIGINAL contracts to close at each trigger. Cumulative
 // across triggers — by the time profit_200 fires, profit_100 has
 // already closed 50%, so this 25% gets us to 75% closed total.
-// Stop loss closes everything still open.
+// Stop loss + thesis-drift exit both close everything still open
+// (submitAutoClose treats them as immediate exits — see
+// `isImmediateExit` below).
 function targetClosePct(triggerType: string): number {
   if (triggerType === 'position_stop_loss') return 1.0          // close everything
   if (triggerType === 'position_profit_100') return 0.5         // close 50% of original
   if (triggerType === 'position_profit_200') return 0.25        // close another 25% (75% total)
-  if (triggerType === 'position_thesis_drift_close') return 0.1 // close 10% on first drift
+  if (triggerType === 'position_thesis_drift_exit') return 1.0  // close everything on first drift
   return 0
 }
 
@@ -494,8 +494,16 @@ async function submitAutoClose(
   }
 
   // Compute target contracts to close in THIS trigger.
+  //
+  // Stop-loss + thesis-drift exit are both "immediate exits": close
+  // everything still open, price for fill rather than for optimal
+  // mark. Profit-takes are partial closes priced AT mid (we have
+  // time, the market is paying).
+  const isImmediateExit =
+    triggerType === 'position_stop_loss' ||
+    triggerType === 'position_thesis_drift_exit'
   let target: number
-  if (triggerType === 'position_stop_loss') {
+  if (isImmediateExit) {
     target = remaining
   } else {
     // profit_100 / profit_200 — fraction of original, rounded down,
@@ -509,10 +517,9 @@ async function submitAutoClose(
   }
 
   // Limit price.
-  const isProfitTake = triggerType !== 'position_stop_loss'
-  const limitPrice = isProfitTake
-    ? Math.max(0.01, currentMid)               // at mid, we have time
-    : Math.max(0.01, currentMid * 0.95)        // 5% below mid for stop, ensure fill
+  const limitPrice = isImmediateExit
+    ? Math.max(0.01, currentMid * 0.95)        // 5% below mid to ensure fill
+    : Math.max(0.01, currentMid)               // at mid, we have time
   const limitRounded = Math.round(limitPrice * 100) / 100
 
   // Build OCC symbols. Same convention place-order uses.
@@ -1065,30 +1072,31 @@ serve(async (req) => {
     // Evaluate triggers
     const triggers = evaluateTriggers(pos, pnlPct, dte)
 
-    // Thesis-drift partial-close trigger: append to the trigger list
+    // Thesis-drift FULL-EXIT trigger: append to the trigger list
     // when the verdict JUST transitioned intact → drifting AND we
     // haven't already fired this trigger on this position. Reuses
-    // the existing auto-close pipeline (submitAutoClose below); the
-    // strategy gate inside structureFor() means credit verticals +
-    // iron condors silently skip the broker call and surface as an
-    // alert-only event, same as the +50% rung.
+    // the existing auto-close pipeline (submitAutoClose below);
+    // submitAutoClose's isImmediateExit branch closes all remaining
+    // contracts at mid×0.95 to ensure fill, same shape as
+    // position_stop_loss. The strategy gate inside structureFor()
+    // means credit verticals + iron condors silently skip the
+    // broker call and surface as an alert-only event.
     //
-    // Why "first transition only": the verdict can oscillate around
-    // its boundaries (a wall reinforces, then re-erodes; DEX wobbles
-    // near zero). Compounding 10% sells on every flip would whittle
-    // a position to zero on a noisy signal. Once the first 10% is
-    // taken off, subsequent drift transitions still ping the user
-    // via the existing alert path — they just don't auto-execute.
+    // Why "first transition only": idempotency — the trigger fires
+    // a full close, so there's nothing left to close on a second
+    // intact ↔ drifting oscillation. The triggers_fired check is
+    // defensive only; in practice the position will be marked
+    // closed before any second drift event lands.
     const driftTriggerAlreadyFired =
-      !!(pos.triggers_fired || {})['position_thesis_drift_close']
+      !!(pos.triggers_fired || {})['position_thesis_drift_exit']
     if (
       verdictTransitionedToDrifting &&
       !driftTriggerAlreadyFired
     ) {
       triggers.push({
-        type: 'position_thesis_drift_close',
+        type: 'position_thesis_drift_exit',
         fired: true,
-        message: `${pos.ticker} ${pos.strategy_type}: thesis first transitioned to drifting — selling 10% per drift rule`,
+        message: `${pos.ticker} ${pos.strategy_type}: thesis transitioned to drifting — closing 100% per drift-exit rule`,
       })
     }
     if (triggers.length > 0) {
