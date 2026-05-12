@@ -332,16 +332,25 @@ const AUTO_CLOSE_TRIGGERS = new Set([
   'position_stop_loss',
   'position_profit_100',
   'position_profit_200',
+  // Thesis-drift full exit: closes the entire remaining position
+  // when the verdict first transitions intact → drifting. Mirrors
+  // the stop-loss treatment — once the dealer-positioning backdrop
+  // the trade was built on starts eroding, we're out. Idempotent
+  // via triggers_fired; fires once per position lifetime.
+  'position_thesis_drift_exit',
 ])
 
 // Pct of ORIGINAL contracts to close at each trigger. Cumulative
 // across triggers — by the time profit_200 fires, profit_100 has
 // already closed 50%, so this 25% gets us to 75% closed total.
-// Stop loss closes everything still open.
+// Stop loss + thesis-drift exit both close everything still open
+// (submitAutoClose treats them as immediate exits — see
+// `isImmediateExit` below).
 function targetClosePct(triggerType: string): number {
-  if (triggerType === 'position_stop_loss') return 1.0      // close everything
-  if (triggerType === 'position_profit_100') return 0.5     // close 50% of original
-  if (triggerType === 'position_profit_200') return 0.25    // close another 25% (75% total)
+  if (triggerType === 'position_stop_loss') return 1.0          // close everything
+  if (triggerType === 'position_profit_100') return 0.5         // close 50% of original
+  if (triggerType === 'position_profit_200') return 0.25        // close another 25% (75% total)
+  if (triggerType === 'position_thesis_drift_exit') return 1.0  // close everything on first drift
   return 0
 }
 
@@ -485,8 +494,16 @@ async function submitAutoClose(
   }
 
   // Compute target contracts to close in THIS trigger.
+  //
+  // Stop-loss + thesis-drift exit are both "immediate exits": close
+  // everything still open, price for fill rather than for optimal
+  // mark. Profit-takes are partial closes priced AT mid (we have
+  // time, the market is paying).
+  const isImmediateExit =
+    triggerType === 'position_stop_loss' ||
+    triggerType === 'position_thesis_drift_exit'
   let target: number
-  if (triggerType === 'position_stop_loss') {
+  if (isImmediateExit) {
     target = remaining
   } else {
     // profit_100 / profit_200 — fraction of original, rounded down,
@@ -500,10 +517,9 @@ async function submitAutoClose(
   }
 
   // Limit price.
-  const isProfitTake = triggerType !== 'position_stop_loss'
-  const limitPrice = isProfitTake
-    ? Math.max(0.01, currentMid)               // at mid, we have time
-    : Math.max(0.01, currentMid * 0.95)        // 5% below mid for stop, ensure fill
+  const limitPrice = isImmediateExit
+    ? Math.max(0.01, currentMid * 0.95)        // 5% below mid to ensure fill
+    : Math.max(0.01, currentMid)               // at mid, we have time
   const limitRounded = Math.round(limitPrice * 100) / 100
 
   // Build OCC symbols. Same convention place-order uses.
@@ -944,6 +960,20 @@ serve(async (req) => {
     // invalidated) — not on every poll. This is what stops the user
     // from getting 50 pings a day if a wall wiggles back and forth.
     let verdictUpdate: { last_verdict?: VerdictState; last_verdict_reasons?: string[]; last_verdict_at?: string } = {}
+    // Drives the auto-exit trigger below. The rule is state-based,
+    // not transition-based: if the verdict reads ANY non-intact
+    // state (`drifting` or `invalidated`), the bot exits 100%. Not
+    // restricted to the canonical intact → drifting transition —
+    // a position that's been drifting all day still triggers on the
+    // first poll we run, and an outright `invalidated` verdict
+    // triggers without having to step through `drifting` first.
+    //
+    // Excluded states:
+    //   * `intact`           → keep holding (the only "ok" state)
+    //   * `not_evaluable`    → data missing; deferring is safer than
+    //                          exiting on missing data
+    let shouldAutoExitOnVerdict = false
+    let exitReasonState: 'drifting' | 'invalidated' | null = null
     if (pos.signal_id) {
       const { data: sigRow } = await supabase
         .from('signals')
@@ -1000,6 +1030,14 @@ serve(async (req) => {
         prior &&
         (prior === 'drifting' || prior === 'invalidated') &&
         verdict.state === 'intact'
+      // State-based auto-exit gate. Any non-intact state where we
+      // also have a meaningful read (not `not_evaluable`) triggers
+      // the close. Idempotency is enforced downstream via
+      // triggers_fired — we'll only fire once per position.
+      if (verdict.state === 'drifting' || verdict.state === 'invalidated') {
+        shouldAutoExitOnVerdict = true
+        exitReasonState = verdict.state
+      }
       const alertType = transitionedToBetter
         ? 'position_thesis_recovered'
         : verdict.state === 'invalidated'
@@ -1042,6 +1080,33 @@ serve(async (req) => {
 
     // Evaluate triggers
     const triggers = evaluateTriggers(pos, pnlPct, dte)
+
+    // Thesis non-intact FULL-EXIT trigger: append to the trigger
+    // list whenever the verdict reads `drifting` or `invalidated`
+    // AND we haven't already fired this trigger on this position.
+    // Reuses the existing auto-close pipeline (submitAutoClose
+    // below); submitAutoClose's isImmediateExit branch closes all
+    // remaining contracts at mid×0.95 to ensure fill, same shape
+    // as position_stop_loss. The strategy gate inside structureFor()
+    // means credit verticals + iron condors silently skip the
+    // broker call and surface as an alert-only event.
+    //
+    // Idempotency: triggers_fired is the ledger — once fired, this
+    // trigger won't re-fire on subsequent polls. In practice the
+    // full-exit closes the position before a second poll would
+    // re-evaluate, so this is defensive.
+    const driftTriggerAlreadyFired =
+      !!(pos.triggers_fired || {})['position_thesis_drift_exit']
+    if (
+      shouldAutoExitOnVerdict &&
+      !driftTriggerAlreadyFired
+    ) {
+      triggers.push({
+        type: 'position_thesis_drift_exit',
+        fired: true,
+        message: `${pos.ticker} ${pos.strategy_type}: thesis is ${exitReasonState ?? 'non-intact'} — closing 100% per verdict-exit rule`,
+      })
+    }
     if (triggers.length > 0) {
       const newFired = { ...pos.triggers_fired }
       if (regimeShiftFired) {
