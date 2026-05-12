@@ -26,19 +26,30 @@
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { fetchYahooChain, YahooError } from './yahoo.ts'
-import {
-  fetchPolygonChain,
-  fetchPolygonMatrixChain,
-  PolygonError,
-  type PolygonStrike,
-} from './polygon.ts'
 
-// Polygon (Massive) path is gated behind the MASSIVE_API_KEY env var.
-// When unset OR when SKIP_POLYGON=true, the dispatch skips Polygon
-// entirely and falls through to DXLink → Yahoo. Defensive guard so
-// a missing edge-function secret can't 503 the entire endpoint.
+// Polygon (Massive) integration is loaded LAZILY via dynamic import
+// inside the dispatcher. Static `import { ... } from './polygon.ts'`
+// was crashing the function at module load on Supabase edge runtime
+// (503s with 80-115ms execution time = cold-start failure, not
+// handler error). Dynamic import defers any load-time failure to
+// invocation, where it can be caught and fall through to DXLink/Yahoo.
+//
+// SKIP_POLYGON=true env var bypasses the dynamic import entirely.
 const POLYGON_ENABLED =
   !!Deno.env.get('MASSIVE_API_KEY') && Deno.env.get('SKIP_POLYGON') !== 'true'
+
+// Lazy holder so we only attempt the import once per cold-start.
+let polygonModulePromise: Promise<typeof import('./polygon.ts') | null> | null = null
+function loadPolygon(): Promise<typeof import('./polygon.ts') | null> {
+  if (!POLYGON_ENABLED) return Promise.resolve(null)
+  if (!polygonModulePromise) {
+    polygonModulePromise = import('./polygon.ts').catch((err) => {
+      console.error('polygon.ts dynamic import failed:', err)
+      return null
+    })
+  }
+  return polygonModulePromise
+}
 import {
   bsCallDelta,
   bsCharm,
@@ -299,13 +310,19 @@ async function computeFromDxLink(
 // in front of the DXLink cache since Polygon covers every listed
 // underlying (DXLink is limited to the ~15 streamed by the Fly
 // worker). DXLink remains the secondary path for resiliency.
-async function computeFromPolygon(args: ComputeArgs): Promise<{ result?: ComputeOutput; error?: string }> {
+//
+// Module is loaded lazily — see loadPolygon() above. The caller has
+// already verified the module is non-null before invoking this.
+async function computeFromPolygon(
+  args: ComputeArgs,
+  pgModule: typeof import('./polygon.ts'),
+): Promise<{ result?: ComputeOutput; error?: string }> {
   const { ticker, preferredDte, expirationOverride } = args
   let chain
   try {
-    chain = await fetchPolygonChain(ticker, preferredDte, expirationOverride)
+    chain = await pgModule.fetchPolygonChain(ticker, preferredDte, expirationOverride)
   } catch (err) {
-    if (err instanceof PolygonError) return { error: err.message }
+    if (err instanceof pgModule.PolygonError) return { error: err.message }
     throw err
   }
   const { spot, expirationDate, daysToExpiration, strikes, expirations } = chain
@@ -519,22 +536,26 @@ function todayDateStr(): string {
 async function computeMatrixFromPolygon(
   ticker: string,
   opts: MatrixOpts = DEFAULT_MATRIX_OPTS,
+  pgModule: typeof import('./polygon.ts'),
 ): Promise<{ matrix?: MatrixOutput; error?: string }> {
   let chain
   try {
-    chain = await fetchPolygonMatrixChain(ticker, opts.maxExpirations, opts.strikeWindowPct)
+    chain = await pgModule.fetchPolygonMatrixChain(ticker, opts.maxExpirations, opts.strikeWindowPct)
   } catch (err) {
-    if (err instanceof PolygonError) return { error: err.message }
+    if (err instanceof pgModule.PolygonError) return { error: err.message }
     throw err
   }
   const { spot, previousClose, expiries } = chain
   if (!Number.isFinite(spot) || spot <= 0) return { error: `no spot for ${ticker}` }
   if (expiries.length === 0) return { error: 'no expirations in window' }
 
-  // Build per-expiry strike lookup.
-  const byExp = new Map<string, Map<number, PolygonStrike>>()
+  // Build per-expiry strike lookup. Type is the module's exported
+  // PolygonStrike; we use a loose type here since dynamic import
+  // doesn't give us a static type for the dictionary value.
+  type PgStrike = import('./polygon.ts').PolygonStrike
+  const byExp = new Map<string, Map<number, PgStrike>>()
   for (const e of expiries) {
-    const m = new Map<number, PolygonStrike>()
+    const m = new Map<number, PgStrike>()
     for (const s of e.strikes) m.set(s.strike, s)
     byExp.set(e.date, m)
   }
@@ -1222,9 +1243,14 @@ serve(async (req) => {
     let yhErr: string | null = null
     if (POLYGON_ENABLED) {
       try {
-        const pg = await computeMatrixFromPolygon(ticker, matrixOpts)
-        if (pg.matrix) matrix = pg.matrix
-        else pgErr = pg.error ?? 'polygon unknown error'
+        const pgModule = await loadPolygon()
+        if (pgModule) {
+          const pg = await computeMatrixFromPolygon(ticker, matrixOpts, pgModule)
+          if (pg.matrix) matrix = pg.matrix
+          else pgErr = pg.error ?? 'polygon unknown error'
+        } else {
+          pgErr = 'polygon module load failed'
+        }
       } catch (e) {
         pgErr = e instanceof Error ? e.message : 'polygon threw'
       }
@@ -1337,9 +1363,14 @@ serve(async (req) => {
   let dxLinkError: string | null = null
   if (POLYGON_ENABLED) {
     try {
-      const pg = await computeFromPolygon({ ticker, preferredDte, expirationOverride })
-      if (pg.result) result = pg.result
-      else polygonError = pg.error ?? 'polygon unknown error'
+      const pgModule = await loadPolygon()
+      if (pgModule) {
+        const pg = await computeFromPolygon({ ticker, preferredDte, expirationOverride }, pgModule)
+        if (pg.result) result = pg.result
+        else polygonError = pg.error ?? 'polygon unknown error'
+      } else {
+        polygonError = 'polygon module load failed'
+      }
     } catch (e) {
       polygonError = e instanceof Error ? e.message : 'polygon threw'
     }
