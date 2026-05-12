@@ -22,6 +22,7 @@ export default function Admin() {
   const [funnel, setFunnel] = useState(null)
   const [cron, setCron] = useState(null)
   const [autoTrades, setAutoTrades] = useState(null)
+  const [botActivity, setBotActivity] = useState(null)
 
   useEffect(() => {
     if (profile && !profile.is_admin) return
@@ -31,12 +32,13 @@ export default function Admin() {
       setLoading(true)
       setError(null)
       try {
-        const [costData, usersData, funnelData, cronData, autoTradesData] = await Promise.all([
+        const [costData, usersData, funnelData, cronData, autoTradesData, botData] = await Promise.all([
           loadCost(),
           loadUsers(),
           loadFunnel(),
           loadCron(),
           loadAutoTrades(),
+          loadBotActivity(),
         ])
         if (cancelled) return
         setCost(costData)
@@ -44,6 +46,7 @@ export default function Admin() {
         setFunnel(funnelData)
         setCron(cronData)
         setAutoTrades(autoTradesData)
+        setBotActivity(botData)
       } catch (e) {
         if (!cancelled) setError(e.message ?? String(e))
       } finally {
@@ -81,6 +84,7 @@ export default function Admin() {
 
       {cost && <CostCard cost={cost} />}
       {autoTrades && <AutoTradesCard data={autoTrades} />}
+      {botActivity && <BotActivityCard data={botActivity} />}
       {users && <UsersCard users={users} />}
       {funnel && <FunnelCard funnel={funnel} />}
       {cron && <CronCard cron={cron} />}
@@ -497,6 +501,148 @@ function fmtDuration(ms) {
   if (ms < 3600_000) return `${Math.round(ms / 60_000)}m`
   if (ms < 86_400_000) return `${(ms / 3600_000).toFixed(1)}h`
   return `${(ms / 86_400_000).toFixed(1)}d`
+}
+
+// ─── Whale-tail bot activity telemetry ──────────────────────────
+//
+// Reads the last 14 days of whale_tail_alerts + bot_runs to surface
+// the bot's calibration story: how many prints did the scanner see,
+// what fraction passed the filter, what fraction got tailed, what
+// was the bot's daily P&L. The numbers Cameron needs to decide
+// whether to flip from paper to live mode.
+
+async function loadBotActivity() {
+  const since = new Date(Date.now() - 14 * 86_400_000).toISOString()
+  const sinceDate = since.slice(0, 10)
+  const [alertsRes, runsRes] = await Promise.all([
+    supabase
+      .from('whale_tail_alerts')
+      .select('status, received_at, ticker')
+      .gte('received_at', since)
+      .order('received_at', { ascending: false }),
+    supabase
+      .from('bot_runs')
+      .select('run_date, mode, trades_attempted, trades_filled, wins_count, losses_count, daily_pnl, kill_switch_state')
+      .gte('run_date', sinceDate)
+      .order('run_date', { ascending: false }),
+  ])
+  if (alertsRes.error) throw new Error(`whale_tail_alerts: ${alertsRes.error.message}`)
+  if (runsRes.error) throw new Error(`bot_runs: ${runsRes.error.message}`)
+
+  const alerts = alertsRes.data ?? []
+  const runs = runsRes.data ?? []
+
+  const byStatus = {}
+  for (const a of alerts) byStatus[a.status] = (byStatus[a.status] ?? 0) + 1
+
+  const totalTrades = runs.reduce((s, r) => s + (r.trades_filled ?? 0), 0)
+  const totalWins = runs.reduce((s, r) => s + (r.wins_count ?? 0), 0)
+  const totalLosses = runs.reduce((s, r) => s + (r.losses_count ?? 0), 0)
+  const totalPnl = runs.reduce((s, r) => s + (Number(r.daily_pnl) || 0), 0)
+  const winRate = totalWins + totalLosses > 0
+    ? Math.round((totalWins / (totalWins + totalLosses)) * 100)
+    : null
+  const killedDays = runs.filter((r) => r.kill_switch_state === 'fired').length
+
+  return {
+    alertsTotal: alerts.length,
+    byStatus,
+    totalTrades,
+    totalWins,
+    totalLosses,
+    totalPnl,
+    winRate,
+    killedDays,
+    recentRuns: runs.slice(0, 10),
+  }
+}
+
+function BotActivityCard({ data }) {
+  const { alertsTotal, byStatus, totalTrades, totalWins, totalLosses, totalPnl, winRate, killedDays, recentRuns } = data
+  const tailedCount = byStatus.tailed ?? 0
+  const filteredOutCount = byStatus.skipped_filter ?? 0
+  const cappedCount = byStatus.skipped_caps ?? 0
+  const rejectedCount = (byStatus.rejected_broker ?? 0) + (byStatus.failed ?? 0)
+  const passThroughRate = alertsTotal > 0
+    ? Math.round((tailedCount / alertsTotal) * 100)
+    : 0
+
+  return (
+    <div className="bg-card border border-border rounded-xl p-4 space-y-3">
+      <div className="flex items-center gap-2">
+        <Zap size={14} className="text-amber-400" />
+        <h2 className="text-sm font-semibold">Whale-tail bot · 14d</h2>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+        <BigStat label="Alerts seen" value={alertsTotal} />
+        <BigStat
+          label="Tailed"
+          value={tailedCount}
+          sub={alertsTotal > 0 ? `${passThroughRate}% pass-through` : undefined}
+        />
+        <BigStat
+          label="P&L"
+          value={`${totalPnl >= 0 ? '+' : ''}$${Math.abs(totalPnl).toFixed(0)}`}
+        />
+        <BigStat
+          label="Win rate"
+          value={winRate != null ? `${winRate}%` : '—'}
+          sub={totalWins + totalLosses > 0 ? `${totalWins}W / ${totalLosses}L` : undefined}
+        />
+      </div>
+
+      <div className="border-t border-border pt-3 space-y-1.5">
+        <div className="text-[10px] uppercase tracking-wider text-muted mb-1">Alert pipeline</div>
+        <PipelineRow label="Seen" value={alertsTotal} tone="muted" />
+        <PipelineRow label="Filtered out" value={filteredOutCount} tone="muted" />
+        <PipelineRow label="Risk-capped" value={cappedCount} tone={cappedCount > 0 ? 'amber' : 'muted'} />
+        <PipelineRow label="Tailed" value={tailedCount} tone="green" />
+        <PipelineRow label="Rejected / failed" value={rejectedCount} tone={rejectedCount > 0 ? 'crimson' : 'muted'} />
+      </div>
+
+      {killedDays > 0 && (
+        <div className="border-t border-border pt-3">
+          <div className="text-[11px] text-crimson">
+            ⚠ Kill switch fired on {killedDays} day{killedDays > 1 ? 's' : ''} in the window.
+          </div>
+        </div>
+      )}
+
+      <div className="border-t border-border pt-3 space-y-1">
+        <div className="text-[10px] uppercase tracking-wider text-muted mb-1">
+          Last {recentRuns.length} days
+        </div>
+        {recentRuns.length === 0 ? (
+          <div className="text-[11px] text-subtle">No bot runs in the last 14 days.</div>
+        ) : (
+          recentRuns.map((r) => (
+            <div key={r.run_date} className="flex items-baseline justify-between text-[11px] border-b border-border/30 pb-1">
+              <span className="font-mono-tab text-fg">{r.run_date}</span>
+              <span className="text-[9px] uppercase text-muted">{r.mode}</span>
+              <span className="text-subtle">{r.trades_filled ?? 0} trades</span>
+              <span className={(r.daily_pnl ?? 0) >= 0 ? 'text-green-400' : 'text-crimson'}>
+                {(r.daily_pnl ?? 0) >= 0 ? '+' : ''}${Math.abs(Number(r.daily_pnl) || 0).toFixed(0)}
+              </span>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  )
+}
+
+function PipelineRow({ label, value, tone = 'muted' }) {
+  const toneCls =
+    tone === 'green' ? 'text-green-400' :
+    tone === 'amber' ? 'text-amber-400' :
+    tone === 'crimson' ? 'text-crimson' : 'text-subtle'
+  return (
+    <div className="flex items-baseline justify-between text-[11px]">
+      <span className={toneCls}>{label}</span>
+      <span className="font-mono-tab text-fg">{value}</span>
+    </div>
+  )
 }
 
 // ─── Helpers ────────────────────────────────────────────────────
