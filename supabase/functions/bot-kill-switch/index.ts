@@ -22,7 +22,7 @@
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { tastytradeFetch } from './tastytrade.ts'
+import { tastytradeFetch, envFromMode, type TtEnv } from '../_shared/tastytrade.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')
@@ -102,6 +102,10 @@ serve(async (req) => {
   try { body = await req.json() } catch { /* may have been consumed above */ }
   const reason = String(body?.reason ?? 'manual halt')
   const accountNumber = body?.account_number ? String(body.account_number) : null
+  // Env defaults to 'live'. Caller can pass {env:'cert'} to halt the
+  // sandbox env specifically. UI's "Halt Bot" button passes whichever
+  // env the bot is currently routing to (from bot_config.mode).
+  const env = (String(body?.env ?? 'live') === 'cert' ? 'cert' : 'live') as TtEnv
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
   const haltLog: string[] = []
@@ -161,6 +165,8 @@ serve(async (req) => {
     const ordersResp = await tastytradeFetch(
       supabase,
       `/accounts/${encodeURIComponent(accountNumber)}/orders/live`,
+      {},
+      env,
     )
     if (ordersResp.ok) {
       const ordersBody = await ordersResp.json().catch(() => ({}))
@@ -173,6 +179,7 @@ serve(async (req) => {
             supabase,
             `/accounts/${encodeURIComponent(accountNumber)}/orders/${o.id}`,
             { method: 'DELETE' },
+            env,
           )
           cancelled++
         } catch (e) {

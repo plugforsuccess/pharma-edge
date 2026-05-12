@@ -203,6 +203,7 @@ serve(async (req) => {
     body: JSON.stringify({
       user_id: profile.id,
       account_number: risk.account_number,
+      env: risk.env,
       strategy,
       structure: signal.structure,
       ticker: signal.ticker,
@@ -272,6 +273,7 @@ serve(async (req) => {
       entry_at: new Date().toISOString(),
       status: 'open',
       source: meta.positionSource,
+      env: risk.env,
       broker_order_id: placeBody.order_id ? String(placeBody.order_id) : null,
       thesis: `${strategy}: ${signal.structure} ${signal.ticker} ${signal.expiry_date} (regime ${signal.regime ?? '?'}, IV%ile ${signal.iv_percentile ?? '?'})`,
     })

@@ -12,7 +12,7 @@
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { tastytradeFetch, TastytradeError } from '../_shared/tastytrade.ts'
+import { tastytradeFetch, TastytradeError, envFromMode, type TtEnv } from '../_shared/tastytrade.ts'
 import { buildLegs, type StructureKind } from '../_shared/multileg.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
@@ -87,6 +87,12 @@ serve(async (req) => {
     (mode === 'live' ? cfg.live_account_number : cfg.sandbox_account_number) ?? '',
   )
   if (!accountNumber) return json({ success: false, error: `no ${mode} account configured` }, 400)
+  // Position carries its open env on the row; trust that over the
+  // current bot_config.mode so exits route to wherever the open
+  // happened, even if the user has since flipped mode.
+  const env: TtEnv = (pos.env === 'cert' || pos.env === 'live')
+    ? (pos.env as TtEnv)
+    : envFromMode(mode)
 
   const remaining = Number(pos.contracts_remaining ?? pos.contracts ?? 0)
   const q = Math.min(remaining, closeContracts > 0 ? Math.floor(closeContracts) : remaining)
@@ -136,6 +142,7 @@ serve(async (req) => {
       supabase,
       `/accounts/${encodeURIComponent(accountNumber)}/orders`,
       { method: 'POST', body: JSON.stringify(orderPayload) },
+      env,
     )
   } catch (err) {
     return json({ success: false, error: err instanceof TastytradeError ? err.message : String(err) }, 502)
@@ -166,6 +173,7 @@ serve(async (req) => {
     api_response: { ...orderData, reason, position_id: positionId, market, legs: legSpec.legs },
     auto_executed: true,
     auto_close_strategy: pos.strategy ?? 'multileg',
+    env,
     position_id: positionId,
   })
 

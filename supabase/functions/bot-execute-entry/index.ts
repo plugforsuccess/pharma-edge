@@ -32,8 +32,7 @@
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { buildOccSymbol, tastytradeFetch } from './tastytrade.ts'
-// (buildOccSymbol + tastytradeFetch imported above)
+import { buildOccSymbol, tastytradeFetch, envFromMode, type TtEnv } from '../_shared/tastytrade.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
@@ -110,47 +109,38 @@ interface BotConfig {
 //
 // Same architectural shape as get-account, but in-process so the
 // service-role bot doesn't have to invoke a JWT-gated edge function.
-const TASTYTRADE_BASE = Deno.env.get('TASTYTRADE_BASE_URL') || 'https://api.cert.tastyworks.com'
-const IS_SANDBOX = /cert\.tastyworks/.test(TASTYTRADE_BASE)
-
+// resolveLiveNlv was previously local + sandbox-NLV-blind. With dual
+// routing, sandbox NLV is REAL-for-cert (orders size against it because
+// fills happen against it). The env parameter picks which env to query.
 async function resolveLiveNlv(
   supabase: ReturnType<typeof createClient>,
   fallbackAccountSize: number | null,
-): Promise<{ nlv: number; source: 'broker_live' | 'broker_sandbox_skipped' | 'profile_fallback' | 'none' }> {
+  env: TtEnv,
+): Promise<{ nlv: number; source: 'broker_live' | 'profile_fallback' | 'none' }> {
   const manual = Number(fallbackAccountSize) || 0
   try {
-    const accountsResp = await tastytradeFetch(supabase, '/customers/me/accounts')
+    const accountsResp = await tastytradeFetch(supabase, '/customers/me/accounts', {}, env)
     if (!accountsResp.ok) {
       return { nlv: manual, source: manual > 0 ? 'profile_fallback' : 'none' }
     }
     const accountsBody = await accountsResp.json().catch(() => ({}))
     const items = ((accountsBody?.data as Record<string, unknown>)?.items ?? []) as Array<{ account?: Record<string, unknown> }>
-
-    // Fetch balances for each account.
     const nlvs: number[] = []
     for (const item of items) {
       const number = String(item.account?.['account-number'] ?? '')
       if (!number) continue
       try {
-        const bResp = await tastytradeFetch(
-          supabase,
-          `/accounts/${encodeURIComponent(number)}/balances`,
-        )
+        const bResp = await tastytradeFetch(supabase, `/accounts/${encodeURIComponent(number)}/balances`, {}, env)
         if (!bResp.ok) continue
         const bBody = await bResp.json()
         const v = Number((bBody?.data as Record<string, unknown>)?.['net-liquidating-value'] ?? 0)
         if (Number.isFinite(v) && v > 0) nlvs.push(v)
       } catch { /* per-account failure, skip */ }
     }
-    // Sandbox NLV is fake — never size against it.
-    if (IS_SANDBOX) {
-      return { nlv: manual, source: manual > 0 ? 'broker_sandbox_skipped' : 'none' }
-    }
     if (nlvs.length === 0) {
       return { nlv: manual, source: manual > 0 ? 'profile_fallback' : 'none' }
     }
-    const liveNlv = Math.max(...nlvs)
-    return { nlv: liveNlv, source: 'broker_live' }
+    return { nlv: Math.max(...nlvs), source: 'broker_live' }
   } catch {
     return { nlv: manual, source: manual > 0 ? 'profile_fallback' : 'none' }
   }
@@ -233,7 +223,8 @@ serve(async (req) => {
   // mode still sizes against REAL NLV (sandbox fills are simulated;
   // sizing has to reflect the actual capital the strategy is being
   // validated against).
-  const nlvResult = await resolveLiveNlv(supabase, profile.account_size)
+  const env: TtEnv = envFromMode(config.mode)
+  const nlvResult = await resolveLiveNlv(supabase, profile.account_size, env)
   const nlv = nlvResult.nlv
   if (nlv <= 0) return skip(`no_nlv (${nlvResult.source})`, 'skipped_caps')
 
@@ -328,6 +319,7 @@ serve(async (req) => {
     body: JSON.stringify({
       user_id: alert.user_id,
       account_number: accountNumber,
+      env,
       ticker: alert.ticker,
       option_type: alert.option_type,
       strike: Number(alert.strike),
@@ -381,6 +373,7 @@ serve(async (req) => {
       status: 'open',
       option_price_peak: askPrice,
       source: 'whale_tail_bot',
+      env,
       broker_order_id: entryBody.order_id ? String(entryBody.order_id) : null,
       thesis: `Whale-tail: tailed UW print ${alert.uw_trade_id} on ${alert.ticker}.`,
     })

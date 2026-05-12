@@ -20,7 +20,7 @@
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { buildOccSymbol, tastytradeFetch, TastytradeError } from './tastytrade.ts'
+import { buildOccSymbol, tastytradeFetch, TastytradeError, type TtEnv } from '../_shared/tastytrade.ts'
 import { computeThesisVerdict, type VerdictState } from './thesisVerdict.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
@@ -480,10 +480,14 @@ async function submitAutoClose(
 
   let orderResp: Response
   try {
-    orderResp = await tastytradeFetch(
+    // Default to 'live' for legacy auto-close path (catalyst-driven
+     // closes). The fill-reconciliation loop below reads env per row.
+     const closeEnv: TtEnv = 'live'
+     orderResp = await tastytradeFetch(
       supabase,
       `/accounts/${encodeURIComponent(signal.tastytrade_account_number)}/orders`,
       { method: 'POST', body: JSON.stringify(orderPayload) },
+      closeEnv,
     )
   } catch (err) {
     const reason = err instanceof TastytradeError ? err.message : String(err)
@@ -578,7 +582,7 @@ async function pollOpenOrders(
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
   const { data: orders } = await supabase
     .from('order_history')
-    .select('id, signal_id, position_id, order_type, user_id, tastytrade_order_id, account_number, status, contracts, ticker, auto_executed, auto_close_strategy, limit_price')
+    .select('id, signal_id, position_id, order_type, user_id, tastytrade_order_id, account_number, env, status, contracts, ticker, auto_executed, auto_close_strategy, limit_price')
     .gte('submitted_at', since)
     .in('status', ['submitted', 'pending', 'partial_fill'])
     .not('tastytrade_order_id', 'is', null)
@@ -588,9 +592,14 @@ async function pollOpenOrders(
   let filled = 0
   for (const o of orders ?? []) {
     try {
-      const resp = await tastytradeFetch(
+      // Each order_history row carries its open env, so the fill
+       // reconciliation hits the correct base URL (cert vs prod).
+       const env: TtEnv = (o.env === 'cert' || o.env === 'live') ? o.env : 'live'
+       const resp = await tastytradeFetch(
         supabase,
         `/accounts/${encodeURIComponent(o.account_number)}/orders/${encodeURIComponent(o.tastytrade_order_id)}`,
+        {},
+        env,
       )
       if (!resp.ok) continue
       const body = await resp.json().catch(() => ({}))

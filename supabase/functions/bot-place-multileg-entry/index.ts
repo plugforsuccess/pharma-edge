@@ -16,7 +16,7 @@
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { tastytradeFetch, TastytradeError } from '../_shared/tastytrade.ts'
+import { tastytradeFetch, TastytradeError, type TtEnv } from '../_shared/tastytrade.ts'
 import { buildLegs, validatePrice, type StructureKind } from '../_shared/multileg.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
@@ -65,6 +65,10 @@ serve(async (req) => {
 
   const userId = String(body.user_id ?? '')
   const accountNumber = String(body.account_number ?? '')
+  // Env defaults to 'live' for back-compat with any caller that still
+  // omits the field. New bot orchestrators always pass it explicitly
+  // (derived from bot_config.mode).
+  const env = (String(body.env ?? 'live') === 'cert' ? 'cert' : 'live') as TtEnv
   const strategy = String(body.strategy ?? '')
   const structureKind = String(body.structure ?? '') as StructureKind
   const ticker = String(body.ticker ?? '').toUpperCase()
@@ -123,6 +127,7 @@ serve(async (req) => {
       supabase,
       `/accounts/${encodeURIComponent(accountNumber)}/orders`,
       { method: 'POST', body: JSON.stringify(orderPayload) },
+      env,
     )
   } catch (err) {
     const reason = err instanceof TastytradeError ? err.message : String(err)
@@ -142,6 +147,7 @@ serve(async (req) => {
       api_response: { error: reason, strategy, signal_id: signalId, legs: legSpec.legs },
       auto_executed: true,
       auto_close_strategy: strategy,
+      env,
     })
     return json({ success: false, error: reason }, 502)
   }
@@ -164,6 +170,7 @@ serve(async (req) => {
       api_response: { ...orderData, strategy, signal_id: signalId, legs: legSpec.legs },
       auto_executed: true,
       auto_close_strategy: strategy,
+      env,
     })
     return json({ success: false, error: `tastytrade ${orderResp.status}`, detail: orderData }, 502)
   }
@@ -192,6 +199,7 @@ serve(async (req) => {
       api_response: { ...orderData, strategy, signal_id: signalId, legs: legSpec.legs },
       auto_executed: true,
       auto_close_strategy: strategy,
+      env,
     })
     .select('id')
     .maybeSingle()
