@@ -65,6 +65,7 @@ export default function BotSettingsSection({ profile, onProfileChange }) {
   const [error, setError] = useState(null)
   const [liveConfirmText, setLiveConfirmText] = useState('')
   const [resettingKill, setResettingKill] = useState(false)
+  const [confirmingLive, setConfirmingLive] = useState(false)
 
   useEffect(() => { setConfig(initial); setDirty(false) }, [initial])
 
@@ -140,6 +141,43 @@ export default function BotSettingsSection({ profile, onProfileChange }) {
     }
   }
 
+  // Dedicated handler for the inline "Confirm switch to LIVE" button.
+  // Saves ONLY the mode field — separate from the main "Save bot
+  // config" button at the bottom of the card so the user doesn't have
+  // to scroll past every filter input to commit a mode change.
+  // Validates the typed phrase, persists, then resets the local
+  // confirm state.
+  async function confirmLiveMode() {
+    if (liveConfirmText !== LIVE_CONFIRM) {
+      setError(`Type "${LIVE_CONFIRM}" exactly to confirm.`)
+      return
+    }
+    setConfirmingLive(true)
+    setError(null)
+    try {
+      // Build a merged config that respects any other unsaved edits
+      // the user has made — we save the entire current config, just
+      // with the new mode overlay. Mirrors what save() does without
+      // the dirty-flag dance.
+      const next = { ...config, mode: 'live' }
+      const { error: err } = await supabase
+        .from('profiles')
+        .update({ bot_config: next })
+        .eq('id', profile.id)
+      if (err) throw err
+      setConfig(next)
+      setDirty(false)
+      setLiveConfirmText('')
+      setSavedFlash(true)
+      setTimeout(() => setSavedFlash(false), 2000)
+      onProfileChange?.()
+    } catch (e) {
+      setError(e.message ?? String(e))
+    } finally {
+      setConfirmingLive(false)
+    }
+  }
+
   async function resetKillSwitch() {
     if (!confirm('Resume the bot? Make sure the underlying problem that triggered the halt is resolved before re-enabling.')) return
     setResettingKill(true)
@@ -164,6 +202,37 @@ export default function BotSettingsSection({ profile, onProfileChange }) {
         <h3 className="text-subtle text-xs font-semibold uppercase tracking-wider">Bot</h3>
         <BotStatusBadge config={config} isHalted={isHalted} />
       </div>
+
+      {/* Top-of-card pending-changes banner — surfaces the save state
+          without making the user scroll past every filter input to
+          find the bottom Save button. Shows only when there are
+          unsaved edits AND we're NOT in the middle of the Live-flip
+          dance (which has its own dedicated Confirm button). */}
+      {dirty && config.mode === initial.mode && (
+        <div className="bg-amber-400/10 border border-amber-400/40 rounded-lg p-2.5 flex items-center justify-between gap-2">
+          <span className="text-[11px] text-amber-400 font-medium">
+            Unsaved changes
+          </span>
+          <div className="flex gap-1.5">
+            <button
+              type="button"
+              onClick={() => { setConfig(initial); setDirty(false); setLiveConfirmText('') }}
+              disabled={saving}
+              className="text-[11px] text-subtle hover:text-fg px-2 py-1 transition disabled:opacity-50"
+            >
+              Revert
+            </button>
+            <button
+              type="button"
+              onClick={save}
+              disabled={saving}
+              className="text-[11px] font-semibold bg-amber-400 hover:bg-amber-300 text-bg px-2.5 py-1 rounded transition disabled:opacity-50"
+            >
+              {saving ? 'Saving…' : savedFlash ? 'Saved ✓' : 'Save'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ─── Kill-switch state ─────────────────────────────── */}
       {isHalted && (
@@ -201,11 +270,14 @@ export default function BotSettingsSection({ profile, onProfileChange }) {
           flippingToLive={config.mode === 'live' && initial.mode !== 'live'}
           liveConfirmText={liveConfirmText}
           setLiveConfirmText={setLiveConfirmText}
+          onConfirmLive={confirmLiveMode}
+          confirmingLive={confirmingLive}
         />
       </Subsection>
 
       {/* ─── Risk caps ─────────────────────────────────────── */}
       <Subsection title="Risk caps">
+        <NlvIndicator nlv={nlv} />
         <PercentRow
           label="Per-trade max loss"
           help={`${formatDollars(perTradeMaxLossDollars)} at current NLV`}
@@ -455,6 +527,39 @@ function BotStatusBadge({ config, isHalted }) {
   )
 }
 
+// Surfaces the NLV value the bot is computing risk caps against.
+// Critical because all the % → $ math (per-trade max, daily kill,
+// etc.) is derived from profile.account_size, NOT from a live broker
+// fetch. If the user's profile has a stale or placeholder NLV (e.g.
+// $1M placeholder), every dollar amount displayed here is wrong by
+// the same multiple. Calling this out explicitly so the user knows
+// where to fix it.
+function NlvIndicator({ nlv }) {
+  // Heuristic: $500K+ on a personal-trading bot is almost certainly
+  // a placeholder, not a real broker NLV. Flag it.
+  const looksLikePlaceholder = nlv >= 500_000
+  return (
+    <div
+      className={clsx(
+        'flex items-baseline justify-between gap-2 -mt-1 mb-1 px-2 py-1.5 rounded border',
+        looksLikePlaceholder
+          ? 'bg-amber-950/30 border-amber-400/40'
+          : 'bg-bg/40 border-border/50',
+      )}
+    >
+      <div className="min-w-0 flex-1">
+        <div className="text-[10px] uppercase tracking-wider text-muted">Computed against NLV</div>
+        <div className="text-xs font-mono-tab text-fg">${nlv.toLocaleString()}</div>
+      </div>
+      <div className="text-[10px] text-muted text-right shrink-0 max-w-[55%]">
+        {looksLikePlaceholder
+          ? 'Looks like a placeholder. Update Account Size in Profile to your real broker NLV.'
+          : 'From Profile → Account Size'}
+      </div>
+    </div>
+  )
+}
+
 function Subsection({ title, children }) {
   return (
     <div className="space-y-2">
@@ -493,7 +598,8 @@ function ToggleRow({ label, help, value, onChange }) {
   )
 }
 
-function ModeRow({ mode, onChange, flippingToLive, liveConfirmText, setLiveConfirmText }) {
+function ModeRow({ mode, onChange, flippingToLive, liveConfirmText, setLiveConfirmText, onConfirmLive, confirmingLive }) {
+  const phraseValid = liveConfirmText === LIVE_CONFIRM
   return (
     <div className="space-y-2">
       <div className="text-xs font-medium text-fg">Mode</div>
@@ -505,13 +611,38 @@ function ModeRow({ mode, onChange, flippingToLive, liveConfirmText, setLiveConfi
         <div className="bg-crimson/10 border border-crimson/40 rounded p-2 space-y-2">
           <p className="text-[11px] text-crimson font-medium">
             ⚠ Flipping to LIVE mode. The bot will submit real orders against your live account.
+            Type the phrase below, then tap Confirm.
           </p>
           <input
             value={liveConfirmText}
             onChange={(e) => setLiveConfirmText(e.target.value)}
             placeholder={`Type ${LIVE_CONFIRM} to confirm`}
             className="w-full bg-card border border-crimson/30 rounded px-2 py-1.5 text-xs font-mono"
+            autoCapitalize="characters"
+            autoCorrect="off"
+            spellCheck="false"
           />
+          <button
+            type="button"
+            onClick={onConfirmLive}
+            disabled={!phraseValid || confirmingLive}
+            className={clsx(
+              'w-full text-xs font-semibold rounded py-2 transition',
+              phraseValid && !confirmingLive
+                ? 'bg-crimson hover:bg-red-500 text-white'
+                : 'bg-bg/60 border border-border text-muted cursor-not-allowed',
+            )}
+          >
+            {confirmingLive ? 'Flipping to live…' : phraseValid ? 'Confirm switch to LIVE' : 'Type GO LIVE to enable'}
+          </button>
+          <button
+            type="button"
+            onClick={() => { setLiveConfirmText(''); onChange('paper') }}
+            disabled={confirmingLive}
+            className="w-full text-[11px] text-subtle hover:text-fg py-1 transition disabled:opacity-50"
+          >
+            Cancel — stay on paper
+          </button>
         </div>
       )}
     </div>
