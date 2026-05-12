@@ -204,47 +204,110 @@ export default function LogSignal() {
       )
       if (!gexErr && gexResp?.success && gexResp?.data) {
         const m = gexResp.data
-        // GEX at the trade's short strike (the trade-specific anchor),
-        // summed across the matrix's expirations. Drives the
-        // wall-at-your-strike check in thesisVerdict — see
-        // src/utils/thesisVerdict.js §3b. Null when the matrix doesn't
-        // carry the short strike (window narrower than the form value)
-        // or the cells row is missing.
+        // AUDIT #5: anchor all entry fields to the trade's own
+        // expiration. The matrix returns cross-expiration aggregates
+        // (m.net_gex, m.largest) that change as the front expiration
+        // rolls forward — comparing those against a live snapshot
+        // sourced from a different expiration is the central
+        // false-positive vector flagged in the audit.
+        //
+        // The recipe is now: find the column index for form.expiry_date
+        // in m.expirations, sum cells in that column for net_gex, take
+        // the max |cell| in that column for largest_wall, and read the
+        // single cell at (short_strike, trade_expiration) for
+        // wall_gex_at_short_strike. Both the live-side derivation in
+        // monitor-positions and the verdict comparison stay
+        // apples-to-apples.
+        //
+        // Backward-compat note: positions logged before this change
+        // have matrix-wide entry snapshots; their verdicts will
+        // continue to compare against live values that are now
+        // trade-expiration-anchored — meaning historical verdicts
+        // become noisier until those positions close out. New
+        // positions get the consistent recipe end-to-end.
+        const tradeExp = form.expiry_date
+        const expIdx =
+          tradeExp && Array.isArray(m.expirations)
+            ? m.expirations.findIndex((e) => e?.date === tradeExp)
+            : -1
         const shortStrikeNum = Number(form.short_strike)
+
+        let netGexAtExp = null
+        let largestWallAtExp = null
         let wallGexAtShortStrike = null
         if (
-          Number.isFinite(shortStrikeNum) &&
+          expIdx >= 0 &&
           Array.isArray(m.strikes) &&
           Array.isArray(m.cells)
         ) {
-          const idx = m.strikes.findIndex((s) => Number(s) === shortStrikeNum)
-          if (idx >= 0 && Array.isArray(m.cells[idx])) {
-            let sum = 0
-            let any = false
-            for (const v of m.cells[idx]) {
-              if (Number.isFinite(v)) { sum += v; any = true }
+          let sumGex = 0
+          let anyGex = false
+          let bestStrike = null
+          let bestGex = 0
+          for (let i = 0; i < m.cells.length; i++) {
+            const v = m.cells[i]?.[expIdx]
+            if (Number.isFinite(v)) {
+              sumGex += v
+              anyGex = true
+              if (Math.abs(v) > Math.abs(bestGex)) {
+                bestGex = v
+                bestStrike = m.strikes[i]
+              }
             }
-            wallGexAtShortStrike = any ? sum : null
+          }
+          netGexAtExp = anyGex ? sumGex : null
+          if (bestStrike != null) {
+            largestWallAtExp = {
+              strike: bestStrike,
+              expiration: tradeExp,
+              gex_net: bestGex,
+            }
+          }
+          // wall_gex_at_short_strike: the single cell at
+          // (short_strike, trade_expiration). Trade-specific anchor.
+          if (Number.isFinite(shortStrikeNum)) {
+            const sIdx = m.strikes.findIndex(
+              (s) => Number(s) === shortStrikeNum,
+            )
+            if (sIdx >= 0) {
+              const cell = m.cells[sIdx]?.[expIdx]
+              if (Number.isFinite(cell)) wallGexAtShortStrike = cell
+            }
           }
         }
+
         entryGexSnapshot = {
           spot: m.spot ?? null,
           source: m.source ?? null,
-          net_gex: m.net_gex ?? null,
+          // net_gex/largest_wall anchored to trade.expiration (audit #5).
+          // Falls back to matrix-wide if the trade's expiration is not
+          // in the returned matrix window (compute-gex's default is the
+          // closest 4 expirations).
+          net_gex: netGexAtExp ?? m.net_gex ?? null,
+          // Per-position context — kept here so /position/:id can show
+          // the matrix-wide regime separately from the trade-specific
+          // one if the UI wants that later.
           net_dex: m.net_dex ?? null,
           net_vex: m.net_vex ?? null,
           expected_move: m.expected_move ?? null,
           expected_move_pct: m.expected_move_pct ?? null,
           pinning_probability: m.pinning_probability ?? null,
-          largest_wall: m.largest
-            ? {
-                strike: m.largest.strike,
-                expiration: m.largest.expiration,
-                gex_net: m.largest.gex_net,
-              }
-            : null,
+          largest_wall:
+            largestWallAtExp ??
+            (m.largest
+              ? {
+                  strike: m.largest.strike,
+                  expiration: m.largest.expiration,
+                  gex_net: m.largest.gex_net,
+                }
+              : null),
           wall_gex_at_short_strike: wallGexAtShortStrike,
           captured_at: new Date().toISOString(),
+          // Tracks how the snapshot was anchored. v2 means
+          // trade-expiration anchored (post-audit-#5). v1 was
+          // matrix-wide aggregates. Verdict module can use this to
+          // gracefully handle pre-v2 positions if needed.
+          snapshot_version: expIdx >= 0 ? 2 : 1,
         }
       }
     } catch {

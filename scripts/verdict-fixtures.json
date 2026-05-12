@@ -338,5 +338,162 @@
       "state": "intact",
       "reasons_contains_any": ["broken through the target wall"]
     }
+  },
+  {
+    "name": "audit3_regime_near_zero_flip_NOT_invalidated",
+    "note": "Audit #3 regression. Tiny net_gex flip (+$1M → -$1M) used to read 'A → B → invalidated' even though both magnitudes are <$20M floor. With the deadband both sides classify as 'mixed' and the flip check no longer fires.",
+    "input": {
+      "entry": { "spot": 100, "net_gex": 1000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 500000 } },
+      "live":  { "spot": 100, "net_gex": -1000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": -500000 } },
+      "trade": { "long_strike": 100, "short_strike": 105, "strategy_type": "BULL_CALL", "expiration": "2026-06-01" }
+    },
+    "expected": {
+      "state": "intact",
+      "reasons_contains_any": ["Entry-time positioning still holds"]
+    }
+  },
+  {
+    "name": "audit3_regime_within_pct_deadband_NOT_invalidated",
+    "note": "Audit #3. Entry magnitude $100M; live flipped sign but magnitude is $5M — below the 10% ratio threshold. Should stay 'mixed' on the live side, no flip fired.",
+    "input": {
+      "entry": { "spot": 100, "net_gex": 100000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 30000000 } },
+      "live":  { "spot": 100, "net_gex": -5000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": -3000000 } },
+      "trade": { "long_strike": 100, "short_strike": 105, "strategy_type": "BULL_CALL", "expiration": "2026-06-01" }
+    },
+    "expected": {
+      "state_not": "invalidated"
+    }
+  },
+  {
+    "name": "audit3_regime_clear_flip_STILL_invalidated",
+    "note": "Audit #3 negative test. Entry +$80M, live -$60M — both well clear of the deadband on either side of zero. Real regime flip, should still fire invalidated.",
+    "input": {
+      "entry": { "spot": 100, "net_gex": 80000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 20000000 } },
+      "live":  { "spot": 99,  "net_gex": -60000000, "largest_wall": { "strike": 95, "expiration": "2026-06-01", "gex_net": -15000000 } },
+      "trade": { "long_strike": 100, "short_strike": 105, "strategy_type": "BULL_CALL", "expiration": "2026-06-01" }
+    },
+    "expected": {
+      "state": "invalidated",
+      "reasons_contains_any": ["Regime flipped A → B"]
+    }
+  },
+  {
+    "name": "audit7_pin_invalidate_scales_for_spx",
+    "note": "Audit #7. SPX at 5040, pin target 5000 — 40 points away = 0.79% of spot. Below the 5% drift threshold; no signal at all.",
+    "input": {
+      "entry": { "spot": 5000, "net_gex": 80000000, "largest_wall": { "strike": 5000, "expiration": "2026-06-01", "gex_net": 30000000 } },
+      "live":  { "spot": 5040, "net_gex": 78000000, "largest_wall": { "strike": 5000, "expiration": "2026-06-01", "gex_net": 28000000 } },
+      "trade": {
+        "long_strike": 4950, "short_strike": 5000,
+        "strategy_type": "BULL_PUT_CREDIT", "expiration": "2026-06-01",
+        "target_king_node": "call_wall", "target_strike": 5000,
+        "target_expiration": "2026-06-01", "target_thesis_kind": "pin_to",
+        "regime_at_entry": "A"
+      }
+    },
+    "expected": {
+      "state": "intact"
+    }
+  },
+  {
+    "name": "audit7_pin_invalidate_fires_for_spx_at_pct_threshold",
+    "note": "Audit #7. SPX at 5450, pin target 5000 — 450 points = 9% of spot. Above the 8% invalidate threshold. Used to never fire under absolute 5/8; now fires invalidated.",
+    "input": {
+      "entry": { "spot": 5000, "net_gex": 80000000, "largest_wall": { "strike": 5000, "expiration": "2026-06-01", "gex_net": 30000000 } },
+      "live":  { "spot": 5450, "net_gex": 60000000, "largest_wall": { "strike": 5000, "expiration": "2026-06-01", "gex_net": 25000000 } },
+      "trade": {
+        "long_strike": 4950, "short_strike": 5000,
+        "strategy_type": "BULL_PUT_CREDIT", "expiration": "2026-06-01",
+        "target_king_node": "call_wall", "target_strike": 5000,
+        "target_expiration": "2026-06-01", "target_thesis_kind": "pin_to",
+        "regime_at_entry": "A"
+      }
+    },
+    "expected": {
+      "state": "invalidated",
+      "reasons_contains_any": ["Pin thesis weakening"]
+    }
+  },
+  {
+    "name": "audit7_pin_small_stock_still_in_band",
+    "note": "Audit #7. $30 stock, pin target 30, live 30.50 — 50¢ away = 1.7% of spot. Below 5% drift threshold; no signal. Used to fire drifting under absolute 5/8.",
+    "input": {
+      "entry": { "spot": 30, "net_gex": 50000000, "largest_wall": { "strike": 30, "expiration": "2026-06-01", "gex_net": 20000000 } },
+      "live":  { "spot": 30.5, "net_gex": 48000000, "largest_wall": { "strike": 30, "expiration": "2026-06-01", "gex_net": 19000000 } },
+      "trade": {
+        "long_strike": 28, "short_strike": 30,
+        "strategy_type": "BULL_PUT_CREDIT", "expiration": "2026-06-01",
+        "target_king_node": "call_wall", "target_strike": 30,
+        "target_expiration": "2026-06-01", "target_thesis_kind": "pin_to",
+        "regime_at_entry": "A"
+      }
+    },
+    "expected": {
+      "state": "intact"
+    }
+  },
+  {
+    "name": "audit8_break_through_entry_at_target_not_evaluable",
+    "note": "Audit #8. Entry spot exactly at target strike — break-through direction is ambiguous. Should return not_evaluable instead of falling through to permanent intact.",
+    "input": {
+      "entry": { "spot": 100, "net_gex": 50000000, "largest_wall": { "strike": 100, "expiration": "2026-06-01", "gex_net": 20000000 } },
+      "live":  { "spot": 102, "net_gex": 48000000, "largest_wall": { "strike": 100, "expiration": "2026-06-01", "gex_net": 18000000 } },
+      "trade": {
+        "long_strike": 95, "short_strike": 100,
+        "strategy_type": "BULL_CALL", "expiration": "2026-06-01",
+        "target_king_node": "call_wall", "target_strike": 100,
+        "target_expiration": "2026-06-01", "target_thesis_kind": "break_through",
+        "regime_at_entry": "A"
+      }
+    },
+    "expected": {
+      "state": "not_evaluable",
+      "reasons_contains_any": ["break-through direction is ambiguous"]
+    }
+  },
+  {
+    "name": "audit10_heuristic_bullish_wall_past_target_in_favor_intact",
+    "note": "Audit #10 / #167. Bullish trade, dominant wall ran to 110 — 5 strikes ABOVE the short target of 105. Wall running past target in trade direction WITHOUT a spot pierce. Should stay intact, NOT fire drift.",
+    "input": {
+      "entry": { "spot": 100, "net_gex": 50000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 20000000 } },
+      "live":  { "spot": 102, "net_gex": 48000000, "largest_wall": { "strike": 110, "expiration": "2026-06-01", "gex_net": 22000000 } },
+      "trade": { "long_strike": 100, "short_strike": 105, "strategy_type": "BULL_CALL", "expiration": "2026-06-01" }
+    },
+    "expected": {
+      "state": "intact",
+      "reasons_contains_any": ["Dealer book reconcentrated in your direction"]
+    }
+  },
+  {
+    "name": "audit10_heuristic_bearish_wall_past_target_in_favor_intact",
+    "note": "Mirror for bearish. Bear put, target 95, wall ran to 90 — below target in trade direction. Should stay intact.",
+    "input": {
+      "entry": { "spot": 100, "net_gex": -50000000, "largest_wall": { "strike": 95, "expiration": "2026-06-01", "gex_net": -20000000 } },
+      "live":  { "spot": 98,  "net_gex": -52000000, "largest_wall": { "strike": 90, "expiration": "2026-06-01", "gex_net": -22000000 } },
+      "trade": { "long_strike": 100, "short_strike": 95, "strategy_type": "BEAR_PUT", "expiration": "2026-06-01" }
+    },
+    "expected": {
+      "state": "intact",
+      "reasons_contains_any": ["Dealer book reconcentrated in your direction"]
+    }
+  },
+  {
+    "name": "audit10_structured_break_through_wall_past_target_intact",
+    "note": "Audit #10 extended to structured path. break_through bullish trade, wall has run past target 105 to 115 (10% of spot), spot still at 102. Should fire 'reconcentrated in your direction', not drift.",
+    "input": {
+      "entry": { "spot": 100, "net_gex": 50000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 20000000 } },
+      "live":  { "spot": 102, "net_gex": 48000000, "largest_wall": { "strike": 115, "expiration": "2026-06-01", "gex_net": 22000000 } },
+      "trade": {
+        "long_strike": 100, "short_strike": 105,
+        "strategy_type": "BULL_CALL", "expiration": "2026-06-01",
+        "target_king_node": "call_wall", "target_strike": 105,
+        "target_expiration": "2026-06-01", "target_thesis_kind": "break_through",
+        "regime_at_entry": "A"
+      }
+    },
+    "expected": {
+      "state": "intact",
+      "reasons_contains_any": ["Dealer book reconcentrated in your direction"]
+    }
   }
 ]
