@@ -1,0 +1,78 @@
+# Bot — daily seeders for iv_history + earnings_calendar.
+#
+# iv_history:
+#   - Captures today's 30d IV + 20d HV per universe ticker after the
+#     close. Runs daily so the percentile baseline accumulates.
+#   - On manual dispatch with backfill_days > 0, also fills HV-only
+#     rows for the prior N days. Use for first-run priming.
+#
+# earnings_calendar:
+#   - Pulls 30-day forward earnings calendar from Polygon for the
+#     universe daily so earnings_crush has fresh data.
+
+name: Bot — seed iv_history + earnings_calendar
+
+on:
+  schedule:
+    # iv_history: 16:30 ET (= 20:30 UTC DST, 21:30 UTC standard).
+    # Captures the day's close IV.
+    - cron: '30 20,21 * * 1-5'
+    # earnings_calendar: 06:00 ET. Fresh enough for tomorrow's BMOs.
+    - cron: '0 10,11 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      which:
+        description: 'Which seeder to run'
+        type: choice
+        options: [both, iv_history, earnings_calendar]
+        default: both
+      backfill_days:
+        description: 'iv_history: number of trailing days to backfill (HV-only, max 60)'
+        type: string
+        default: '0'
+
+concurrency:
+  group: bot-seed-data
+  cancel-in-progress: false
+
+jobs:
+  seed-iv-history:
+    if: ${{ github.event_name == 'schedule' || inputs.which == 'both' || inputs.which == 'iv_history' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Invoke bot-seed-iv-history
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          BACKFILL: ${{ inputs.backfill_days || '0' }}
+        run: |
+          resp=$(curl -sS -w "\n%{http_code}" -X POST \
+            "${SUPABASE_URL}/functions/v1/bot-seed-iv-history" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "{\"backfill_days\": ${BACKFILL}}")
+          http=$(echo "$resp" | tail -n1)
+          body=$(echo "$resp" | head -n -1)
+          echo "iv_history status=${http} body=${body}"
+          if [ "$http" != "200" ]; then echo "::error::iv_history seed failed (${http})"; exit 1; fi
+
+  seed-earnings:
+    if: ${{ github.event_name == 'schedule' || inputs.which == 'both' || inputs.which == 'earnings_calendar' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Invoke bot-seed-earnings-calendar
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          resp=$(curl -sS -w "\n%{http_code}" -X POST \
+            "${SUPABASE_URL}/functions/v1/bot-seed-earnings-calendar" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{"lookahead_days": 30}')
+          http=$(echo "$resp" | tail -n1)
+          body=$(echo "$resp" | head -n -1)
+          echo "earnings status=${http} body=${body}"
+          if [ "$http" != "200" ]; then echo "::error::earnings seed failed (${http})"; exit 1; fi

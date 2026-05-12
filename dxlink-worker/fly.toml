@@ -6,10 +6,19 @@
 # full re-deploy. The brand-facing name is "Cash Moves" everywhere
 # user-visible; the Fly slug stays put.
 #
-# Single shared-cpu-1x instance in iad (matches Tastytrade's US-East
-# colo, so latency to the dxFeed gateway is minimal). The worker
-# doesn't expose HTTP — Fly's health check just verifies the process
-# is alive via the [services] block being absent.
+# Two processes share this app + its secrets:
+#   * worker  — long-running DXLink WebSocket subscriber (the original
+#               GEX feed). Streams Greeks + quotes to dxlink_quotes.
+#   * scanner — polls Polygon (Massive) options-flow REST API every 5s
+#               during RTH, qualifies prints, writes whale_tail_alerts.
+# Both run on their own shared-cpu-1x machines but inherit the SAME
+# Fly secret bag (SUPABASE_*, TASTYTRADE_*, MASSIVE_API_KEY). That's
+# why they're consolidated here instead of standing up a second app —
+# the Supabase service-role key is already configured on this app.
+#
+# Memory: worker needs 1GB for the dxFeed subscription burst (see the
+# OOM history comment below). Scanner is REST-polling and stays well
+# under 512MB, but to keep [[vm]] simple we run both at 1GB.
 #
 # Memory: 1GB. The 256MB cap was too tight — V8's baseline (~80MB) +
 # 64k active dxFeed subscriptions + WebSocket frame buffers + the
@@ -34,6 +43,15 @@ primary_region = "iad"
 [env]
   TASTYTRADE_BASE_URL = "https://api.tastyworks.com"
   FLUSH_INTERVAL_MS = "750"
+  # Scanner-only knobs (worker ignores)
+  POLYGON_BASE_URL = "https://api.polygon.io"
+  MIN_PREMIUM_DOLLARS_DEFAULT = "500000"
+  POLL_INTERVAL_MS_RTH = "5000"
+  POLL_INTERVAL_MS_OFF = "60000"
+
+[processes]
+  worker  = "deno run --allow-net --allow-env src/main.ts"
+  scanner = "deno run --allow-net --allow-env src/scanner/main.ts"
 
 [[vm]]
   size = "shared-cpu-1x"
@@ -43,19 +61,19 @@ primary_region = "iad"
   policy = "always"
   retries = 10
 
-# No [[services]] block — the worker doesn't accept incoming HTTP.
+# No [[services]] block — neither process accepts incoming HTTP.
 # Fly will use the process check (is the container running?) as health.
 
 [deploy]
-  strategy = "immediate"  # one instance, no rolling
+  strategy = "immediate"  # one instance per process, no rolling
 
-# Long-running WebSocket worker, NOT a request-handling app — never
-# auto-stop on idle, always keep one machine running, auto-start on
-# Fly-side restarts.
+# Long-running workers, NOT request-handling apps — never auto-stop
+# on idle, always keep one machine per process running, auto-start
+# on Fly-side restarts.
 auto_stop_machines = "off"
 auto_start_machines = true
 min_machines_running = 1
 
-# No [mounts] section — the worker is stateless; all state lives in
-# Supabase. (An empty [mounts] table makes Fly try to bind a volume
+# No [mounts] section — both processes are stateless; all state lives
+# in Supabase. (An empty [mounts] table makes Fly try to bind a volume
 # named "" to the machine, which errors deploy.)
