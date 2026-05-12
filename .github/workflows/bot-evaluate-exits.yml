@@ -1,0 +1,48 @@
+# Bot exit-rule evaluator — runs every 5 min during US RTH.
+#
+# Same pattern as trigger-eval (which handles the GEX bot's exit
+# rules). This cron handles the whale-tail bot's six exit kinds:
+# profit-take ladder, stop-loss, time-stop, trailing-stop, kill-switch.
+
+name: Bot — evaluate whale-tail exits
+
+on:
+  schedule:
+    - cron: '35,40,45,50,55 13 * * 1-5'   # 9:35–9:55 ET (DST)
+    - cron: '*/5 14-20 * * 1-5'           # 10:00–16:55 ET (DST)
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Evaluate even outside RTH (dev wiring tests)'
+        type: boolean
+        default: false
+
+concurrency:
+  group: bot-evaluate-exits
+  cancel-in-progress: false
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Invoke bot-evaluate-exits edge function
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          FORCE: ${{ inputs.force == true }}
+        run: |
+          body='{}'
+          if [ "$FORCE" = "true" ]; then body='{"force":true}'; fi
+          resp=$(curl -sS -w "\n%{http_code}" -X POST \
+            "${SUPABASE_URL}/functions/v1/bot-evaluate-exits" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "$body")
+          http=$(echo "$resp" | tail -n1)
+          payload=$(echo "$resp" | head -n -1)
+          echo "bot-evaluate-exits status=${http} body=${payload}"
+          if [ "$http" != "200" ]; then
+            echo "::error::bot-evaluate-exits returned ${http}"
+            exit 1
+          fi
