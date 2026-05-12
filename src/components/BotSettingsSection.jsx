@@ -73,7 +73,53 @@ export default function BotSettingsSection({ profile, onProfileChange }) {
   const pausedReason = profile?.bot_paused_reason
   const isHalted = pausedUntil && new Date(pausedUntil).getTime() > Date.now()
 
-  const nlv = Number(profile?.account_size) || 0
+  // Live broker NLV — same pattern as AccountContextCard on
+  // PositionDetail. Calls get-account on mount; falls back to
+  // profile.account_size when broker is unreachable OR when the
+  // configured endpoint is sandbox (which returns a fake $100K NLV).
+  // Live NLV refreshes on profile re-fetch by the parent component
+  // (we don't poll continuously — it's a settings page, not live data).
+  const [liveNlv, setLiveNlv] = useState(null)
+  const [liveNlvSource, setLiveNlvSource] = useState('loading')
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { data, error: err } = await supabase.functions.invoke('get-account')
+        if (cancelled) return
+        if (err || !data?.success) {
+          setLiveNlvSource('broker_unreachable')
+          return
+        }
+        const accounts = (data.accounts ?? []).slice()
+        accounts.sort(
+          (a, b) =>
+            Number(b.net_liquidating_value ?? 0) - Number(a.net_liquidating_value ?? 0),
+        )
+        const primary = accounts.find((a) => !a.is_paper) || accounts[0]
+        const isSandbox = Boolean(
+          data.is_sandbox ?? primary?.is_sandbox ?? primary?.is_paper,
+        )
+        if (isSandbox) {
+          setLiveNlvSource('sandbox_skipped')
+          return
+        }
+        const nlv = Number(primary?.net_liquidating_value)
+        if (Number.isFinite(nlv) && nlv > 0) {
+          setLiveNlv(nlv)
+          setLiveNlvSource('broker_live')
+        } else {
+          setLiveNlvSource('broker_no_balance')
+        }
+      } catch {
+        if (!cancelled) setLiveNlvSource('broker_unreachable')
+      }
+    })()
+    return () => { cancelled = true }
+  }, [profile?.id])
+
+  const manualNlv = Number(profile?.account_size) || 0
+  const nlv = liveNlv ?? manualNlv
   const perTradeMaxLossDollars = nlv * (config.per_trade_max_loss_pct / 100)
   const dailyLossCapDollars = nlv * (config.daily_loss_kill_pct / 100)
   const weeklyLossCapDollars = nlv * (config.weekly_loss_kill_pct / 100)
@@ -277,7 +323,7 @@ export default function BotSettingsSection({ profile, onProfileChange }) {
 
       {/* ─── Risk caps ─────────────────────────────────────── */}
       <Subsection title="Risk caps">
-        <NlvIndicator nlv={nlv} />
+        <NlvIndicator nlv={nlv} source={liveNlvSource} liveNlv={liveNlv} manualNlv={manualNlv} />
         <PercentRow
           label="Per-trade max loss"
           help={`${formatDollars(perTradeMaxLossDollars)} at current NLV`}
@@ -527,34 +573,53 @@ function BotStatusBadge({ config, isHalted }) {
   )
 }
 
-// Surfaces the NLV value the bot is computing risk caps against.
-// Critical because all the % → $ math (per-trade max, daily kill,
-// etc.) is derived from profile.account_size, NOT from a live broker
-// fetch. If the user's profile has a stale or placeholder NLV (e.g.
-// $1M placeholder), every dollar amount displayed here is wrong by
-// the same multiple. Calling this out explicitly so the user knows
-// where to fix it.
-function NlvIndicator({ nlv }) {
-  // Heuristic: $500K+ on a personal-trading bot is almost certainly
-  // a placeholder, not a real broker NLV. Flag it.
-  const looksLikePlaceholder = nlv >= 500_000
+// Surfaces the NLV value the bot is computing risk caps against,
+// and where that number came from. The bot's server-side risk math
+// (bot-execute-entry → resolveLiveNlv) follows the same priority
+// order this indicator displays:
+//   1. broker_live        — Tastytrade /accounts/:id/balances NLV
+//   2. sandbox_skipped    — broker reachable but on cert endpoint;
+//                           fake $100K NLV ignored, fall back to manual
+//   3. broker_unreachable — broker call failed, using manual fallback
+//   4. broker_no_balance  — broker returned no usable balance
+//   5. loading            — get-account call still in flight
+function NlvIndicator({ nlv, source, liveNlv, manualNlv }) {
+  const isLive = source === 'broker_live'
+  const isFallback = !isLive && source !== 'loading'
   return (
     <div
       className={clsx(
         'flex items-baseline justify-between gap-2 -mt-1 mb-1 px-2 py-1.5 rounded border',
-        looksLikePlaceholder
+        isLive
+          ? 'bg-green-950/20 border-green-400/30'
+          : isFallback
           ? 'bg-amber-950/30 border-amber-400/40'
           : 'bg-bg/40 border-border/50',
       )}
     >
       <div className="min-w-0 flex-1">
         <div className="text-[10px] uppercase tracking-wider text-muted">Computed against NLV</div>
-        <div className="text-xs font-mono-tab text-fg">${nlv.toLocaleString()}</div>
+        <div className={clsx('text-xs font-mono-tab', isLive ? 'text-green-400' : 'text-fg')}>
+          ${Number(nlv).toLocaleString()}
+        </div>
       </div>
-      <div className="text-[10px] text-muted text-right shrink-0 max-w-[55%]">
-        {looksLikePlaceholder
-          ? 'Looks like a placeholder. Update Account Size in Profile to your real broker NLV.'
-          : 'From Profile → Account Size'}
+      <div className="text-[10px] text-right shrink-0 max-w-[55%]">
+        {source === 'loading' && <span className="text-muted">syncing broker…</span>}
+        {source === 'broker_live' && (
+          <span className="text-green-400">live broker NLV ✓</span>
+        )}
+        {source === 'sandbox_skipped' && (
+          <span className="text-amber-400">sandbox NLV ignored · using manual</span>
+        )}
+        {source === 'broker_unreachable' && (
+          <span className="text-amber-400">broker unreachable · using manual</span>
+        )}
+        {source === 'broker_no_balance' && (
+          <span className="text-amber-400">no broker balance · using manual</span>
+        )}
+        {isFallback && manualNlv > 0 && (
+          <div className="text-muted mt-0.5">Manual: ${manualNlv.toLocaleString()}</div>
+        )}
       </div>
     </div>
   )
