@@ -132,7 +132,13 @@ export default function BotSettingsSection({ profile, onProfileChange }) {
     let cancelled = false
     ;(async () => {
       try {
-        const { data, error: err } = await supabase.functions.invoke('get-account')
+        // Route get-account to the env that matches bot mode so the
+        // displayed NLV comes from the Tastytrade env where orders
+        // will actually fire. mode=paper → cert sandbox, mode=live → prod.
+        const targetEnv = config.mode === 'paper' ? 'cert' : 'live'
+        const { data, error: err } = await supabase.functions.invoke('get-account', {
+          body: { env: targetEnv },
+        })
         if (cancelled) return
         if (err || !data?.success) {
           setLiveNlvSource('broker_unreachable')
@@ -150,19 +156,12 @@ export default function BotSettingsSection({ profile, onProfileChange }) {
           ? accounts.find((a) => String(a.account_number) === String(targetNumber))
           : null
         const primary = matched || accounts.find((a) => !a.is_paper) || accounts[0]
-        const isCertSandbox = Boolean(
-          data.is_sandbox ?? primary?.is_sandbox,
-        )
-        if (isCertSandbox) {
-          setLiveNlvSource('sandbox_skipped')
-          return
-        }
         const nlv = Number(primary?.net_liquidating_value)
         if (Number.isFinite(nlv) && nlv > 0) {
           setLiveNlv(nlv)
           setLiveNlvSource(
             matched
-              ? (primary.is_paper ? 'broker_paper' : 'broker_live')
+              ? (targetEnv === 'cert' ? 'broker_cert' : (primary.is_paper ? 'broker_paper' : 'broker_live'))
               : 'broker_fallback',
           )
         } else {
@@ -661,7 +660,7 @@ function BotStatusBadge({ config, isHalted }) {
 //   4. broker_no_balance  — broker returned no usable balance
 //   5. loading            — get-account call still in flight
 function NlvIndicator({ nlv, source, liveNlv, manualNlv }) {
-  const isLive = source === 'broker_live' || source === 'broker_paper'
+  const isLive = source === 'broker_live' || source === 'broker_paper' || source === 'broker_cert'
   const isFallback = !isLive && source !== 'loading'
   return (
     <div
@@ -686,13 +685,13 @@ function NlvIndicator({ nlv, source, liveNlv, manualNlv }) {
           <span className="text-green-400">live broker NLV ✓</span>
         )}
         {source === 'broker_paper' && (
-          <span className="text-green-400">paper account NLV ✓</span>
+          <span className="text-green-400">prod paper NLV ✓</span>
+        )}
+        {source === 'broker_cert' && (
+          <span className="text-green-400">cert sandbox NLV ✓</span>
         )}
         {source === 'broker_fallback' && (
-          <span className="text-amber-400">account # not found · using largest</span>
-        )}
-        {source === 'sandbox_skipped' && (
-          <span className="text-amber-400">cert sandbox · using manual</span>
+          <span className="text-amber-400">account # not found in env</span>
         )}
         {source === 'broker_unreachable' && (
           <span className="text-amber-400">broker unreachable · using manual</span>
