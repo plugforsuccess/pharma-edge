@@ -1,273 +1,431 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowUpCircle, ArrowDownCircle, Flame, Filter } from 'lucide-react'
+import { Activity, AlertTriangle, ArrowDownCircle, ArrowUpCircle, CheckCircle2, Filter, ShieldAlert, Sparkles, XCircle } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { useSubscription } from '../hooks/useSubscription'
+import { useAuth } from '../context/AuthContext'
+import { evaluateRisk } from '../utils/botRiskEval'
 import LiveDataStatus from '../components/LiveDataStatus'
-import { isWithinRth } from '../utils/marketHours'
 
-// Options flow page — today's per-strike volume + premium + UOA
-// (unusual options activity) across the full streamed universe.
+// Flow page — the bot's feed.
 //
-// Data source: public.option_flow_daily, populated by the dxlink-worker
-// via dxFeed Trade events. Empty until the worker is healthy and RTH
-// is in session — we surface that state explicitly so users don't think
-// the page is broken when it just hasn't seen prints yet.
+// Replaces the prior option_flow_daily aggregate view with a live
+// timeline of whale_tail_alerts: every UW print the scanner saw,
+// what the filter decided, and (when we tailed) the position that
+// resulted. Twitter-style feed so the user can scan during a meeting
+// break and see "what did the bot just do?"
 //
-// Two views (tabbed):
-//   "All tickers" — cross-market top flow, sorted by volume
-//   "By ticker"   — type a ticker → see only that ticker's flow
+// Data source: public.whale_tail_alerts populated by the scanner
+// (PR #2). Page renders cleanly with an empty table — the bot isn't
+// running yet. Once the scanner is wired, alerts appear automatically
+// via Supabase realtime.
+//
+// Top of page: bot status card (mode, today's stats, risk envelope,
+// kill switch). Reads profiles.bot_config + bot_runs for today.
 
-const FILTER_TABS = ['All tickers', 'Calls only', 'Puts only', 'Notable (UOA)']
+const STATUS_BADGE = {
+  observed: { label: 'Observed', cls: 'bg-bg/60 border-border text-subtle' },
+  queued: { label: 'Queued for entry', cls: 'bg-amber-950/30 border-amber-400/40 text-amber-400' },
+  tailed: { label: 'Tailed', cls: 'bg-green-950/30 border-green-400/40 text-green-400' },
+  skipped_filter: { label: 'Filtered out', cls: 'bg-bg/60 border-border text-muted' },
+  skipped_caps: { label: 'Risk-capped', cls: 'bg-orange-950/30 border-orange-400/40 text-orange-400' },
+  rejected_broker: { label: 'Broker rejected', cls: 'bg-red-950/20 border-crimson/40 text-crimson' },
+  failed: { label: 'Failed', cls: 'bg-red-950/20 border-crimson/40 text-crimson' },
+}
+
+const FILTER_TABS = [
+  { id: 'all', label: 'All' },
+  { id: 'tailed', label: 'Tailed' },
+  { id: 'queued', label: 'Queued' },
+  { id: 'skipped', label: 'Skipped' },
+]
 
 export default function Flow() {
-  const { isPro } = useSubscription()
-  const [rows, setRows] = useState([])
+  const { user, profile } = useAuth()
+  const [alerts, setAlerts] = useState([])
+  const [todayRun, setTodayRun] = useState(null)
+  const [openCount, setOpenCount] = useState(0)
+  const [filterTab, setFilterTab] = useState('all')
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [filter, setFilter] = useState('All tickers')
-  const [tickerFilter, setTickerFilter] = useState('')
-  const [lastFetched, setLastFetched] = useState(null)
-
-  async function load() {
-    setLoading(true)
-    setError(null)
-    try {
-      const today = nyToday()
-      let q = supabase
-        .from('option_flow_daily')
-        .select(
-          'ticker, strike, expiration_date, option_type, total_volume, total_premium, print_count, biggest_print_size, biggest_print_at',
-        )
-        .eq('trade_date', today)
-        .order('total_volume', { ascending: false })
-        .limit(200)
-      if (tickerFilter.trim()) {
-        q = q.eq('ticker', tickerFilter.trim().toUpperCase())
-      }
-      const { data, error: err } = await q
-      if (err) throw err
-      setRows(data ?? [])
-      setLastFetched(new Date())
-    } catch (e) {
-      setError(e.message || String(e))
-    } finally {
-      setLoading(false)
-    }
-  }
+  const [killSwitchBusy, setKillSwitchBusy] = useState(false)
+  const [killSwitchError, setKillSwitchError] = useState(null)
 
   useEffect(() => {
-    load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tickerFilter])
+    if (!user) return
+    let cancelled = false
+    ;(async () => {
+      setLoading(true)
+      const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date())
+      const [alertsRes, runRes, openRes] = await Promise.all([
+        supabase
+          .from('whale_tail_alerts')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('received_at', { ascending: false })
+          .limit(50),
+        supabase
+          .from('bot_runs')
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('run_date', today)
+          .maybeSingle(),
+        supabase
+          .from('open_positions')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', user.id)
+          .eq('status', 'open'),
+      ])
+      if (cancelled) return
+      setAlerts(alertsRes.data ?? [])
+      setTodayRun(runRes.data ?? null)
+      setOpenCount(openRes.count ?? 0)
+      setLoading(false)
+    })()
+    return () => { cancelled = true }
+  }, [user])
+
+  // Realtime: new alerts append at top, status changes update in place.
+  useEffect(() => {
+    if (!user) return
+    const channel = supabase
+      .channel(`flow:user:${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'whale_tail_alerts', filter: `user_id=eq.${user.id}` },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            setAlerts((prev) => [payload.new, ...prev].slice(0, 50))
+          } else if (payload.eventType === 'UPDATE') {
+            setAlerts((prev) => prev.map((a) => (a.id === payload.new.id ? payload.new : a)))
+          }
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'bot_runs', filter: `user_id=eq.${user.id}` },
+        (payload) => {
+          if (payload.new) setTodayRun(payload.new)
+        },
+      )
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [user])
 
   const filtered = useMemo(() => {
-    if (filter === 'Calls only') return rows.filter((r) => r.option_type === 'C')
-    if (filter === 'Puts only') return rows.filter((r) => r.option_type === 'P')
-    if (filter === 'Notable (UOA)') {
-      // We don't have OI in this table directly; approximate UOA as
-      // strikes with a single biggest_print >= 500 contracts OR total
-      // volume >= 5,000 + above-average premium.
-      return rows.filter((r) =>
-        (r.biggest_print_size && Number(r.biggest_print_size) >= 500) ||
-        (Number(r.total_volume) >= 5000),
-      )
-    }
-    return rows
-  }, [rows, filter])
-
-  if (!isPro) {
-    return (
-      <div className="px-4 lg:px-6 py-5 max-w-md mx-auto lg:max-w-2xl">
-        <div className="bg-card border border-amber-400/20 rounded-xl p-4 space-y-2">
-          <h1 className="text-lg font-semibold flex items-center gap-2">
-            <Flame size={16} className="text-amber-400" />
-            Options Flow
-          </h1>
-          <p className="text-xs text-subtle leading-relaxed">
-            Real-time options prints across the streamed universe — top
-            volume by strike, biggest single prints, and unusual options
-            activity (UOA) detection. Pro feature.
-          </p>
-        </div>
-      </div>
+    if (filterTab === 'all') return alerts
+    if (filterTab === 'tailed') return alerts.filter((a) => a.status === 'tailed')
+    if (filterTab === 'queued') return alerts.filter((a) => a.status === 'queued')
+    if (filterTab === 'skipped') return alerts.filter((a) =>
+      ['skipped_filter', 'skipped_caps', 'rejected_broker', 'failed'].includes(a.status),
     )
+    return alerts
+  }, [alerts, filterTab])
+
+  async function haltBot() {
+    if (!user) return
+    if (!confirm('Halt the bot? This cancels all working orders and requests close on every open position. Manual resume required.')) return
+    setKillSwitchBusy(true)
+    setKillSwitchError(null)
+    try {
+      const { data, error } = await supabase.functions.invoke('bot-kill-switch', {
+        body: { reason: 'manual halt from Flow page' },
+      })
+      if (error) throw error
+      if (!data?.success) throw new Error(data?.error || 'kill switch failed')
+    } catch (e) {
+      setKillSwitchError(e.message || 'kill switch failed')
+    } finally {
+      setKillSwitchBusy(false)
+    }
   }
 
   return (
-    <div className="px-4 lg:px-6 py-5 max-w-md mx-auto lg:max-w-6xl space-y-4">
+    <div className="px-4 lg:px-6 py-5 max-w-md lg:max-w-3xl mx-auto space-y-4">
       <div>
-        <h1 className="text-lg lg:text-2xl font-semibold leading-tight flex items-center gap-2">
-          <Flame size={16} className="text-amber-400" />
-          Options Flow
-        </h1>
-        <p className="text-xs lg:text-sm text-subtle">
-          Today's prints across the streamed universe.
-          {lastFetched && (
-            <span className="text-muted ml-1">
-              · {lastFetched.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
-            </span>
-          )}
+        <h1 className="text-lg font-semibold leading-tight">Flow</h1>
+        <p className="text-xs text-subtle">
+          Live whale-print feed. Bot scanner runs during RTH; alerts appear here in real time.
         </p>
       </div>
 
+      <BotStatusCard
+        profile={profile}
+        todayRun={todayRun}
+        openCount={openCount}
+        onHalt={haltBot}
+        killSwitchBusy={killSwitchBusy}
+        killSwitchError={killSwitchError}
+      />
+
       <LiveDataStatus />
 
-      <div className="flex gap-2">
-        <input
-          type="text"
-          value={tickerFilter}
-          onChange={(e) => setTickerFilter(e.target.value.toUpperCase())}
-          placeholder="Filter by ticker (e.g. SPY)"
-          className="flex-1 bg-card border border-border rounded-lg px-3 py-1.5 text-sm placeholder:text-muted focus:outline-none focus:border-amber-400/40"
-        />
-        <button
-          onClick={load}
-          disabled={loading}
-          className="px-3 py-1.5 bg-card border border-border rounded-lg text-xs text-subtle hover:text-fg disabled:opacity-50"
-        >
-          {loading ? '…' : 'Refresh'}
-        </button>
+      <div className="flex items-center gap-2 overflow-x-auto pb-1">
+        <Filter size={12} className="text-muted shrink-0" />
+        {FILTER_TABS.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setFilterTab(t.id)}
+            className={`text-[11px] uppercase tracking-wider px-2.5 py-1 rounded-full border transition shrink-0 ${
+              filterTab === t.id
+                ? 'bg-amber-400/10 border-amber-400/40 text-amber-400'
+                : 'bg-bg/60 border-border text-subtle hover:text-fg'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
 
-      {/* Filter chips */}
-      <div className="-mx-4 px-4 overflow-x-auto">
-        <div className="flex gap-2 pb-1">
-          {FILTER_TABS.map((t) => (
-            <button
-              key={t}
-              onClick={() => setFilter(t)}
-              className={
-                'shrink-0 px-3 py-1 rounded-full border text-xs font-medium transition ' +
-                (filter === t
-                  ? 'bg-amber-400 text-bg border-amber-400'
-                  : 'bg-card text-subtle border-border hover:text-fg')
-              }
-            >
-              {t}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {error && (
-        <div className="bg-red-950/30 border border-red-900/50 text-red-400 text-xs rounded p-3">
-          Couldn't load flow: {error}
-        </div>
-      )}
-
-      {loading && (
-        <div className="bg-card border border-border rounded-xl p-3 space-y-2 animate-pulse" aria-label="Loading flow">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="flex items-center gap-2">
-              <div className="h-3 w-16 rounded bg-white/[0.04]" />
-              <div className="h-2 rounded bg-white/[0.04]" style={{ width: `${40 + ((i * 9) % 40)}%` }} />
-              <div className="h-3 w-10 rounded bg-white/[0.04] ml-auto" />
-            </div>
+      {loading ? (
+        <div className="text-xs text-subtle py-8 text-center">Loading…</div>
+      ) : filtered.length === 0 ? (
+        <EmptyState filterTab={filterTab} botEnabled={profile?.bot_config?.enabled} />
+      ) : (
+        <div className="space-y-2">
+          {filtered.map((a) => (
+            <AlertCard key={a.id} alert={a} />
           ))}
         </div>
       )}
-
-      {!loading && !error && rows.length === 0 && (
-        <div className="bg-card border border-border rounded-xl p-8 text-center space-y-3">
-          <Filter size={22} className="text-muted mx-auto" />
-          <p className="text-base text-fg font-display">
-            {isWithinRth() ? 'No prints yet' : 'Markets are closed'}
-          </p>
-          <p className="text-xs text-subtle leading-relaxed max-w-sm mx-auto">
-            {isWithinRth() ? (
-              <>
-                The dxlink worker hasn't logged any large prints for{' '}
-                <span className="text-fg">{tickerFilter || 'tracked tickers'}</span>{' '}
-                today. Flow data fills in throughout the session — check
-                back after the open settles or once a UOA hits.
-              </>
-            ) : (
-              <>
-                Flow only ticks during regular hours (M–F, 9:30am–4pm ET).
-                Come back when the bell rings — we'll have prints
-                streaming within the first 30 seconds.
-              </>
-            )}
-          </p>
-        </div>
-      )}
-
-      {!loading && !error && filtered.length > 0 && (
-        <div className="bg-card border border-border rounded-xl overflow-hidden">
-          <div className="grid grid-cols-[1fr_auto_auto_auto] gap-2 px-3 py-2 text-[10px] uppercase tracking-wider text-muted border-b border-border">
-            <div>Symbol / Exp</div>
-            <div className="text-right">Vol</div>
-            <div className="text-right">Premium</div>
-            <div className="text-right w-10">Biggest</div>
-          </div>
-          <div className="divide-y divide-border">
-            {filtered.slice(0, 60).map((r, i) => (
-              <FlowRow key={`${r.ticker}-${r.strike}-${r.expiration_date}-${r.option_type}-${i}`} r={r} />
-            ))}
-          </div>
-        </div>
-      )}
-
-      <p className="text-[10px] text-muted leading-relaxed px-1">
-        Volume + premium are running totals since the open. Premium = price ×
-        size × 100 per print, summed. Biggest print flagged when ≥ 100
-        contracts. UOA (unusual activity) is approximated as strikes with
-        single prints ≥ 500 contracts or total volume ≥ 5K. Without
-        standing OI in this view we can't compute exact vol/OI ratios —
-        the Suggested Plays engine sees those numbers and folds them into
-        the play rationale.
-      </p>
     </div>
   )
 }
 
-function FlowRow({ r }) {
-  const isCall = r.option_type === 'C'
-  const Icon = isCall ? ArrowUpCircle : ArrowDownCircle
-  const tone = isCall ? 'text-green-400' : 'text-crimson'
+function BotStatusCard({ profile, todayRun, openCount, onHalt, killSwitchBusy, killSwitchError }) {
+  const config = profile?.bot_config ?? {}
+  const enabled = config.enabled ?? false
+  const mode = config.mode ?? 'paper'
+  const pausedUntil = profile?.bot_paused_until
+  const pausedReason = profile?.bot_paused_reason
+  const isPaused = pausedUntil && new Date(pausedUntil).getTime() > Date.now()
+
+  const nlv = Number(profile?.account_size) || 0
+  const envelope = useMemo(() => {
+    if (!profile) return null
+    try {
+      return evaluateRisk({
+        config: { ...config, event_block_days: config.event_block_days ?? [] },
+        nlv,
+        todayPnl: Number(todayRun?.daily_pnl) || 0,
+        weekPnl: Number(todayRun?.daily_pnl) || 0,
+        openPositionsCount: openCount,
+        openExposureDollars: 0,
+        tradesAttemptedToday: Number(todayRun?.trades_attempted) || 0,
+        recentClosedTrades: [],
+        botPausedUntil: pausedUntil,
+        botPausedReason: pausedReason,
+        todayEventBlock: null,
+      })
+    } catch {
+      return null
+    }
+  }, [profile, config, nlv, todayRun, openCount, pausedUntil, pausedReason])
+
+  let statusLabel, statusTone, statusIcon
+  if (isPaused) {
+    statusLabel = 'HALTED'
+    statusTone = 'text-crimson border-crimson/40 bg-crimson/10'
+    statusIcon = <ShieldAlert size={14} className="text-crimson" />
+  } else if (!enabled) {
+    statusLabel = 'DISABLED'
+    statusTone = 'text-muted border-border bg-bg/60'
+    statusIcon = <Activity size={14} className="text-muted" />
+  } else if (mode === 'paper') {
+    statusLabel = 'PAPER · ACTIVE'
+    statusTone = 'text-amber-400 border-amber-400/40 bg-amber-400/10'
+    statusIcon = <Sparkles size={14} className="text-amber-400" />
+  } else {
+    statusLabel = 'LIVE · ACTIVE'
+    statusTone = 'text-green-400 border-green-400/40 bg-green-400/10'
+    statusIcon = <Sparkles size={14} className="text-green-400" />
+  }
+
   return (
-    <div className="grid grid-cols-[1fr_auto_auto_auto] gap-2 px-3 py-2 text-xs items-center">
-      <div className="min-w-0">
-        <div className="flex items-center gap-1.5">
-          <Icon size={11} className={tone} />
-          <span className="font-mono-tab font-semibold text-fg">
-            {r.ticker} ${formatStrike(r.strike)}
+    <div className="bg-card border border-border rounded-xl p-4 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          {statusIcon}
+          <span className={`text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded border ${statusTone}`}>
+            {statusLabel}
           </span>
         </div>
-        <div className="text-[10px] text-muted">{r.expiration_date}</div>
+        {enabled && !isPaused && (
+          <button
+            onClick={onHalt}
+            disabled={killSwitchBusy}
+            className="text-[11px] font-semibold text-crimson hover:text-red-300 disabled:opacity-50 px-2 py-1 border border-crimson/30 rounded transition"
+          >
+            {killSwitchBusy ? 'Halting…' : 'HALT BOT'}
+          </button>
+        )}
       </div>
-      <div className="text-right font-mono-tab tabular-nums text-fg">
-        {Number(r.total_volume).toLocaleString()}
+
+      {isPaused && (
+        <div className="bg-crimson/10 border border-crimson/40 rounded-lg p-2 text-[11px] text-crimson space-y-1">
+          <div className="font-semibold">Bot is halted.</div>
+          {pausedReason && <div>Reason: {pausedReason}</div>}
+          <div className="text-subtle text-[10px]">
+            Resume from Settings → Bot → Reset pause.
+          </div>
+        </div>
+      )}
+
+      {killSwitchError && (
+        <div className="text-[11px] text-crimson">{killSwitchError}</div>
+      )}
+
+      <div className="grid grid-cols-3 gap-2 text-[11px]">
+        <Stat label="Trades today" value={String(todayRun?.trades_attempted ?? 0)} />
+        <Stat
+          label="Daily P&L"
+          value={formatPnl(todayRun?.daily_pnl)}
+          tone={Number(todayRun?.daily_pnl) > 0 ? 'pos' : Number(todayRun?.daily_pnl) < 0 ? 'neg' : 'neutral'}
+        />
+        <Stat label="Open" value={`${openCount} / ${config.max_concurrent_positions ?? 3}`} />
       </div>
-      <div className="text-right font-mono-tab tabular-nums text-subtle">
-        ${formatPremium(r.total_premium)}
+
+      {envelope?.envelope && nlv > 0 && (
+        <div className="bg-bg/40 border border-border/50 rounded-lg p-2.5 space-y-1 text-[10px]">
+          <div className="uppercase tracking-wider text-muted">Risk envelope</div>
+          <div className="flex justify-between">
+            <span className="text-subtle">Max loss / trade</span>
+            <span className="text-fg font-mono-tab">${envelope.envelope.perTradeMaxLossDollars.toFixed(0)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-subtle">Daily loss cap</span>
+            <span className="text-fg font-mono-tab">${envelope.envelope.dailyLossCapDollars.toFixed(0)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-subtle">Weekly loss cap</span>
+            <span className="text-fg font-mono-tab">${envelope.envelope.weeklyLossCapDollars.toFixed(0)}</span>
+          </div>
+        </div>
+      )}
+
+      {envelope && !envelope.allowEntry && (
+        <div className="bg-amber-950/30 border border-amber-400/40 rounded-lg p-2 text-[11px] text-amber-400 flex items-start gap-1.5">
+          <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+          <span>{envelope.blockReason}</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AlertCard({ alert }) {
+  const badge = STATUS_BADGE[alert.status] ?? STATUS_BADGE.observed
+  const isCall = alert.option_type === 'C'
+  const directionIcon = isCall
+    ? <ArrowUpCircle size={12} className="text-green-400" />
+    : <ArrowDownCircle size={12} className="text-crimson" />
+  const filterFailures = Array.isArray(alert.filter_failures) ? alert.filter_failures : []
+
+  return (
+    <div className="bg-card border border-border rounded-xl p-3 space-y-2">
+      <div className="flex items-baseline justify-between gap-2">
+        <div className="flex items-center gap-1.5 min-w-0">
+          {directionIcon}
+          <span className="font-semibold text-sm">{alert.ticker}</span>
+          <span className="text-subtle text-xs truncate">
+            ${Number(alert.strike).toFixed(alert.strike >= 100 ? 0 : 2)} {isCall ? 'Call' : 'Put'}
+          </span>
+        </div>
+        <span className={`text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded border ${badge.cls} shrink-0`}>
+          {badge.label}
+        </span>
       </div>
-      <div className="text-right font-mono-tab tabular-nums text-muted w-10">
-        {r.biggest_print_size ? Number(r.biggest_print_size).toLocaleString() : '—'}
+
+      <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px]">
+        <Row label="Premium" value={`$${(Number(alert.premium_dollars) / 1000).toFixed(0)}K`} />
+        <Row label="Exp" value={alert.expiry_date} />
+        <Row label="DTE" value={`${alert.dte ?? '—'}d`} />
+        <Row label="OTM" value={alert.otm_pct != null ? `${Number(alert.otm_pct).toFixed(1)}%` : '—'} />
+        <Row label="Vol/OI" value={alert.vol_oi_ratio != null ? `${Number(alert.vol_oi_ratio).toFixed(1)}x` : '—'} />
+        <Row label="Mid" value={alert.mid != null ? `$${Number(alert.mid).toFixed(2)}` : '—'} />
+      </div>
+
+      {alert.status === 'tailed' && alert.triggered_position_id && (
+        <a
+          href={`/position/${alert.triggered_position_id}`}
+          className="block text-[11px] text-green-400 hover:text-green-300 pt-1 border-t border-border/50"
+        >
+          <CheckCircle2 size={11} className="inline mr-1" />
+          View position →
+        </a>
+      )}
+
+      {alert.status === 'skipped_filter' && filterFailures.length > 0 && (
+        <div className="text-[10px] text-muted pt-1 border-t border-border/50">
+          Filter failures: {filterFailures.join(', ')}
+        </div>
+      )}
+
+      {alert.status === 'skipped_caps' && (
+        <div className="text-[10px] text-orange-400 pt-1 border-t border-border/50">
+          Skipped: risk envelope full
+        </div>
+      )}
+
+      {(alert.status === 'rejected_broker' || alert.status === 'failed') && (
+        <div className="text-[10px] text-crimson pt-1 border-t border-border/50 flex items-start gap-1">
+          <XCircle size={10} className="mt-0.5 shrink-0" />
+          <span>Order failed — check admin logs</span>
+        </div>
+      )}
+
+      <div className="text-[9px] text-muted text-right">
+        {formatAgo(alert.received_at)}
       </div>
     </div>
   )
 }
 
-function nyToday() {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/New_York',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date())
+function EmptyState({ filterTab, botEnabled }) {
+  return (
+    <div className="bg-card border border-border rounded-xl p-6 text-center space-y-2">
+      <div className="text-xs text-subtle">
+        {filterTab === 'all' ? (
+          botEnabled
+            ? 'No qualifying alerts yet. The scanner runs during RTH; new prints appear here in real time.'
+            : 'Bot is disabled. Enable it from Settings → Bot to start scanning.'
+        ) : (
+          `No alerts matching "${filterTab}" yet.`
+        )}
+      </div>
+    </div>
+  )
 }
 
-function formatStrike(v) {
-  const n = Number(v)
-  if (!Number.isFinite(n)) return '—'
-  return n >= 1000 ? n.toFixed(0) : n.toFixed(1)
+function Stat({ label, value, tone = 'neutral' }) {
+  const toneCls =
+    tone === 'pos' ? 'text-green-400' :
+    tone === 'neg' ? 'text-crimson' : 'text-fg'
+  return (
+    <div className="bg-bg/40 border border-border/50 rounded-lg p-2 text-center">
+      <div className="text-[9px] uppercase tracking-wider text-muted">{label}</div>
+      <div className={`text-sm font-mono-tab font-semibold ${toneCls}`}>{value}</div>
+    </div>
+  )
 }
 
-function formatPremium(v) {
-  const n = Number(v)
-  if (!Number.isFinite(n)) return '—'
-  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`
-  if (n >= 1e3) return `${(n / 1e3).toFixed(0)}K`
-  return n.toFixed(0)
+function Row({ label, value }) {
+  return (
+    <div className="contents">
+      <span className="text-muted">{label}</span>
+      <span className="text-right text-fg font-mono-tab">{value}</span>
+    </div>
+  )
+}
+
+function formatPnl(n) {
+  const v = Number(n) || 0
+  const sign = v >= 0 ? '+' : '−'
+  return `${sign}$${Math.abs(v).toFixed(0)}`
+}
+
+function formatAgo(iso) {
+  if (!iso) return ''
+  const ms = Date.now() - new Date(iso).getTime()
+  if (ms < 60_000) return 'just now'
+  if (ms < 3600_000) return `${Math.round(ms / 60_000)}m ago`
+  if (ms < 86_400_000) return `${Math.round(ms / 3600_000)}h ago`
+  return `${Math.round(ms / 86_400_000)}d ago`
 }
