@@ -58,6 +58,14 @@ const STRIKE_GEX_MELT_RATIO = 0.5
 // crossings) so we gate on the magnitude threshold.
 const DEX_FLIP_MAGNITUDE_RATIO = 0.1
 
+// VEX (net vanna exposure) is the dealer-vol-hedging cousin of DEX.
+// Same flip semantics — sign change with meaningful magnitude. We
+// only act on VEX flips when the trade's strategy is vega-sensitive
+// (debit verticals carry net long vega; iron condors carry net short
+// vega). Credit verticals are roughly vega-neutral; VEX flips on
+// those surface as informational only.
+const VEX_FLIP_MAGNITUDE_RATIO = 0.1
+
 // Regime-flip deadband (audit #3 + #4). Net GEX flips around zero are
 // noise — a position entered at +$1M and now sitting at -$1M shouldn't
 // auto-close. We treat anything within ±10% of the entry magnitude OR
@@ -113,12 +121,16 @@ export const VERDICT_STATES = ['intact', 'drifting', 'invalidated', 'not_evaluab
  *   This is the trade-specific anchor health metric (vs `largest_wall`
  *   which tracks the marketwide dominant wall). Optional for legacy
  *   snapshots.
+ * @property {number|null} [net_vex] - signed dealer-book net vanna
+ *   exposure. Same call-positive / put-negative convention as net_gex.
+ *   Optional for legacy snapshots.
  * @property {{strike:number,expiration:string,gex_net:number}|null} largest_wall
  *
  * @typedef {Object} LiveSnapshot
  * @property {number|null} spot
  * @property {number|null} net_gex
  * @property {number|null} [net_dex]
+ * @property {number|null} [net_vex]
  * @property {number|null} [wall_gex_at_short_strike]
  * @property {{strike:number,expiration:string,gex_net:number}|null} largest_wall
  *
@@ -421,6 +433,42 @@ export function computeThesisVerdict(entry, live, trade) {
       } else if (isBullish || isBearish) {
         // Flip in the trade's favor — informational, state unchanged.
         reasons.push(`Net DEX flipped ${fmtMillions(entryDex)} → ${fmtMillions(liveDex)}. Dealers ${dealerBehavior} — tailwind for your direction.`)
+      }
+    }
+  }
+
+  // ── 3d. Net VEX flip (dealer vol-hedging regime) ────────────────
+  // VEX flips on the same sign+magnitude rule as DEX, but we only
+  // change state on it when the trade is vega-sensitive:
+  //   * Debit verticals (BULL_CALL, BEAR_PUT) — net long vega until
+  //     the long leg goes deep ITM; VEX flip can meaningfully shift
+  //     the spread's mark.
+  //   * Credit verticals (BULL_PUT_CREDIT, BEAR_CALL_CREDIT) — roughly
+  //     vega-neutral by construction; VEX flip is informational only.
+  // Suppressed when breakThroughFired (same reasoning as the other
+  // post-pierce checks above).
+  const isDebitVertical = ['BULL_CALL', 'BEAR_PUT'].includes(trade.strategy_type)
+  if (
+    !breakThroughFired &&
+    Number.isFinite(entry.net_vex) &&
+    Number.isFinite(live.net_vex) &&
+    Math.abs(entry.net_vex) > 0
+  ) {
+    const entryVex = entry.net_vex
+    const liveVex = live.net_vex
+    const vexSignFlipped =
+      Math.sign(entryVex) !== 0 &&
+      Math.sign(liveVex) !== 0 &&
+      Math.sign(entryVex) !== Math.sign(liveVex)
+    const liveVexMeaningful =
+      Math.abs(liveVex) > VEX_FLIP_MAGNITUDE_RATIO * Math.abs(entryVex)
+    if (vexSignFlipped && liveVexMeaningful) {
+      if (isDebitVertical) {
+        reasons.push(`Net VEX flipped ${fmtMillions(entryVex)} → ${fmtMillions(liveVex)}. Dealer vol-hedging regime inverted — vega-sensitive trade exposed.`)
+        state = 'drifting'
+      } else {
+        // Vega-neutral structure (credit verticals). Surface as info.
+        reasons.push(`Net VEX flipped ${fmtMillions(entryVex)} → ${fmtMillions(liveVex)}. Informational only — your structure is roughly vega-neutral.`)
       }
     }
   }

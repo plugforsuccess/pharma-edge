@@ -11,6 +11,7 @@ const STRIKE_DRIFT_THRESHOLD = 3
 const STRIKE_GEX_REINFORCE_RATIO = 1.3
 const STRIKE_GEX_MELT_RATIO = 0.5
 const DEX_FLIP_MAGNITUDE_RATIO = 0.1
+const VEX_FLIP_MAGNITUDE_RATIO = 0.1
 // Regime-flip deadband — see src/utils/thesisVerdict.js for rationale.
 const REGIME_DEADBAND_RATIO = 0.10
 const REGIME_DEADBAND_FLOOR = 20_000_000
@@ -28,6 +29,8 @@ export interface EntrySnapshot {
   // convention as compute-gex's MatrixOutput. Optional for legacy
   // snapshots predating the field.
   net_dex?: number | null
+  // Signed dealer-book net vanna exposure. Optional for legacy snapshots.
+  net_vex?: number | null
   // Signed GEX at the trade's short strike, summed across the matrix's
   // expirations. Optional for legacy snapshots.
   wall_gex_at_short_strike?: number | null
@@ -38,6 +41,7 @@ export interface LiveSnapshot {
   spot: number | null
   net_gex: number | null
   net_dex?: number | null
+  net_vex?: number | null
   wall_gex_at_short_strike?: number | null
   largest_wall: { strike: number; expiration: string; gex_net: number } | null
 }
@@ -244,6 +248,32 @@ export function computeThesisVerdict(
         state = 'drifting'
       } else if (isBullish || isBearish) {
         reasons.push(`Net DEX flipped ${fmtMillions(eD)} → ${fmtMillions(lD)}. Dealers ${dealerBehavior} — tailwind for your direction.`)
+      }
+    }
+  }
+
+  // Net VEX flip — vega-sensitivity gated by strategy_type. See
+  // src/utils/thesisVerdict.js for full rationale; mirror in lock-step.
+  const isDebitVertical = ['BULL_CALL', 'BEAR_PUT'].includes(trade.strategy_type)
+  const entryVexVal = entry.net_vex ?? null
+  const liveVexVal = live.net_vex ?? null
+  if (
+    !breakThroughFired &&
+    Number.isFinite(entryVexVal) &&
+    Number.isFinite(liveVexVal) &&
+    Math.abs(entryVexVal as number) > 0
+  ) {
+    const eV = entryVexVal as number
+    const lV = liveVexVal as number
+    const vexSignFlipped =
+      Math.sign(eV) !== 0 && Math.sign(lV) !== 0 && Math.sign(eV) !== Math.sign(lV)
+    const liveVexMeaningful = Math.abs(lV) > VEX_FLIP_MAGNITUDE_RATIO * Math.abs(eV)
+    if (vexSignFlipped && liveVexMeaningful) {
+      if (isDebitVertical) {
+        reasons.push(`Net VEX flipped ${fmtMillions(eV)} → ${fmtMillions(lV)}. Dealer vol-hedging regime inverted — vega-sensitive trade exposed.`)
+        state = 'drifting'
+      } else {
+        reasons.push(`Net VEX flipped ${fmtMillions(eV)} → ${fmtMillions(lV)}. Informational only — your structure is roughly vega-neutral.`)
       }
     }
   }

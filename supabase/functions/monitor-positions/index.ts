@@ -159,6 +159,23 @@ interface Position {
 // 'mixed' = transition / disagreement
 type Regime = 'A' | 'B' | 'mixed'
 
+// Black-Scholes vanna (∂delta/∂σ) — used to compute live net VEX from
+// dxlink rows. dxFeed delivers gamma + delta + vega but NOT vanna, so
+// we recompute inline. Mirrors compute-gex/greeks.ts bsVanna; keep the
+// formula identical or net VEX will diverge between sources.
+// q = 0 (no dividend), r = 4.5% (same as compute-gex's RISK_FREE).
+const VANNA_R = 0.045
+function normPdfV(x: number): number {
+  return Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI)
+}
+function bsVanna(spot: number, strike: number, t: number, sigma: number): number {
+  if (!(spot > 0 && strike > 0 && t > 0 && sigma > 0)) return 0
+  const sqrtT = Math.sqrt(t)
+  const d1 = (Math.log(spot / strike) + (VANNA_R + 0.5 * sigma * sigma) * t) / (sigma * sqrtT)
+  const d2 = d1 - sigma * sqrtT
+  return -normPdfV(d1) * d2 / sigma
+}
+
 // Inline regime + snapshot computation from dxlink_quotes. Mirrors
 // compute-gex's dxlink path — sums OI × gamma × spot² across calls
 // (positive) and puts (negative) for the strikes near spot, then
@@ -181,6 +198,11 @@ export interface LiveSnapshotForVerdict {
   // spot. Same convention compute-gex's MatrixOutput uses. Drives the
   // DEX-flip drift check in thesisVerdict.
   net_dex: number
+  // Signed dealer-book net vanna exposure: sum of OI × vanna × spot²
+  // across calls (positive) and puts (negative). Vanna inferred from
+  // BS using the dxFeed-supplied IV per row. Drives the VEX-flip
+  // drift check in thesisVerdict.
+  net_vex: number
   // Per-strike net GEX for the front expiration. Used to compute the
   // trade-specific `wall_gex_at_short_strike` value passed to the
   // verdict module (each position has its own short strike, so the
@@ -215,7 +237,7 @@ async function deriveSnapshotForTicker(
 ): Promise<LiveSnapshotForVerdict | null> {
   const { data: rows } = await supabase
     .from('dxlink_quotes')
-    .select('kind, expiration_date, strike, option_type, gamma, delta, open_interest, mid, bid, ask, updated_at')
+    .select('kind, expiration_date, strike, option_type, gamma, delta, iv, open_interest, mid, bid, ask, updated_at')
     .or(`symbol.eq.${ticker},underlying.eq.${ticker}`)
   if (!rows || rows.length === 0) return null
 
@@ -254,11 +276,20 @@ async function deriveSnapshotForTicker(
   const dN = spot * spot
   const byStrike = new Map<number, number>()
   let netDex = 0
+  let netVex = 0
+  // Convert YYYY-MM-DD to year fraction for the vanna calc. dxlink
+  // doesn't deliver vanna; we compute it inline from IV + spot +
+  // strike + DTE. Recomputing per-row is fine — bsVanna is cheap.
+  const dteOf = (exp: string): number => {
+    const ms = new Date(exp + 'T16:00:00Z').getTime() - Date.now()
+    return Math.max(ms / (365 * 86_400_000), 1 / 365)
+  }
   for (const r of optionRows) {
     if (r.strike == null) continue
     const oi = r.open_interest ?? 0
     const g = r.gamma ?? 0
     const d = r.delta ?? 0
+    const iv = r.iv ?? 0
     if (oi === 0) continue
     if (Number.isFinite(g) && g > 0) {
       const sign = r.option_type === 'C' ? 1 : -1
@@ -268,6 +299,16 @@ async function deriveSnapshotForTicker(
     // puts). Same recipe as compute-gex's MatrixOutput.
     if (Number.isFinite(d)) {
       netDex += oi * d * spot
+    }
+    // VEX accumulation: vanna is ∂delta/∂σ (gamma's vol cousin).
+    // Calls contribute positively, puts negatively — same dealer-
+    // hedging convention as GEX. Skip rows missing IV (dxFeed
+    // occasionally ships partial frames).
+    if (Number.isFinite(iv) && iv > 0 && r.expiration_date) {
+      const t = dteOf(r.expiration_date as string)
+      const v = bsVanna(spot, r.strike, t, iv)
+      const sign = r.option_type === 'C' ? 1 : -1
+      netVex += sign * oi * v * dN
     }
   }
   if (byStrike.size === 0) return null
@@ -318,6 +359,7 @@ async function deriveSnapshotForTicker(
     spot,
     net_gex: netGex,
     net_dex: netDex,
+    net_vex: netVex,
     gex_by_strike: byStrike,
     largest_wall: largestStrike != null
       ? { strike: largestStrike, expiration: targetExpiration, gex_net: largestNet }
@@ -968,6 +1010,7 @@ serve(async (req) => {
               spot: liveSnapshot.spot,
               net_gex: liveSnapshot.net_gex,
               net_dex: liveSnapshot.net_dex,
+              net_vex: liveSnapshot.net_vex,
               wall_gex_at_short_strike: liveWallAtShort,
               largest_wall: liveSnapshot.largest_wall,
             }
