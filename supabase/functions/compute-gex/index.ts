@@ -129,6 +129,42 @@ function bsGamma(spot: number, strike: number, t: number, sigma: number): number
   return normPdf(d1) / (spot * sigma * sqrtT)
 }
 
+// Median ATM IV across a single expiration's strikes. Used by each
+// matrix source path to compute a real `frontIv` so the expected-move
+// metric isn't pegged at the 0.20 fallback. ATM band is ±5% of spot
+// by default — wide enough to catch ≥3 strikes on most underlyings,
+// narrow enough that skew doesn't bias the median. Picks up both call
+// IV and put IV when present (so a strike that's missing one side
+// still contributes the other); takes the true median across the
+// collected values.
+//
+// Returns `undefined` when no strike in the band has a usable IV, so
+// the caller can fall back to the 0.20 last-resort default — but in
+// practice this fires correctly on every liquid name where the source
+// returned an IV column (Polygon Greeks, dxlink Quote events, Yahoo
+// optionChain).
+function medianAtmIv(
+  spot: number,
+  strikes: Array<{ strike: number; callIv: number | null; putIv: number | null }>,
+  bandPct = 0.05,
+): number | undefined {
+  if (!(spot > 0)) return undefined
+  const lo = spot * (1 - bandPct)
+  const hi = spot * (1 + bandPct)
+  const ivs: number[] = []
+  for (const s of strikes) {
+    if (!Number.isFinite(s.strike) || s.strike < lo || s.strike > hi) continue
+    const c = Number(s.callIv)
+    const p = Number(s.putIv)
+    if (Number.isFinite(c) && c > 0) ivs.push(c)
+    if (Number.isFinite(p) && p > 0) ivs.push(p)
+  }
+  if (ivs.length === 0) return undefined
+  ivs.sort((a, b) => a - b)
+  const mid = Math.floor(ivs.length / 2)
+  return ivs.length % 2 === 0 ? (ivs[mid - 1] + ivs[mid]) / 2 : ivs[mid]
+}
+
 interface StrikeResult {
   strike: number
   oi_call: number
@@ -562,6 +598,17 @@ async function computeMatrixFromPolygon(
 
   const futureExps = expiries.map((e) => e.date)
 
+  // Front-expiry median ATM IV — drives `expected_move` / `iv_used`
+  // in the matrix output. Falls back to 0.20 inside buildMatrix when
+  // no strike in the ATM band carries a usable IV.
+  const polygonFrontIv = expiries.length > 0
+    ? medianAtmIv(spot, expiries[0].strikes.map((s) => ({
+        strike: s.strike,
+        callIv: s.callIV,
+        putIv: s.putIV,
+      })))
+    : undefined
+
   return buildMatrix(ticker, spot, 'polygon', futureExps, (exp, strike) => {
     const cell = byExp.get(exp)?.get(strike)
     if (!cell) return EMPTY_CELL
@@ -588,7 +635,7 @@ async function computeMatrixFromPolygon(
     return { gex, vex, cex, dex }
   }, (exp) => {
     return Array.from(byExp.get(exp)?.keys() ?? [])
-  }, opts, undefined, undefined, previousClose)
+  }, opts, undefined, polygonFrontIv, previousClose)
 }
 
 async function computeMatrixFromDxLink(
@@ -689,6 +736,14 @@ async function computeMatrixFromDxLink(
     return Math.max(1, Math.round((expMs - Date.now()) / 86_400_000))
   }
 
+  // Front-expiry median ATM IV — see Polygon path for rationale.
+  const dxlinkFrontExp = futureExps[0]
+  const dxlinkFrontIv = dxlinkFrontExp
+    ? medianAtmIv(spot, Array.from(byExpFull.get(dxlinkFrontExp)?.entries() ?? []).map(
+        ([strike, b]) => ({ strike, callIv: b.call_iv, putIv: b.put_iv }),
+      ))
+    : undefined
+
   return buildMatrix(ticker, spot, 'dxlink', futureExps, (exp, strike) => {
     const bucket = byExpFull.get(exp)?.get(strike)
     if (!bucket) return EMPTY_CELL
@@ -713,7 +768,7 @@ async function computeMatrixFromDxLink(
     return { gex, vex, cex, dex }
   }, (exp) => {
     return Array.from(byExpFull.get(exp)?.keys() ?? [])
-  }, opts, undefined, undefined, prevClose)
+  }, opts, undefined, dxlinkFrontIv, prevClose)
 }
 
 async function computeMatrixFromYahoo(
@@ -792,6 +847,14 @@ async function computeMatrixFromYahoo(
   const futureExps = Array.from(byExp.keys()).sort().slice(0, opts.maxExpirations)
   if (futureExps.length === 0) return { error: 'no chains came back from yahoo' }
 
+  // Front-expiry median ATM IV — see Polygon path for rationale.
+  const yahooFrontExp = futureExps[0]
+  const yahooFrontIv = yahooFrontExp
+    ? medianAtmIv(spot, Array.from(byExp.get(yahooFrontExp)?.entries() ?? []).map(
+        ([strike, b]) => ({ strike, callIv: b.callIV, putIv: b.putIV }),
+      ))
+    : undefined
+
   return buildMatrix(ticker, spot, 'yahoo', futureExps, (exp, strike) => {
     const bucket = byExp.get(exp)?.get(strike)
     if (!bucket) return EMPTY_CELL
@@ -815,7 +878,7 @@ async function computeMatrixFromYahoo(
     return { gex, vex, cex, dex }
   }, (exp) => {
     return Array.from(byExp.get(exp)?.keys() ?? [])
-  }, opts, dteByExp, undefined, yahooPrevClose ?? null)
+  }, opts, dteByExp, yahooFrontIv, yahooPrevClose ?? null)
 }
 
 // Velocity Mode — diff the live matrix against the most recent
@@ -991,12 +1054,13 @@ function buildMatrix(
     return { date, dte }
   })
 
-  // Expected move uses the front-expiry IV. When the caller didn't
-  // pass one (dxlink path doesn't bother extracting it cleanly), we
-  // approximate by walking the strikes at the front expiry and taking
-  // the median IV-equivalent gamma — but a much simpler stand-in is
-  // 20% as a fallback default. Front IV is the right answer when we
-  // have it; the fallback keeps the metric defined.
+  // Expected move uses the front-expiry IV. Each source path now
+  // computes a real `frontIv` via medianAtmIv() and passes it in;
+  // the 0.20 default below is a last-resort fallback that only fires
+  // when no strike in the ATM band carried a usable IV (illiquid
+  // names, mid-frame dxFeed glitch, or a Yahoo response with the
+  // IV column stripped). Front IV is the right answer when we have
+  // it; the fallback keeps the metric defined.
   const frontDte = expirationInfos[0]?.dte ?? 7
   const ivForExpectedMove = frontIv && frontIv > 0 ? frontIv : 0.20
   const em = expectedMove(spot, ivForExpectedMove, frontDte)
