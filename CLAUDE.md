@@ -138,13 +138,20 @@ variable to its full name; set `VITE_PUBLIC_RECORD_REPO` in Vercel env.
   (sandbox) base URL as paper for UX-warning purposes.
 - `compute-gex` v6+ (`verify_jwt=true`). Returns Gamma Exposure (GEX) by
   strike for a single ticker so `/markets` can render the heatmap.
-  **Primary: `dxlink_quotes`** (real-time from the dxlink-worker).
-  **Fallback: Yahoo `/v7/finance/options/{symbol}`** (15-min delayed,
-  Black-Scholes gamma in-edge) — used when the worker hasn't subscribed
-  to the requested ticker, the rows are >30s stale, or DXLink is down.
-  Response includes `source: 'dxlink' | 'yahoo'` so the UI can label
-  freshness. 5-minute snapshot cache via `gex_snapshots`; `refresh:true`
-  bypasses. Yahoo path uses cookie+crumb auth.
+  **Primary: Polygon (Massive) `/v3/snapshot/options/{underlying}`** —
+  real-time chain with OI + Greeks + IV per contract per expiry, gated
+  on `MASSIVE_API_KEY` being set. Covers every listed underlying, not
+  just the curated DXLink universe. **Secondary: `dxlink_quotes`** —
+  real-time per-symbol cache from the dxlink-worker, used when Polygon
+  errors. **Tertiary: Yahoo `/v7/finance/options/{symbol}`** —
+  15-min delayed, Black-Scholes gamma in-edge, cookie+crumb auth.
+  **Quaternary: `gex_history` EOD snapshot** — last-good matrix served
+  with a `source: 'eod'` tag so the UI can label staleness. Polygon is
+  dynamically imported inside the dispatcher (see `loadPolygon()`) so
+  a `polygon.ts` parse error degrades gracefully to DXLink instead of
+  503'ing the function. `SKIP_POLYGON=true` bypasses Polygon entirely.
+  Response includes `source: 'polygon' | 'dxlink' | 'yahoo' | 'eod'`.
+  5-minute snapshot cache via `gex_snapshots`; `refresh:true` bypasses.
 - `monitor-positions` v1+ (`verify_jwt=true`). Polls Tastytrade
   `/accounts/:n/orders` for active orders and reconciles fill status
   onto `order_history`. Triggered by
