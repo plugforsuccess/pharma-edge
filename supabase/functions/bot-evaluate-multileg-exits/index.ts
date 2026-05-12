@@ -1,3 +1,4 @@
+// deploy-trigger: 2026-05-12 (manual workflow nudge)
 // bot-evaluate-multileg-exits — autonomous exit engine for 2-leg
 // credit verticals and 4-leg iron condors / iron butterflies.
 //

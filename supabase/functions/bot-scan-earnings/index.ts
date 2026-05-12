@@ -1,3 +1,4 @@
+// deploy-trigger: 2026-05-12 (manual workflow nudge)
 // bot-scan-earnings — earnings-IV-crush scanner.
 //
 // Strategy: SHORT IRON CONDOR opened the day before a BMO earnings

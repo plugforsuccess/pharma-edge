@@ -1,3 +1,4 @@
+// deploy-trigger: 2026-05-12 (manual workflow nudge)
 // bot-scan-iv-meanrev — IV mean-reversion scanner.
 //
 // Looks for liquid tickers where 30d IV is at or above the 80th

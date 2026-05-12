@@ -1,3 +1,4 @@
+// deploy-trigger: 2026-05-12 (manual workflow nudge)
 // bot-scan-opex — OPEX-pin scanner.
 //
 // Strategy: SHORT IRON BUTTERFLY centred on the call wall (Regime A
