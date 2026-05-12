@@ -11,6 +11,15 @@ const STRIKE_DRIFT_THRESHOLD = 3
 const STRIKE_GEX_REINFORCE_RATIO = 1.3
 const STRIKE_GEX_MELT_RATIO = 0.5
 const DEX_FLIP_MAGNITUDE_RATIO = 0.1
+// Regime-flip deadband — see src/utils/thesisVerdict.js for rationale.
+const REGIME_DEADBAND_RATIO = 0.10
+const REGIME_DEADBAND_FLOOR = 20_000_000
+// Pin-thesis thresholds scaled by spot — see src/utils/thesisVerdict.js.
+// Calibrated so $100 spot → $5/$8 (matches original absolute thresholds).
+const PIN_DRIFT_PCT = 0.05
+const PIN_INVALIDATE_PCT = 0.08
+// Entry-spot-equals-target tolerance — see src/utils/thesisVerdict.js.
+const ENTRY_SPOT_AMBIGUOUS_TOLERANCE = 0.25
 
 export interface EntrySnapshot {
   spot: number | null
@@ -79,10 +88,12 @@ export function computeThesisVerdict(
     return computeStructuredVerdict(entry, live, trade)
   }
 
-  // Regime-flip — skip when net_gex unavailable on either side.
+  // Regime-flip with deadband — mirror src/utils/thesisVerdict.js.
+  // trade.regime_at_entry intentionally ignored; both sides classified
+  // by the same function with entry's magnitude as the reference.
   if (Number.isFinite(entry.net_gex) && Number.isFinite(live.net_gex)) {
-    const entryRegime = trade.regime_at_entry ?? regimeFromNetGex(entry.net_gex!)
-    const liveRegime = regimeFromNetGex(live.net_gex!)
+    const entryRegime = regimeFromNetGex(entry.net_gex!, entry.net_gex)
+    const liveRegime = regimeFromNetGex(live.net_gex!, entry.net_gex)
     if (entryRegime !== liveRegime && entryRegime !== 'mixed' && liveRegime !== 'mixed') {
       reasons.push(`Regime flipped ${entryRegime} → ${liveRegime} since entry. Dealer hedging dynamics have inverted.`)
       state = 'invalidated'
@@ -150,6 +161,13 @@ export function computeThesisVerdict(
     const liveExpAtTradeExp =
       tradeExpiration != null && live.largest_wall.expiration === tradeExpiration
 
+    // Wall-running-past-target safe-harbor (audit #10). Mirror of
+    // src/utils/thesisVerdict.js.
+    const liveWallPastTargetInFavor =
+      Number.isFinite(targetStrike) &&
+      ((isBullish && liveStrike > targetStrike + STRIKE_TARGET_TOLERANCE) ||
+        (isBearish && liveStrike < targetStrike - STRIKE_TARGET_TOLERANCE))
+
     if (Number.isFinite(entryStrike) && Number.isFinite(liveStrike)) {
       const strikeDrift = Math.abs(liveStrike - entryStrike)
       if (strikeDrift >= STRIKE_DRIFT_THRESHOLD) {
@@ -157,6 +175,9 @@ export function computeThesisVerdict(
           reasons.push(`Dominant wall has migrated to ${formatStrike(liveStrike)} @ ${live.largest_wall.expiration} — your structural target zone. Thesis playing out.`)
         } else if (liveAtTradeTarget) {
           reasons.push(`Dominant wall now at ${formatStrike(liveStrike)} — your trade's short strike. Strike target reached.`)
+        } else if (liveWallPastTargetInFavor) {
+          const direction = isBullish ? 'above' : 'below'
+          reasons.push(`Dominant wall has run to ${formatStrike(liveStrike)} — past your ${formatStrike(targetStrike)} target ${direction} entry's level. Dealer book reconcentrated in your direction.`)
         } else {
           reasons.push(`Dominant wall shifted from ${formatStrike(entryStrike)} → ${formatStrike(liveStrike)}. Thesis anchor moved.`)
           state = 'drifting'
@@ -258,11 +279,10 @@ function computeStructuredVerdict(
   const liveSpot = Number(live.spot)
   const entrySpot = Number(entry.spot)
 
-  // Regime-flip check requires net_gex on both sides; skip silently
-  // when missing (Yahoo fallback case).
+  // Regime-flip with deadband — see src/utils/thesisVerdict.js.
   if (Number.isFinite(entry.net_gex) && Number.isFinite(live.net_gex)) {
-    const entryRegime = trade.regime_at_entry ?? regimeFromNetGex(entry.net_gex!)
-    const liveRegime = regimeFromNetGex(live.net_gex!)
+    const entryRegime = regimeFromNetGex(entry.net_gex!, entry.net_gex)
+    const liveRegime = regimeFromNetGex(live.net_gex!, entry.net_gex)
     if (entryRegime !== liveRegime && entryRegime !== 'mixed' && liveRegime !== 'mixed') {
       reasons.push(`Regime flipped ${entryRegime} → ${liveRegime} since entry. Dealer hedging dynamics have inverted.`)
       state = 'invalidated'
@@ -273,8 +293,17 @@ function computeStructuredVerdict(
   let breakThroughFired = false
   if (targetKind === 'break_through') {
     const PIERCE = 0.5
-    const wantsUp = entrySpot < targetStrike
-    const wantsDown = entrySpot > targetStrike
+    // Audit #8: ambiguous direction → not_evaluable.
+    if (Math.abs(entrySpot - targetStrike) < ENTRY_SPOT_AMBIGUOUS_TOLERANCE) {
+      return {
+        state: 'not_evaluable',
+        reasons: [
+          `Entry spot ${entrySpot.toFixed(2)} was at the target ${formatStrike(targetStrike)} — break-through direction is ambiguous. Re-log the signal with a clearer entry context.`,
+        ],
+      }
+    }
+    const wantsUp = entrySpot < targetStrike - ENTRY_SPOT_AMBIGUOUS_TOLERANCE
+    const wantsDown = entrySpot > targetStrike + ENTRY_SPOT_AMBIGUOUS_TOLERANCE
     if (wantsUp && liveSpot >= targetStrike + PIERCE) {
       reasons.push(`Spot has broken through the target wall at ${formatStrike(targetStrike)} — structural target reached. Check the P&L card.`)
       breakThroughFired = true
@@ -289,10 +318,15 @@ function computeStructuredVerdict(
       state = 'drifting'
     }
   } else if (targetKind === 'pin_to') {
-    if (Math.abs(liveSpot - targetStrike) >= 5) {
+    // Audit #7: thresholds scale by spot.
+    const distance = Math.abs(liveSpot - targetStrike)
+    const driftMin = liveSpot * PIN_DRIFT_PCT
+    const invalidateMin = liveSpot * PIN_INVALIDATE_PCT
+    if (distance >= driftMin) {
       const direction = liveSpot > targetStrike ? 'above' : 'below'
-      reasons.push(`Spot at ${liveSpot.toFixed(2)} is ${direction} the pin target ${formatStrike(targetStrike)} by ${Math.abs(liveSpot - targetStrike).toFixed(2)}. Pin thesis weakening.`)
-      state = liveSpot > targetStrike + 8 || liveSpot < targetStrike - 8 ? 'invalidated' : 'drifting'
+      const pctMove = ((distance / liveSpot) * 100).toFixed(2)
+      reasons.push(`Spot at ${liveSpot.toFixed(2)} is ${direction} the pin target ${formatStrike(targetStrike)} by ${distance.toFixed(2)} (${pctMove}%). Pin thesis weakening.`)
+      state = distance > invalidateMin ? 'invalidated' : 'drifting'
     }
   } else if (targetKind === 'fade') {
     const entryDistance = Math.abs(entrySpot - targetStrike)
@@ -305,11 +339,28 @@ function computeStructuredVerdict(
     }
   }
 
+  // Audit #10: live-wall migration with directional safe-harbor for
+  // break_through. Threshold scales by spot (audit #7).
   if (live.largest_wall && !breakThroughFired && state === 'intact') {
     const liveWallStrike = Number(live.largest_wall.strike)
-    if (Number.isFinite(liveWallStrike) && Math.abs(liveWallStrike - targetStrike) >= 5) {
-      reasons.push(`Live dominant wall is at ${formatStrike(liveWallStrike)} — your target was ${formatStrike(targetStrike)}. Different cluster anchoring the regime now.`)
-      state = 'drifting'
+    const wallDistance = Math.abs(liveWallStrike - targetStrike)
+    const wallDriftMin = liveSpot * 0.05
+    if (Number.isFinite(liveWallStrike) && wallDistance >= wallDriftMin) {
+      let favorable = false
+      if (targetKind === 'break_through') {
+        const wantsUp = entrySpot < targetStrike - ENTRY_SPOT_AMBIGUOUS_TOLERANCE
+        const wantsDown = entrySpot > targetStrike + ENTRY_SPOT_AMBIGUOUS_TOLERANCE
+        favorable =
+          (wantsUp && liveWallStrike > targetStrike) ||
+          (wantsDown && liveWallStrike < targetStrike)
+      }
+      if (favorable) {
+        const direction = liveWallStrike > targetStrike ? 'above' : 'below'
+        reasons.push(`Live dominant wall has run to ${formatStrike(liveWallStrike)} — past your ${formatStrike(targetStrike)} target ${direction} entry. Dealer book reconcentrated in your direction.`)
+      } else {
+        reasons.push(`Live dominant wall is at ${formatStrike(liveWallStrike)} — your target was ${formatStrike(targetStrike)}. Different cluster anchoring the regime now.`)
+        state = 'drifting'
+      }
     }
   }
 
@@ -320,8 +371,18 @@ function computeStructuredVerdict(
   return { state, reasons }
 }
 
-function regimeFromNetGex(netGex: number): 'A' | 'B' | 'mixed' {
+// Regime classifier with deadband — see src/utils/thesisVerdict.js.
+function regimeFromNetGex(
+  netGex: number,
+  referenceGex?: number | null,
+): 'A' | 'B' | 'mixed' {
   if (!Number.isFinite(netGex)) return 'mixed'
+  const ref =
+    referenceGex != null && Number.isFinite(referenceGex)
+      ? Math.abs(referenceGex)
+      : 0
+  const threshold = Math.max(ref * REGIME_DEADBAND_RATIO, REGIME_DEADBAND_FLOOR)
+  if (Math.abs(netGex) < threshold) return 'mixed'
   if (netGex > 0) return 'A'
   if (netGex < 0) return 'B'
   return 'mixed'

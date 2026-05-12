@@ -58,6 +58,46 @@ const STRIKE_GEX_MELT_RATIO = 0.5
 // crossings) so we gate on the magnitude threshold.
 const DEX_FLIP_MAGNITUDE_RATIO = 0.1
 
+// Regime-flip deadband (audit #3 + #4). Net GEX flips around zero are
+// noise — a position entered at +$1M and now sitting at -$1M shouldn't
+// auto-close. We treat anything within ±10% of the entry magnitude OR
+// below an absolute floor ($20M) as 'mixed' regardless of sign.
+//
+// The same classifier runs on both sides (audit #4): both `entry` and
+// `live` go through regimeFromNetGex with the same reference, so we
+// can't have one side classified with one classifier and the other
+// with a different one. The persisted `trade.regime_at_entry`
+// (originally produced by deriveRegime in monitor-positions, which
+// uses flip + sign) is therefore IGNORED for the comparison — we
+// always recompute both sides here so the contract is "same function,
+// same reference → comparable output."
+const REGIME_DEADBAND_RATIO = 0.10
+const REGIME_DEADBAND_FLOOR = 20_000_000
+
+// Pin-thesis thresholds (audit #7 / #10). Previously absolute dollar
+// amounts (≥5 → drifting, >8 → invalidated). Those work for $100 ETFs
+// and break everywhere else — SPX at 5000 never crosses an absolute-5
+// threshold; a $30 stock at 38 always does. Scaled by spot instead:
+//
+//   |live - target| / spot < 5%             → no signal
+//   |live - target| / spot ≥ 5% AND ≤ 8%    → drifting
+//   |live - target| / spot > 8%             → invalidated
+//
+// Calibration: at $100 spot the percentages collapse to the original
+// $5 / $8 absolute thresholds, so existing $100-ish ETF behavior is
+// preserved exactly. At $5000 SPX they become $250 / $400 — first
+// real "pin thesis weakening" reads at a 5% index move. At $30 they
+// become $1.50 / $2.40 — proportional and meaningful.
+const PIN_DRIFT_PCT = 0.05
+const PIN_INVALIDATE_PCT = 0.08
+
+// Entry-spot-equals-target tolerance (audit #8). When entrySpot is
+// within ±$0.25 of targetStrike, the break_through direction is
+// ambiguous (we can't tell from one observation whether the trade
+// wants spot to rise or fall) — fall through to a not_evaluable
+// reason instead of silently treating it as intact.
+const ENTRY_SPOT_AMBIGUOUS_TOLERANCE = 0.25
+
 export const VERDICT_STATES = ['intact', 'drifting', 'invalidated', 'not_evaluable']
 
 /**
@@ -138,8 +178,11 @@ export function computeThesisVerdict(entry, live, trade) {
   // ±5% of |entry.net_gex|) we treat as 'mixed' — too noisy to call.
   // Skipped when haveNetGex is false (Yahoo fallback case).
   if (haveNetGex) {
-    const entryRegime = trade.regime_at_entry ?? regimeFromNetGex(entry.net_gex)
-    const liveRegime = regimeFromNetGex(live.net_gex)
+    // Both sides classified by the same function with entry's magnitude
+    // as the deadband reference. trade.regime_at_entry is intentionally
+    // ignored — see REGIME_DEADBAND_RATIO comment near the top.
+    const entryRegime = regimeFromNetGex(entry.net_gex, entry.net_gex)
+    const liveRegime = regimeFromNetGex(live.net_gex, entry.net_gex)
     if (entryRegime !== liveRegime && entryRegime !== 'mixed' && liveRegime !== 'mixed') {
       reasons.push(`Regime flipped ${entryRegime} → ${liveRegime} since entry. Dealer hedging dynamics have inverted.`)
       state = 'invalidated'
@@ -252,6 +295,16 @@ export function computeThesisVerdict(entry, live, trade) {
     const liveExpAtTradeExp =
       tradeExpiration != null && live.largest_wall.expiration === tradeExpiration
 
+    // Audit #10 / #167 follow-on: wall has RUN PAST the trade's
+    // target in the trade's direction. Same suppression semantics
+    // as breakThroughFired — once the structural backdrop has
+    // reconcentrated past your target, that's the thesis playing
+    // out, not anchor drift.
+    const liveWallPastTargetInFavor =
+      Number.isFinite(targetStrike) &&
+      ((isBullish && liveStrike > targetStrike + STRIKE_TARGET_TOLERANCE) ||
+        (isBearish && liveStrike < targetStrike - STRIKE_TARGET_TOLERANCE))
+
     if (Number.isFinite(entryStrike) && Number.isFinite(liveStrike)) {
       const strikeDrift = Math.abs(liveStrike - entryStrike)
       if (strikeDrift >= STRIKE_DRIFT_THRESHOLD) {
@@ -262,6 +315,12 @@ export function computeThesisVerdict(entry, live, trade) {
         } else if (liveAtTradeTarget) {
           reasons.push(`Dominant wall now at ${formatStrike(liveStrike)} — your trade's short strike. Strike target reached.`)
           // close enough — call this intact, the strike is what matters
+        } else if (liveWallPastTargetInFavor) {
+          // Wall ran past target in trade direction. Informational
+          // positive reason, state unchanged.
+          const direction = isBullish ? 'above' : 'below'
+          reasons.push(`Dominant wall has run to ${formatStrike(liveStrike)} — past your ${formatStrike(targetStrike)} target ${direction} entry's level. Dealer book reconcentrated in your direction.`)
+          // do NOT set state = 'drifting'
         } else {
           reasons.push(`Dominant wall shifted from ${formatStrike(entryStrike)} → ${formatStrike(liveStrike)}. Thesis anchor moved.`)
           state = 'drifting'
@@ -407,14 +466,12 @@ function computeStructuredVerdict(entry, live, trade) {
   const liveSpot = Number(live.spot)
   const entrySpot = Number(entry.spot)
 
-  // Regime flip is invalidating regardless of thesis kind — when the
-  // dealer-hedging dynamics invert, the structural premise of any
-  // trade-vs-wall thesis is questionable. Skipped when net_gex is
-  // unavailable on either side (Yahoo fallback case where the cached
-  // payload only carries spot).
+  // Regime flip — same deadband-aware classifier as the heuristic
+  // path. trade.regime_at_entry intentionally ignored; see comment
+  // near REGIME_DEADBAND_RATIO at the top.
   if (Number.isFinite(entry.net_gex) && Number.isFinite(live.net_gex)) {
-    const entryRegime = trade.regime_at_entry ?? regimeFromNetGex(entry.net_gex)
-    const liveRegime = regimeFromNetGex(live.net_gex)
+    const entryRegime = regimeFromNetGex(entry.net_gex, entry.net_gex)
+    const liveRegime = regimeFromNetGex(live.net_gex, entry.net_gex)
     if (entryRegime !== liveRegime && entryRegime !== 'mixed' && liveRegime !== 'mixed') {
       reasons.push(`Regime flipped ${entryRegime} → ${liveRegime} since entry. Dealer hedging dynamics have inverted.`)
       state = 'invalidated'
@@ -429,9 +486,22 @@ function computeStructuredVerdict(entry, live, trade) {
     // direction. Direction inferred from where entry spot sat
     // relative to target — entry below = needs to rise; entry above
     // = needs to fall.
+    //
+    // Audit #8: when entrySpot is essentially at the target (within
+    // ENTRY_SPOT_AMBIGUOUS_TOLERANCE), direction is undefined — bail
+    // out as not_evaluable instead of silently falling through to
+    // intact forever.
     const PIERCE = 0.5
-    const wantsUp = entrySpot < targetStrike
-    const wantsDown = entrySpot > targetStrike
+    if (Math.abs(entrySpot - targetStrike) < ENTRY_SPOT_AMBIGUOUS_TOLERANCE) {
+      return {
+        state: 'not_evaluable',
+        reasons: [
+          `Entry spot ${entrySpot.toFixed(2)} was at the target ${formatStrike(targetStrike)} — break-through direction is ambiguous. Re-log the signal with a clearer entry context.`,
+        ],
+      }
+    }
+    const wantsUp = entrySpot < targetStrike - ENTRY_SPOT_AMBIGUOUS_TOLERANCE
+    const wantsDown = entrySpot > targetStrike + ENTRY_SPOT_AMBIGUOUS_TOLERANCE
     if (wantsUp && liveSpot >= targetStrike + PIERCE) {
       reasons.push(`Spot has broken through the target wall at ${formatStrike(targetStrike)} — structural target reached. Check the P&L card.`)
       breakThroughFired = true
@@ -451,12 +521,18 @@ function computeStructuredVerdict(entry, live, trade) {
   } else if (targetKind === 'pin_to') {
     // Trade wins when spot stays at or near target_strike at
     // expiration. Wall break in EITHER direction = thesis broken.
-    const PIERCE_THRESHOLD = 1.0  // tighter for pin trades
-    if (Math.abs(liveSpot - targetStrike) >= PIERCE_THRESHOLD * 5) {
-      // Spot meaningfully away from the pin
+    //
+    // Audit #7: thresholds scale by spot, not absolute dollars, so
+    // they work on SPX (0.5% of 5000 = 25 points) AND $30 stocks
+    // (0.5% of 30 = $0.15).
+    const distance = Math.abs(liveSpot - targetStrike)
+    const driftMin = liveSpot * PIN_DRIFT_PCT
+    const invalidateMin = liveSpot * PIN_INVALIDATE_PCT
+    if (distance >= driftMin) {
       const direction = liveSpot > targetStrike ? 'above' : 'below'
-      reasons.push(`Spot at ${liveSpot.toFixed(2)} is ${direction} the pin target ${formatStrike(targetStrike)} by ${Math.abs(liveSpot - targetStrike).toFixed(2)}. Pin thesis weakening.`)
-      state = liveSpot > targetStrike + 8 || liveSpot < targetStrike - 8 ? 'invalidated' : 'drifting'
+      const pctMove = ((distance / liveSpot) * 100).toFixed(2)
+      reasons.push(`Spot at ${liveSpot.toFixed(2)} is ${direction} the pin target ${formatStrike(targetStrike)} by ${distance.toFixed(2)} (${pctMove}%). Pin thesis weakening.`)
+      state = distance > invalidateMin ? 'invalidated' : 'drifting'
     }
   } else if (targetKind === 'fade') {
     // Trade wins when spot mean-reverts toward target_strike. Closer
@@ -477,11 +553,39 @@ function computeStructuredVerdict(entry, live, trade) {
   // target), so the next dominant cluster is informational, not a
   // drift event. Same for pin_to / fade where the verdict is already
   // expressing the relevant dynamics in the per-thesis branch above.
+  //
+  // Audit #10: extend the heuristic-path "wall past target in trade's
+  // favor" safe-harbor to the structured path. For break_through
+  // trades, direction is unambiguous (we computed wantsUp/wantsDown
+  // above) — if the live wall has run past target in that direction,
+  // it's the structural backdrop reinforcing the thesis, not drift.
+  //
+  // Threshold scales by spot (audit #7). 5% of spot — calibrated to
+  // match the original absolute-$5 behavior at $100 spot while
+  // scaling correctly for SPX / small-cap underlyings.
   if (live.largest_wall && !breakThroughFired && state === 'intact') {
     const liveWallStrike = Number(live.largest_wall.strike)
-    if (Number.isFinite(liveWallStrike) && Math.abs(liveWallStrike - targetStrike) >= 5) {
-      reasons.push(`Live dominant wall is at ${formatStrike(liveWallStrike)} — your target was ${formatStrike(targetStrike)}. Different cluster anchoring the regime now.`)
-      state = 'drifting'
+    const wallDistance = Math.abs(liveWallStrike - targetStrike)
+    const wallDriftMin = liveSpot * 0.05
+    if (Number.isFinite(liveWallStrike) && wallDistance >= wallDriftMin) {
+      // For break_through, check whether the wall has run PAST target
+      // in the trade's direction (favorable migration, not drift).
+      let favorable = false
+      if (targetKind === 'break_through') {
+        const wantsUp = entrySpot < targetStrike - ENTRY_SPOT_AMBIGUOUS_TOLERANCE
+        const wantsDown = entrySpot > targetStrike + ENTRY_SPOT_AMBIGUOUS_TOLERANCE
+        favorable =
+          (wantsUp && liveWallStrike > targetStrike) ||
+          (wantsDown && liveWallStrike < targetStrike)
+      }
+      if (favorable) {
+        const direction = liveWallStrike > targetStrike ? 'above' : 'below'
+        reasons.push(`Live dominant wall has run to ${formatStrike(liveWallStrike)} — past your ${formatStrike(targetStrike)} target ${direction} entry. Dealer book reconcentrated in your direction.`)
+        // state unchanged
+      } else {
+        reasons.push(`Live dominant wall is at ${formatStrike(liveWallStrike)} — your target was ${formatStrike(targetStrike)}. Different cluster anchoring the regime now.`)
+        state = 'drifting'
+      }
     }
   }
 
@@ -492,8 +596,18 @@ function computeStructuredVerdict(entry, live, trade) {
   return { state, reasons }
 }
 
-function regimeFromNetGex(netGex) {
+// Regime classifier with a noise deadband. `referenceGex` is the
+// magnitude we treat as "meaningful" — typically |entry.net_gex|.
+// Live values within ±REGIME_DEADBAND_RATIO of that reference (or
+// below the absolute floor) read as 'mixed' regardless of sign.
+// Audit #3 + #4: same classifier runs on both sides with the same
+// reference, so a +$1M → -$1M flip stays 'mixed → mixed' instead of
+// firing 'A → B → invalidated' on noise.
+function regimeFromNetGex(netGex, referenceGex) {
   if (!Number.isFinite(netGex)) return 'mixed'
+  const ref = Number.isFinite(referenceGex) ? Math.abs(referenceGex) : 0
+  const threshold = Math.max(ref * REGIME_DEADBAND_RATIO, REGIME_DEADBAND_FLOOR)
+  if (Math.abs(netGex) < threshold) return 'mixed'
   if (netGex > 0) return 'A'
   if (netGex < 0) return 'B'
   return 'mixed'

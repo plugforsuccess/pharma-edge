@@ -190,9 +190,28 @@ export interface LiveSnapshotForVerdict {
   regime: Regime
 }
 
+// AUDIT #5: deriveSnapshotForTicker is now position-aware. The trade's
+// own expiration (passed as `targetExpiration`) is the anchor for
+// net_gex, largest_wall, regime, and the per-strike GEX lookup. A
+// 30-DTE position no longer compares its entry's 30-DTE snapshot
+// against a live front-expiration snapshot — both sides anchored to
+// the same expiration.
+//
+// Returns null when:
+//   * dxlink_quotes has no rows for the ticker / no equity row
+//   * equity row is older than 30s (existing check)
+//   * AUDIT #6: median option `updated_at` for the target expiration
+//     is older than 5 minutes (option chains can stop updating after-
+//     hours or during quiet periods even when the equity tick is
+//     fresh; the median gates that out)
+//   * no option rows for the trade's expiration (worker isn't
+//     subscribed to it, or it's already expired) — verdict downstream
+//     will read not_evaluable, which is the safer default than
+//     auto-executing on the wrong expiration's positioning.
 async function deriveSnapshotForTicker(
   supabase: ReturnType<typeof createClient>,
   ticker: string,
+  targetExpiration: string,
 ): Promise<LiveSnapshotForVerdict | null> {
   const { data: rows } = await supabase
     .from('dxlink_quotes')
@@ -204,81 +223,61 @@ async function deriveSnapshotForTicker(
   if (!equity) return null
   const spot = equity.mid ?? equity.bid ?? equity.ask
   if (!spot || spot <= 0) return null
-  // 30s freshness gate — same threshold compute-gex uses for its
-  // dxlink path. Stale data → skip.
-  const age = Date.now() - new Date(equity.updated_at).getTime()
-  if (age > 30_000) return null
+  // 30s freshness gate on the equity row.
+  const equityAge = Date.now() - new Date(equity.updated_at).getTime()
+  if (equityAge > 30_000) return null
 
-  // Pick the front-most expiration with options. Different positions
-  // may sit on different expirations, but for regime classification
-  // the front gamma profile dominates the dealer book — that's the
-  // expiry we want.
-  const optionRows = rows.filter((r: any) => r.kind === 'option')
+  // AUDIT #5: filter to the trade's expiration only. The verdict for
+  // this position is about ITS expiration's positioning, not the
+  // front month's.
+  const optionRows = (rows as any[]).filter(
+    (r) => r.kind === 'option' && r.expiration_date === targetExpiration,
+  )
   if (optionRows.length === 0) return null
-  const today = new Date().toISOString().slice(0, 10)
-  const futureExps = Array.from(
-    new Set(optionRows.map((r: any) => r.expiration_date).filter((d: any): d is string => typeof d === 'string' && d >= today)),
-  ).sort() as string[]
-  if (futureExps.length === 0) return null
-  const frontExp = futureExps[0]
 
-  // Aggregate per-strike net GEX + cumulative net DEX. Same formulas
-  // as compute-gex's dxlink path — calls contribute positively, puts
-  // negatively. GEX uses gamma × OI × spot²; DEX uses delta × OI ×
-  // spot. dxFeed's Quote events deliver both Greeks; we don't refit.
-  //
-  // Two GEX maps:
-  //   * `byStrikeFront` — front-expiration only. Drives regime
-  //     classification (regime A/B/mixed is anchored to the front
-  //     gamma profile, same as compute-gex's `compute_regime`).
-  //   * `byStrikeAllExp` — cross-expiration aggregate. Drives the
-  //     wall-at-your-strike check in thesisVerdict so the entry-side
-  //     and live-side recipes match (LogSignal sums across the
-  //     matrix's expirations at lock time; this matches it).
+  // AUDIT #6: median option freshness gate. Equity ticks every few
+  // seconds during RTH but option chains can stale out (after-hours,
+  // illiquid expirations, dxfeed subscription gap). If the median
+  // option `updated_at` is older than 5 minutes, the verdict would
+  // be reading positioning that no longer reflects the live book.
+  const optionAges = optionRows
+    .map((r) => Date.now() - new Date(r.updated_at).getTime())
+    .filter((a) => Number.isFinite(a))
+    .sort((a, b) => a - b)
+  if (optionAges.length === 0) return null
+  const medianAge = optionAges[Math.floor(optionAges.length / 2)]
+  if (medianAge > 5 * 60 * 1000) return null
+
+  // Aggregate per-strike net GEX + cumulative net DEX from rows at the
+  // trade's expiration. Same formulas as compute-gex's dxlink path.
+  // calls contribute positively, puts negatively.
   const dN = spot * spot
-  const byStrikeFront = new Map<number, number>()
-  const byStrikeAllExp = new Map<number, number>()
+  const byStrike = new Map<number, number>()
   let netDex = 0
-  const accumGex = (
-    map: Map<number, number>,
-    strike: number,
-    oi: number,
-    gamma: number,
-    type: string,
-  ) => {
-    if (!Number.isFinite(gamma) || gamma <= 0) return
-    const sign = type === 'C' ? 1 : -1
-    map.set(strike, (map.get(strike) ?? 0) + sign * oi * gamma * dN)
-  }
   for (const r of optionRows) {
     if (r.strike == null) continue
     const oi = r.open_interest ?? 0
     const g = r.gamma ?? 0
     const d = r.delta ?? 0
     if (oi === 0) continue
-    if (r.expiration_date === frontExp) {
-      accumGex(byStrikeFront, r.strike, oi, g, r.option_type)
+    if (Number.isFinite(g) && g > 0) {
+      const sign = r.option_type === 'C' ? 1 : -1
+      byStrike.set(r.strike, (byStrike.get(r.strike) ?? 0) + sign * oi * g * dN)
     }
-    accumGex(byStrikeAllExp, r.strike, oi, g, r.option_type)
-    // DEX accumulation: the call/put sign is already encoded in the
-    // delta value itself (puts come back negative from dxFeed). Net
-    // DEX uses the full chain — same as compute-gex's MatrixOutput.
+    // DEX uses the dxFeed-supplied delta directly (already signed for
+    // puts). Same recipe as compute-gex's MatrixOutput.
     if (Number.isFinite(d)) {
       netDex += oi * d * spot
     }
   }
-  if (byStrikeFront.size === 0) return null
+  if (byStrike.size === 0) return null
 
-  // Net GEX: sum across all front-expiration strikes (regime metric).
+  // Net GEX: sum across all strikes at the target expiration.
   let netGex = 0
-  for (const v of byStrikeFront.values()) netGex += v
-  // Alias used below for the wall + flip calculation. Keeps the
-  // existing code shape intact; the new cross-expiration map is
-  // exposed separately via the return value.
-  const byStrike = byStrikeFront
+  for (const v of byStrike.values()) netGex += v
 
-  // Zero-gamma flip: walk strikes ascending, track running cumulative,
-  // find the first strike where cumulative crosses zero.
+  // Zero-gamma flip at the trade's expiration: walk strikes ascending,
+  // find where cumulative crosses zero.
   const strikesSorted = Array.from(byStrike.keys()).sort((a, b) => a - b)
   let cumulative = 0
   let flip: number | null = null
@@ -291,8 +290,9 @@ async function deriveSnapshotForTicker(
     }
   }
 
-  // Largest wall = strike with the largest |gex_net|. Same definition
-  // compute-gex uses for the ★ marker.
+  // Largest wall in the trade's expiration. Same definition as the
+  // entry-side recipe in LogSignal (largest |gex_net| at the target
+  // expiration column).
   let largestStrike: number | null = null
   let largestAbs = 0
   let largestNet = 0
@@ -305,7 +305,8 @@ async function deriveSnapshotForTicker(
     }
   }
 
-  // Regime decision — same rules as Reasoning.jsx's deriveRegime().
+  // Regime decision — same rules as Reasoning.jsx's deriveRegime(),
+  // applied to the trade's expiration.
   const aboveFlip = flip == null || spot >= flip
   const positiveGex = netGex >= 0
   let regime: Regime
@@ -317,9 +318,9 @@ async function deriveSnapshotForTicker(
     spot,
     net_gex: netGex,
     net_dex: netDex,
-    gex_by_strike: byStrikeAllExp,
+    gex_by_strike: byStrike,
     largest_wall: largestStrike != null
-      ? { strike: largestStrike, expiration: frontExp, gex_net: largestNet }
+      ? { strike: largestStrike, expiration: targetExpiration, gex_net: largestNet }
       : null,
     regime,
   }
@@ -895,7 +896,10 @@ serve(async (req) => {
     // transition without spamming on every cron tick within one regime.
     let regimeUpdate: { last_regime?: Regime | null } = {}
     let regimeShiftFired = false
-    const liveSnapshot = await deriveSnapshotForTicker(supabase, pos.ticker)
+    // Audit #5: each position's snapshot is derived at the trade's
+    // own expiration, not the front month. Multiple positions on the
+    // same ticker but different expirations get separate derivations.
+    const liveSnapshot = await deriveSnapshotForTicker(supabase, pos.ticker, pos.expiration)
     const currentRegime = liveSnapshot?.regime ?? null
     if (currentRegime) {
       regimeUpdate.last_regime = currentRegime
