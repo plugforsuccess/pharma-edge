@@ -116,10 +116,21 @@ async function fetchSnapshot(
   // Polygon paginates via next_url. Walk every page so all expirations
   // are returned. The strike filter above prevents this from being
   // pathological.
+  //
+  // Polygon's next_url does NOT carry the apiKey forward — earlier
+  // versions of this loop assumed it did, so page-2+ requests came
+  // back 401 and only page-1 contracts (often 0DTE-only) made it
+  // through. The reattachApiKey helper below ensures every request
+  // carries the auth.
+  function reattachApiKey(u: string): string {
+    if (u.includes('apiKey=')) return u
+    return u + (u.includes('?') ? '&' : '?') + `apiKey=${encodeURIComponent(MASSIVE_API_KEY!)}`
+  }
+
   let nextUrl: string | null = url.toString()
   const all: SnapshotContract[] = []
   while (nextUrl) {
-    const resp = await fetch(nextUrl)
+    const resp = await fetch(reattachApiKey(nextUrl))
     if (!resp.ok) {
       const text = await resp.text().catch(() => '')
       throw new PolygonError(
@@ -129,7 +140,6 @@ async function fetchSnapshot(
     }
     const body: { results?: SnapshotContract[]; next_url?: string } = await resp.json()
     if (Array.isArray(body.results)) all.push(...body.results)
-    // next_url already includes the apiKey from our original call.
     nextUrl = body.next_url ?? null
   }
   return all
