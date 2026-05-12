@@ -212,7 +212,14 @@ function BotStatusCard({ profile, todayRun, openCount, onHalt, killSwitchBusy, k
     let cancelled = false
     ;(async () => {
       try {
-        const { data, error: err } = await supabase.functions.invoke('get-account')
+        // Pass env that matches the current bot mode so we look in the
+        // right Tastytrade environment for the configured account.
+        // mode=paper → env=cert (api.cert.tastyworks.com)
+        // mode=live  → env=live (api.tastyworks.com)
+        const targetEnv = mode === 'paper' ? 'cert' : 'live'
+        const { data, error: err } = await supabase.functions.invoke('get-account', {
+          body: { env: targetEnv },
+        })
         if (cancelled) return
         if (err || !data?.success) {
           setLiveNlvSource('broker_unreachable')
@@ -223,9 +230,6 @@ function BotStatusCard({ profile, todayRun, openCount, onHalt, killSwitchBusy, k
           (a, b) =>
             Number(b.net_liquidating_value ?? 0) - Number(a.net_liquidating_value ?? 0),
         )
-        // Pick the account that matches the bot's currently-active number
-        // for the current mode. If not found (or unset), fall back to the
-        // largest non-paper account so the display is never blank.
         const targetNumber = mode === 'live'
           ? config.live_account_number
           : config.sandbox_account_number
@@ -233,19 +237,12 @@ function BotStatusCard({ profile, todayRun, openCount, onHalt, killSwitchBusy, k
           ? accounts.find((a) => String(a.account_number) === String(targetNumber))
           : null
         const primary = matched || accounts.find((a) => !a.is_paper) || accounts[0]
-        const isCertSandbox = Boolean(
-          data.is_sandbox ?? primary?.is_sandbox,
-        )
-        if (isCertSandbox) {
-          setLiveNlvSource('sandbox_skipped')
-          return
-        }
         const nlv = Number(primary?.net_liquidating_value)
         if (Number.isFinite(nlv) && nlv > 0) {
           setLiveNlv(nlv)
           setLiveNlvSource(
             matched
-              ? (primary.is_paper ? 'broker_paper' : 'broker_live')
+              ? (targetEnv === 'cert' ? 'broker_cert' : (primary.is_paper ? 'broker_paper' : 'broker_live'))
               : 'broker_fallback',
           )
         } else {
@@ -504,10 +501,10 @@ function formatAgo(iso) {
 function nlvSourceLabel(source) {
   switch (source) {
     case 'loading':            return 'loading…'
-    case 'broker_live':        return 'broker live'
-    case 'broker_paper':       return 'broker paper'
-    case 'broker_fallback':    return 'broker (no match)'
-    case 'sandbox_skipped':    return 'cert sandbox skipped'
+    case 'broker_live':        return 'live broker'
+    case 'broker_paper':       return 'prod paper'
+    case 'broker_cert':        return 'cert sandbox'
+    case 'broker_fallback':    return 'no account match'
     case 'broker_no_balance':  return 'broker no balance'
     case 'broker_unreachable': return 'profile fallback'
     default:                   return source
