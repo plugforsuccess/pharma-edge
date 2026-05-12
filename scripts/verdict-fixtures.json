@@ -104,6 +104,32 @@
     }
   },
   {
+    "name": "heuristic_bullish_wall_past_target_in_favor_is_intact",
+    "note": "Heuristic path. Bullish trade, dominant wall ran to 110 — 5 strikes ABOVE the short target of 105. Wall running past target in trade direction (without spot pierce). Should stay intact, NOT fire drift. Mirrors the spot-pierce success branch from §2 for the wall-only case.",
+    "input": {
+      "entry": { "spot": 100, "net_gex": 50000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 20000000 } },
+      "live":  { "spot": 102, "net_gex": 48000000, "largest_wall": { "strike": 110, "expiration": "2026-06-01", "gex_net": 22000000 } },
+      "trade": { "long_strike": 100, "short_strike": 105, "strategy_type": "BULL_CALL", "expiration": "2026-06-01" }
+    },
+    "expected": {
+      "state": "intact",
+      "reasons_contains_any": ["Dealer book reconcentrated in your direction", "past your"]
+    }
+  },
+  {
+    "name": "heuristic_bearish_wall_past_target_in_favor_is_intact",
+    "note": "Mirror for bearish. Bear put, target is the short strike (lower of the two). Wall ran to 90 — 5 strikes BELOW the short of 95. Wall running past target in trade direction. Should stay intact.",
+    "input": {
+      "entry": { "spot": 100, "net_gex": -50000000, "largest_wall": { "strike": 95, "expiration": "2026-06-01", "gex_net": -20000000 } },
+      "live":  { "spot": 98,  "net_gex": -52000000, "largest_wall": { "strike": 90, "expiration": "2026-06-01", "gex_net": -22000000 } },
+      "trade": { "long_strike": 100, "short_strike": 95, "strategy_type": "BEAR_PUT", "expiration": "2026-06-01" }
+    },
+    "expected": {
+      "state": "intact",
+      "reasons_contains_any": ["Dealer book reconcentrated in your direction", "past your"]
+    }
+  },
+  {
     "name": "heuristic_bullish_wall_past_target_after_pierce_is_intact",
     "note": "Canonical winning-trade case. Bullish call spread, spot rallied through the entry call wall, the new dominant wall is 10 strikes PAST the short strike. Old logic flagged this drifting because liveAtTradeTarget was false; new logic suppresses drift checks once breakThroughFired.",
     "input": {

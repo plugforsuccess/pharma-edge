@@ -254,6 +254,23 @@ export function computeThesisVerdict(entry, live, trade) {
 
     if (Number.isFinite(entryStrike) && Number.isFinite(liveStrike)) {
       const strikeDrift = Math.abs(liveStrike - entryStrike)
+      // Has the dominant wall RUN PAST the trade's target IN the
+      // trade's direction? This is the "wall running" case the spot-
+      // pierce check (§2) doesn't catch — spot might still be in the
+      // middle, but the dealer book has reconcentrated past your
+      // structural target. Same suppression semantics as
+      // breakThroughFired: don't fire drift, surface as a positive
+      // thesis-playing-out reason.
+      //
+      // For a bull spread (long_strike < short_strike): the new wall
+      // sitting MORE THAN STRIKE_TARGET_TOLERANCE above the target
+      // counts as "running past in your favor."
+      // For a bear spread (long_strike > short_strike): below target.
+      const liveWallPastTargetInFavor =
+        Number.isFinite(targetStrike) &&
+        ((isBullish && liveStrike > targetStrike + STRIKE_TARGET_TOLERANCE) ||
+          (isBearish && liveStrike < targetStrike - STRIKE_TARGET_TOLERANCE))
+
       if (strikeDrift >= STRIKE_DRIFT_THRESHOLD) {
         if (liveAtTradeTarget && liveExpAtTradeExp) {
           // Wall migrated to the trade's structural target. Thesis playing out.
@@ -262,6 +279,14 @@ export function computeThesisVerdict(entry, live, trade) {
         } else if (liveAtTradeTarget) {
           reasons.push(`Dominant wall now at ${formatStrike(liveStrike)} — your trade's short strike. Strike target reached.`)
           // close enough — call this intact, the strike is what matters
+        } else if (liveWallPastTargetInFavor) {
+          // Wall ran past target in trade's direction. Structural
+          // backdrop is reinforcing the trade thesis even though spot
+          // hasn't pierced yet. Mirrors the "wall migrated to target"
+          // branch — informational positive reason, state unchanged.
+          const direction = isBullish ? 'above' : 'below'
+          reasons.push(`Dominant wall has run to ${formatStrike(liveStrike)} — past your ${formatStrike(targetStrike)} target ${direction} entry's level. Dealer book reconcentrated in your direction.`)
+          // do NOT set state = 'drifting'
         } else {
           reasons.push(`Dominant wall shifted from ${formatStrike(entryStrike)} → ${formatStrike(liveStrike)}. Thesis anchor moved.`)
           state = 'drifting'
