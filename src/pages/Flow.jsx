@@ -197,7 +197,53 @@ function BotStatusCard({ profile, todayRun, openCount, onHalt, killSwitchBusy, k
   const pausedReason = profile?.bot_paused_reason
   const isPaused = pausedUntil && new Date(pausedUntil).getTime() > Date.now()
 
-  const nlv = Number(profile?.account_size) || 0
+  // Live broker NLV — same pattern as BotSettingsSection + AccountContextCard.
+  // The stale profile.account_size is a $1M placeholder; without this the
+  // risk envelope reads as 4%/20%/35% of $1M instead of the user's actual
+  // Tastytrade balance (which can be ~$450 in a fresh live account).
+  // Falls back to account_size only when the broker is unreachable or
+  // when the configured base URL is the cert (sandbox) endpoint.
+  const [liveNlv, setLiveNlv] = useState(null)
+  const [liveNlvSource, setLiveNlvSource] = useState('loading')
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { data, error: err } = await supabase.functions.invoke('get-account')
+        if (cancelled) return
+        if (err || !data?.success) {
+          setLiveNlvSource('broker_unreachable')
+          return
+        }
+        const accounts = (data.accounts ?? []).slice()
+        accounts.sort(
+          (a, b) =>
+            Number(b.net_liquidating_value ?? 0) - Number(a.net_liquidating_value ?? 0),
+        )
+        const primary = accounts.find((a) => !a.is_paper) || accounts[0]
+        const isSandbox = Boolean(
+          data.is_sandbox ?? primary?.is_sandbox ?? primary?.is_paper,
+        )
+        if (isSandbox) {
+          setLiveNlvSource('sandbox_skipped')
+          return
+        }
+        const nlv = Number(primary?.net_liquidating_value)
+        if (Number.isFinite(nlv) && nlv > 0) {
+          setLiveNlv(nlv)
+          setLiveNlvSource('broker_live')
+        } else {
+          setLiveNlvSource('broker_no_balance')
+        }
+      } catch {
+        if (!cancelled) setLiveNlvSource('broker_unreachable')
+      }
+    })()
+    return () => { cancelled = true }
+  }, [profile?.id])
+
+  const manualNlv = Number(profile?.account_size) || 0
+  const nlv = liveNlv ?? manualNlv
   const envelope = useMemo(() => {
     if (!profile) return null
     try {
@@ -284,7 +330,16 @@ function BotStatusCard({ profile, todayRun, openCount, onHalt, killSwitchBusy, k
 
       {envelope?.envelope && nlv > 0 && (
         <div className="bg-bg/40 border border-border/50 rounded-lg p-2.5 space-y-1 text-[10px]">
-          <div className="uppercase tracking-wider text-muted">Risk envelope</div>
+          <div className="flex items-center justify-between">
+            <span className="uppercase tracking-wider text-muted">Risk envelope</span>
+            <span className={
+              liveNlvSource === 'broker_live'
+                ? 'text-green-400 text-[9px] font-mono-tab'
+                : 'text-amber-400 text-[9px] font-mono-tab'
+            }>
+              NLV ${nlv.toLocaleString()} · {nlvSourceLabel(liveNlvSource)}
+            </span>
+          </div>
           <div className="flex justify-between">
             <span className="text-subtle">Max loss / trade</span>
             <span className="text-fg font-mono-tab">${envelope.envelope.perTradeMaxLossDollars.toFixed(0)}</span>
@@ -428,4 +483,15 @@ function formatAgo(iso) {
   if (ms < 3600_000) return `${Math.round(ms / 60_000)}m ago`
   if (ms < 86_400_000) return `${Math.round(ms / 3600_000)}h ago`
   return `${Math.round(ms / 86_400_000)}d ago`
+}
+
+function nlvSourceLabel(source) {
+  switch (source) {
+    case 'loading':            return 'loading…'
+    case 'broker_live':        return 'broker live'
+    case 'sandbox_skipped':    return 'sandbox skipped'
+    case 'broker_no_balance':  return 'broker no balance'
+    case 'broker_unreachable': return 'profile fallback'
+    default:                   return source
+  }
 }
