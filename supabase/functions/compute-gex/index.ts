@@ -27,6 +27,12 @@ import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { fetchYahooChain, YahooError } from './yahoo.ts'
 import {
+  fetchPolygonChain,
+  fetchPolygonMatrixChain,
+  PolygonError,
+  type PolygonStrike,
+} from './polygon.ts'
+import {
   bsCallDelta,
   bsCharm,
   bsVanna,
@@ -280,6 +286,80 @@ async function computeFromDxLink(
   }
 }
 
+// ─── Primary: Polygon (Massive) Options Advanced ─────────────────
+//
+// Real-time chain snapshot with Greeks pre-computed by Polygon. Used
+// in front of the DXLink cache since Polygon covers every listed
+// underlying (DXLink is limited to the ~15 streamed by the Fly
+// worker). DXLink remains the secondary path for resiliency.
+async function computeFromPolygon(args: ComputeArgs): Promise<{ result?: ComputeOutput; error?: string }> {
+  const { ticker, preferredDte, expirationOverride } = args
+  let chain
+  try {
+    chain = await fetchPolygonChain(ticker, preferredDte, expirationOverride)
+  } catch (err) {
+    if (err instanceof PolygonError) return { error: err.message }
+    throw err
+  }
+  const { spot, expirationDate, daysToExpiration, strikes, expirations } = chain
+  if (!Number.isFinite(spot) || spot <= 0) return { error: `no spot for ${ticker}` }
+
+  // Available expirations list — same shape as Yahoo path.
+  const todayMs = Date.now()
+  const availableExpirations: ExpirationInfo[] = expirations
+    .map((u) => {
+      const ms = u * 1000
+      const d = new Date(ms)
+      const date = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
+      const dte = Math.max(0, Math.round((ms - todayMs) / 86_400_000))
+      return { date, dte }
+    })
+    .sort((a, b) => a.dte - b.dte)
+
+  // Trim to ATM window
+  const lo = spot * (1 - STRIKE_WINDOW_PCT)
+  const hi = spot * (1 + STRIKE_WINDOW_PCT)
+  const trimmed = strikes.filter((s) => s.strike >= lo && s.strike <= hi)
+  if (trimmed.length === 0) return { error: 'no strikes in window' }
+
+  const t = Math.max(daysToExpiration, 1) / 365
+  const results: StrikeResult[] = []
+  const dealerNotional = spot * spot
+
+  for (const s of trimmed) {
+    if (s.callOI === 0 && s.putOI === 0) continue
+    // Prefer Polygon-supplied gamma; fall back to BS inversion if missing.
+    const gC = s.callGamma ?? bsGamma(spot, s.strike, t, s.callIV ?? s.putIV ?? 0)
+    const gP = s.putGamma ?? bsGamma(spot, s.strike, t, s.putIV ?? s.callIV ?? 0)
+    const gexCall = +(s.callOI * gC * dealerNotional)
+    const gexPut = -(s.putOI * gP * dealerNotional)
+    results.push({
+      strike: s.strike,
+      oi_call: s.callOI,
+      oi_put: s.putOI,
+      iv_call: s.callIV,
+      iv_put: s.putIV,
+      gex_call: gexCall,
+      gex_put: gexPut,
+      gex_net: gexCall + gexPut,
+    })
+  }
+  if (results.length === 0) return { error: 'no strikes had OI' }
+  results.sort((a, b) => a.strike - b.strike)
+
+  return {
+    result: shapeOutput(
+      ticker,
+      spot,
+      expirationDate,
+      daysToExpiration,
+      results,
+      'polygon',
+      availableExpirations,
+    ),
+  }
+}
+
 // ─── Fallback: Yahoo (15-min delayed, computes BS gamma here) ───
 async function computeFromYahoo(args: ComputeArgs): Promise<{ result?: ComputeOutput; error?: string }> {
   const { ticker, preferredDte, expirationOverride } = args
@@ -363,7 +443,7 @@ interface MatrixOutput {
   // 'eod' = served from gex_history when both live paths failed (or
   // returned sparse data); UI renders a yellow EOD CLOSE badge with
   // eod_snapshot_at as the timestamp.
-  source: 'dxlink' | 'yahoo' | 'eod'
+  source: 'polygon' | 'dxlink' | 'yahoo' | 'eod'
   computed_at: string
   expirations: ExpirationInfo[]
   strikes: number[]                      // descending; same length as cells.length
@@ -422,6 +502,65 @@ interface MatrixOutput {
 function todayDateStr(): string {
   const d = new Date()
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
+}
+
+// ─── Primary matrix source: Polygon ─────────────────────────────
+//
+// Pulls the chain snapshot with Greeks pre-computed by Polygon. Same
+// 2D pivot as the DXLink path but covers every listed ticker (not
+// just the curated DXLink universe).
+async function computeMatrixFromPolygon(
+  ticker: string,
+  opts: MatrixOpts = DEFAULT_MATRIX_OPTS,
+): Promise<{ matrix?: MatrixOutput; error?: string }> {
+  let chain
+  try {
+    chain = await fetchPolygonMatrixChain(ticker, opts.maxExpirations, opts.strikeWindowPct)
+  } catch (err) {
+    if (err instanceof PolygonError) return { error: err.message }
+    throw err
+  }
+  const { spot, previousClose, expiries } = chain
+  if (!Number.isFinite(spot) || spot <= 0) return { error: `no spot for ${ticker}` }
+  if (expiries.length === 0) return { error: 'no expirations in window' }
+
+  // Build per-expiry strike lookup.
+  const byExp = new Map<string, Map<number, PolygonStrike>>()
+  for (const e of expiries) {
+    const m = new Map<number, PolygonStrike>()
+    for (const s of e.strikes) m.set(s.strike, s)
+    byExp.set(e.date, m)
+  }
+
+  const futureExps = expiries.map((e) => e.date)
+
+  return buildMatrix(ticker, spot, 'polygon', futureExps, (exp, strike) => {
+    const cell = byExp.get(exp)?.get(strike)
+    if (!cell) return EMPTY_CELL
+    const dte = expiries.find((e) => e.date === exp)?.dte ?? 1
+    const t = Math.max(dte, 1) / 365
+    const dN = spot * spot
+    const gC = cell.callGamma ?? bsGamma(spot, strike, t, cell.callIV ?? cell.putIV ?? 0)
+    const gP = cell.putGamma ?? bsGamma(spot, strike, t, cell.putIV ?? cell.callIV ?? 0)
+    const gex = (cell.callOI * gC - cell.putOI * gP) * dN
+    // Second-order Greeks: vanna and charm aren't in Polygon's snapshot
+    // by default. Compute from BS using the IV polygon DID return.
+    const sigC = cell.callIV ?? cell.putIV ?? 0
+    const sigP = cell.putIV ?? cell.callIV ?? 0
+    const vC = bsVanna(spot, strike, t, sigC)
+    const vP = bsVanna(spot, strike, t, sigP)
+    const vex = (cell.callOI * vC - cell.putOI * vP) * dN
+    const chC = bsCharm(spot, strike, t, sigC) / 365
+    const chP = bsCharm(spot, strike, t, sigP) / 365
+    const cex = (cell.callOI * chC - cell.putOI * chP) * dN
+    // Delta — prefer Polygon's value; fall back to BS.
+    const dC = cell.callDelta ?? bsCallDelta(spot, strike, t, sigC)
+    const dP = cell.putDelta ?? (bsCallDelta(spot, strike, t, sigP) - 1)
+    const dex = (cell.callOI * dC + cell.putOI * dP) * spot
+    return { gex, vex, cex, dex }
+  }, (exp) => {
+    return Array.from(byExp.get(exp)?.keys() ?? [])
+  }, opts, undefined, undefined, previousClose)
 }
 
 async function computeMatrixFromDxLink(
@@ -744,7 +883,7 @@ async function attachVelocity(
 function buildMatrix(
   ticker: string,
   spot: number,
-  source: 'dxlink' | 'yahoo',
+  source: 'polygon' | 'dxlink' | 'yahoo',
   expirations: string[],
   exposureFor: (exp: string, strike: number) => CellExposures,
   strikesIn: (exp: string) => number[],
@@ -914,7 +1053,7 @@ interface ComputeOutput {
   zero_gamma_strike: number | null
   largest_positive_strike: number
   largest_negative_strike: number
-  source: 'dxlink' | 'yahoo'
+  source: 'polygon' | 'dxlink' | 'yahoo'
   computed_at: string
 }
 
@@ -924,7 +1063,7 @@ function shapeOutput(
   expiration: string,
   daysToExpiration: number,
   results: StrikeResult[],
-  source: 'dxlink' | 'yahoo',
+  source: 'polygon' | 'dxlink' | 'yahoo',
   availableExpirations: ExpirationInfo[],
 ): ComputeOutput {
   let cumulative = 0
@@ -1066,18 +1205,29 @@ serve(async (req) => {
   }
 
   // Matrix mode short-circuits — different output shape, different
-  // pipeline. DXLink first, Yahoo fallback, then EOD-snapshot fallback
-  // from gex_history so the matrix never goes blank overnight.
+  // pipeline. Polygon first (real-time + every ticker), DXLink fallback,
+  // Yahoo fallback, then EOD-snapshot fallback from gex_history so the
+  // matrix never goes blank overnight.
   if (matrixMode) {
     let matrix: MatrixOutput | null = null
+    let pgErr: string | null = null
     let dxErr: string | null = null
     let yhErr: string | null = null
     try {
-      const dx = await computeMatrixFromDxLink(adminClient, ticker, matrixOpts)
-      if (dx.matrix) matrix = dx.matrix
-      else dxErr = dx.error ?? 'dxlink unknown error'
+      const pg = await computeMatrixFromPolygon(ticker, matrixOpts)
+      if (pg.matrix) matrix = pg.matrix
+      else pgErr = pg.error ?? 'polygon unknown error'
     } catch (e) {
-      dxErr = e instanceof Error ? e.message : 'dxlink threw'
+      pgErr = e instanceof Error ? e.message : 'polygon threw'
+    }
+    if (!matrix) {
+      try {
+        const dx = await computeMatrixFromDxLink(adminClient, ticker, matrixOpts)
+        if (dx.matrix) matrix = dx.matrix
+        else dxErr = dx.error ?? 'dxlink unknown error'
+      } catch (e) {
+        dxErr = e instanceof Error ? e.message : 'dxlink threw'
+      }
     }
     if (!matrix) {
       try {
@@ -1167,19 +1317,31 @@ serve(async (req) => {
     })
   }
 
-  // Try DXLink cache first; fall back to Yahoo on any failure.
+  // Try Polygon (Massive) first — real-time chain with every ticker.
+  // Fall back to DXLink cache, then Yahoo on any failure.
   let result: ComputeOutput | null = null
+  let polygonError: string | null = null
   let dxLinkError: string | null = null
   try {
-    const dx = await computeFromDxLink(adminClient, {
-      ticker,
-      preferredDte,
-      expirationOverride,
-    })
-    if (dx.result) result = dx.result
-    else dxLinkError = dx.error ?? 'dxlink unknown error'
+    const pg = await computeFromPolygon({ ticker, preferredDte, expirationOverride })
+    if (pg.result) result = pg.result
+    else polygonError = pg.error ?? 'polygon unknown error'
   } catch (e) {
-    dxLinkError = e instanceof Error ? e.message : 'dxlink threw'
+    polygonError = e instanceof Error ? e.message : 'polygon threw'
+  }
+
+  if (!result) {
+    try {
+      const dx = await computeFromDxLink(adminClient, {
+        ticker,
+        preferredDte,
+        expirationOverride,
+      })
+      if (dx.result) result = dx.result
+      else dxLinkError = dx.error ?? 'dxlink unknown error'
+    } catch (e) {
+      dxLinkError = e instanceof Error ? e.message : 'dxlink threw'
+    }
   }
 
   if (!result) {
@@ -1190,7 +1352,7 @@ serve(async (req) => {
         return json(
           {
             success: false,
-            error: `dxlink: ${dxLinkError}; yahoo: ${y.error}`,
+            error: `polygon: ${polygonError}; dxlink: ${dxLinkError}; yahoo: ${y.error}`,
           },
           502,
         )
@@ -1198,7 +1360,7 @@ serve(async (req) => {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       return json(
-        { success: false, error: `dxlink: ${dxLinkError}; yahoo: ${msg}` },
+        { success: false, error: `polygon: ${polygonError}; dxlink: ${dxLinkError}; yahoo: ${msg}` },
         502,
       )
     }
