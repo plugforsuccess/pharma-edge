@@ -207,6 +207,57 @@
     }
   },
   {
+    "name": "heuristic_bullish_debit_vex_flipped_is_drifting",
+    "note": "BULL_CALL (debit vertical, vega-sensitive) + net VEX sign flip with meaningful magnitude → drifting. Dealer vol-hedging regime inverted.",
+    "input": {
+      "entry": { "spot": 100, "net_gex": 50000000, "net_vex": 80000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 20000000 } },
+      "live":  { "spot": 100, "net_gex": 48000000, "net_vex": -40000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 19000000 } },
+      "trade": { "long_strike": 100, "short_strike": 105, "strategy_type": "BULL_CALL", "expiration": "2026-06-01" }
+    },
+    "expected": {
+      "state": "drifting",
+      "reasons_contains_any": ["Net VEX flipped", "vol-hedging regime inverted"]
+    }
+  },
+  {
+    "name": "heuristic_bearish_debit_vex_flipped_is_drifting",
+    "note": "Mirror of bullish case. BEAR_PUT (debit vertical) + VEX sign flip → drifting.",
+    "input": {
+      "entry": { "spot": 100, "net_gex": -50000000, "net_vex": -80000000, "largest_wall": { "strike": 95, "expiration": "2026-06-01", "gex_net": -20000000 } },
+      "live":  { "spot": 100, "net_gex": -48000000, "net_vex": 40000000, "largest_wall": { "strike": 95, "expiration": "2026-06-01", "gex_net": -19000000 } },
+      "trade": { "long_strike": 100, "short_strike": 95, "strategy_type": "BEAR_PUT", "expiration": "2026-06-01" }
+    },
+    "expected": {
+      "state": "drifting",
+      "reasons_contains_any": ["Net VEX flipped", "vol-hedging regime inverted"]
+    }
+  },
+  {
+    "name": "heuristic_credit_vex_flipped_informational_only",
+    "note": "BULL_PUT_CREDIT (credit vertical, roughly vega-neutral) + VEX sign flip — surfaces as informational only, state stays intact.",
+    "input": {
+      "entry": { "spot": 100, "net_gex": 50000000, "net_vex": 80000000, "largest_wall": { "strike": 100, "expiration": "2026-06-01", "gex_net": 20000000 } },
+      "live":  { "spot": 100, "net_gex": 48000000, "net_vex": -40000000, "largest_wall": { "strike": 100, "expiration": "2026-06-01", "gex_net": 19000000 } },
+      "trade": { "long_strike": 95, "short_strike": 100, "strategy_type": "BULL_PUT_CREDIT", "expiration": "2026-06-01" }
+    },
+    "expected": {
+      "state": "intact",
+      "reasons_contains_any": ["Informational only", "vega-neutral"]
+    }
+  },
+  {
+    "name": "heuristic_vex_flip_too_small_magnitude_ignored",
+    "note": "VEX sign flipped but live magnitude is only 5% of entry (below the 10% threshold) — too small to act on, state unchanged.",
+    "input": {
+      "entry": { "spot": 100, "net_gex": 50000000, "net_vex": 80000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 20000000 } },
+      "live":  { "spot": 100, "net_gex": 48000000, "net_vex": -4000000, "largest_wall": { "strike": 105, "expiration": "2026-06-01", "gex_net": 19000000 } },
+      "trade": { "long_strike": 100, "short_strike": 105, "strategy_type": "BULL_CALL", "expiration": "2026-06-01" }
+    },
+    "expected": {
+      "state": "intact"
+    }
+  },
+  {
     "name": "structured_break_through_target_reached",
     "note": "Phase 3a structured path. break_through thesis, spot crossed target_strike upward = thesis playing out, stays intact.",
     "input": {
