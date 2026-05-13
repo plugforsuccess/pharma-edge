@@ -1211,7 +1211,8 @@ serve(async (req) => {
   // some internal call paths; this lets the function recognize the
   // role directly and skip the user-JWT validation that would
   // otherwise 401 a system-driven request.
-  // NOTE: verify_jwt=false in config.toml — this function self-validates.
+  // NOTE: verify_jwt=false in config.toml — this function self-validates
+  // service-role vs user-JWT below.
   const isServiceRole = SUPABASE_SERVICE_ROLE_KEY && bearer === SUPABASE_SERVICE_ROLE_KEY
   if (!isServiceRole) {
     const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
