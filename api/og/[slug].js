@@ -163,7 +163,7 @@ function cardJsx({ displayName, slug, stats }) {
                     color: '#6b6b8a',
                     fontFamily: 'monospace',
                   },
-                  children: `cashmoves.io/u/${slug}`,
+                  children: `pharma-edge.vercel.app/u/${slug}`,
                 },
               },
             ],

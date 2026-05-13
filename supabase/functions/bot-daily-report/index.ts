@@ -22,7 +22,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')
 const FROM_ADDRESS = Deno.env.get('RESEND_FROM') || 'onboarding@resend.dev'
-const APP_URL = Deno.env.get('APP_URL') || 'https://cashmoves.io'
+const APP_URL = Deno.env.get('APP_URL') || 'https://pharma-edge.vercel.app'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
