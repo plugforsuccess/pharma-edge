@@ -1392,21 +1392,51 @@ serve(async (req) => {
         { onConflict: 'ticker' },
       )
       .then(() => {})
-    // Archive mode: also insert into gex_history. AWAITED — the
-    // previous fire-and-forget version was being killed by the Edge
-    // runtime as soon as the response was sent, leaving gex_history
-    // empty. Cron callers don't care about the extra ~50ms; user-
-    // facing requests don't pass archive=true so they're unaffected.
-    if (archive && matrix && matrix.source !== 'eod') {
-      const { error: insertError } = await adminClient
+    // Archive every fresh matrix compute into gex_history, deduped to
+    // a 5-minute bucket via the table's (ticker, snapshot_at) PRIMARY
+    // KEY. Conflicts in the same bucket get the latest payload via
+    // UPSERT — that's the desired behaviour (rolling latest per slot).
+    //
+    // Why no longer gated on `archive=true`: the snapshot-gex cron has
+    // been silently 401'ing for days, leaving gex_history empty and
+    // breaking /markets replay + the EOD fallback. Letting any
+    // user-driven matrix compute populate the table makes the time
+    // series self-healing — cron is now just a top-up for tickers
+    // nobody looked at, not the only writer.
+    //
+    // Skipped when source==='eod' (it's served FROM gex_history, no
+    // point re-archiving) or when the matrix is empty.
+    if (matrix && matrix.source !== 'eod') {
+      const bucketMs = 5 * 60 * 1000
+      const bucketedAt = new Date(
+        Math.floor(Date.now() / bucketMs) * bucketMs,
+      ).toISOString()
+      const archivePromise = adminClient
         .from('gex_history')
-        .insert({
-          ticker,
-          snapshot_at: new Date().toISOString(),
-          payload: matrix,
+        .upsert(
+          { ticker, snapshot_at: bucketedAt, payload: matrix },
+          { onConflict: 'ticker,snapshot_at' },
+        )
+        .then(({ error }: { error: { code?: string; message: string } | null }) => {
+          if (error && error.code !== '23505') {
+            console.error('[archive] gex_history upsert failed:', error.message)
+          }
         })
-      if (insertError && insertError.code !== '23505') {
-        console.error('[archive] gex_history insert failed:', insertError)
+      // Cron callers (archive=true) AWAIT the write so a failed insert
+      // becomes a 5xx the workflow can see. User calls fire-and-forget
+      // via EdgeRuntime.waitUntil so they don't pay the latency but
+      // the write still completes after the response returns.
+      if (archive) {
+        await archivePromise
+      } else {
+        // deno-lint-ignore no-explicit-any
+        const er = (globalThis as any).EdgeRuntime
+        if (er && typeof er.waitUntil === 'function') {
+          er.waitUntil(archivePromise)
+        } else {
+          // Local-dev fallback: just don't await. Better than nothing.
+          archivePromise.catch(() => {})
+        }
       }
     }
     if (includeVelocity && matrix) {

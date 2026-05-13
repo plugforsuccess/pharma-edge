@@ -50,8 +50,17 @@ Fly.io service: per-symbol bid/ask/mid/iv/gamma/delta/theta/vega/open_interest/d
 upserted on every dxFeed frame; authenticated SELECT, service-role write
 only. RLS on all tables, immutability + server-side hash triggers on
 `signals`/`outcomes`. `outcomes` is 1:1 with `signals` (UNIQUE).
-`claude_calls` is the per-user rate-limit + cost ledger (write-once via
-service role; SELECT own + admin SELECT all). `push_subscriptions` stores
+`claude_calls` is the per-user rate-limit + cost ledger AND the
+full-fidelity post-mortem record: each row carries `ticker`,
+`prompt_input` (system + messages sent), `prompt_output` (the entire
+Anthropic response), `matrix_at_call` (GEX matrix visible to Claude at
+the moment of the call), `duration_ms`, and `error`. Write-once via
+service role; SELECT own + admin SELECT all. The companion FK lives on
+`signals.originating_claude_call_id` with the chosen play stored at
+`signals.claude_chosen_play` and the counterfactual rejected plays at
+`signals.claude_other_plays` — together these let every future trade be
+reconstructed with the exact prompt, response, matrix, and "what else
+was on the table". `push_subscriptions` stores
 the user's PushSubscription tuples. `order_history` is the broker-order
 audit log — SELECT-own for authenticated, INSERT/UPDATE/DELETE
 service-role only. `tastytrade_sessions` is a singleton (`id=1`) caching
@@ -144,7 +153,11 @@ variable to its full name; set `VITE_PUBLIC_RECORD_REPO` in Vercel env.
   to the requested ticker, the rows are >30s stale, or DXLink is down.
   Response includes `source: 'dxlink' | 'yahoo'` so the UI can label
   freshness. 5-minute snapshot cache via `gex_snapshots`; `refresh:true`
-  bypasses. Yahoo path uses cookie+crumb auth.
+  bypasses. Yahoo path uses cookie+crumb auth. Every successful matrix
+  compute also UPSERTs into `gex_history` keyed to a 5-min bucket — cron
+  callers (`archive=true`) await the write; user calls fire-and-forget
+  via `EdgeRuntime.waitUntil` so the time-series stays populated even
+  when the GitHub Actions snapshot cron is broken.
 - `monitor-positions` v1+ (`verify_jwt=true`). Polls Tastytrade
   `/accounts/:n/orders` for active orders and reconciles fill status
   onto `order_history`. Triggered by

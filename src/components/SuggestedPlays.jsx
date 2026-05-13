@@ -250,7 +250,12 @@ export default function SuggestedPlays({ ticker, isPro: isProProp }) {
               key={i}
               play={play}
               ticker={ticker}
-              onLogSignal={() => logAsSignal(navigate, play, ticker, data.spot, data.regime)}
+              onLogSignal={() =>
+                logAsSignal(navigate, play, ticker, data.spot, data.regime, {
+                  claudeCallId: data.claude_call_id ?? null,
+                  otherPlays: data.plays.filter((_, j) => j !== i),
+                })
+              }
             />
           ))}
 
@@ -597,7 +602,8 @@ const PLAY_TYPE_TO_PREFILL = {
   BEAR_CALL_CREDIT: { direction: 'long_put',  structure: 'bear_call_credit' },
 }
 
-function logAsSignal(navigate, play, ticker, spot, regime) {
+function logAsSignal(navigate, play, ticker, spot, regime, attribution = {}) {
+  const { claudeCallId = null, otherPlays = [] } = attribution
   const mapped = PLAY_TYPE_TO_PREFILL[play.type] || PLAY_TYPE_TO_PREFILL.BEAR_PUT
   // Derive a per-share premium from suggest-plays' dollar-denominated
   // max-loss / max-profit fields so the calculator opens with EVERY
@@ -648,6 +654,15 @@ function logAsSignal(navigate, play, ticker, spot, regime) {
         target_expiration: play.target_expiration ?? null,
         target_thesis_kind: play.target_thesis_kind ?? null,
         regime_at_entry: regime ?? null, // top-level regime from suggest-plays response
+        // ── Post-mortem provenance ──────────────────────────────────
+        // Carry the claude_calls.id that produced this play, plus the
+        // chosen play object and the counterfactual other_plays Claude
+        // returned. LogSignal writes all three into the signals row so
+        // every future post-mortem can reconstruct what the model
+        // proposed AND what the user picked from.
+        originating_claude_call_id: claudeCallId,
+        claude_chosen_play: play,
+        claude_other_plays: otherPlays,
       },
     },
   })

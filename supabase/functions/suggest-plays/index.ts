@@ -763,7 +763,31 @@ serve(async (req) => {
   // we still proceed with just the GEX context.
   const flow = await fetchTodayFlow(adminClient, ticker)
 
-  // Claude call.
+  // Claude call. Build the full request body once so we can persist
+  // the exact prompt that produced the response — this is what every
+  // post-mortem needs to reconstruct the trade.
+  const claudeRequestBody = {
+    model: CLAUDE_MODEL,
+    max_tokens: MAX_TOKENS,
+    // Pinned low so the same matrix returns essentially the same
+    // answer across re-analyses — the matrix itself evolves intraday
+    // (OI rolls, walls shift), and we want the user to be able to
+    // tell whether a different suggestion came from a data change
+    // or just model drift. 0.2 keeps a sliver of variance for
+    // tie-breaking when two plays score nearly identically.
+    temperature: 0.2,
+    // Prompt caching: SYSTEM_PROMPT is ~1.5k tokens of static playbook
+    // (regime rules, R/R math, strategy diversity, output schema) that
+    // never changes between calls. Marking it cache_control=ephemeral
+    // means Anthropic caches the prefix for 5 min and subsequent calls
+    // pay the cache-read rate (~$0.30/M) instead of full input rate
+    // (~$3/M) — roughly 2× cost reduction per call once warm.
+    system: [
+      { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
+    ],
+    messages: [{ role: 'user', content: buildUserPrompt(matrix, accountSize, flow) }],
+  }
+  const claudeStartedAt = Date.now()
   const claudeResp = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -771,30 +795,30 @@ serve(async (req) => {
       'x-api-key': ANTHROPIC_API_KEY!,
       'anthropic-version': '2023-06-01',
     },
-    body: JSON.stringify({
-      model: CLAUDE_MODEL,
-      max_tokens: MAX_TOKENS,
-      // Pinned low so the same matrix returns essentially the same
-      // answer across re-analyses — the matrix itself evolves intraday
-      // (OI rolls, walls shift), and we want the user to be able to
-      // tell whether a different suggestion came from a data change
-      // or just model drift. 0.2 keeps a sliver of variance for
-      // tie-breaking when two plays score nearly identically.
-      temperature: 0.2,
-      // Prompt caching: SYSTEM_PROMPT is ~1.5k tokens of static playbook
-      // (regime rules, R/R math, strategy diversity, output schema) that
-      // never changes between calls. Marking it cache_control=ephemeral
-      // means Anthropic caches the prefix for 5 min and subsequent calls
-      // pay the cache-read rate (~$0.30/M) instead of full input rate
-      // (~$3/M) — roughly 2× cost reduction per call once warm.
-      system: [
-        { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
-      ],
-      messages: [{ role: 'user', content: buildUserPrompt(matrix, accountSize, flow) }],
-    }),
+    body: JSON.stringify(claudeRequestBody),
   })
+  const claudeDurationMs = Date.now() - claudeStartedAt
   if (!claudeResp.ok) {
     const detail = await claudeResp.text().catch(() => '')
+    // Persist the failure so we can debug 4xx/5xx from Anthropic later
+    // without losing the prompt that triggered it.
+    adminClient.from('claude_calls').insert({
+      user_id: user.id,
+      function_name: 'suggest-plays',
+      called_at: new Date().toISOString(),
+      model: CLAUDE_MODEL,
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_creation_tokens: 0,
+      cache_read_tokens: 0,
+      cost_usd: 0,
+      ticker,
+      prompt_input: claudeRequestBody,
+      prompt_output: null,
+      matrix_at_call: matrix,
+      duration_ms: claudeDurationMs,
+      error: `anthropic ${claudeResp.status}: ${detail.slice(0, 500)}`,
+    }).then(() => {})
     return json({ success: false, error: `analysis backend returned ${claudeResp.status}: ${detail.slice(0, 200)}` }, 502)
   }
   const claudeBody = await claudeResp.json()
@@ -912,26 +936,48 @@ serve(async (req) => {
   // attribution. Token counts come from claudeBody.usage; cost is
   // computed at write time using the model's per-token rates so
   // historical rows preserve the price the call was charged at.
+  //
+  // We also persist the full prompt_input, prompt_output, and
+  // matrix_at_call snapshot — this is the foundational data every
+  // future post-mortem needs to reconstruct the trade. AWAITED with
+  // .select() so we can pin the claude_call_id onto the response,
+  // letting the client FK the resulting signal back to this exact row.
   const usage = (claudeBody?.usage ?? {}) as Record<string, number | undefined>
   const cost = computeClaudeCost(CLAUDE_MODEL, usage)
-  await adminClient.from('claude_calls').insert({
-    user_id: user.id,
-    function_name: 'suggest-plays',
-    called_at: new Date().toISOString(),
-    model: CLAUDE_MODEL,
-    input_tokens: usage.input_tokens ?? 0,
-    output_tokens: usage.output_tokens ?? 0,
-    cache_creation_tokens: usage.cache_creation_input_tokens ?? 0,
-    cache_read_tokens: usage.cache_read_input_tokens ?? 0,
-    cost_usd: cost,
-  }).then(() => {})
+  const { data: claudeCallRow, error: claudeCallErr } = await adminClient
+    .from('claude_calls')
+    .insert({
+      user_id: user.id,
+      function_name: 'suggest-plays',
+      called_at: new Date().toISOString(),
+      model: CLAUDE_MODEL,
+      input_tokens: usage.input_tokens ?? 0,
+      output_tokens: usage.output_tokens ?? 0,
+      cache_creation_tokens: usage.cache_creation_input_tokens ?? 0,
+      cache_read_tokens: usage.cache_read_input_tokens ?? 0,
+      cost_usd: cost,
+      ticker,
+      prompt_input: claudeRequestBody,
+      prompt_output: claudeBody,
+      matrix_at_call: matrix,
+      duration_ms: claudeDurationMs,
+      error: null,
+    })
+    .select('id')
+    .single()
+  if (claudeCallErr) {
+    console.warn('[claude_calls] insert failed:', claudeCallErr.message)
+  }
+  const claudeCallId: string | null = claudeCallRow?.id ?? null
 
-  // Cache the result
+  // Cache the result. claude_call_id is part of the cached payload so
+  // a cache-hit response can still FK the signal back to the call.
   const payload = {
     ticker,
     spot: matrix.spot,
     source: matrix.source,
     account_size: accountSize,
+    claude_call_id: claudeCallId,
     ...parsed,
     computed_at: new Date().toISOString(),
   }

@@ -361,6 +361,16 @@ export default function LogSignal() {
       target_expiration: prefill.target_expiration ?? null,
       target_thesis_kind: prefill.target_thesis_kind ?? null,
       regime_at_entry: prefill.regime_at_entry ?? null,
+      // ── Post-mortem provenance ────────────────────────────────────
+      // FK back to the exact claude_calls row that produced this trade,
+      // plus the chosen play and the counterfactual other_plays Claude
+      // returned. Lets every future post-mortem pull the prompt,
+      // response, matrix-at-call, and "what else was on the table"
+      // directly from the database. NULL when the signal was logged
+      // manually without going through Suggested Plays.
+      originating_claude_call_id: prefill.originating_claude_call_id ?? null,
+      claude_chosen_play: prefill.claude_chosen_play ?? null,
+      claude_other_plays: prefill.claude_other_plays ?? null,
       // signal_hash + logged_at intentionally omitted: DB trigger
       // computes the canonical hash on INSERT and logged_at defaults to NOW().
     }
