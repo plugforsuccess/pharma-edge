@@ -35,6 +35,17 @@ function ProtectedRoute({ children }) {
   return children
 }
 
+// Admin-only route gate. Used for /flow (bot UI demoted to admin-only
+// per the leaderboard focus audit 2026-05-12) and /admin. Falls back
+// to /record for non-admins so the URL-typed visit goes somewhere
+// sensible.
+function AdminOnly({ children }) {
+  const { profile, loading } = useAuth()
+  if (loading) return <LoadingScreen />
+  if (!profile?.is_admin) return <Navigate to="/record" replace />
+  return children
+}
+
 function LoadingScreen() {
   return (
     <div className="min-h-screen bg-bg flex items-center justify-center">
@@ -95,7 +106,7 @@ export default function App() {
             <Route path="settings" element={<Settings />} />
             <Route path="calculator" element={<OptionCalculator />} />
             <Route path="markets" element={<Markets />} />
-            <Route path="flow" element={<Flow />} />
+            <Route path="flow" element={<AdminOnly><Flow /></AdminOnly>} />
             <Route path="reasoning" element={<Reasoning />} />
             <Route path="learn" element={<LearnIndex />} />
             <Route path="learn/dealer-positioning-guide" element={<DealerPositioningGuide />} />
@@ -105,7 +116,7 @@ export default function App() {
             <Route path="learn/best-gex-tools" element={<BestGexTools /> } />
             <Route path="glossary" element={<Glossary />} />
             <Route path="position/:id" element={<PositionDetail />} />
-            <Route path="admin" element={<Admin />} />
+            <Route path="admin" element={<AdminOnly><Admin /></AdminOnly>} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
