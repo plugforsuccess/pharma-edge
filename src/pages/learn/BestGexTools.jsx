@@ -32,7 +32,7 @@ export default function BestGexTools() {
 
       <h2>The contenders</h2>
       <ul>
-        <li><strong>Cash Moves</strong> — cashmoves.io, $39/mo Pro, broker integration + immutable record</li>
+        <li><strong>Cash Moves</strong> — pharma-edge.vercel.app, $39/mo Pro, broker integration + immutable record</li>
         <li><strong>Skylit (Heatseeker)</strong> — skylit.ai, $99–699/mo via Whop, broadest ticker coverage</li>
         <li><strong>SpotGamma</strong> — spotgamma.com, ~$59–99/mo, the OG of retail GEX</li>
         <li><strong>VannaCharm</strong> — vannacharm.com, free + ~$29/mo paid, single-developer focused on Vanna/Charm/GEX trio</li>

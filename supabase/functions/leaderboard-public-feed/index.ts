@@ -5,7 +5,7 @@
 // filter and pagination.
 //
 // verify_jwt=false — the leaderboard is publicly browseable. Anyone
-// landing on cashmoves.io/leaderboard can read it without an account.
+// landing on pharma-edge.vercel.app/leaderboard can read it without an account.
 //
 // The strategy_filter parameter is documented in the spec but not yet
 // wired to data — the snapshot stores aggregated stats per user

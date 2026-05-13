@@ -43,7 +43,7 @@ jobs:
             cat > README.md <<'EOF'
           # Cash Moves Public Record
 
-          Daily SHA-256 anchors of locked signals from cashmoves.io.
+          Daily SHA-256 anchors of locked signals from pharma-edge.vercel.app.
           Each commit corresponds to a signal hash; the chain is
           immutable by construction.
           EOF

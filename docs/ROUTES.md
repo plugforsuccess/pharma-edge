@@ -2,7 +2,7 @@
 
 A complete map of every route in the Cash Moves PWA, who can reach it, and what's on it. Pulled from `src/App.jsx` (router config) and `src/components/Layout.jsx` (nav config).
 
-> Convention: paths are relative to the deployed origin (e.g. `cashmoves.io`).
+> Convention: paths are relative to the deployed origin (e.g. `pharma-edge.vercel.app`).
 > Routes marked **(public)** require no auth; everything else needs a logged-in session via Supabase Auth.
 
 ---

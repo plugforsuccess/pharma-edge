@@ -48,7 +48,7 @@ export default function LearnLayout({
       link.setAttribute('rel', 'canonical')
       document.head.appendChild(link)
     }
-    link.setAttribute('href', `https://cashmoves.io/learn/${slug}`)
+    link.setAttribute('href', `https://pharma-edge.vercel.app/learn/${slug}`)
 
     return () => {
       document.title = prevTitle

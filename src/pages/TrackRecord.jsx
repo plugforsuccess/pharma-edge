@@ -264,7 +264,7 @@ export default function TrackRecord() {
           {profile?.public_slug && (
             <p className="text-muted text-xs mt-1">
               {profile.is_public ? 'public · ' : 'private · '}
-              cashmoves.io/u/{profile.public_slug}
+              pharma-edge.vercel.app/u/{profile.public_slug}
             </p>
           )}
         </div>

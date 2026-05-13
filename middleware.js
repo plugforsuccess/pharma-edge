@@ -43,7 +43,7 @@ const SUPABASE_ANON_KEY =
   process.env.VITE_SUPABASE_ANON_KEY ||
   process.env.SUPABASE_ANON_KEY
 const APP_URL =
-  process.env.APP_URL || 'https://cashmoves.io'
+  process.env.APP_URL || 'https://pharma-edge.vercel.app'
 
 export default async function middleware(req) {
   try {

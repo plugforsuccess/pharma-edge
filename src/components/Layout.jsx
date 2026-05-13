@@ -87,7 +87,7 @@ export default function Layout() {
         <div className="px-3 mb-6">
           <div className="text-lg font-display tracking-tight">Cash Moves</div>
           <div className="text-[10px] uppercase tracking-[0.18em] text-muted mt-0.5">
-            cashmoves.io
+            pharma-edge.vercel.app
           </div>
         </div>
         <nav className="flex flex-col gap-1">
