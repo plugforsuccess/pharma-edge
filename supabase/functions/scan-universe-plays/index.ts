@@ -68,13 +68,11 @@ serve(async (req) => {
   const isServiceRole = !!SUPABASE_SERVICE_ROLE_KEY && bearer === SUPABASE_SERVICE_ROLE_KEY
   let isVaultCron = false
   if (!isCron && !isServiceRole && bearer) {
-    const { data: vaultRow } = await adminClient
-      .schema('vault')
-      .from('decrypted_secrets')
-      .select('decrypted_secret')
-      .eq('name', 'cron_scan_auth_token')
-      .maybeSingle()
-    isVaultCron = !!vaultRow?.decrypted_secret && bearer === vaultRow.decrypted_secret
+    // vault.decrypted_secrets is not reachable via PostgREST .schema()
+    // lookups; we bridge it through a SECURITY DEFINER RPC in public
+    // that service_role can call. See migration cron_token_rpc.
+    const { data: vaultToken } = await adminClient.rpc('get_cron_scan_auth_token')
+    isVaultCron = typeof vaultToken === 'string' && vaultToken.length > 0 && bearer === vaultToken
   }
   if (!isCron && !isServiceRole && !isVaultCron) {
     return json({ error: 'unauthorized' }, 401)
