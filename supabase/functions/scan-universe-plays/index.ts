@@ -1,4 +1,6 @@
 // Cash Moves — scan-universe-plays edge function.
+// Verified working 2026-05-13: 7 plays from 2/3 tickers, $0.06 cost,
+// 86s duration. compute-gex now self-validates (config.toml verify_jwt=false).
 //
 // Cross-ticker GEX scanner. Iterates SCAN_UNIVERSE, runs the same
 // Claude prompt as suggest-plays for each ticker, aggregates and
