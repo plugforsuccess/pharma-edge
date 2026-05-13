@@ -372,6 +372,20 @@ VITE_VAPID_PUBLIC_KEY=
 VITE_PUBLIC_RECORD_REPO=
 ```
 
+**Vercel Edge Middleware + OG image** (set in Vercel → Project Settings →
+Environment Variables, scope: all environments):
+```
+SUPABASE_URL=                  # same value as VITE_SUPABASE_URL
+SUPABASE_ANON_KEY=             # same value as VITE_SUPABASE_ANON_KEY
+APP_URL=https://pharma-edge.vercel.app
+```
+The middleware (`middleware.js`) and OG image route (`api/og/[slug].js`)
+run at the **edge runtime**, where `VITE_*` vars are NOT exposed —
+those are inlined into the client bundle at build time only. The
+middleware emits an `x-cash-moves-middleware: pass:missing-env` response
+header (visible via `curl -I`) when these are unset; that's the
+diagnostic if SSR share previews stop working.
+
 **Supabase Edge Function Secrets** (set via `supabase secrets set`):
 ```
 ANTHROPIC_API_KEY=

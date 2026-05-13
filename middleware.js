@@ -51,7 +51,9 @@ export default async function middleware(req) {
     const parts = url.pathname.split('/').filter(Boolean)
     const namespace = parts[0]
     const slug = parts[1]
-    if (!slug || !/^[a-z0-9\-]+$/i.test(slug)) return next()
+    if (!slug || !/^[a-z0-9\-]+$/i.test(slug)) {
+      return passthrough('invalid-slug')
+    }
 
     // Legacy /r/:slug → 301 → /u/:slug at the edge. Crawlers respect
     // the 301 and re-fetch /u/:slug, where the meta-injection branch
@@ -63,11 +65,24 @@ export default async function middleware(req) {
         headers: {
           location: target.toString(),
           'Cache-Control': 'public, max-age=3600',
+          'x-cash-moves-middleware': 'legacy-r-redirect',
         },
       })
     }
 
-    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return next()
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+      // Vercel exposes VITE_* env vars to the BUILD only (they get
+      // inlined into the client bundle). They're NOT available to
+      // Edge Middleware at runtime unless explicitly added to the
+      // project's Environment Variables. Set SUPABASE_URL and
+      // SUPABASE_ANON_KEY in Vercel → Project → Settings → Env Vars
+      // (scope: all environments) for SSR meta injection to work.
+      console.error(
+        '[middleware] SUPABASE_URL / SUPABASE_ANON_KEY missing at edge runtime — ' +
+          'meta injection disabled. Set them in Vercel project env vars.',
+      )
+      return passthrough('missing-env')
+    }
 
     // Fetch profile + stats in parallel with the static HTML so the
     // middleware's added latency is bounded by the slower of the two
@@ -109,13 +124,31 @@ export default async function middleware(req) {
         // Defense against CSRF on the rewritten page (no cookies are
         // sent from middleware, but signal intent).
         'X-Content-Type-Options': 'nosniff',
+        // Debug breadcrumb — curl -I /u/:slug shows this when the
+        // middleware actually ran. Absence = middleware not deployed
+        // or matcher missed.
+        'x-cash-moves-middleware': profile ? 'meta-injected' : 'meta-fallback',
       },
     })
-  } catch {
-    // Any failure → serve the unmodified SPA. Logging would be useful
-    // but we don't want a middleware error to take the page down.
-    return next()
+  } catch (err) {
+    // Any failure → serve the unmodified SPA. Surface the error in
+    // Vercel logs so we don't silently regress.
+    console.error('[middleware] threw:', err instanceof Error ? err.message : err)
+    return passthrough('threw')
   }
+}
+
+// passthrough() wraps next() so every fall-through path tags itself
+// in a response header. Lets us answer "did the middleware run?" with
+// a single `curl -I` instead of digging through Vercel logs.
+function passthrough(reason) {
+  const resp = next()
+  try {
+    resp.headers.set('x-cash-moves-middleware', `pass:${reason}`)
+  } catch {
+    // next() returns a frozen response in some runtimes; ignore.
+  }
+  return resp
 }
 
 function buildMeta({ slug, profile, appUrl }) {
