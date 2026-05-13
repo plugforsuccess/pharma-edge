@@ -25,6 +25,7 @@ import {
   TrendingUp,
 } from 'lucide-react'
 import clsx from 'clsx'
+import PublicHeader from '../components/PublicHeader'
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -116,6 +117,7 @@ export default function Leaderboard() {
 
   return (
     <div className="min-h-screen bg-bg">
+      <PublicHeader />
       <div className="px-4 lg:px-6 pt-6 pb-12 mx-auto lg:max-w-5xl w-full">
         {/* ── Header ────────────────────────────────────────────── */}
         <div className="mb-6">
