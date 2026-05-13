@@ -1,0 +1,50 @@
+# Daily leaderboard snapshot.
+#
+# Runs once per day at 04:30 UTC (= 00:30 ET DST / 23:30 ET non-DST).
+# Late enough that overnight outcome reconciliation has settled, early
+# enough that the next morning's /leaderboard reads see fresh data.
+#
+# The leaderboard-snapshot edge function:
+#   1. Refreshes the user_trade_stats materialized view (powers /record)
+#   2. Computes top-100 rankings for each of 16 (time_window, rank_type)
+#      pairs and inserts a snapshot row per pair
+#
+# Required GitHub Actions secrets:
+#   SUPABASE_URL
+#   SUPABASE_SERVICE_ROLE_KEY
+
+name: Leaderboard — daily snapshot
+
+on:
+  schedule:
+    - cron: '30 4 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: leaderboard-snapshot
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Invoke leaderboard-snapshot edge function
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          set -e
+          response=$(curl -fsS -X POST \
+            "$SUPABASE_URL/functions/v1/leaderboard-snapshot" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{}')
+          echo "$response" | jq .
+          # Fail the job if the function reported any per-combo failures
+          # so on-call gets paged via GHA notifications.
+          failures=$(echo "$response" | jq -r '.failure_count // 0')
+          if [ "$failures" != "0" ]; then
+            echo "::error::leaderboard-snapshot reported $failures failed combinations"
+            exit 1
+          fi

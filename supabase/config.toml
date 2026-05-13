@@ -1,0 +1,20 @@
+# Supabase project config. Per-function overrides for verify_jwt land
+# here so `supabase functions deploy <name>` (the CI workflow) picks up
+# the correct gating without needing per-function CLI flags.
+#
+# Default behavior (no entry below) = verify_jwt = true.
+# Functions listed here with `verify_jwt = false` are explicitly public.
+
+project_id = "rghoynbaykeyjbhqmaff"
+
+# ─── Public, anon-callable functions ───────────────────────────────
+# profile-view-track:    called from /u/:slug page loads by both
+#                        authenticated and anonymous viewers.
+# leaderboard-public-feed: the /leaderboard page read endpoint;
+#                        anyone (including logged-out users) can browse.
+
+[functions.profile-view-track]
+verify_jwt = false
+
+[functions.leaderboard-public-feed]
+verify_jwt = false
