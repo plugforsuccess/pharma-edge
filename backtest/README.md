@@ -66,3 +66,71 @@ network.
 Scaffold only. The Polygon client + a smoke-test runner are in this
 PR; the strategy implementations are stubs that exercise the harness
 plumbing. Real backtest runs come once the API key is set.
+
+## Spread P&L scoring engine
+
+Two modules score a hypothetical spread against historical Polygon
+data. Both are ticker-agnostic and used by the Suggested Plays
+repeatability harness AND the strategy backtests above.
+
+### Tier 1 — `simulate_tier1.py` (intrinsic, hold-to-expiration)
+
+Fast, no IV assumptions. Holds the spread to expiration and computes
+intrinsic value off the close. Subtracts entry debit. Returns final
+P&L. Caches Polygon EOD bars to `backtest/cache/eod_<TICKER>.parquet`.
+
+Use it for first-pass repeatability checks. It's the **floor** —
+real-world trading exits at profit targets, so Tier 1 systematically
+underestimates actual performance.
+
+```bash
+python backtest/simulate_tier1.py \
+  --ticker SPY \
+  --structure bull_call_spread \
+  --long-strike 450 --short-strike 455 \
+  --expiration 2026-05-17 \
+  --entry-debit 1.80 \
+  --entry-date 2026-05-12
+```
+
+### Tier 2 — `simulate_tier2.py` (path-aware, profit targets + stops)
+
+Walks daily closes between entry and expiration. Prices the spread
+each day via Black-Scholes with held-flat `entry_iv`, exits when
+`profit_target_pct` or `stop_loss_pct` is hit, falls through to Tier 1
+intrinsic at expiration if no exit fires. Shares the Tier 1 cache.
+
+The held-flat IV is an approximation. For 5-14 DTE GEX structural
+plays with no earnings in window, the error is small. For trades
+spanning earnings or vol events, expect significant skew — pull a
+real `entry_iv` from `signals.entry_gex_snapshot` or Polygon options
+snapshots and pass it explicitly.
+
+```bash
+python backtest/simulate_tier2.py \
+  --ticker SPY \
+  --structure bull_call_spread \
+  --long-strike 450 --short-strike 455 \
+  --expiration 2026-05-17 \
+  --entry-debit 1.80 \
+  --entry-date 2026-05-12 \
+  --entry-iv 0.18 \
+  --profit-target-pct 90 \
+  --stop-loss-pct -50
+```
+
+### Slippage default
+
+`slippage_pct=0.005` (0.5%) is conservative for liquid tickers
+(SPY/QQQ/NVDA) and optimistic for thin names. Bump to `0.01` for
+tickers with average daily option volume under 10K contracts.
+Ticker-aware slippage is a Tier 3 concern.
+
+### Tests
+
+```bash
+cd backtest && pytest tests/ -v
+```
+
+10 tests cover the core math + edge cases. They mock the network so
+they don't need `POLYGON_API_KEY`.

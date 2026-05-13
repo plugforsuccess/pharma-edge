@@ -11,3 +11,6 @@ dist-ssr
 __pycache__/
 *.pyc
 .venv/
+.venv-*/
+backtest/cache/
+.pytest_cache/
