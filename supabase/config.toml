@@ -27,3 +27,11 @@ verify_jwt = false
 # runs. Self-validates auth inside the function; no user JWT path.
 [functions.scan-universe-plays]
 verify_jwt = false
+
+# compute-gex: switched to verify_jwt = false so internal edge-function
+# callers (scan-universe-plays cron) can pass service-role bearer
+# without hitting the gateway's UNAUTHORIZED_INVALID_JWT_FORMAT check.
+# The function still validates the bearer internally — service-role
+# key OR a real user JWT — and 401s anonymous callers itself.
+[functions.compute-gex]
+verify_jwt = false
