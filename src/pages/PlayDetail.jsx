@@ -18,17 +18,13 @@ import { useAuth } from '../context/AuthContext'
 import { logAsSignal } from '../lib/logAsSignal'
 import ConvictionDots, { tierFor } from '../components/ConvictionDots'
 import MatrixSummaryCard from '../components/MatrixSummaryCard'
+import PlayMetricsCard from '../components/PlayMetricsCard'
 import { ArrowLeft, ExternalLink, FileText } from 'lucide-react'
 
 function fmtMoney(n) {
   if (n == null || !Number.isFinite(Number(n))) return '—'
   return `$${Math.abs(Number(n)).toLocaleString(undefined, { maximumFractionDigits: 0 })}`
 }
-function popPct(bp) {
-  if (bp == null || !Number.isFinite(Number(bp))) return '—'
-  return `${Math.round(Number(bp) / 100)}%`
-}
-
 // Render the strike pair with explicit long/short + call/put labels so
 // a user who doesn't know "Bear Call Spread" by name still sees which
 // leg they buy and which they sell. The play object stores long_strike
@@ -206,17 +202,6 @@ export default function PlayDetail() {
             <ConvictionDots edge={play.ev_edge_bp} size="lg" />
             <span className={`text-xs font-semibold ${TIER_TEXT[tier]}`}>{tier}</span>
           </div>
-          <div className="grid grid-cols-3 gap-2 text-xs">
-            <Stat label="PoP" value={popPct(play.entry_pop_bp)} />
-            <Stat label="R/R" value={Number(play.risk_reward).toFixed(1)} />
-            <Stat
-              label="EV edge"
-              value={
-                play.ev_edge_bp == null ? '—'
-                  : `${play.ev_edge_bp >= 0 ? '+' : ''}${play.ev_edge_bp}bp`
-              }
-            />
-          </div>
           {minutesAgo != null && (
             <p className="text-[10px] text-zinc-500 pt-1 border-t border-border">
               From scan {minutesAgo === 0 ? 'just now' : `${minutesAgo}m ago`} ·
@@ -224,6 +209,13 @@ export default function PlayDetail() {
             </p>
           )}
         </section>
+
+        {/* ── Live risk metrics ─────────────────────────────────
+            At-scan numbers (struck-through, muted) vs live Polygon
+            recompute (primary). Refreshes every 30s while open.
+            Surfaces a degradation banner when R/R has compressed
+            >50%, PoP dropped >20pp, or EV flipped negative. */}
+        <PlayMetricsCard play={play} />
 
         {/* ── Matrix summary + narrative ───────────────────────── */}
         {matrix && (
@@ -359,15 +351,6 @@ export default function PlayDetail() {
           </button>
         </div>
       </div>
-    </div>
-  )
-}
-
-function Stat({ label, value }) {
-  return (
-    <div className="bg-bg rounded-lg px-2 py-1.5 border border-border">
-      <p className="text-[10px] text-zinc-500 uppercase tracking-wider">{label}</p>
-      <p className="text-sm text-white font-semibold">{value}</p>
     </div>
   )
 }

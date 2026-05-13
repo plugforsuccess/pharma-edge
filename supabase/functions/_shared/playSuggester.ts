@@ -639,6 +639,22 @@ export async function computePopAndFilter(
       p.entry_pop_bp != null && p.breakeven_pop_bp != null
         ? p.entry_pop_bp - p.breakeven_pop_bp
         : null
+
+    // SERVER-SIDE R/R OVERRIDE. Claude has been observed returning
+    // a risk_reward that's inconsistent with its own max_profit /
+    // max_loss outputs — especially on credit spreads where the
+    // model occasionally inverts the ratio (returning width/credit
+    // instead of credit/(width-credit)). Recompute from the two
+    // dollar fields so what we filter on matches what we display.
+    //
+    // PLTR 137/135 credit @ $0.345 example seen in production:
+    //   Claude returned: max_loss=172, max_profit=78, risk_reward=1.85
+    //   Self-consistent: 78/172 = 0.453 → fails the R/R >= 1.5 gate
+    //   That's the correct outcome — the play would have been
+    //   filtered out instead of surfaced with broken math.
+    if (Number.isFinite(maxLoss) && Number.isFinite(maxWin) && maxLoss > 0 && maxWin > 0) {
+      p.risk_reward = Number((maxWin / maxLoss).toFixed(2))
+    }
   }
 
   const beforeCount = parsed.plays.length
