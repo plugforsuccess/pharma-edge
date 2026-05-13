@@ -17,6 +17,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { logAsSignal } from '../lib/logAsSignal'
 import ConvictionDots, { tierFor } from '../components/ConvictionDots'
+import MatrixSummaryCard from '../components/MatrixSummaryCard'
 import { ArrowLeft, ExternalLink, Calculator, FileText } from 'lucide-react'
 
 function fmtMoney(n) {
@@ -27,13 +28,6 @@ function popPct(bp) {
   if (bp == null || !Number.isFinite(Number(bp))) return '—'
   return `${Math.round(Number(bp) / 100)}%`
 }
-function fmtMillions(v) {
-  if (v == null || !Number.isFinite(Number(v))) return 'n/a'
-  const n = Number(v)
-  const sign = n >= 0 ? '+' : '−'
-  return `${sign}$${(Math.abs(n) / 1e6).toFixed(1)}M`
-}
-
 const TIER_TEXT = {
   LOUD:  'text-emerald-400',
   CLEAR: 'text-amber-400',
@@ -45,6 +39,10 @@ export default function PlayDetail() {
   const navigate = useNavigate()
   const { profile } = useAuth()
   const [feedRow, setFeedRow] = useState(null)
+  // matrix_at_call snapshot from the claude_calls row that produced
+  // this play. Lets the compact MatrixSummaryCard show what dealer
+  // positioning looked like at scan time, not at view time.
+  const [matrixAtCall, setMatrixAtCall] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -53,22 +51,28 @@ export default function PlayDetail() {
     async function load() {
       setLoading(true)
       setError(null)
-      // Find the most recent feed row that contains a play with this
-      // claude_call_id. The jsonb path query is the fastest server-side
-      // filter; falling back to a full table scan when the index isn't
-      // helpful (small table).
-      const { data, error: e } = await supabase
-        .from('top_plays_feed')
-        .select('id, computed_at, ranked_plays, tickers_succeeded, universe')
-        .order('computed_at', { ascending: false })
-        .limit(20)
+      // Two independent reads in parallel: the feed row (for play +
+      // other plays) and the claude_calls row (for matrix_at_call).
+      // Each is single-row + indexed so the fan-out is essentially free.
+      const [feedRes, callRes] = await Promise.all([
+        supabase
+          .from('top_plays_feed')
+          .select('id, computed_at, ranked_plays, tickers_succeeded, universe')
+          .order('computed_at', { ascending: false })
+          .limit(20),
+        supabase
+          .from('claude_calls')
+          .select('matrix_at_call')
+          .eq('id', claudeCallId)
+          .maybeSingle(),
+      ])
       if (cancelled) return
-      if (e) {
-        setError(e.message)
+      if (feedRes.error) {
+        setError(feedRes.error.message)
         setLoading(false)
         return
       }
-      const row = (data ?? []).find((r) =>
+      const row = (feedRes.data ?? []).find((r) =>
         Array.isArray(r.ranked_plays) &&
         r.ranked_plays.some((p) => p?.claude_call_id === claudeCallId),
       )
@@ -78,6 +82,10 @@ export default function PlayDetail() {
         return
       }
       setFeedRow(row)
+      // Matrix snapshot is best-effort — old plays from before the
+      // matrix-persistence rollout will have null matrix_at_call. The
+      // detail page still renders, the matrix card just doesn't.
+      setMatrixAtCall(callRes.data?.matrix_at_call ?? null)
       setLoading(false)
     }
     load()
@@ -121,7 +129,7 @@ export default function PlayDetail() {
   }
 
   const tier = tierFor(play.ev_edge_bp)
-  const matrix = play.matrix_snapshot || null
+  const matrix = matrixAtCall || play.matrix_snapshot || null
   const accountSize = Number(profile?.account_size) || 25000
   const maxLoss = Number(play.max_loss_per_spread) || 0
   const maxProfit = Number(play.max_profit_per_spread) || 0
@@ -196,33 +204,27 @@ export default function PlayDetail() {
           )}
         </section>
 
-        {/* ── Matrix snapshot ──────────────────────────────────── */}
+        {/* ── Matrix summary + narrative ───────────────────────── */}
         {matrix && (
-          <section className="bg-card border border-border rounded-xl p-4 space-y-2">
-            <h3 className="text-zinc-300 text-[11px] font-semibold uppercase tracking-wider">
-              Matrix snapshot · at scan time
-            </h3>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
-              <Row label="Spot" value={matrix.spot != null ? `$${Number(matrix.spot).toFixed(2)}` : '—'} />
-              <Row label="Net GEX" value={fmtMillions(matrix.net_gex)} />
-              <Row label="Regime" value={matrix.regime || (matrix.net_gex > 0 ? 'A' : 'B')} />
-              <Row label="Source" value={matrix.source ?? '—'} />
-              <Row label="Largest wall"
-                value={matrix.largest ? `$${matrix.largest.strike}` : '—'} />
-              <Row label="Wall size"
-                value={matrix.largest ? fmtMillions(matrix.largest.gex_net) : '—'} />
-              <Row label="Flip strike"
-                value={matrix.zero_gamma_strike ? `$${matrix.zero_gamma_strike}` : '—'} />
-              <Row label="Put wall"
-                value={matrix.largest_negative_strike ? `$${matrix.largest_negative_strike}` : '—'} />
-            </div>
+          <>
+            <MatrixSummaryCard
+              matrix={matrix}
+              variant="compact"
+              play={{
+                strategy: play.strategy,
+                long_strike: play.long_strike,
+                short_strike: play.short_strike,
+                dte: play.dte,
+                thesis_kind: play.target_thesis_kind,
+              }}
+            />
             <Link
               to={`/markets?ticker=${play.ticker}`}
-              className="text-xs text-red-400 hover:text-red-300 inline-flex items-center gap-1 pt-1"
+              className="text-xs text-red-400 hover:text-red-300 inline-flex items-center gap-1 px-1"
             >
               View live matrix <ExternalLink size={11} />
             </Link>
-          </section>
+          </>
         )}
 
         {/* ── Claude's thesis ──────────────────────────────────── */}

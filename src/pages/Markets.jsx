@@ -8,6 +8,7 @@ import { useAuth } from '../context/AuthContext'
 import { useSubscription } from '../hooks/useSubscription'
 import { HOT_TICKERS, TICKER_UNIVERSE } from '../lib/tickerUniverse'
 import GexMatrix from '../components/GexMatrix'
+import MatrixSummaryCard from '../components/MatrixSummaryCard'
 import TickerDrawer from '../components/TickerDrawer'
 import ReplaySlider from '../components/ReplaySlider'
 import SuggestedPlays from '../components/SuggestedPlays'
@@ -111,6 +112,21 @@ export default function Markets() {
   // which cells field gets rendered. Trinity is the only non-
   // single-ticker view (3 tickers side-by-side).
   const [view, setView] = useState('gex')
+  // viewMode: 'summary' = MatrixSummaryCard (regime + narrative);
+  // 'raw' = the existing heatmap + tabs. Persisted in localStorage
+  // so a power user who flipped to 'raw' once doesn't get reset to
+  // the summary view on next visit. New users default to summary.
+  const [viewMode, setViewMode] = useState(() => {
+    if (typeof window === 'undefined') return 'summary'
+    try {
+      const v = window.localStorage.getItem('pe_markets_view_mode')
+      return v === 'raw' ? 'raw' : 'summary'
+    } catch { return 'summary' }
+  })
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try { window.localStorage.setItem('pe_markets_view_mode', viewMode) } catch { /* */ }
+  }, [viewMode])
   // Replay mode: when active, the time slider feeds historical
   // snapshot payloads to the matrix instead of the live data fetched
   // by load(). Toggling off clears the snapshot and we go back to live.
@@ -569,13 +585,51 @@ export default function Markets() {
             </div>
           )}
 
-        {!loading && !error && (
-          <GexMatrix
-            data={replayActive && replaySnapshot ? replaySnapshot : data}
-            liveSpot={replayActive ? null : liveSpot}
-            exposureType={view}
-          />
-        )}
+        {!loading && !error && (() => {
+          const matrixData = replayActive && replaySnapshot ? replaySnapshot : data
+          return (
+            <div className="space-y-3">
+              {/* Summary / Raw toggle. Sits above whichever view is
+                  active so users don't lose context flipping back and
+                  forth. Persists in localStorage. */}
+              <div className="flex items-center gap-1 bg-card border border-border rounded-lg p-1 w-fit">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('summary')}
+                  className={clsx(
+                    'px-3 py-1 text-[11px] font-medium rounded transition-colors',
+                    viewMode === 'summary'
+                      ? 'bg-bg text-white'
+                      : 'text-zinc-500 hover:text-zinc-300',
+                  )}
+                >
+                  Summary
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('raw')}
+                  className={clsx(
+                    'px-3 py-1 text-[11px] font-medium rounded transition-colors',
+                    viewMode === 'raw'
+                      ? 'bg-bg text-white'
+                      : 'text-zinc-500 hover:text-zinc-300',
+                  )}
+                >
+                  Raw cells
+                </button>
+              </div>
+              {viewMode === 'summary' && matrixData ? (
+                <MatrixSummaryCard matrix={matrixData} variant="full" />
+              ) : (
+                <GexMatrix
+                  data={matrixData}
+                  liveSpot={replayActive ? null : liveSpot}
+                  exposureType={view}
+                />
+              )}
+            </div>
+          )
+        })()}
       </div>
 
       {/* Desktop-only bottom ticker bar — centered Skylit-style. Click
