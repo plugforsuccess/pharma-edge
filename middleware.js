@@ -1,13 +1,20 @@
 // Cash Moves — Vercel Edge Middleware.
 //
-// Single responsibility: inject per-user SSR meta tags into the
-// index.html response for /u/:slug requests. Without this, every
-// share-out of a profile renders the generic site-level OG preview
-// instead of the user's verified P&L + win rate — the central
-// load-bearing fix for the leaderboard viral loop per the audit.
+// Two responsibilities:
+//   1. Inject per-user SSR meta tags into the index.html response for
+//      /u/:slug requests. Without this, every share-out of a profile
+//      renders the generic site-level OG preview instead of the
+//      user's verified P&L + win rate — the central load-bearing fix
+//      for the leaderboard viral loop per the audit.
+//   2. 301 /r/:slug → /u/:slug at the edge so legacy share links
+//      (anything posted before the rebrand) resolve to the new
+//      profile URL with the correct OG preview. The client-side
+//      <LegacyRecordRedirect> fallback in App.jsx covers the case
+//      where the matcher misses; the edge 301 is what actually fixes
+//      Twitter/iMessage previews on old links.
 //
 // Runs at the Vercel edge BEFORE the SPA rewrite (`/((?!api/).*) →
-// /index.html`) fires the static index. For every match we:
+// /index.html`) fires the static index. For /u/:slug we:
 //   1. Resolve the slug from the URL
 //   2. Fetch profile + stats from the profile-public-data edge function
 //   3. Pull the static index.html via fetch
@@ -26,7 +33,7 @@
 import { next } from '@vercel/edge'
 
 export const config = {
-  matcher: ['/u/:slug', '/u/:slug/'],
+  matcher: ['/u/:slug', '/u/:slug/', '/r/:slug', '/r/:slug/'],
 }
 
 const SUPABASE_URL =
@@ -42,8 +49,23 @@ export default async function middleware(req) {
   try {
     const url = new URL(req.url)
     const parts = url.pathname.split('/').filter(Boolean)
+    const namespace = parts[0]
     const slug = parts[1]
     if (!slug || !/^[a-z0-9\-]+$/i.test(slug)) return next()
+
+    // Legacy /r/:slug → 301 → /u/:slug at the edge. Crawlers respect
+    // the 301 and re-fetch /u/:slug, where the meta-injection branch
+    // gives them the per-user OG preview.
+    if (namespace === 'r') {
+      const target = new URL(`/u/${slug}${url.search}`, url)
+      return new Response(null, {
+        status: 301,
+        headers: {
+          location: target.toString(),
+          'Cache-Control': 'public, max-age=3600',
+        },
+      })
+    }
 
     if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return next()
 
