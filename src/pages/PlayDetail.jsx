@@ -321,14 +321,13 @@ export default function PlayDetail() {
             </div>
           </section>
         )}
-      </div>
 
-      {/* ── Fixed bottom CTA stack ───────────────────────────── */}
-      <div
-        className="fixed bottom-0 left-0 right-0 bg-bg border-t border-border px-4 lg:px-6 pt-3 pb-safe"
-        style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom))' }}
-      >
-        <div className="mx-auto lg:max-w-2xl w-full space-y-2">
+        {/* CTA stack — inline at the bottom of the content. Fixed
+            positioning would have collided with the app's bottom
+            nav (also fixed at bottom: 0 with a higher z-index), so
+            we just flow with the content. The outer pb-32 leaves
+            comfortable runway above the nav. */}
+        <div className="space-y-2 pt-2">
           <button
             type="button"
             onClick={handleCalculator}
