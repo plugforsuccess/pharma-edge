@@ -3,51 +3,24 @@ import { useNavigate } from 'react-router-dom'
 import { Activity, ChevronRight, Plus, Settings as SettingsIcon, Sparkles, TrendingUp } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
-import { useSubscription } from '../hooks/useSubscription'
 import { daysUntil } from '../utils/dates'
 import { catalystLabel, directionLabel } from '../lib/design'
 import NotificationCenter from '../components/NotificationCenter'
 import OpenPositions from '../components/OpenPositions'
 import OutcomeInbox from '../components/OutcomeInbox'
-import SuggestedPlays from '../components/SuggestedPlays'
 import TodaysPlaysFeed from '../components/TodaysPlaysFeed'
-import MarketPulse from '../components/MarketPulse'
-import TapeTickerRow from '../components/TapeTickerRow'
 import OnboardingModal, { shouldShowOnboarding } from '../components/OnboardingModal'
 import PullToRefreshIndicator from '../components/PullToRefreshIndicator'
 import usePullToRefresh from '../hooks/usePullToRefresh'
 import clsx from 'clsx'
 
-// Default starting ticker for the Tape's multi-ticker surfaces.
-// Persisted to localStorage so a user who lives in QQQ doesn't get
-// snapped back to SPY every time they open the app.
-const TAPE_DEFAULT_TICKER = 'SPY'
-const TAPE_TICKER_STORAGE_KEY = 'pe_tape_ticker'
-
-function loadInitialTicker() {
-  if (typeof window === 'undefined') return TAPE_DEFAULT_TICKER
-  try {
-    const v = window.localStorage.getItem(TAPE_TICKER_STORAGE_KEY)
-    if (v && /^[A-Z][A-Z0-9.\-]{0,9}$/.test(v)) return v
-  } catch { /* private mode */ }
-  return TAPE_DEFAULT_TICKER
-}
-
 export default function Dashboard() {
   const { user } = useAuth()
-  const { isPro } = useSubscription()
   const navigate = useNavigate()
   const [signals, setSignals] = useState([])
   const [stats, setStats] = useState({ wins: 0, losses: 0, open: 0, winRate: 0, total: 0 })
   const [loading, setLoading] = useState(true)
-  const [activeTicker, setActiveTicker] = useState(loadInitialTicker)
   const [showOnboarding, setShowOnboarding] = useState(false)
-
-  // Persist the active ticker so it survives navigation away and back.
-  useEffect(() => {
-    if (typeof window === 'undefined' || !activeTicker) return
-    try { window.localStorage.setItem(TAPE_TICKER_STORAGE_KEY, activeTicker) } catch { /* */ }
-  }, [activeTicker])
 
   // First-time-user walkthrough — fires once per user per browser.
   // Defer the check to the next tick after auth resolves so we don't
@@ -166,35 +139,13 @@ export default function Dashboard() {
         </div>
       </header>
 
-      {/* Hero band — the new top-of-page anchor.
-          Mobile: ticker row → Pulse → Plays. The two surfaces share the
-          activeTicker so flipping a chip flips both.
-          Desktop: hero spans the full content width above the two-column
-          split below. */}
-      <TapeTickerRow active={activeTicker} onSelect={setActiveTicker} />
-      <MarketPulse ticker={activeTicker} />
-
-      {/* Cross-ticker Today's Plays feed. Lives ABOVE per-ticker
-          Suggested Plays so the daily habit hook is the first thing
-          users see. Per-ticker drill-in stays directly below. */}
+      {/* Today's Plays is the primary hero of the Tape now. The
+          per-ticker Suggested Plays card moved to /markets (Pulse)
+          where users go specifically to explore one ticker — splitting
+          the two surfaces here was dividing attention. The cross-
+          ticker feed is the daily habit hook. */}
       <section className="mb-5">
         <TodaysPlaysFeed />
-      </section>
-
-      <section className="mb-5">
-        <div className="flex items-end justify-between mb-2.5">
-          <div>
-            <p className="eyebrow">Gamma · {activeTicker}</p>
-            <h2 className="font-display text-base text-fg mt-0.5">Suggested Plays</h2>
-          </div>
-          <button
-            onClick={() => navigate(`/markets?ticker=${activeTicker}`)}
-            className="text-[11px] text-subtle hover:text-fg transition-colors"
-          >
-            Open in Markets →
-          </button>
-        </div>
-        <SuggestedPlays ticker={activeTicker} isPro={isPro} />
       </section>
 
       {/* Two-column layout for personal state + Live Moves below the

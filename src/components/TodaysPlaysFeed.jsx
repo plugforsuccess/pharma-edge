@@ -1,34 +1,22 @@
 // Today's Plays — cross-ticker ranked feed.
 //
-// Reads the latest row from top_plays_feed (populated by the
-// scan-universe-plays cron every 15 min during RTH). Auto-refreshes
-// every 60s so a user opening the app sees fresh data within a
-// minute of a new scan committing.
+// Reads the latest top_plays_feed row, auto-refreshes every 60s.
+// Tap a play → /play/:claude_call_id (the decision-context page).
+// The Log CTA is on the detail page; this list is read + tap.
 //
-// Tap a play → /log with the play pre-filled, claude_call_id
-// threaded through, and the OTHER feed plays as claude_other_plays.
-// That deep-links the user into the same logging flow Suggested
-// Plays uses today — full post-mortem provenance preserved.
+// Display rules:
+//   * ConvictionDots show within-tier ranking even when every play
+//     is the same tier (a row of FAINTs needs to be ordered)
+//   * Quiet-market banner when 0 plays clear CLEAR tier
+//   * Universe coverage stat in header (e.g. "2/19 tickers")
 
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Flame } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { logAsSignal } from '../lib/logAsSignal'
+import ConvictionDots, { tierFor } from './ConvictionDots'
 
 const REFRESH_INTERVAL_MS = 60_000
-
-// Conviction tiers from ev_edge_bp (basis points over breakeven PoP):
-//   >= 1500 = LOUD  (15pp+ edge — high conviction)
-//   >=  500 = CLEAR (5-15pp edge — meaningful edge)
-//   >=    0 = FAINT (positive but small)
-// Negative edges are filtered server-side, shouldn't reach the feed.
-function tierFor(play) {
-  const edge = Number(play?.ev_edge_bp ?? 0)
-  if (edge >= 1500) return { label: 'LOUD', cls: 'text-emerald-400', bar: 'bg-emerald-400' }
-  if (edge >= 500) return { label: 'CLEAR', cls: 'text-amber-400', bar: 'bg-amber-400' }
-  return { label: 'FAINT', cls: 'text-zinc-400', bar: 'bg-zinc-500' }
-}
 
 function popPct(bp) {
   if (bp == null || !Number.isFinite(Number(bp))) return null
@@ -55,7 +43,7 @@ export default function TodaysPlaysFeed() {
       const { data, error: e } = await supabase
         .from('top_plays_feed')
         .select(
-          'computed_at, ranked_plays, tickers_succeeded, tickers_failed, total_plays_after_filter',
+          'computed_at, ranked_plays, tickers_succeeded, tickers_failed, total_plays_after_filter, universe',
         )
         .order('computed_at', { ascending: false })
         .limit(1)
@@ -78,22 +66,13 @@ export default function TodaysPlaysFeed() {
     }
   }, [])
 
-  function handleClick(play, allPlays) {
-    // Pass the full feed minus this play as claude_other_plays so the
-    // counterfactual record on signals captures everything the scanner
-    // proposed at this moment in time, not just same-ticker alternatives.
-    const otherPlays = allPlays.filter((p) => p !== play)
-    logAsSignal(
-      navigate,
-      play,
-      play.ticker,
-      play.spot ?? null,
-      null,
-      {
-        claudeCallId: play.claude_call_id ?? null,
-        otherPlays,
-      },
-    )
+  function handleClick(play) {
+    // The detail page handles its own data fetch from claude_call_id —
+    // we just need to navigate. State is not the data source here;
+    // the URL is canonical so deep-linking + refresh work.
+    if (play?.claude_call_id) {
+      navigate(`/play/${play.claude_call_id}`)
+    }
   }
 
   if (loading) {
@@ -113,7 +92,10 @@ export default function TodaysPlaysFeed() {
   }
 
   const plays = Array.isArray(feed?.ranked_plays) ? feed.ranked_plays : []
+  const universeSize = Array.isArray(feed?.universe) ? feed.universe.length : 19
+  const tickersSucceeded = feed?.tickers_succeeded ?? 0
 
+  // Empty / pre-launch state
   if (plays.length === 0) {
     return (
       <section className="bg-card border border-border rounded-xl p-4 space-y-2">
@@ -126,13 +108,18 @@ export default function TodaysPlaysFeed() {
           15 minutes during market hours.
           {feed?.computed_at && (
             <span className="block mt-1 text-[10px] text-zinc-500">
-              Last scan {minutesAgo(feed.computed_at)} · {feed.tickers_succeeded ?? 0} tickers
+              Last scan {minutesAgo(feed.computed_at)} · {tickersSucceeded}/{universeSize} tickers
             </span>
           )}
         </p>
       </section>
     )
   }
+
+  // How many plays clear CLEAR tier? Drives the quiet-market banner.
+  const highConvictionCount = plays.filter((p) =>
+    tierFor(p.ev_edge_bp) !== 'FAINT',
+  ).length
 
   return (
     <section className="bg-card border border-border rounded-xl p-4 space-y-3">
@@ -141,27 +128,37 @@ export default function TodaysPlaysFeed() {
           <Flame size={14} className="text-amber-400" />
           <h2 className="text-white text-sm font-semibold">Today's Plays</h2>
         </div>
-        <span className="text-[10px] text-muted">
-          {minutesAgo(feed.computed_at)} · {feed.tickers_succeeded ?? 0} tickers
+        <span className="text-[10px] text-zinc-500">
+          {minutesAgo(feed.computed_at)} · {tickersSucceeded}/{universeSize} tickers
         </span>
       </header>
 
+      {/* Quiet-market callout when no LOUD or CLEAR plays */}
+      {highConvictionCount === 0 && (
+        <div className="bg-amber-950/30 border border-amber-900/40 rounded-lg px-3 py-2">
+          <p className="text-amber-200 text-[11px] leading-relaxed">
+            <span className="font-semibold">Quiet market.</span> Scanner found {plays.length} setup{plays.length === 1 ? '' : 's'}{' '}
+            across {tickersSucceeded} of {universeSize} tickers but none cleared CLEAR conviction.
+            Lower-conviction plays below — wait for stronger signals or skip today.
+          </p>
+        </div>
+      )}
+
       <ul className="space-y-1.5">
         {plays.map((play, i) => {
-          const tier = tierFor(play)
           const pop = popPct(play.entry_pop_bp)
-          const rr =
-            Number.isFinite(Number(play.risk_reward))
-              ? Number(play.risk_reward).toFixed(1)
-              : '—'
+          const rr = Number.isFinite(Number(play.risk_reward))
+            ? Number(play.risk_reward).toFixed(1)
+            : '—'
           return (
-            <li key={`${play.ticker}-${i}`}>
+            <li key={`${play.claude_call_id ?? play.ticker}-${i}`}>
               <button
                 type="button"
-                onClick={() => handleClick(play, plays)}
-                className="w-full flex items-center gap-3 rounded-lg border border-border bg-bg px-3 py-2.5 text-left hover:border-zinc-700 transition-colors"
+                onClick={() => handleClick(play)}
+                disabled={!play.claude_call_id}
+                className="w-full flex items-center gap-3 rounded-lg border border-border bg-bg px-3 py-2.5 text-left hover:border-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
-                <div className={`w-1 h-9 rounded-full flex-shrink-0 ${tier.bar}`} />
+                <ConvictionDots edge={play.ev_edge_bp} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 text-sm">
                     <span className="font-bold text-white">{play.ticker}</span>
@@ -172,8 +169,14 @@ export default function TodaysPlaysFeed() {
                   </div>
                 </div>
                 <div className="text-right flex-shrink-0">
-                  <div className={`text-[10px] font-semibold ${tier.cls}`}>{tier.label}</div>
-                  <div className="text-[11px] text-zinc-500">PoP {pop ?? '—'}</div>
+                  <div className="text-[11px] text-zinc-300 font-semibold">
+                    PoP {pop ?? '—'}
+                  </div>
+                  <div className="text-[10px] text-zinc-500">
+                    {play.ev_edge_bp != null
+                      ? `${play.ev_edge_bp >= 0 ? '+' : ''}${play.ev_edge_bp}bp`
+                      : ''}
+                  </div>
                 </div>
               </button>
             </li>
@@ -183,7 +186,7 @@ export default function TodaysPlaysFeed() {
 
       <p className="text-[10px] text-muted leading-relaxed pt-2 border-t border-border">
         Cross-ticker scan. Same R/R + EV gates as per-ticker Suggested Plays.
-        Tap any row to deep-link the calculator.
+        Tap a row to see Claude's full thesis + position sizing.
       </p>
     </section>
   )
