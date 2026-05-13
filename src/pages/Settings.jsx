@@ -12,6 +12,18 @@ import {
 import clsx from 'clsx'
 import BotSettingsSection from '../components/BotSettingsSection'
 
+// Reserved slugs — must match the profiles_public_slug_not_reserved
+// CHECK constraint in migration 20260512100000_leaderboard_v1_schema.
+// Surfacing the same list in the client so users get a friendly
+// "reserved name" message before they hit a DB rejection.
+const RESERVED_SLUGS = new Set([
+  'admin', 'api', 'app', 'auth', 'leaderboard', 'login', 'logout',
+  'me', 'record', 'settings', 'signup', 'support', 'help',
+  'u', 'user', 'users', 'profile', 'profiles', 'www', 'about',
+  'privacy', 'terms', 'pricing', 'features', 'blog', 'home',
+  'index', 'public', 'static', 'assets', 'favicon',
+])
+
 function slugify(value) {
   return String(value || '')
     .toLowerCase()
@@ -39,7 +51,48 @@ export default function Settings() {
   }
 
   const slugDraft = slugify(form.public_slug)
-  const publicUrl = slugDraft ? `${window.location.origin}/r/${slugDraft}` : ''
+  // /u/:slug is the canonical public profile route (post leaderboard
+  // focus-audit 2026-05-12). /r/:slug 301-redirects to it but we
+  // surface /u/ directly so shared URLs land on the canonical form.
+  const publicUrl = slugDraft ? `${window.location.origin}/u/${slugDraft}` : ''
+
+  // Realtime slug availability check. Debounced 300ms after the user
+  // stops typing. Three states surfaced inline below the input:
+  //   * 'reserved'  — matches RESERVED_SLUGS
+  //   * 'taken'     — another profile already claims it
+  //   * 'available' — clear to save
+  // The current user's own slug doesn't count as "taken" (they can
+  // re-save without changing it).
+  const [slugStatus, setSlugStatus] = useState(null)
+  useEffect(() => {
+    if (!slugDraft) {
+      setSlugStatus(null)
+      return
+    }
+    if (slugDraft === profile?.public_slug) {
+      setSlugStatus(null)
+      return
+    }
+    if (RESERVED_SLUGS.has(slugDraft)) {
+      setSlugStatus('reserved')
+      return
+    }
+    let cancelled = false
+    setSlugStatus('checking')
+    const t = setTimeout(async () => {
+      const { data } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('public_slug', slugDraft)
+        .maybeSingle()
+      if (cancelled) return
+      setSlugStatus(data && data.id !== user?.id ? 'taken' : 'available')
+    }, 300)
+    return () => {
+      cancelled = true
+      clearTimeout(t)
+    }
+  }, [slugDraft, profile?.public_slug, user?.id])
 
   async function save() {
     if (!user?.id) return
@@ -97,7 +150,7 @@ export default function Settings() {
       <Section title="Account">
         <p className="text-white text-sm font-medium break-all">{user?.email}</p>
         {profile?.public_slug && (
-          <p className="text-subtle text-xs mt-2 font-mono">/r/{profile.public_slug}</p>
+          <p className="text-subtle text-xs mt-2 font-mono">/u/{profile.public_slug}</p>
         )}
       </Section>
 
@@ -136,6 +189,20 @@ export default function Settings() {
             Will be saved as <span className="font-mono text-zinc-400">{slugDraft || '(empty)'}</span>
           </p>
         )}
+        {slugStatus && (
+          <p
+            className={clsx('text-[10px] font-medium', {
+              'text-muted': slugStatus === 'checking',
+              'text-green-400': slugStatus === 'available',
+              'text-red-400': slugStatus === 'taken' || slugStatus === 'reserved',
+            })}
+          >
+            {slugStatus === 'checking'  && 'Checking…'}
+            {slugStatus === 'available' && '✓ Available'}
+            {slugStatus === 'taken'     && '✗ Taken — pick a different slug'}
+            {slugStatus === 'reserved'  && '✗ Reserved — pick a different slug'}
+          </p>
+        )}
 
         {/* Share button — convenience surface so the user can drop their
             /r/:slug link into iMessage / X / etc. without navigating to
@@ -145,7 +212,7 @@ export default function Settings() {
           <button
             type="button"
             onClick={async () => {
-              const url = `${window.location.origin}/r/${profile.public_slug}`
+              const url = `${window.location.origin}/u/${profile.public_slug}`
               const display =
                 [form.first_name, form.last_name].filter(Boolean).join(' ').trim() ||
                 'My Cash Moves track record'

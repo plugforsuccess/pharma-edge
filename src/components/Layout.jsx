@@ -3,12 +3,14 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import {
   Activity,
   BarChart2,
+  Briefcase,
   Flame,
   Home,
   Plus,
   Settings,
   Sparkles,
   Shield,
+  Trophy,
 } from 'lucide-react'
 import InstallPrompt from './InstallPrompt'
 import Spinner from './Spinner'
@@ -29,27 +31,31 @@ import clsx from 'clsx'
 // don't use "Dashboard" here because The Tape is already the
 // dashboard; double-labeling would collide.
 //
-// Mobile bottom nav has 4 tabs split 2/2 around a center FAB:
-//   [Tape] [Pulse] (LOG FAB) [Flow] [Record]
-// Settings moves to the desktop sidebar + tape header avatar so it
-// frees up bottom-bar real estate. The Log FAB is the primary action
-// (writing a signal); making it visually dominant matches the
-// "log first, place second" workflow CLAUDE.md describes.
+// Mobile bottom nav has 4 tabs split 2/2 around a center FAB. Per the
+// leaderboard focus-audit (2026-05-12), Flow demotes to an
+// admin-only surface (it's a bot UI, not a user product), and
+// Positions takes its slot since active-position management is the
+// thing a user opens the app to check. Final shape:
+//   [Tape] [Pulse] (LOG FAB) [Record] [Leaderboard]
+// Record links to the user's own /record dashboard; Leaderboard is
+// the public discovery surface. Settings still lives in the desktop
+// sidebar + tape header avatar (mobile reaches it via avatar tap).
 const navLeft = [
   { to: '/', icon: Home, label: 'Tape' },
   { to: '/markets', icon: Activity, label: 'Pulse' },
 ]
 const navRight = [
-  { to: '/flow', icon: Flame, label: 'Flow' },
   { to: '/record', icon: BarChart2, label: 'Record' },
+  { to: '/leaderboard', icon: Trophy, label: 'Top' },
 ]
+// Desktop sidebar. /flow lives here ONLY for is_admin users (gated
+// in Layout(); regular users don't see it). /leaderboard added as a
+// first-class tab. /reasoning kept between the visualization tabs
+// and operational tabs as a desktop-only quick-access (mobile reaches
+// it from the Markets page header).
 const navFull = [
   ...navLeft,
   ...navRight,
-  // Reasoning sits between the visualization tabs (Pulse/Flow) and
-  // the operational tabs (Record/Settings) in the desktop sidebar
-  // since it's the engine output for the views above it. Mobile
-  // users reach /reasoning from the Markets page header for now.
   { to: '/reasoning', icon: Sparkles, label: 'Reasoning' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ]
@@ -60,8 +66,14 @@ export default function Layout() {
   // Owner-only Admin link; appended to the desktop sidebar nav when
   // the signed-in user has profiles.is_admin = true. Mobile users
   // reach /admin by typing the URL — it's a low-frequency surface.
+  // /flow is admin-only per the focus audit (bot UI, not a user
+  // product). Admins also get the /admin sidebar shortcut.
   const sidebarNav = profile?.is_admin
-    ? [...navFull, { to: '/admin', icon: Shield, label: 'Admin' }]
+    ? [
+        ...navFull,
+        { to: '/flow', icon: Flame, label: 'Flow' },
+        { to: '/admin', icon: Shield, label: 'Admin' },
+      ]
     : navFull
   return (
     <div className="min-h-screen flex">
