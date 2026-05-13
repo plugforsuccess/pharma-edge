@@ -10,6 +10,7 @@ import NotificationCenter from '../components/NotificationCenter'
 import OpenPositions from '../components/OpenPositions'
 import OutcomeInbox from '../components/OutcomeInbox'
 import SuggestedPlays from '../components/SuggestedPlays'
+import TodaysPlaysFeed from '../components/TodaysPlaysFeed'
 import MarketPulse from '../components/MarketPulse'
 import TapeTickerRow from '../components/TapeTickerRow'
 import OnboardingModal, { shouldShowOnboarding } from '../components/OnboardingModal'
@@ -172,6 +173,13 @@ export default function Dashboard() {
           split below. */}
       <TapeTickerRow active={activeTicker} onSelect={setActiveTicker} />
       <MarketPulse ticker={activeTicker} />
+
+      {/* Cross-ticker Today's Plays feed. Lives ABOVE per-ticker
+          Suggested Plays so the daily habit hook is the first thing
+          users see. Per-ticker drill-in stays directly below. */}
+      <section className="mb-5">
+        <TodaysPlaysFeed />
+      </section>
 
       <section className="mb-5">
         <div className="flex items-end justify-between mb-2.5">
