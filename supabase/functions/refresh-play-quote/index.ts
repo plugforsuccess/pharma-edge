@@ -129,13 +129,16 @@ serve(async (req) => {
     }
   }
 
-  // Pull both leg quotes + spot in parallel.
+  // Pull both leg quotes in parallel. Spot comes from the option
+  // snapshot's `underlying_asset.price` field — the dedicated
+  // /v2/snapshot/locale/us/markets/stocks endpoint returns 403
+  // NOT_AUTHORIZED on the Options Advanced plan ("You are not
+  // entitled to this data"), so we don't call it.
   const longTicker = buildOccTicker(body.ticker, body.expiration, cls.optType, body.long_strike)
   const shortTicker = buildOccTicker(body.ticker, body.expiration, cls.optType, body.short_strike)
-  const [longQuote, shortQuote, spotQuote] = await Promise.all([
+  const [longQuote, shortQuote] = await Promise.all([
     fetchPolygonOptionQuote(longTicker, body.ticker),
     fetchPolygonOptionQuote(shortTicker, body.ticker),
-    fetchPolygonSpot(body.ticker),
   ])
 
   if (!longQuote || !shortQuote) {
@@ -146,8 +149,9 @@ serve(async (req) => {
       short_quote: shortQuote,
     }, 502)
   }
-  if (!spotQuote) {
-    return json({ success: false, error: 'Polygon spot unavailable' }, 502)
+  const spotPrice = longQuote.underlying_price ?? shortQuote.underlying_price ?? null
+  if (!spotPrice) {
+    return json({ success: false, error: 'no underlying price on either option snapshot' }, 502)
   }
 
   const width = Math.abs(body.long_strike - body.short_strike)
@@ -204,7 +208,7 @@ serve(async (req) => {
   const iv = shortQuote.iv ?? longQuote.iv ?? 0.30
   const dte = daysBetween(body.expiration)
   const popEntry = computePopBp({
-    spot: spotQuote.last,
+    spot: spotPrice,
     strike: body.short_strike,
     iv,
     dte,
@@ -225,7 +229,7 @@ serve(async (req) => {
     long_strike: body.long_strike,
     short_strike: body.short_strike,
     expiration: body.expiration,
-    spot: spotQuote.last,
+    spot: spotPrice,
     long_mid: longQuote.mid,
     short_mid: shortQuote.mid,
     long_bid: longQuote.bid,
@@ -284,10 +288,15 @@ interface OptionQuote {
   ask: number
   iv: number | null
   age_seconds: number
+  underlying_price: number | null
 }
 
 async function fetchPolygonOptionQuote(occTicker: string, underlying: string): Promise<OptionQuote | null> {
   // /v3/snapshot/options/{underlying}/{contract}
+  // Response carries last_quote (bid/ask/midpoint), implied_volatility,
+  // AND underlying_asset.price — we extract spot from there to avoid a
+  // separate /v2/snapshot/locale/us/markets/stocks call that 403s on
+  // the Options Advanced plan.
   const url = `https://api.polygon.io/v3/snapshot/options/${underlying.toUpperCase()}/${occTicker}?apiKey=${POLYGON_API_KEY}`
   try {
     const resp = await fetch(url, { signal: AbortSignal.timeout(5000) })
@@ -300,38 +309,29 @@ async function fetchPolygonOptionQuote(occTicker: string, underlying: string): P
     if (!r) return null
     const bid = Number(r.last_quote?.bid)
     const ask = Number(r.last_quote?.ask)
+    const midpoint = Number(r.last_quote?.midpoint)
     if (!Number.isFinite(bid) || !Number.isFinite(ask) || bid < 0 || ask <= 0 || ask < bid) {
       return null
     }
+    // Prefer Polygon's own midpoint when available; fall back to (bid+ask)/2.
+    const mid = Number.isFinite(midpoint) && midpoint > 0 ? midpoint : (bid + ask) / 2
     const iv = Number(r.implied_volatility)
-    // sip_timestamp is nanoseconds since epoch
-    const tsNs = Number(r.last_quote?.sip_timestamp)
+    const underlying_price = Number(r.underlying_asset?.price)
+    // last_quote.last_updated is nanoseconds since epoch
+    const tsNs = Number(r.last_quote?.last_updated)
     const ageSeconds = Number.isFinite(tsNs) && tsNs > 0
       ? Math.max(0, Math.floor((Date.now() - tsNs / 1e6) / 1000))
       : 0
     return {
-      mid: (bid + ask) / 2,
+      mid,
       bid,
       ask,
       iv: Number.isFinite(iv) && iv > 0 ? iv : null,
       age_seconds: ageSeconds,
+      underlying_price: Number.isFinite(underlying_price) && underlying_price > 0 ? underlying_price : null,
     }
   } catch (err) {
     console.warn('[refresh-play-quote] polygon option threw', occTicker, err)
-    return null
-  }
-}
-
-async function fetchPolygonSpot(ticker: string): Promise<{ last: number } | null> {
-  const url = `https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/${ticker.toUpperCase()}?apiKey=${POLYGON_API_KEY}`
-  try {
-    const resp = await fetch(url, { signal: AbortSignal.timeout(5000) })
-    if (!resp.ok) return null
-    const body = await resp.json()
-    const last = Number(body?.ticker?.lastTrade?.p ?? body?.ticker?.day?.c ?? body?.ticker?.prevDay?.c)
-    if (!Number.isFinite(last) || last <= 0) return null
-    return { last }
-  } catch {
     return null
   }
 }
