@@ -30,6 +30,7 @@ import {
   TrendingUp,
 } from 'lucide-react'
 import EquityCurve from '../components/EquityCurve'
+import PublicHeader from '../components/PublicHeader'
 import clsx from 'clsx'
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
@@ -187,6 +188,7 @@ export default function PublicProfile() {
 
   return (
     <div className="min-h-screen bg-bg">
+      <PublicHeader />
       <div className="px-4 lg:px-6 pt-6 pb-12 mx-auto lg:max-w-4xl w-full">
         {/* ── Profile header ───────────────────────────────────── */}
         <div className="flex items-start gap-4 mb-6">
