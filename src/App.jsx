@@ -1,5 +1,5 @@
 import { Suspense, lazy } from 'react'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
@@ -13,7 +13,7 @@ const TrackRecord = lazy(() => import('./pages/TrackRecord'))
 const Rules = lazy(() => import('./pages/Rules'))
 const Settings = lazy(() => import('./pages/Settings'))
 const OptionCalculator = lazy(() => import('./pages/OptionCalculator'))
-const PublicRecord = lazy(() => import('./pages/PublicRecord'))
+const PublicProfile = lazy(() => import('./pages/PublicProfile'))
 const Markets = lazy(() => import('./pages/Markets'))
 const Glossary = lazy(() => import('./pages/Glossary'))
 const PositionDetail = lazy(() => import('./pages/PositionDetail'))
@@ -46,6 +46,14 @@ function ProtectedLayout() {
   return <Layout />
 }
 
+// Legacy /r/:slug → /u/:slug. Per the leaderboard focus-audit spec,
+// public profiles are at /u/:slug going forward; the old /r/:slug
+// route 301-redirects so existing share links don't break.
+function LegacyRecordRedirect() {
+  const { slug } = useParams()
+  return <Navigate to={`/u/${slug}`} replace />
+}
+
 export default function App() {
   return (
     <AuthProvider>
@@ -53,13 +61,14 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route
-            path="/r/:slug"
+            path="/u/:slug"
             element={
               <Suspense fallback={<LoadingScreen />}>
-                <PublicRecord />
+                <PublicProfile />
               </Suspense>
             }
           />
+          <Route path="/r/:slug" element={<LegacyRecordRedirect />} />
           <Route
             path="/"
             element={
