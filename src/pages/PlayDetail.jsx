@@ -18,7 +18,7 @@ import { useAuth } from '../context/AuthContext'
 import { logAsSignal } from '../lib/logAsSignal'
 import ConvictionDots, { tierFor } from '../components/ConvictionDots'
 import MatrixSummaryCard from '../components/MatrixSummaryCard'
-import { ArrowLeft, ExternalLink, Calculator, FileText } from 'lucide-react'
+import { ArrowLeft, ExternalLink, FileText } from 'lucide-react'
 
 function fmtMoney(n) {
   if (n == null || !Number.isFinite(Number(n))) return '—'
@@ -27,6 +27,34 @@ function fmtMoney(n) {
 function popPct(bp) {
   if (bp == null || !Number.isFinite(Number(bp))) return '—'
   return `${Math.round(Number(bp) / 100)}%`
+}
+
+// Render the strike pair with explicit long/short + call/put labels so
+// a user who doesn't know "Bear Call Spread" by name still sees which
+// leg they buy and which they sell. The play object stores long_strike
+// (what you buy) and short_strike (what you sell) regardless of
+// strategy — option type comes from the strategy.
+function describeLegs(play) {
+  const opt = (() => {
+    switch (play.type) {
+      case 'BULL_CALL':
+      case 'BEAR_CALL_CREDIT':
+        return 'call'
+      case 'BEAR_PUT':
+      case 'BULL_PUT_CREDIT':
+        return 'put'
+      case 'IRON_CONDOR':
+      default:
+        return null
+    }
+  })()
+  const long = `$${play.long_strike}`
+  const short = `$${play.short_strike}`
+  if (opt === null) {
+    // Iron condor — both wings, can't label with a single option type
+    return `${long} / ${short}`
+  }
+  return `Long ${long} ${opt} · Short ${short} ${opt}`
 }
 const TIER_TEXT = {
   LOUD:  'text-emerald-400',
@@ -149,16 +177,6 @@ export default function PlayDetail() {
     })
   }
 
-  function handleCalculator() {
-    const params = new URLSearchParams({
-      ticker: play.ticker,
-      long: String(play.long_strike),
-      short: String(play.short_strike),
-      expiry: play.expiration,
-    })
-    navigate(`/calculator?${params.toString()}`)
-  }
-
   return (
     <div className="min-h-screen bg-bg pb-32">
       <div className="px-4 lg:px-6 pt-6 mx-auto lg:max-w-2xl w-full space-y-3">
@@ -177,8 +195,11 @@ export default function PlayDetail() {
               <span className="text-white text-xl font-bold">{play.ticker}</span>
               <span className="text-zinc-400 text-sm">· {play.strategy}</span>
             </div>
-            <p className="text-zinc-500 text-xs">
-              ${play.long_strike} / ${play.short_strike} · {play.dte ?? '—'}DTE · exp {play.expiration}
+            <p className="text-zinc-300 text-xs">
+              {describeLegs(play)}
+            </p>
+            <p className="text-zinc-500 text-[11px] mt-0.5">
+              {play.dte ?? '—'}DTE · exp {play.expiration}
             </p>
           </div>
           <div className="flex items-center gap-3 pt-1">
@@ -324,19 +345,11 @@ export default function PlayDetail() {
           </section>
         )}
 
-        {/* CTA stack — inline at the bottom of the content. Fixed
-            positioning would have collided with the app's bottom
-            nav (also fixed at bottom: 0 with a higher z-index), so
-            we just flow with the content. The outer pb-32 leaves
-            comfortable runway above the nav. */}
+        {/* CTA — Log this trade flows you into the calculator step
+            inside LogSignal anyway, so a standalone "Open in
+            calculator" button (the /calculator route was retired)
+            would have been a dead end. */}
         <div className="space-y-2 pt-2">
-          <button
-            type="button"
-            onClick={handleCalculator}
-            className="w-full bg-card border border-border text-zinc-300 text-sm font-medium rounded-lg py-2.5 inline-flex items-center justify-center gap-1.5 hover:border-zinc-700"
-          >
-            <Calculator size={14} /> Open in calculator
-          </button>
           <button
             type="button"
             onClick={handleLog}
