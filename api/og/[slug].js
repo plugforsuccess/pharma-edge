@@ -41,32 +41,33 @@ export default async function handler(req) {
       return errorImage('Service misconfigured')
     }
 
-    // Pull profile + public_record rows in parallel. We don't use
-    // the supabase-js client in edge runtime to avoid the bundle
-    // hit; raw fetch against PostgREST works fine.
-    const headers = {
-      apikey: SUPABASE_ANON_KEY,
-      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-    }
-    const [profileResp, signalsResp] = await Promise.all([
-      fetch(
-        `${SUPABASE_URL}/rest/v1/profiles?public_slug=eq.${encodeURIComponent(slug)}&is_public=eq.true&select=display_name,public_slug`,
-        { headers },
-      ),
-      fetch(
-        `${SUPABASE_URL}/rest/v1/public_record?public_slug=eq.${encodeURIComponent(slug)}&select=thesis_correct,trade_type,pnl_percent,entry_pop_bp&limit=500`,
-        { headers },
-      ),
-    ])
+    // Single round-trip to profile-public-data — same source the
+    // /u/:slug page and middleware.js use, so the OG preview agrees
+    // with the page it links to.
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/profile-public-data`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({ slug }),
+    })
+    if (!resp.ok) return errorImage('Profile not found')
+    const body = await resp.json()
+    if (!body?.success || !body?.data) return errorImage('Profile not found')
 
-    if (!profileResp.ok) return errorImage('Profile not found')
-    const profiles = await profileResp.json()
-    const profile = profiles?.[0]
-    if (!profile) return errorImage('Profile not public')
-
-    const signals = signalsResp.ok ? await signalsResp.json() : []
-    const stats = computeStats(signals)
+    const profile = body.data.profile
+    const apiStats = body.data.stats
     const displayName = profile.display_name || slug
+    const stats = {
+      total: apiStats.trades,
+      wins: apiStats.wins,
+      losses: apiStats.losses,
+      winRate: apiStats.win_rate_pct != null ? Math.round(apiStats.win_rate_pct) : 0,
+      totalPnl: Number(apiStats.total_pnl || 0),
+      biggestWin: Number(apiStats.biggest_win || 0),
+      hasTrades: apiStats.trades > 0,
+    }
 
     return new ImageResponse(
       cardJsx({ displayName, slug, stats }),
@@ -85,76 +86,13 @@ export default async function handler(req) {
   }
 }
 
-function computeStats(rows) {
-  if (!rows || rows.length === 0) {
-    return {
-      total: 0,
-      wins: 0,
-      losses: 0,
-      winRate: 0,
-      avgPredictedPop: null,
-      calibrationDelta: null,
-      avgPnl: null,
-    }
-  }
-  const resolved = rows.filter(
-    (s) => s.thesis_correct !== null && s.thesis_correct !== undefined,
-  )
-  const wins = resolved.filter((s) => s.thesis_correct).length
-  const losses = resolved.length - wins
-  const winRate = resolved.length > 0 ? Math.round((wins / resolved.length) * 100) : 0
-
-  const withPop = rows.filter(
-    (s) => s.entry_pop_bp != null && Number.isFinite(Number(s.entry_pop_bp)),
-  )
-  const avgPredictedPop = withPop.length
-    ? Math.round(
-        withPop.reduce((sum, s) => sum + Number(s.entry_pop_bp), 0) / withPop.length / 100,
-      )
-    : null
-  // Calibration delta: average predicted PoP minus actual win rate.
-  // Positive = overconfident; negative = underconfident; near zero
-  // = well-calibrated.
-  const calibrationDelta =
-    avgPredictedPop != null && resolved.length > 0
-      ? avgPredictedPop - winRate
-      : null
-
-  const withPnl = resolved.filter((s) => s.pnl_percent != null)
-  const avgPnl = withPnl.length
-    ? Math.round(
-        withPnl.reduce((sum, s) => sum + Number(s.pnl_percent), 0) / withPnl.length,
-      )
-    : null
-
-  return {
-    total: rows.length,
-    resolved: resolved.length,
-    wins,
-    losses,
-    winRate,
-    avgPredictedPop,
-    calibrationDelta,
-    avgPnl,
-  }
-}
+// computeStats removed 2026-05-12 — data now comes pre-aggregated
+// from the profile-public-data edge function; see handler() above.
 
 function cardJsx({ displayName, slug, stats }) {
-  const hasResolved = stats.resolved > 0
-  const calibrationLabel =
-    stats.calibrationDelta == null
-      ? '—'
-      : stats.calibrationDelta === 0
-        ? '0 pts'
-        : `${stats.calibrationDelta > 0 ? '+' : ''}${stats.calibrationDelta} pts`
-  const calibrationColor =
-    stats.calibrationDelta == null
-      ? '#6b6b8a'
-      : Math.abs(stats.calibrationDelta) <= 5
-        ? '#22c55e'
-        : Math.abs(stats.calibrationDelta) <= 15
-          ? '#eab308'
-          : '#ef4444'
+  const pnlSigned = `${stats.totalPnl >= 0 ? '+' : '−'}$${Math.abs(Math.round(stats.totalPnl)).toLocaleString()}`
+  const pnlColor =
+    !stats.hasTrades ? '#6b6b8a' : stats.totalPnl >= 0 ? '#22c55e' : '#ef4444'
 
   return {
     type: 'div',
@@ -225,7 +163,7 @@ function cardJsx({ displayName, slug, stats }) {
                     color: '#6b6b8a',
                     fontFamily: 'monospace',
                   },
-                  children: `cashmoves.io/r/${slug}`,
+                  children: `cashmoves.io/u/${slug}`,
                 },
               },
             ],
@@ -256,7 +194,7 @@ function cardJsx({ displayName, slug, stats }) {
               textTransform: 'uppercase',
               letterSpacing: '0.18em',
             },
-            children: hasResolved ? 'Public Track Record' : 'New Trader',
+            children: stats.hasTrades ? 'Verified Track Record' : 'New Trader',
           },
         },
         // Stats row
@@ -271,33 +209,30 @@ function cardJsx({ displayName, slug, stats }) {
             },
             children: [
               statCell({
-                label: 'CALIBRATION',
-                value: calibrationLabel,
-                color: calibrationColor,
-                sub: 'predicted vs actual',
+                label: 'VERIFIED P&L',
+                value: stats.hasTrades ? pnlSigned : '—',
+                color: pnlColor,
+                sub: 'hash-locked',
               }),
               statCell({
                 label: 'WIN RATE',
-                value: hasResolved ? `${stats.winRate}%` : '—',
-                color: hasResolved && stats.winRate >= 55 ? '#22c55e' : '#e8e8f0',
-                sub: hasResolved ? `${stats.wins}W / ${stats.losses}L` : 'no resolved moves',
+                value: stats.hasTrades && stats.total >= 10 ? `${stats.winRate}%` : '—',
+                color: stats.hasTrades && stats.winRate >= 55 ? '#22c55e' : '#e8e8f0',
+                sub: stats.hasTrades ? `${stats.wins}W / ${stats.losses}L` : 'no trades yet',
               }),
               statCell({
-                label: 'AVG P/L',
-                value: stats.avgPnl != null ? `${stats.avgPnl > 0 ? '+' : ''}${stats.avgPnl}%` : '—',
-                color:
-                  stats.avgPnl == null
-                    ? '#e8e8f0'
-                    : stats.avgPnl > 0
-                      ? '#22c55e'
-                      : '#ef4444',
-                sub: 'per closed move',
+                label: 'BIGGEST WIN',
+                value: stats.biggestWin > 0
+                  ? `$${Math.round(stats.biggestWin).toLocaleString()}`
+                  : '—',
+                color: stats.biggestWin > 0 ? '#22c55e' : '#e8e8f0',
+                sub: 'best single trade',
               }),
               statCell({
-                label: 'TOTAL',
+                label: 'TRADES',
                 value: String(stats.total),
                 color: '#e8e8f0',
-                sub: stats.total === 1 ? 'logged move' : 'logged moves',
+                sub: stats.total === 1 ? 'closed' : 'closed',
               }),
             ],
           },
