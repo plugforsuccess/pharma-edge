@@ -30,9 +30,16 @@ const SCAN_AUTH_TOKEN = Deno.env.get('SCAN_AUTH_TOKEN')
 
 // Anthropic + Polygon comfortable parallelism. Anthropic Sonnet 4.6
 // default tier is 4,000 RPM; Polygon Options Advanced is ~200 req/min;
-// each ticker triggers ~10 Polygon calls so 4 in flight = ~40/min
-// peak — well under the limit. Don't bump above 8 without measuring.
-const CONCURRENCY = 4
+// each ticker triggers ~10 Polygon calls so 8 in flight = ~80/min
+// peak — well under the Polygon limit.
+//
+// History: started at 4. At 4, full 19-ticker scans averaged ~140s,
+// hitting Supabase Edge's ~150s runtime cap and getting killed before
+// the final top_plays_feed insert. cron.job_run_details showed
+// successful HTTP queue but no rows landed. Bumped to 8 → ~75-95s
+// per scan, well under the runtime cap. Don't go above 12 without
+// measuring Anthropic 429s.
+const CONCURRENCY = 8
 
 // Cap on plays per feed row. Most users won't scroll past 10; 15
 // gives breathing room so the next user opening the app sees a fresh
