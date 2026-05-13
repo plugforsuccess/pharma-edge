@@ -47,20 +47,38 @@ serve(async (req) => {
   }
   if (req.method !== 'POST') return json({ error: 'method not allowed' }, 405)
 
-  // Auth: cron secret OR service-role JWT.
-  const authHeader = req.headers.get('Authorization') || ''
-  const isCron = !!SCAN_AUTH_TOKEN && authHeader === `Bearer ${SCAN_AUTH_TOKEN}`
-  const isServiceRole = !!SUPABASE_SERVICE_ROLE_KEY && authHeader === `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`
-  if (!isCron && !isServiceRole) {
-    return json({ error: 'unauthorized' }, 401)
-  }
-
   if (!ANTHROPIC_API_KEY || !SUPABASE_URL || !SUPABASE_ANON_KEY || !SUPABASE_SERVICE_ROLE_KEY) {
     return json({ error: 'edge function misconfigured' }, 500)
   }
 
   const startedAt = Date.now()
   const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+
+  // Auth: cron secret OR service-role JWT OR vault-stored cron token.
+  //
+  // The vault path is what makes the pg_cron schedule work without any
+  // dashboard env-var setup. We store the token in vault.decrypted_secrets
+  // under the name 'cron_scan_auth_token' (see migration); pg_cron reads
+  // the same row when building its Bearer header. Both sides agree on
+  // the value with zero manual config.
+  const authHeader = req.headers.get('Authorization') || ''
+  const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : ''
+
+  const isCron = !!SCAN_AUTH_TOKEN && bearer === SCAN_AUTH_TOKEN
+  const isServiceRole = !!SUPABASE_SERVICE_ROLE_KEY && bearer === SUPABASE_SERVICE_ROLE_KEY
+  let isVaultCron = false
+  if (!isCron && !isServiceRole && bearer) {
+    const { data: vaultRow } = await adminClient
+      .schema('vault')
+      .from('decrypted_secrets')
+      .select('decrypted_secret')
+      .eq('name', 'cron_scan_auth_token')
+      .maybeSingle()
+    isVaultCron = !!vaultRow?.decrypted_secret && bearer === vaultRow.decrypted_secret
+  }
+  if (!isCron && !isServiceRole && !isVaultCron) {
+    return json({ error: 'unauthorized' }, 401)
+  }
 
   // Optional body for manual overrides (e.g. { scan_kind: 'manual',
   // force: true } to bypass the RTH check during testing).
