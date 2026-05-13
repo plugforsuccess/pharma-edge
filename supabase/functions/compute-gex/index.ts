@@ -1204,11 +1204,21 @@ serve(async (req) => {
   if (!authHeader?.startsWith('Bearer ')) {
     return json({ success: false, error: 'unauthorized' }, 401)
   }
-  const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    global: { headers: { Authorization: authHeader } },
-  })
-  const { data: { user }, error: authError } = await userClient.auth.getUser()
-  if (authError || !user) return json({ success: false, error: 'unauthorized' }, 401)
+  const bearer = authHeader.slice('Bearer '.length).trim()
+  // Service-role bypass for internal calls from other edge functions
+  // (scan-universe-plays, post-scan analytics). The platform's gateway
+  // rejects service-role JWTs as UNAUTHORIZED_INVALID_JWT_FORMAT for
+  // some internal call paths; this lets the function recognize the
+  // role directly and skip the user-JWT validation that would
+  // otherwise 401 a system-driven request.
+  const isServiceRole = SUPABASE_SERVICE_ROLE_KEY && bearer === SUPABASE_SERVICE_ROLE_KEY
+  if (!isServiceRole) {
+    const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      global: { headers: { Authorization: authHeader } },
+    })
+    const { data: { user }, error: authError } = await userClient.auth.getUser()
+    if (authError || !user) return json({ success: false, error: 'unauthorized' }, 401)
+  }
 
   let body: Record<string, unknown>
   try {
