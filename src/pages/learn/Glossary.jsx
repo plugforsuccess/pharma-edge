@@ -1,35 +1,36 @@
-import { ArrowLeft, Target } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { Target } from 'lucide-react'
+import LearnLayout from '../../components/LearnLayout'
+import { getArticleBySlug, getNeighbors } from '../../lib/learnArticles'
 
 // Plain-language definitions for the GEX vocabulary used on /markets.
 // Cameron's day-1 reference — the goal is "I see Net GEX +$5M and a
 // flip strike of 510 — what does that mean for tomorrow's tape?"
 //
-// Wording is intentionally non-academic: this is for traders sizing
-// positions, not for textbook fidelity. Footnotes link to deeper
-// references where appropriate.
+// Moved from the standalone /glossary route into /learn/glossary on
+// 2026-05-12 per the focus-audit nav consolidation. Content unchanged;
+// wrapper swapped from a bespoke shell to LearnLayout so it shares
+// chrome with the other learn articles.
+
+const SLUG = 'glossary'
 
 export default function Glossary() {
-  const navigate = useNavigate()
+  const meta = getArticleBySlug(SLUG)
+  const { prev, next } = getNeighbors(SLUG)
   return (
-    <div className="px-4 lg:px-6 py-5 space-y-5 max-w-md lg:max-w-3xl mx-auto">
-      <div className="flex items-center gap-3">
-        <button
-          onClick={() => navigate(-1)}
-          className="p-2 -ml-2 text-subtle hover:text-fg"
-          aria-label="Back"
-        >
-          <ArrowLeft size={20} />
-        </button>
-        <div>
-          <h1 className="text-lg font-semibold leading-tight">Pulse Glossary</h1>
-          <p className="text-xs text-subtle">
-            HeatPulse™ vocabulary — what the heatmap, the secondary
-            Greeks, and the suggested-play cards are telling you, in
-            trader language.
-          </p>
-        </div>
-      </div>
+    <LearnLayout
+      title={meta?.title ?? 'Pulse Glossary'}
+      description={meta?.description ?? 'HeatPulse™ vocabulary in trader language.'}
+      slug={SLUG}
+      publishedAt="May 12, 2026"
+      updatedAt="May 12, 2026"
+      prevArticle={prev}
+      nextArticle={next}
+    >
+      <p className="text-xs text-subtle mb-4">
+        HeatPulse™ vocabulary — what the heatmap, the secondary
+        Greeks, and the suggested-play cards are telling you, in
+        trader language.
+      </p>
 
       {/* ── How to Trade GEX (top-of-page playbook) ──
           The actionable section. Lives above the term definitions
@@ -739,7 +740,7 @@ export default function Glossary() {
           advice.
         </p>
       </div>
-    </div>
+    </LearnLayout>
   )
 }
 

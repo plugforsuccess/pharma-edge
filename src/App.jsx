@@ -5,18 +5,14 @@ import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import SignalDetail from './pages/SignalDetail'
 import LogSignal from './pages/LogSignal'
-import Calendar from './pages/Calendar'
 import Layout from './components/Layout'
 
 // Non-critical screens can pay their bytes lazily.
 const TrackRecord = lazy(() => import('./pages/TrackRecord'))
-const Rules = lazy(() => import('./pages/Rules'))
 const Settings = lazy(() => import('./pages/Settings'))
-const OptionCalculator = lazy(() => import('./pages/OptionCalculator'))
 const PublicProfile = lazy(() => import('./pages/PublicProfile'))
 const Leaderboard = lazy(() => import('./pages/Leaderboard'))
 const Markets = lazy(() => import('./pages/Markets'))
-const Glossary = lazy(() => import('./pages/Glossary'))
 const PositionDetail = lazy(() => import('./pages/PositionDetail'))
 const Flow = lazy(() => import('./pages/Flow'))
 const Reasoning = lazy(() => import('./pages/Reasoning'))
@@ -26,6 +22,8 @@ const GammaFlipTrading = lazy(() => import('./pages/learn/GammaFlipTrading'))
 const ZeroDtePinningStrategy = lazy(() => import('./pages/learn/ZeroDtePinningStrategy'))
 const VannaExposureExplained = lazy(() => import('./pages/learn/VannaExposureExplained'))
 const BestGexTools = lazy(() => import('./pages/learn/BestGexTools'))
+const Glossary = lazy(() => import('./pages/learn/Glossary'))
+const CashMovesRules = lazy(() => import('./pages/learn/CashMovesRules'))
 const Admin = lazy(() => import('./pages/Admin'))
 
 function ProtectedRoute({ children }) {
@@ -100,11 +98,8 @@ export default function App() {
             <Route index element={<Dashboard />} />
             <Route path="signal/:id" element={<SignalDetail />} />
             <Route path="log" element={<LogSignal />} />
-            <Route path="calendar" element={<Calendar />} />
             <Route path="record" element={<TrackRecord />} />
-            <Route path="rules" element={<Rules />} />
             <Route path="settings" element={<Settings />} />
-            <Route path="calculator" element={<OptionCalculator />} />
             <Route path="markets" element={<Markets />} />
             <Route path="flow" element={<AdminOnly><Flow /></AdminOnly>} />
             <Route path="reasoning" element={<Reasoning />} />
@@ -114,7 +109,16 @@ export default function App() {
             <Route path="learn/0dte-pinning-strategy" element={<ZeroDtePinningStrategy />} />
             <Route path="learn/vanna-exposure-explained" element={<VannaExposureExplained />} />
             <Route path="learn/best-gex-tools" element={<BestGexTools /> } />
-            <Route path="glossary" element={<Glossary />} />
+            <Route path="learn/glossary" element={<Glossary />} />
+            <Route path="learn/cash-moves-rules" element={<CashMovesRules />} />
+            {/* Legacy route 301s — preserve cached deep links from
+                the pre-focus-audit nav. Pointed at the new /learn/
+                homes for content that moved; /calendar and
+                /calculator deleted with no replacement. */}
+            <Route path="glossary" element={<Navigate to="/learn/glossary" replace />} />
+            <Route path="rules" element={<Navigate to="/learn/cash-moves-rules" replace />} />
+            <Route path="calendar" element={<Navigate to="/" replace />} />
+            <Route path="calculator" element={<Navigate to="/" replace />} />
             <Route path="position/:id" element={<PositionDetail />} />
             <Route path="admin" element={<AdminOnly><Admin /></AdminOnly>} />
           </Route>

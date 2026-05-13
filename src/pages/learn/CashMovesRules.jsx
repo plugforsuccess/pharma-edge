@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { useAuth } from '../context/AuthContext'
-import { supabase } from '../lib/supabase'
+import { useAuth } from '../../context/AuthContext'
+import { supabase } from '../../lib/supabase'
 import clsx from 'clsx'
 
 const RULE_SECTIONS = [
