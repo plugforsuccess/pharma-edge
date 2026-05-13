@@ -49,6 +49,27 @@ export const LEARN_ARTICLES = [
     headTerms: ['best gex tools', 'gamma exposure tools', 'gex platform comparison'],
     minutes: 10,
   },
+  // The next two entries are the in-product reference pages folded
+  // into /learn on 2026-05-12 per the focus-audit nav consolidation.
+  // They sit at the end of the reading order because they're
+  // platform-specific (Cash Moves vocabulary + Cash Moves rules)
+  // rather than the broader GEX concepts above.
+  {
+    slug: 'glossary',
+    title: 'Cash Moves Glossary: HeatPulse™ Vocabulary',
+    description: 'Plain-language definitions for every term on /markets — Net GEX, Flip, Wall, DEX, VEX, CEX, Regime A/B, and the trade-setup patterns the suggested-play cards reference.',
+    summary: 'The day-one reference. If you see a term on the heatmap or in a suggested play and aren\'t sure what to do with it, this is where you look.',
+    headTerms: ['gex glossary', 'options dealer vocabulary', 'gamma exposure terms'],
+    minutes: 7,
+  },
+  {
+    slug: 'cash-moves-rules',
+    title: 'The Cash Moves Trading Rules',
+    description: 'The entry, position-sizing, stop-loss, profit-taking, DTE, strike-selection, and regime rules embedded in the app. The same rules the calculator and the suggested-play filter enforce.',
+    summary: 'Every rule the app encodes, written out in one place. If you ever wonder why the calculator refused a play or the suggested-play filter rejected an idea, the reason is here.',
+    headTerms: ['options trading rules', 'gex trading rules', 'risk management options'],
+    minutes: 5,
+  },
 ]
 
 export function getArticleBySlug(slug) {

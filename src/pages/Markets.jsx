@@ -328,7 +328,7 @@ export default function Markets() {
           <Sparkles size={18} />
         </button>
         <button
-          onClick={() => navigate('/glossary')}
+          onClick={() => navigate('/learn/glossary')}
           className="p-2 text-subtle hover:text-fg"
           aria-label="Glossary"
           title="GEX glossary"

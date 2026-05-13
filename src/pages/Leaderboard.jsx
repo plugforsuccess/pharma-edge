@@ -128,7 +128,7 @@ export default function Leaderboard() {
             win rate, biggest single win, and total activity.{' '}
             <button
               type="button"
-              onClick={() => navigate('/glossary')}
+              onClick={() => navigate('/learn/glossary')}
               className="text-zinc-300 hover:text-white underline-offset-2 hover:underline"
             >
               How verification works →

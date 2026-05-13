@@ -306,7 +306,7 @@ export default function PublicProfile() {
           </p>
           <button
             type="button"
-            onClick={() => navigate('/glossary')}
+            onClick={() => navigate('/learn/glossary')}
             className="text-zinc-500 text-[10px] hover:text-zinc-300 mt-1"
           >
             How verification works →
