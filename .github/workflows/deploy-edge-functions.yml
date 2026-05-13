@@ -84,15 +84,29 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
-          # NOTE: we do NOT pass --no-verify-jwt here. That flag would
-          # disable JWT verification for ALL deployed functions, which
-          # is dangerous (suggest-plays, place-order, etc. all require
-          # verified user auth). The CLI respects the per-function
-          # setting captured at first deploy by default.
+          # Per-function verify_jwt: read from supabase/config.toml.
+          # Without this, the CLI preserves whatever verify_jwt was
+          # captured at first deploy regardless of what config.toml
+          # currently says — meaning flipping the flag in config.toml
+          # has no effect on existing deployed functions. We parse the
+          # `[functions.<name>]` block ourselves and pass
+          # --no-verify-jwt when config.toml has it explicitly set
+          # to false. Functions without a config.toml entry keep
+          # verify_jwt=true (the CLI default).
           for fn in ${{ steps.detect.outputs.functions }}; do
             echo "::group::Deploy $fn"
+            flags=""
+            if awk -v fn="$fn" '
+                $0 == "[functions." fn "]" { in_block=1; next }
+                /^\[functions\./ { in_block=0 }
+                in_block && /verify_jwt[[:space:]]*=[[:space:]]*false/ { found=1; exit }
+                END { exit found ? 0 : 1 }
+              ' supabase/config.toml; then
+              flags="--no-verify-jwt"
+              echo "config.toml: verify_jwt=false for $fn"
+            fi
             supabase functions deploy "$fn" \
-              --project-ref rghoynbaykeyjbhqmaff
+              --project-ref rghoynbaykeyjbhqmaff $flags
             echo "::endgroup::"
           done
           echo "All deploys complete."
