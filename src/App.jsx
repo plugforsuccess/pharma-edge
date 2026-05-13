@@ -14,6 +14,7 @@ const Rules = lazy(() => import('./pages/Rules'))
 const Settings = lazy(() => import('./pages/Settings'))
 const OptionCalculator = lazy(() => import('./pages/OptionCalculator'))
 const PublicProfile = lazy(() => import('./pages/PublicProfile'))
+const Leaderboard = lazy(() => import('./pages/Leaderboard'))
 const Markets = lazy(() => import('./pages/Markets'))
 const Glossary = lazy(() => import('./pages/Glossary'))
 const PositionDetail = lazy(() => import('./pages/PositionDetail'))
@@ -65,6 +66,14 @@ export default function App() {
             element={
               <Suspense fallback={<LoadingScreen />}>
                 <PublicProfile />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/leaderboard"
+            element={
+              <Suspense fallback={<LoadingScreen />}>
+                <Leaderboard />
               </Suspense>
             }
           />
