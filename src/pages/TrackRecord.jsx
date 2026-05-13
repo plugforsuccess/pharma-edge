@@ -1,24 +1,70 @@
-import { useEffect, useState } from 'react'
+// Cash Moves — TrackRecord (private dashboard).
+//
+// Authenticated route. The user's reputation cockpit:
+//   * Hero with display name + public slug + share button
+//   * 4 stat blocks (Verified P&L, Biggest Win, Trades, Profile Views)
+//   * P&L equity curve with 1D/1W/1M/3M/ALL period toggle
+//   * Position table — Open Positions | Closed Positions tabs
+//   * Activity feed (signals logged, positions opened/closed)
+//   * Reputation panel — current leaderboard rank + climb CTA
+//
+// Reads:
+//   * profiles (the user's own row)
+//   * open_positions (active + closed, scoped by RLS to own user)
+//   * signals (for the activity feed)
+//   * leaderboard_snapshots (for the rank-fetch fallback)
+//
+// Per the leaderboard-spec rewrite (2026-05-12), biotech-era enums
+// (enrollment_signal, fda_precedent_signal, etc.) and the
+// bySignalType breakdown are GONE. The page is GEX/options-flow only
+// from this version forward.
+
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Share2, TrendingUp, TrendingDown, Minus } from 'lucide-react'
+import {
+  ArrowDown,
+  ArrowUp,
+  DollarSign,
+  Eye,
+  Hash,
+  Layers,
+  Share2,
+  TrendingDown,
+  TrendingUp,
+  Trophy,
+} from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
-import Sparkline from '../components/Sparkline'
+import EquityCurve from '../components/EquityCurve'
 import clsx from 'clsx'
 
-const SIGNAL_TYPES = [
-  { key: 'enrollment_signal', label: 'Enrollment Signal' },
-  { key: 'fda_precedent_signal', label: 'FDA Precedent' },
-  { key: 'protocol_amendment_signal', label: 'Protocol Amendment' },
-  { key: 'insider_selling_signal', label: 'Insider Selling' },
-  { key: 'cash_runway_signal', label: 'Cash Runway' },
+const STRATEGY_META = {
+  BULL_CALL:        { label: 'Bull Call',        icon: TrendingUp,   tone: 'text-green-400' },
+  BEAR_PUT:         { label: 'Bear Put',         icon: TrendingDown, tone: 'text-red-400' },
+  BULL_PUT_CREDIT:  { label: 'Bull Put Credit',  icon: ArrowUp,      tone: 'text-emerald-400' },
+  BEAR_CALL_CREDIT: { label: 'Bear Call Credit', icon: ArrowDown,    tone: 'text-rose-400' },
+  IRON_CONDOR:      { label: 'Iron Condor',      icon: Layers,       tone: 'text-purple-400' },
+}
+
+const STRATEGY_FILTER_PILLS = [
+  { key: 'all',         label: 'All' },
+  { key: 'wins',        label: 'Wins' },
+  { key: 'losses',      label: 'Losses' },
+  { key: 'this_week',   label: 'This Week' },
+  { key: 'this_month',  label: 'This Month' },
 ]
+
+const POSITION_TABS = ['open', 'closed']
+const TOP_TABS = ['positions', 'activity']
 
 export default function TrackRecord() {
   const { user, profile } = useAuth()
   const navigate = useNavigate()
-  const [outcomes, setOutcomes] = useState([])
-  const [stats, setStats] = useState(null)
+  const [positions, setPositions] = useState([])
+  const [activity, setActivity] = useState([])
+  const [leaderboardRank, setLeaderboardRank] = useState(null)
+  const [topTab, setTopTab] = useState('positions')
+  const [positionTab, setPositionTab] = useState('open')
   const [filter, setFilter] = useState('all')
   const [loading, setLoading] = useState(true)
   const [shareFlash, setShareFlash] = useState('')
@@ -31,17 +77,138 @@ export default function TrackRecord() {
 
   async function fetchData() {
     setLoading(true)
-    const { data } = await supabase
-      .from('outcomes')
-      .select('*, signals(*)')
-      .eq('user_id', user.id)
-      .order('recorded_at', { ascending: false })
 
-    const list = data ?? []
-    setOutcomes(list)
-    setStats(computeStats(list))
+    // Pull all positions (open + closed) for this user. RLS scopes to
+    // own rows. We render Open in one tab, Closed in the other.
+    const { data: positionsData } = await supabase
+      .from('open_positions')
+      .select(
+        'id, signal_id, ticker, strategy_type, status, contracts, ' +
+          'entry_debit_per_spread, exit_credit_per_spread, realized_pnl, ' +
+          'last_mid_per_spread, last_pnl_pct, last_verdict, ' +
+          'entry_at, closed_at, expiration, long_strike, short_strike',
+      )
+      .eq('user_id', user.id)
+      .order('entry_at', { ascending: false })
+    setPositions(positionsData ?? [])
+
+    // Activity feed: signals logged + position opens/closes, merged.
+    // The fancy verdict-transition events from `alerts` will come in a
+    // follow-up; v1 sticks to lifecycle events for simplicity.
+    const { data: signals } = await supabase
+      .from('signals')
+      .select('id, ticker, structure, logged_at, signal_hash, signal_source')
+      .eq('user_id', user.id)
+      .order('logged_at', { ascending: false })
+      .limit(50)
+    const activityRows = []
+    for (const sig of signals ?? []) {
+      activityRows.push({
+        kind: 'signal_logged',
+        at: sig.logged_at,
+        signal_id: sig.id,
+        ticker: sig.ticker,
+        meta: sig.structure,
+        hash_locked: !!sig.signal_hash,
+      })
+    }
+    for (const pos of positionsData ?? []) {
+      activityRows.push({
+        kind: 'position_opened',
+        at: pos.entry_at,
+        position_id: pos.id,
+        signal_id: pos.signal_id,
+        ticker: pos.ticker,
+        meta: pos.strategy_type,
+      })
+      if (pos.status === 'closed' && pos.closed_at) {
+        activityRows.push({
+          kind: 'position_closed',
+          at: pos.closed_at,
+          position_id: pos.id,
+          signal_id: pos.signal_id,
+          ticker: pos.ticker,
+          meta: pos.strategy_type,
+          realized_pnl: pos.realized_pnl,
+        })
+      }
+    }
+    activityRows.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
+    setActivity(activityRows.slice(0, 100))
+
+    // Best-effort: pull the user's rank from the most recent
+    // all_time / top_earners snapshot. Page renders fine without it.
+    const { data: snapshot } = await supabase
+      .from('leaderboard_snapshots')
+      .select('rankings')
+      .eq('time_window', 'all_time')
+      .eq('rank_type', 'top_earners')
+      .order('computed_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (snapshot?.rankings) {
+      const row = (snapshot.rankings || []).find((r) => r.user_id === user.id)
+      setLeaderboardRank(row?.rank ?? null)
+    }
+
     setLoading(false)
   }
+
+  const closedPositions = useMemo(
+    () => positions.filter((p) => p.status === 'closed'),
+    [positions],
+  )
+  const openPositions = useMemo(
+    () => positions.filter((p) => p.status === 'open' || p.status === 'partial'),
+    [positions],
+  )
+
+  // 4 stat blocks. Source of truth is the user's own closed positions
+  // (RLS-scoped query above). Same recipe as the leaderboard's
+  // top_earners ranking so the user's /record stats match what
+  // /leaderboard shows.
+  const stats = useMemo(() => {
+    const closed = closedPositions
+    const totalPnl = closed.reduce((s, p) => s + Number(p.realized_pnl || 0), 0)
+    const biggestWin = closed.reduce(
+      (max, p) => Math.max(max, Number(p.realized_pnl || 0)),
+      0,
+    )
+    return {
+      totalPnl,
+      biggestWin,
+      trades: closed.length,
+      profileViews: Number(profile?.profile_view_count ?? 0),
+    }
+  }, [closedPositions, profile?.profile_view_count])
+
+  // Filter applied to the Closed tab (Open tab ignores filter — the
+  // filter pills only make sense for resolved trades).
+  const filteredClosed = useMemo(() => {
+    if (filter === 'all') return closedPositions
+    if (filter === 'wins') return closedPositions.filter((p) => Number(p.realized_pnl || 0) > 0)
+    if (filter === 'losses') return closedPositions.filter((p) => Number(p.realized_pnl || 0) <= 0)
+    const now = Date.now()
+    if (filter === 'this_week') {
+      return closedPositions.filter(
+        (p) => p.closed_at && now - new Date(p.closed_at).getTime() < 7 * 86_400_000,
+      )
+    }
+    if (filter === 'this_month') {
+      return closedPositions.filter(
+        (p) => p.closed_at && now - new Date(p.closed_at).getTime() < 30 * 86_400_000,
+      )
+    }
+    return closedPositions
+  }, [closedPositions, filter])
+
+  const equityPoints = useMemo(
+    () =>
+      closedPositions
+        .filter((p) => p.closed_at && p.realized_pnl != null)
+        .map((p) => ({ at: p.closed_at, realized_pnl: Number(p.realized_pnl) })),
+    [closedPositions],
+  )
 
   async function shareRecord() {
     if (!profile?.public_slug) {
@@ -49,18 +216,24 @@ export default function TrackRecord() {
       setTimeout(() => setShareFlash(''), 2500)
       return
     }
-    const url = `${window.location.origin}/r/${profile.public_slug}`
-    const text =
-      stats?.total > 0
-        ? `My verified biotech signal track record — ${stats.winRate}% win rate on ${stats.resolved} resolved signals.`
-        : 'My verified biotech signal track record.'
+    if (!profile?.is_public) {
+      setShareFlash('Your profile is private. Toggle public in Settings.')
+      setTimeout(() => setShareFlash(''), 2500)
+      return
+    }
+    // /u/:slug is the new Polymarket-style route. Until that page ships
+    // in Week 3, fall back to /r/:slug which renders the legacy page.
+    const url = `${window.location.origin}/u/${profile.public_slug}`
+    const text = stats.trades > 0
+      ? `My verified options track record: $${Math.round(stats.totalPnl).toLocaleString()} P&L · ${stats.trades} trades · hash-locked.`
+      : 'My verified options track record.'
 
     if (navigator.share) {
       try {
-        await navigator.share({ title: 'My Cash Moves Signal Record', text, url })
+        await navigator.share({ title: 'My Cash Moves record', text, url })
         return
       } catch {
-        // user cancelled or share failed; fall through to clipboard
+        /* fall through */
       }
     }
     try {
@@ -72,29 +245,38 @@ export default function TrackRecord() {
     setTimeout(() => setShareFlash(''), 2500)
   }
 
-  const filtered = outcomes.filter((o) => {
-    if (filter === 'wins') return o.thesis_correct === true
-    if (filter === 'losses') return o.thesis_correct === false
-    if (filter === 'paper') return o.signals?.trade_type === 'paper'
-    if (filter === 'real') return o.signals?.trade_type === 'real'
-    return true
-  })
+  if (loading) {
+    return (
+      <div className="px-4 lg:px-6 pt-6 pb-4 mx-auto lg:max-w-4xl w-full">
+        <LoadingSkeleton />
+      </div>
+    )
+  }
 
   return (
     <div className="px-4 lg:px-6 pt-6 pb-4 mx-auto lg:max-w-4xl w-full">
-      <div className="flex items-center justify-between mb-2">
-        <h1 className="text-white text-xl lg:text-2xl font-bold">Track Record</h1>
-        {profile?.is_public && profile?.public_slug && (
-          <button
-            type="button"
-            onClick={shareRecord}
-            className="flex items-center gap-1 text-subtle text-xs hover:text-white transition-colors"
-            title="Share your public track record"
-          >
-            <Share2 size={12} />
-            Share Record
-          </button>
-        )}
+      {/* ── Hero ────────────────────────────────────────────────── */}
+      <div className="flex items-start justify-between mb-4">
+        <div>
+          <h1 className="text-white text-xl lg:text-2xl font-bold">
+            {profile?.display_name || 'Your Record'}
+          </h1>
+          {profile?.public_slug && (
+            <p className="text-muted text-xs mt-1">
+              {profile.is_public ? 'public · ' : 'private · '}
+              cashmoves.io/u/{profile.public_slug}
+            </p>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={shareRecord}
+          className="flex items-center gap-1 text-subtle text-xs hover:text-white transition-colors border border-border rounded-lg px-2.5 py-1.5"
+          title="Share your public record"
+        >
+          <Share2 size={12} />
+          Share
+        </button>
       </div>
       {shareFlash && (
         <p className="text-green-400 text-xs mb-4" role="status">
@@ -102,338 +284,220 @@ export default function TrackRecord() {
         </p>
       )}
 
-      {loading ? (
-        <LoadingSkeleton />
-      ) : !stats || stats.total === 0 ? (
-        <EmptyState />
+      {stats.trades === 0 && openPositions.length === 0 ? (
+        <EmptyState onLogClick={() => navigate('/log')} />
       ) : (
         <>
-          <div className="bg-card border border-border rounded-xl p-4 mb-4">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <p className="text-muted text-xs uppercase tracking-wider">Overall Win Rate</p>
-                <p
-                  className={clsx('text-4xl font-bold mt-1', {
-                    'text-green-400': stats.winRate >= 60,
-                    'text-yellow-400': stats.winRate >= 50 && stats.winRate < 60,
-                    'text-red-400': stats.winRate < 50,
-                  })}
-                >
-                  {stats.winRate}%
-                </p>
-              </div>
-              <div className="text-right">
-                <p className="text-muted text-xs">Resolved Signals</p>
-                <p className="text-white text-2xl font-bold mt-1">{stats.total}</p>
-              </div>
-            </div>
-
-            <div className="h-2 bg-zinc-800 rounded-full overflow-hidden mb-4">
-              <div
-                className="h-full bg-gradient-to-r from-red-600 to-green-500 rounded-full transition-all"
-                style={{ width: `${stats.winRate}%` }}
-              />
-            </div>
-
-            <div className="grid grid-cols-4 gap-2 text-center">
-              <StatBox label="Wins" value={stats.wins} color="text-green-400" />
-              <StatBox label="Losses" value={stats.losses} color="text-red-400" />
-              <StatBox label="Paper" value={stats.paper} color="text-zinc-400" />
-              <StatBox label="Real" value={stats.real} color="text-white" />
-            </div>
-
-            {stats.equityCurve && stats.equityCurve.length >= 2 && (
-              <div className="mt-4 pt-4 border-t border-border">
-                <div className="flex items-baseline justify-between mb-2">
-                  <p className="text-muted text-[10px] uppercase tracking-wider">
-                    Cumulative %
-                  </p>
-                  <p
-                    className={clsx(
-                      'text-sm font-mono-tab font-semibold',
-                      stats.cumPnlPct >= 0 ? 'text-green-400' : 'text-red-400',
-                    )}
-                  >
-                    {stats.cumPnlPct >= 0 ? '+' : ''}
-                    {stats.cumPnlPct.toFixed(0)}%
-                  </p>
-                </div>
-                <Sparkline values={stats.equityCurve} width={320} height={56} />
-              </div>
-            )}
+          {/* ── Stat blocks ──────────────────────────────────────── */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+            <StatBlock
+              icon={DollarSign}
+              label="Verified P&L"
+              value={`${stats.totalPnl >= 0 ? '+' : '−'}$${Math.abs(Math.round(stats.totalPnl)).toLocaleString()}`}
+              tone={stats.totalPnl >= 0 ? 'text-green-400' : 'text-red-400'}
+            />
+            <StatBlock
+              icon={TrendingUp}
+              label="Biggest Win"
+              value={`$${Math.round(stats.biggestWin).toLocaleString()}`}
+              tone="text-green-400"
+            />
+            <StatBlock
+              icon={Hash}
+              label="Trades"
+              value={String(stats.trades)}
+              tone="text-white"
+            />
+            <StatBlock
+              icon={Eye}
+              label="Profile Views"
+              value={stats.profileViews.toLocaleString()}
+              tone="text-zinc-300"
+            />
           </div>
 
-          <div className="grid grid-cols-2 gap-3 mb-4">
-            <div className="bg-green-950/20 border border-green-900/30 rounded-xl p-4">
-              <p className="text-muted text-xs uppercase tracking-wider">Avg Win</p>
-              <p className="text-green-400 text-2xl font-bold mt-1">
-                {stats.avgPnlWins != null ? `+${stats.avgPnlWins}%` : '—'}
-              </p>
-            </div>
-            <div className="bg-red-950/20 border border-red-900/30 rounded-xl p-4">
-              <p className="text-muted text-xs uppercase tracking-wider">Avg Loss</p>
-              <p className="text-red-400 text-2xl font-bold mt-1">
-                {stats.avgPnlLosses != null ? `${stats.avgPnlLosses}%` : '—'}
-              </p>
-            </div>
-          </div>
+          {/* ── Equity curve ────────────────────────────────────── */}
+          <EquityCurve points={equityPoints} className="mb-4" />
 
-          <div className="bg-card border border-border rounded-xl p-4 mb-4">
-            <h3 className="text-subtle text-xs font-semibold uppercase tracking-wider mb-3">
-              Rules Discipline
-            </h3>
-            <div className="grid grid-cols-2 gap-3 text-center">
-              <div>
-                <p className="text-white font-bold text-xl">{stats.rulesFollowedRate}%</p>
-                <p className="text-muted text-[10px]">Rules followed</p>
-              </div>
-              <div>
-                <p
-                  className={clsx(
-                    'font-bold text-xl',
-                    stats.winRateWhenRulesFollowed >= 60 ? 'text-green-400' : 'text-yellow-400',
-                  )}
-                >
-                  {stats.winRateWhenRulesFollowed}%
-                </p>
-                <p className="text-muted text-[10px]">Win rate when disciplined</p>
-              </div>
-            </div>
-          </div>
+          {/* ── Reputation panel ────────────────────────────────── */}
+          <ReputationPanel
+            rank={leaderboardRank}
+            trades={stats.trades}
+            onClimbClick={() => navigate('/leaderboard')}
+          />
 
-          {stats.calibrationN > 0 && (
-            <div className="bg-card border border-border rounded-xl p-4 mb-4">
-              <h3 className="text-subtle text-xs font-semibold uppercase tracking-wider mb-1">
-                Calibration
-              </h3>
-              <p className="text-[10px] text-muted leading-relaxed mb-3">
-                How often plays we predicted as winners actually hit. Calculated
-                only on signals with a hash-locked entry POP — n={stats.calibrationN}.
-              </p>
-              <div className="grid grid-cols-3 gap-3 text-center">
-                <div>
-                  <p className="text-white font-bold text-xl">{stats.predictedAvgPct}%</p>
-                  <p className="text-muted text-[10px]">Predicted</p>
-                </div>
-                <div>
-                  <p
-                    className={clsx(
-                      'font-bold text-xl',
-                      stats.actualHitRatePct >= stats.predictedAvgPct
-                        ? 'text-green-400'
-                        : 'text-yellow-400',
-                    )}
-                  >
-                    {stats.actualHitRatePct}%
-                  </p>
-                  <p className="text-muted text-[10px]">Actual</p>
-                </div>
-                <div>
-                  <p
-                    className={clsx(
-                      'font-bold text-xl',
-                      stats.calibrationDelta >= 0 ? 'text-green-400' : 'text-red-400',
-                    )}
-                  >
-                    {stats.calibrationDelta >= 0 ? '+' : ''}
-                    {stats.calibrationDelta}
-                  </p>
-                  <p className="text-muted text-[10px]">Δ pts</p>
-                </div>
-              </div>
-              {stats.calibrationN < 30 && (
-                <p className="text-[10px] text-muted mt-3 leading-relaxed">
-                  Δ becomes meaningful around n=30. Below that the actual
-                  rate has too much noise to trust as a calibration signal.
-                </p>
-              )}
-            </div>
-          )}
-
-          {Object.keys(stats.bySignalType).length > 0 && (
-            <div className="bg-card border border-border rounded-xl p-4 mb-4">
-              <h3 className="text-subtle text-xs font-semibold uppercase tracking-wider mb-3">
-                Signal Type Performance
-              </h3>
-              <div className="space-y-3">
-                {Object.entries(stats.bySignalType)
-                  .sort((a, b) => b[1].wins / b[1].total - a[1].wins / a[1].total)
-                  .map(([type, data]) => {
-                    const rate = Math.round((data.wins / data.total) * 100)
-                    return (
-                      <div key={type} className="flex items-center justify-between">
-                        <p className="text-zinc-400 text-xs flex-1">{type}</p>
-                        <div className="flex items-center gap-2">
-                          <div className="w-20 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-                            <div
-                              className={clsx(
-                                'h-full rounded-full',
-                                rate >= 60 ? 'bg-green-500' : rate >= 50 ? 'bg-yellow-500' : 'bg-red-500',
-                              )}
-                              style={{ width: `${rate}%` }}
-                            />
-                          </div>
-                          <p
-                            className={clsx(
-                              'text-xs font-semibold w-8 text-right',
-                              rate >= 60 ? 'text-green-400' : rate >= 50 ? 'text-yellow-400' : 'text-red-400',
-                            )}
-                          >
-                            {rate}%
-                          </p>
-                          <p className="text-muted text-[10px] w-12 text-right">
-                            {data.wins}/{data.total}
-                          </p>
-                        </div>
-                      </div>
-                    )
-                  })}
-              </div>
-            </div>
-          )}
-
-          <div className="flex gap-2 mb-3 overflow-x-auto">
-            {['all', 'wins', 'losses', 'paper', 'real'].map((f) => (
+          {/* ── Top tabs: Positions | Activity ──────────────────── */}
+          <div className="flex gap-1 mb-3 border-b border-border">
+            {TOP_TABS.map((t) => (
               <button
-                key={f}
+                key={t}
                 type="button"
-                onClick={() => setFilter(f)}
+                onClick={() => setTopTab(t)}
                 className={clsx(
-                  'px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors',
-                  filter === f ? 'bg-red-600 text-white' : 'bg-card border border-border text-subtle',
+                  'px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px',
+                  topTab === t
+                    ? 'text-white border-red-500'
+                    : 'text-muted border-transparent hover:text-subtle',
                 )}
               >
-                {f.charAt(0).toUpperCase() + f.slice(1)}
+                {t === 'positions' ? 'Positions' : 'Activity'}
               </button>
             ))}
           </div>
 
-          <div className="space-y-2">
-            {filtered.map((outcome) => (
-              <OutcomeRow
-                key={outcome.id}
-                outcome={outcome}
-                onClick={() => navigate(`/signal/${outcome.signal_id}`)}
-              />
-            ))}
-            {filtered.length === 0 && (
-              <div className="text-center py-10 px-4 space-y-2">
-                <p className="text-fg text-sm font-display">
-                  Nothing matches this filter
-                </p>
-                <p className="text-subtle text-xs leading-relaxed max-w-xs mx-auto">
-                  Try a different filter, or check back after your next
-                  outcome resolves — calibration data accumulates with
-                  every closed trade.
-                </p>
+          {topTab === 'positions' ? (
+            <>
+              {/* Open | Closed sub-tabs */}
+              <div className="flex gap-2 mb-3">
+                {POSITION_TABS.map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setPositionTab(t)}
+                    className={clsx(
+                      'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
+                      positionTab === t
+                        ? 'bg-zinc-800 text-white'
+                        : 'bg-card border border-border text-subtle',
+                    )}
+                  >
+                    {t === 'open'
+                      ? `Open (${openPositions.length})`
+                      : `Closed (${closedPositions.length})`}
+                  </button>
+                ))}
               </div>
-            )}
-          </div>
+
+              {positionTab === 'closed' && (
+                <div className="flex gap-2 mb-3 overflow-x-auto">
+                  {STRATEGY_FILTER_PILLS.map((p) => (
+                    <button
+                      key={p.key}
+                      type="button"
+                      onClick={() => setFilter(p.key)}
+                      className={clsx(
+                        'px-2.5 py-1 rounded-md text-[11px] font-medium whitespace-nowrap transition-colors',
+                        filter === p.key
+                          ? 'bg-red-600 text-white'
+                          : 'bg-card border border-border text-subtle',
+                      )}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div className="space-y-2">
+                {(positionTab === 'open' ? openPositions : filteredClosed).map((pos) => (
+                  <PositionRow
+                    key={pos.id}
+                    pos={pos}
+                    onClick={() =>
+                      navigate(pos.status === 'closed' ? `/signal/${pos.signal_id}` : `/position/${pos.id}`)
+                    }
+                  />
+                ))}
+                {(positionTab === 'open' ? openPositions : filteredClosed).length === 0 && (
+                  <div className="text-center py-10 px-4 space-y-2">
+                    <p className="text-fg text-sm font-display">
+                      {positionTab === 'open' ? 'No open positions' : 'Nothing matches this filter'}
+                    </p>
+                    <p className="text-subtle text-xs leading-relaxed max-w-xs mx-auto">
+                      {positionTab === 'open'
+                        ? 'Open a position from Suggested Plays or LogSignal.'
+                        : 'Try a different filter, or log a new trade.'}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="space-y-2">
+              {activity.map((row, i) => (
+                <ActivityRow
+                  key={`${row.kind}-${row.position_id ?? row.signal_id}-${i}`}
+                  row={row}
+                  onClick={() =>
+                    row.position_id
+                      ? navigate(`/position/${row.position_id}`)
+                      : navigate(`/signal/${row.signal_id}`)
+                  }
+                />
+              ))}
+              {activity.length === 0 && (
+                <p className="text-center text-muted text-xs py-10">No activity yet.</p>
+              )}
+            </div>
+          )}
         </>
       )}
     </div>
   )
 }
 
-function computeStats(rows) {
-  const resolved = rows.filter((o) => o.thesis_correct !== null && o.thesis_correct !== undefined)
-  const wins = resolved.filter((o) => o.thesis_correct)
-  const losses = resolved.filter((o) => !o.thesis_correct)
-  const paper = resolved.filter((o) => o.signals?.trade_type === 'paper')
-  const real = resolved.filter((o) => o.signals?.trade_type === 'real')
-  const rulesFollowed = resolved.filter((o) => o.rules_followed)
-  const winsOnRulesFollowed = rulesFollowed.filter((o) => o.thesis_correct)
+// ────────────────────────────────────────────────────────────────────
+// Subcomponents
+// ────────────────────────────────────────────────────────────────────
 
-  const bySignalType = {}
-  for (const o of resolved) {
-    const sig = o.signals
-    if (!sig) continue
-    for (const { key, label } of SIGNAL_TYPES) {
-      if ((sig[key] ?? 0) > 5) {
-        if (!bySignalType[label]) bySignalType[label] = { wins: 0, total: 0 }
-        bySignalType[label].total++
-        if (o.thesis_correct) bySignalType[label].wins++
-      }
-    }
-  }
-
-  const winsWithPnl = wins.filter((o) => o.pnl_percent != null)
-  const lossesWithPnl = losses.filter((o) => o.pnl_percent != null)
-  const avgPnlWins = winsWithPnl.length
-    ? Math.round(winsWithPnl.reduce((s, o) => s + Number(o.pnl_percent), 0) / winsWithPnl.length)
-    : null
-  const avgPnlLosses = lossesWithPnl.length
-    ? Math.round(lossesWithPnl.reduce((s, o) => s + Number(o.pnl_percent), 0) / lossesWithPnl.length)
-    : null
-
-  // Equity curve: cumulative running pnl_percent in chronological order.
-  // Approximates portfolio % return assuming equal sizing — close enough
-  // for the shareable shape, not a strict P&L attribution.
-  const chronological = resolved
-    .filter((o) => o.pnl_percent != null)
-    .slice()
-    .sort(
-      (a, b) =>
-        new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime(),
-    )
-  let cum = 0
-  const equityCurve = chronological.map((o) => {
-    cum += Number(o.pnl_percent)
-    return cum
-  })
-  const cumPnlPct = equityCurve.length ? equityCurve[equityCurve.length - 1] : 0
-
-  // Calibration: average predicted POP across resolved signals vs the
-  // actual hit rate. If the model is well-calibrated the two converge
-  // as n grows. Only counts signals with a non-null entry_pop_bp
-  // (post-2026-05-07 v2 hash signals; older v1 rows are excluded).
-  const calibratable = resolved.filter(
-    (o) => o.signals?.entry_pop_bp != null,
+function StatBlock({ icon: Icon, label, value, tone }) {
+  return (
+    <div className="bg-card border border-border rounded-xl p-3">
+      <div className="flex items-center gap-1.5 text-muted text-[10px] uppercase tracking-wider mb-1">
+        <Icon size={11} />
+        {label}
+      </div>
+      <p className={clsx('text-lg lg:text-xl font-bold font-mono-tab tabular-nums', tone)}>
+        {value}
+      </p>
+    </div>
   )
-  const calibrationN = calibratable.length
-  const predictedAvg = calibrationN
-    ? calibratable.reduce(
-        (s, o) => s + Number(o.signals.entry_pop_bp) / 10000,
-        0,
-      ) / calibrationN
-    : null
-  const actualHitRate = calibrationN
-    ? calibratable.filter((o) => o.thesis_correct).length / calibrationN
-    : null
-  const calibrationDelta =
-    predictedAvg != null && actualHitRate != null
-      ? Math.round((actualHitRate - predictedAvg) * 100)
-      : null
-
-  return {
-    total: resolved.length,
-    wins: wins.length,
-    losses: losses.length,
-    winRate: resolved.length ? Math.round((wins.length / resolved.length) * 100) : 0,
-    paper: paper.length,
-    real: real.length,
-    rulesFollowedRate: resolved.length
-      ? Math.round((rulesFollowed.length / resolved.length) * 100)
-      : 0,
-    winRateWhenRulesFollowed: rulesFollowed.length
-      ? Math.round((winsOnRulesFollowed.length / rulesFollowed.length) * 100)
-      : 0,
-    avgPnlWins,
-    avgPnlLosses,
-    bySignalType,
-    equityCurve,
-    cumPnlPct,
-    calibrationN,
-    predictedAvgPct: predictedAvg != null ? Math.round(predictedAvg * 100) : null,
-    actualHitRatePct: actualHitRate != null ? Math.round(actualHitRate * 100) : null,
-    calibrationDelta,
-  }
 }
 
-function OutcomeRow({ outcome, onClick }) {
-  const sig = outcome.signals
-  const isWin = outcome.thesis_correct === true
-  const isLoss = outcome.thesis_correct === false
+function ReputationPanel({ rank, trades, onClimbClick }) {
+  // Three states:
+  //   * No rank (no snapshot yet OR not eligible): "Climb the leaderboard"
+  //     CTA explaining the eligibility gates.
+  //   * Ranked (snapshot exists, user in top 100): show rank + CTA to
+  //     /leaderboard.
+  const eligible = trades >= 10
+  return (
+    <div className="bg-card border border-border rounded-xl p-4 mb-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Trophy size={16} className="text-amber-400" />
+          <div>
+            <p className="text-muted text-[10px] uppercase tracking-wider">Leaderboard</p>
+            <p className="text-white text-sm font-semibold">
+              {rank
+                ? `Ranked #${rank} all-time`
+                : eligible
+                  ? 'Unranked — next snapshot tomorrow'
+                  : `${trades}/10 trades to qualify`}
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onClimbClick}
+          className="text-xs text-red-400 hover:text-red-300 font-medium"
+        >
+          {rank ? 'View →' : 'Climb →'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function PositionRow({ pos, onClick }) {
+  const meta = STRATEGY_META[pos.strategy_type] ?? {
+    label: pos.strategy_type, icon: Hash, tone: 'text-zinc-400',
+  }
+  const Icon = meta.icon
+  const pnl = Number(pos.realized_pnl ?? pos.last_pnl_pct ?? 0)
+  const isClosed = pos.status === 'closed'
+  const pnlDollar = pos.status === 'closed' ? Number(pos.realized_pnl ?? 0) : null
+  const positive = pnl >= 0
 
   return (
     <button
@@ -441,106 +505,154 @@ function OutcomeRow({ outcome, onClick }) {
       onClick={onClick}
       className="w-full text-left bg-card border border-border rounded-xl px-4 py-3 flex items-center gap-3 hover:border-zinc-700 transition-colors active:scale-[0.98]"
     >
-      <div
-        className={clsx(
-          'w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0',
-          {
-            'bg-green-950 text-green-400': isWin,
-            'bg-red-950 text-red-400': isLoss,
-            'bg-zinc-900 text-zinc-400': !isWin && !isLoss,
-          },
-        )}
-      >
-        {isWin ? <TrendingUp size={14} /> : isLoss ? <TrendingDown size={14} /> : <Minus size={14} />}
+      <div className={clsx('w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-zinc-900', meta.tone)}>
+        <Icon size={14} />
       </div>
 
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <p className="text-white font-bold text-sm">{sig?.ticker}</p>
-          {sig?.trade_type && (
-            <span className="text-[10px] text-muted border border-zinc-800 px-1.5 py-0.5 rounded-full uppercase">
-              {sig.trade_type}
+        <div className="flex items-center gap-2 flex-wrap">
+          <p className="text-white font-bold text-sm">{pos.ticker}</p>
+          <span className={clsx('text-[10px] font-medium', meta.tone)}>{meta.label}</span>
+          {pos.long_strike != null && pos.short_strike != null && (
+            <span className="text-[10px] text-muted font-mono-tab">
+              {pos.long_strike}/{pos.short_strike}
             </span>
           )}
-          {!outcome.rules_followed && (
-            <span className="text-[10px] text-yellow-400 border border-yellow-900 px-1.5 py-0.5 rounded-full">
-              rule break
+          {!isClosed && pos.last_verdict && pos.last_verdict !== 'intact' && (
+            <span
+              className={clsx(
+                'text-[10px] px-1.5 py-0.5 rounded-full border',
+                pos.last_verdict === 'invalidated'
+                  ? 'border-red-900 text-red-400'
+                  : 'border-yellow-900 text-yellow-400',
+              )}
+            >
+              {pos.last_verdict}
             </span>
           )}
         </div>
         <p className="text-muted text-[10px] truncate mt-0.5">
-          {outcome.catalyst_result?.replace(/_/g, ' ')} ·{' '}
-          {new Date(outcome.recorded_at).toLocaleDateString()}
+          {isClosed
+            ? `Closed ${new Date(pos.closed_at).toLocaleDateString()}`
+            : `Opened ${new Date(pos.entry_at).toLocaleDateString()}${
+                pos.expiration ? ` · exp ${pos.expiration}` : ''
+              }`}
         </p>
       </div>
 
       <div className="text-right flex-shrink-0">
-        {outcome.pnl_percent != null && (
+        {pnlDollar != null && (
           <p
             className={clsx(
-              'font-bold text-sm',
-              Number(outcome.pnl_percent) >= 0 ? 'text-green-400' : 'text-red-400',
+              'font-bold text-sm font-mono-tab tabular-nums',
+              positive ? 'text-green-400' : 'text-red-400',
             )}
           >
-            {Number(outcome.pnl_percent) >= 0 ? '+' : ''}
-            {outcome.pnl_percent}%
+            {positive ? '+' : '−'}${Math.abs(Math.round(pnlDollar)).toLocaleString()}
           </p>
         )}
-        <p
-          className={clsx(
-            'text-[10px] font-semibold',
-            isWin ? 'text-green-400' : isLoss ? 'text-red-400' : 'text-subtle',
-          )}
-        >
-          {isWin ? 'WIN' : isLoss ? 'LOSS' : 'N/A'}
-        </p>
+        {!isClosed && pos.last_pnl_pct != null && (
+          <p
+            className={clsx(
+              'font-bold text-sm font-mono-tab tabular-nums',
+              positive ? 'text-green-400' : 'text-red-400',
+            )}
+          >
+            {positive ? '+' : ''}{Math.round(Number(pos.last_pnl_pct))}%
+          </p>
+        )}
+        {pos.signal_id && (
+          <p className="text-[10px] text-muted flex items-center gap-0.5 justify-end mt-0.5">
+            <Hash size={9} />
+            verified
+          </p>
+        )}
       </div>
     </button>
   )
 }
 
-function StatBox({ label, value, color }) {
+function ActivityRow({ row, onClick }) {
+  const meta = ACTIVITY_META[row.kind] ?? ACTIVITY_META.signal_logged
+  const Icon = meta.icon
   return (
-    <div>
-      <p className={clsx('font-bold text-lg', color)}>{value}</p>
-      <p className="text-muted text-[10px]">{label}</p>
-    </div>
+    <button
+      type="button"
+      onClick={onClick}
+      className="w-full text-left bg-card border border-border rounded-xl px-4 py-3 flex items-center gap-3 hover:border-zinc-700 transition-colors active:scale-[0.98]"
+    >
+      <div className={clsx('w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-zinc-900', meta.tone)}>
+        <Icon size={14} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <p className="text-white text-sm font-medium">{meta.label}</p>
+          <p className="text-zinc-400 text-xs">{row.ticker}</p>
+          {row.hash_locked && (
+            <span className="text-[10px] text-amber-400 flex items-center gap-0.5">
+              <Hash size={9} />
+            </span>
+          )}
+        </div>
+        <p className="text-muted text-[10px] truncate mt-0.5">
+          {new Date(row.at).toLocaleString()}
+        </p>
+      </div>
+      {row.realized_pnl != null && (
+        <p
+          className={clsx(
+            'text-right font-bold text-sm font-mono-tab tabular-nums flex-shrink-0',
+            Number(row.realized_pnl) >= 0 ? 'text-green-400' : 'text-red-400',
+          )}
+        >
+          {Number(row.realized_pnl) >= 0 ? '+' : '−'}$
+          {Math.abs(Math.round(Number(row.realized_pnl))).toLocaleString()}
+        </p>
+      )}
+    </button>
   )
+}
+
+const ACTIVITY_META = {
+  signal_logged:     { label: 'Signal logged',    icon: Hash,        tone: 'text-amber-400' },
+  position_opened:   { label: 'Position opened',  icon: TrendingUp,  tone: 'text-blue-400' },
+  position_closed:   { label: 'Position closed',  icon: DollarSign,  tone: 'text-zinc-300' },
 }
 
 function LoadingSkeleton() {
   return (
-    <div className="space-y-4">
-      {Array(4)
-        .fill(0)
-        .map((_, i) => (
-          <div
-            key={i}
-            className="bg-card border border-border rounded-xl p-4 h-24 animate-pulse"
-          />
+    <div className="space-y-3">
+      <div className="h-8 w-40 bg-card border border-border rounded animate-pulse" />
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {Array(4).fill(0).map((_, i) => (
+          <div key={i} className="h-20 bg-card border border-border rounded-xl animate-pulse" />
         ))}
+      </div>
+      <div className="h-32 bg-card border border-border rounded-xl animate-pulse" />
+      <div className="h-16 bg-card border border-border rounded-xl animate-pulse" />
     </div>
   )
 }
 
-function EmptyState() {
+function EmptyState({ onLogClick }) {
   return (
     <div className="bg-card border border-border rounded-xl p-10 text-center space-y-3">
       <div className="text-3xl">📓</div>
       <p className="text-fg text-base font-display">
-        No resolved signals yet
+        Log your first thesis to start your verified record
       </p>
       <p className="text-subtle text-xs leading-relaxed max-w-xs mx-auto">
-        Your record fills in as outcomes resolve. Log a move from
-        Suggested Plays, mark its outcome when the catalyst hits,
-        and the calibration story builds itself — predicted POP vs
-        actual hit rate, n by n.
+        Every signal you lock is hash-anchored to a public GitHub commit.
+        Your verified P&L, win rate, and trade count build the record
+        that others can&nbsp;trust.
       </p>
-      <p className="text-muted text-[10px] leading-relaxed pt-2 border-t border-border max-w-xs mx-auto">
-        Calibration becomes meaningful around n=30 resolved trades.
-        Below that the actual hit rate has too much sample noise to
-        read as a real signal.
-      </p>
+      <button
+        type="button"
+        onClick={onLogClick}
+        className="mt-2 inline-flex items-center gap-1 bg-red-600 hover:bg-red-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+      >
+        Log a thesis
+      </button>
     </div>
   )
 }

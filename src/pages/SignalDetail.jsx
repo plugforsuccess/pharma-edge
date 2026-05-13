@@ -16,13 +16,12 @@ import StrikePriceCalculator from '../components/StrikePriceCalculator'
 import PlaceOrderPanel from '../components/PlaceOrderPanel'
 import clsx from 'clsx'
 
-const SIGNAL_TYPES = [
-  { key: 'enrollment_signal', label: 'Enrollment Velocity Drop' },
-  { key: 'fda_precedent_signal', label: 'FDA Precedent Mismatch' },
-  { key: 'protocol_amendment_signal', label: 'Protocol Amendment' },
-  { key: 'insider_selling_signal', label: 'Insider Selling' },
-  { key: 'cash_runway_signal', label: 'Cash Runway Risk' },
-]
+// Biotech-era SIGNAL_TYPES (enrollment_signal, fda_precedent_signal,
+// protocol_amendment_signal, insider_selling_signal, cash_runway_signal)
+// were removed 2026-05-12 per the leaderboard focus-audit spec. Those
+// columns still exist on the `signals` table for historical rows but
+// are not surfaced in the UI from this version forward. The Signal
+// Strength panel now renders only confidence_score + entry_pop_bp.
 
 export default function SignalDetail() {
   const { id } = useParams()
@@ -158,17 +157,12 @@ export default function SignalDetail() {
           Signal Strength
         </h3>
         <div className="space-y-3">
-          {SIGNAL_TYPES.map(({ key, label }) =>
-            signal[key] > 0 ? <SignalBar key={key} label={label} score={signal[key]} /> : null
-          )}
           {signal.confidence_score != null && (
-            <div className="border-t border-border pt-3">
-              <SignalBar
-                label="Overall Confidence"
-                score={signal.confidence_score}
-                highlight
-              />
-            </div>
+            <SignalBar
+              label="Overall Confidence"
+              score={signal.confidence_score}
+              highlight
+            />
           )}
           {signal.entry_pop_bp != null && (
             <div className="border-t border-border pt-3 flex items-center justify-between">
