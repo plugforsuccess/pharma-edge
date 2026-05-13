@@ -21,3 +21,9 @@ verify_jwt = false
 
 [functions.profile-public-data]
 verify_jwt = false
+
+# scan-universe-plays: cross-ticker scanner. Triggered by pg_cron
+# (shared SCAN_AUTH_TOKEN bearer) or by service-role JWT for manual
+# runs. Self-validates auth inside the function; no user JWT path.
+[functions.scan-universe-plays]
+verify_jwt = false

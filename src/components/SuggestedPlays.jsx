@@ -5,6 +5,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { useSubscription } from '../hooks/useSubscription'
+import { logAsSignal } from '../lib/logAsSignal'
 
 // Ask Claude for 0-3 spread trade ideas based on the live GEX matrix
 // for the current ticker. Renders each as a card with strikes, expiry,
@@ -590,83 +591,9 @@ function formatPopFromBp(bp) {
   return `${Math.round(Number(bp) / 100)}%`
 }
 
-// All 5 spread structures the user can be deep-linked into. Direction
-// here is the THESIS direction (a Bear Call Credit is bearish even
-// though it's built from calls). LogSignal owns the structure→direction
-// mapping internally too; passing both here just removes a hop.
-const PLAY_TYPE_TO_PREFILL = {
-  BULL_CALL:        { direction: 'long_call', structure: 'bull_call_spread' },
-  BEAR_PUT:         { direction: 'long_put',  structure: 'bear_put_spread' },
-  IRON_CONDOR:      { direction: 'watch',     structure: 'iron_condor' },
-  BULL_PUT_CREDIT:  { direction: 'long_call', structure: 'bull_put_credit' },
-  BEAR_CALL_CREDIT: { direction: 'long_put',  structure: 'bear_call_credit' },
-}
-
-function logAsSignal(navigate, play, ticker, spot, regime, attribution = {}) {
-  const { claudeCallId = null, otherPlays = [] } = attribution
-  const mapped = PLAY_TYPE_TO_PREFILL[play.type] || PLAY_TYPE_TO_PREFILL.BEAR_PUT
-  // Derive a per-share premium from suggest-plays' dollar-denominated
-  // max-loss / max-profit fields so the calculator opens with EVERY
-  // field already populated — no re-typing. Convention:
-  //   * debit  → premium = max_loss_per_spread / 100  (cost per share)
-  //   * credit → premium = max_profit_per_spread / 100 (credit per share)
-  //   * condor → same as credit (premium collected = max profit)
-  const isDebit = play.type === 'BULL_CALL' || play.type === 'BEAR_PUT'
-  const dollarBasis = isDebit
-    ? Number(play.max_loss_per_spread)
-    : Number(play.max_profit_per_spread)
-  const premiumPerShare =
-    Number.isFinite(dollarBasis) && dollarBasis > 0
-      ? (dollarBasis / 100).toFixed(2)
-      : null
-  navigate('/log', {
-    state: {
-      prefill: {
-        signal_source: 'gex_flow',
-        ticker,
-        stock_price_at_signal: String(spot),
-        catalyst_type: 'other',
-        direction: mapped.direction,
-        structure: mapped.structure,
-        // suggested_play_type lets LogSignal render the Suggested /
-        // Modified-from-suggestion badge on the strategy picker.
-        suggested_play_type: play.type,
-        // POP from suggest-plays. Locks into the v2 signal_hash at
-        // insert time so the prediction becomes part of the immutable
-        // public record. Null is OK — DB column is nullable.
-        entry_pop_bp: play.entry_pop_bp ?? null,
-        thesis: `GEX-driven setup: ${play.rationale}`,
-        long_strike: play.long_strike,
-        short_strike: play.short_strike,
-        expiry_date: play.expiration,
-        // Premium per share — feeds the calculator's premium input so
-        // the user lands on a fully-populated form, not one with three
-        // fields still blank.
-        premium: premiumPerShare,
-        // ── Phase 3a structured thesis fields ───────────────────────
-        // Suggest-plays now emits these per play; pass them through
-        // to LogSignal so the locked signal row carries explicit
-        // declarations of what the trade is anchored to and what
-        // spot needs to do for it to win. Verdict logic on the
-        // position page reads these to replace the older heuristics.
-        target_king_node: play.target_king_node ?? null,
-        target_strike: play.target_strike ?? null,
-        target_expiration: play.target_expiration ?? null,
-        target_thesis_kind: play.target_thesis_kind ?? null,
-        regime_at_entry: regime ?? null, // top-level regime from suggest-plays response
-        // ── Post-mortem provenance ──────────────────────────────────
-        // Carry the claude_calls.id that produced this play, plus the
-        // chosen play object and the counterfactual other_plays Claude
-        // returned. LogSignal writes all three into the signals row so
-        // every future post-mortem can reconstruct what the model
-        // proposed AND what the user picked from.
-        originating_claude_call_id: claudeCallId,
-        claude_chosen_play: play,
-        claude_other_plays: otherPlays,
-      },
-    },
-  })
-}
+// LogSignal prefill builder lives in src/lib/logAsSignal.js so the
+// cross-ticker TodaysPlaysFeed component can deep-link with the same
+// shape. Imported above.
 
 
 // ?debug=1 surface — surfaces gating state inline since iOS PWA has no
