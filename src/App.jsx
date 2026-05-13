@@ -25,6 +25,7 @@ const BestGexTools = lazy(() => import('./pages/learn/BestGexTools'))
 const Glossary = lazy(() => import('./pages/learn/Glossary'))
 const CashMovesRules = lazy(() => import('./pages/learn/CashMovesRules'))
 const Admin = lazy(() => import('./pages/Admin'))
+const PlayDetail = lazy(() => import('./pages/PlayDetail'))
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -97,6 +98,14 @@ export default function App() {
           >
             <Route index element={<Dashboard />} />
             <Route path="signal/:id" element={<SignalDetail />} />
+            <Route
+              path="play/:claude_call_id"
+              element={
+                <Suspense fallback={<LoadingScreen />}>
+                  <PlayDetail />
+                </Suspense>
+              }
+            />
             <Route path="log" element={<LogSignal />} />
             <Route path="record" element={<TrackRecord />} />
             <Route path="settings" element={<Settings />} />
