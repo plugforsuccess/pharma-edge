@@ -5,34 +5,32 @@
 // concentrated.
 //
 // Data flow:
-//   1. dxlink-worker (Fly.io) holds a persistent WS to Tastytrade's
-//      DXLink gateway and streams Quote / Greeks / Summary events into
-//      public.dxlink_quotes (~750ms cache TTL inside the worker).
-//   2. This edge function reads the latest dxlink_quotes rows for the
-//      requested ticker, picks the closest expiry to preferredDte, and
-//      computes GEX from real-time gamma + OI per strike.
-//   3. We don't recompute Black-Scholes — gamma comes straight off the
-//      Greeks event from dxFeed. dealer notional = OI × gamma × 100 × S²
-//      with calls positive / puts negative.
-//
-// Fallback: if dxlink_quotes has no rows for the ticker (worker hasn't
-// subscribed to it yet, or worker is down), we fall back to Yahoo so
-// the user gets *something* instead of an error. The fallback is
-// flagged in the response so the UI can warn that data is delayed.
+//   1. Polygon (Massive plan) — primary. Real-time options snapshots,
+//      unlimited REST, every US ticker. The matrix path uses
+//      computeMatrixFromPolygon; the single-strike path uses
+//      computeFromPolygon. Black-Scholes gamma is computed in-edge
+//      from Polygon's IV when greeks aren't pre-attached.
+//   2. dxlink_quotes — secondary fallback. The dxlink-worker (Fly.io)
+//      streams Quote / Greeks / Summary events into public.dxlink_quotes
+//      for a curated ticker universe; we read the latest rows when
+//      Polygon can't satisfy the request. Greeks come straight off the
+//      stream — no BS recomputation in this path.
+//   3. EOD snapshot from gex_history — overnight / market-closed
+//      fallback. Tagged 'eod' in the response so the UI can render the
+//      yellow CLOSE-OF-DAY badge.
 //
 // Auth: real user JWT (verify_jwt=true at the platform level + getUser
 // here). 5-minute snapshot cache via gex_snapshots; refresh:true bypasses.
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { fetchYahooChain, YahooError } from './yahoo.ts'
 
 // Polygon (Massive) integration is loaded LAZILY via dynamic import
 // inside the dispatcher. Static `import { ... } from './polygon.ts'`
 // was crashing the function at module load on Supabase edge runtime
 // (503s with 80-115ms execution time = cold-start failure, not
 // handler error). Dynamic import defers any load-time failure to
-// invocation, where it can be caught and fall through to DXLink/Yahoo.
+// invocation, where it can be caught and fall through to DXLink.
 //
 // SKIP_POLYGON=true env var bypasses the dynamic import entirely.
 const POLYGON_ENABLED =
@@ -67,7 +65,7 @@ const STRIKE_WINDOW_PCT = 0.30
 const CACHE_TTL_MS = 5 * 60 * 1000
 // Worker writes are debounced to ~750ms. If the freshest row for a
 // ticker is older than this, the worker is asleep / disconnected /
-// hasn't subscribed to the ticker — we should fall back to Yahoo
+// hasn't subscribed to the ticker — we should fall back to Polygon
 // rather than serve stale data.
 const DXLINK_FRESH_MS = 30 * 1000
 
@@ -116,7 +114,7 @@ function clamp(n: number, min: number, max: number, fallback: number): number {
   return Math.max(min, Math.min(max, n))
 }
 
-// ─── Black-Scholes gamma (used only by the Yahoo fallback) ──────
+// ─── Black-Scholes gamma (used when a source ships IV but not gamma) ──
 function normPdf(x: number): number {
   return Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI)
 }
@@ -420,75 +418,6 @@ async function computeFromPolygon(
   }
 }
 
-// ─── Fallback: Yahoo (15-min delayed, computes BS gamma here) ───
-async function computeFromYahoo(args: ComputeArgs): Promise<{ result?: ComputeOutput; error?: string }> {
-  const { ticker, preferredDte, expirationOverride } = args
-  let chain
-  try {
-    chain = await fetchYahooChain(ticker, preferredDte, expirationOverride)
-  } catch (err) {
-    if (err instanceof YahooError) return { error: err.message }
-    throw err
-  }
-  const { spot, expirationDate, daysToExpiration, strikes, expirations } = chain
-  if (!Number.isFinite(spot) || spot <= 0) return { error: `no spot for ${ticker}` }
-
-  // Build available_expirations from the unix-timestamp list Yahoo gave us.
-  const todayMs = Date.now()
-  const availableExpirations: ExpirationInfo[] = expirations
-    .map((u) => {
-      const ms = u * 1000
-      const d = new Date(ms)
-      const date = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
-      const dte = Math.max(0, Math.round((ms - todayMs) / 86_400_000))
-      return { date, dte }
-    })
-    .sort((a, b) => a.dte - b.dte)
-
-  const lo = spot * (1 - STRIKE_WINDOW_PCT)
-  const hi = spot * (1 + STRIKE_WINDOW_PCT)
-  const trimmed = strikes.filter((s) => s.strike >= lo && s.strike <= hi)
-  if (trimmed.length === 0) return { error: 'no strikes in window' }
-
-  const t = Math.max(daysToExpiration, 1) / 365
-  const results: StrikeResult[] = []
-  const dealerNotional = spot * spot
-
-  for (const s of trimmed) {
-    if (s.callOI === 0 && s.putOI === 0) continue
-    const sigmaCall = s.callIV ?? s.putIV ?? 0
-    const sigmaPut = s.putIV ?? s.callIV ?? 0
-    const gC = bsGamma(spot, s.strike, t, sigmaCall)
-    const gP = bsGamma(spot, s.strike, t, sigmaPut)
-    results.push({
-      strike: s.strike,
-      oi_call: s.callOI,
-      oi_put: s.putOI,
-      iv_call: s.callIV,
-      iv_put: s.putIV,
-      gex_call: +(s.callOI * gC * dealerNotional),
-      gex_put: -(s.putOI * gP * dealerNotional),
-      gex_net: 0,
-    })
-    const r = results[results.length - 1]
-    r.gex_net = r.gex_call + r.gex_put
-  }
-  if (results.length === 0) return { error: 'no strikes had OI' }
-  results.sort((a, b) => a.strike - b.strike)
-
-  return {
-    result: shapeOutput(
-      ticker,
-      spot,
-      expirationDate,
-      daysToExpiration,
-      results,
-      'yahoo',
-      availableExpirations,
-    ),
-  }
-}
-
 // ─── Matrix mode (strikes × expirations 2D grid) ────────────────
 //
 // The /markets page renders a Skylit-style heatmap: rows = strikes,
@@ -503,7 +432,7 @@ interface MatrixOutput {
   // 'eod' = served from gex_history when both live paths failed (or
   // returned sparse data); UI renders a yellow EOD CLOSE badge with
   // eod_snapshot_at as the timestamp.
-  source: 'polygon' | 'dxlink' | 'yahoo' | 'eod'
+  source: 'polygon' | 'dxlink' | 'eod'
   computed_at: string
   expirations: ExpirationInfo[]
   strikes: number[]                      // descending; same length as cells.length
@@ -771,116 +700,6 @@ async function computeMatrixFromDxLink(
   }, opts, undefined, dxlinkFrontIv, prevClose)
 }
 
-async function computeMatrixFromYahoo(
-  ticker: string,
-  opts: MatrixOpts = DEFAULT_MATRIX_OPTS,
-): Promise<{ matrix?: MatrixOutput; error?: string }> {
-  // First call gives us the chain for the nearest expiry plus the full
-  // expirations list. Then fan out parallel calls for the next N-1.
-  let firstChain
-  try {
-    firstChain = await fetchYahooChain(ticker, 0)
-  } catch (err) {
-    if (err instanceof YahooError) return { error: err.message }
-    throw err
-  }
-  const { spot, expirations: expiryUnixes, previousClose: yahooPrevClose } = firstChain
-  if (!Number.isFinite(spot) || spot <= 0) return { error: `no spot for ${ticker}` }
-
-  // Use start-of-today-UTC instead of "right now" — Yahoo encodes
-  // option expirations as the unix timestamp at 00:00 UTC of the
-  // expiration date. Comparing against `Math.floor(Date.now() / 1000)`
-  // would filter out today's 0DTE expiration any time the request
-  // arrives after 00:00 UTC (which is always, in practice). We want
-  // every expiration whose CALENDAR DAY is today or later.
-  const now = new Date()
-  const todayMidnightUnix = Math.floor(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) / 1000,
-  )
-  const futureUnixes = expiryUnixes
-    .filter((u) => u >= todayMidnightUnix)
-    .slice(0, opts.maxExpirations)
-  if (futureUnixes.length === 0) return { error: 'no future expirations from yahoo' }
-
-  // Format unix → YYYY-MM-DD; same as fetchYahooChain's date format.
-  const expDate = (u: number): string => {
-    const d = new Date(u * 1000)
-    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
-  }
-
-  // Fetch each expiration's chain in parallel (skip the first — we
-  // already have it from the bootstrap call).
-  const firstDate = expDate(futureUnixes[0])
-  const chains = await Promise.all(
-    futureUnixes.map(async (u, i) => {
-      if (i === 0 && expDate(firstChain.expirationUnix) === firstDate) {
-        return firstChain
-      }
-      try {
-        return await fetchYahooChain(ticker, 0, expDate(u))
-      } catch {
-        return null
-      }
-    }),
-  )
-
-  // Index gamma + OI per (expDate, strike).
-  type YBucket = { callOI: number; callIV: number | null; putOI: number; putIV: number | null }
-  const byExp = new Map<string, Map<number, YBucket>>()
-  const dteByExp = new Map<string, number>()
-  for (let i = 0; i < chains.length; i++) {
-    const chain = chains[i]
-    if (!chain) continue
-    const date = chain.expirationDate
-    dteByExp.set(date, chain.daysToExpiration)
-    const strikeMap = new Map<number, YBucket>()
-    for (const s of chain.strikes) {
-      strikeMap.set(s.strike, {
-        callOI: s.callOI,
-        callIV: s.callIV,
-        putOI: s.putOI,
-        putIV: s.putIV,
-      })
-    }
-    byExp.set(date, strikeMap)
-  }
-  const futureExps = Array.from(byExp.keys()).sort().slice(0, opts.maxExpirations)
-  if (futureExps.length === 0) return { error: 'no chains came back from yahoo' }
-
-  // Front-expiry median ATM IV — see Polygon path for rationale.
-  const yahooFrontExp = futureExps[0]
-  const yahooFrontIv = yahooFrontExp
-    ? medianAtmIv(spot, Array.from(byExp.get(yahooFrontExp)?.entries() ?? []).map(
-        ([strike, b]) => ({ strike, callIv: b.callIV, putIv: b.putIV }),
-      ))
-    : undefined
-
-  return buildMatrix(ticker, spot, 'yahoo', futureExps, (exp, strike) => {
-    const bucket = byExp.get(exp)?.get(strike)
-    if (!bucket) return EMPTY_CELL
-    const dte = dteByExp.get(exp) ?? 30
-    const t = Math.max(dte, 1) / 365
-    const sigmaCall = bucket.callIV ?? bucket.putIV ?? 0
-    const sigmaPut = bucket.putIV ?? bucket.callIV ?? 0
-    const gC = bsGamma(spot, strike, t, sigmaCall)
-    const gP = bsGamma(spot, strike, t, sigmaPut)
-    const dN = spot * spot
-    const gex = bucket.callOI * gC * dN - bucket.putOI * gP * dN
-    const vC = bsVanna(spot, strike, t, sigmaCall)
-    const vP = bsVanna(spot, strike, t, sigmaPut)
-    const vex = (bucket.callOI * vC - bucket.putOI * vP) * dN
-    const chC = bsCharm(spot, strike, t, sigmaCall) / 365
-    const chP = bsCharm(spot, strike, t, sigmaPut) / 365
-    const cex = (bucket.callOI * chC - bucket.putOI * chP) * dN
-    const dC = bsCallDelta(spot, strike, t, sigmaCall)
-    const dP = bsCallDelta(spot, strike, t, sigmaPut) - 1
-    const dex = (bucket.callOI * dC + bucket.putOI * dP) * spot
-    return { gex, vex, cex, dex }
-  }, (exp) => {
-    return Array.from(byExp.get(exp)?.keys() ?? [])
-  }, opts, dteByExp, yahooFrontIv, yahooPrevClose ?? null)
-}
-
 // Velocity Mode — diff the live matrix against the most recent
 // historical snapshot for the same ticker, returning per-cell ∆GEX.
 //
@@ -974,7 +793,7 @@ async function attachVelocity(
 function buildMatrix(
   ticker: string,
   spot: number,
-  source: 'polygon' | 'dxlink' | 'yahoo',
+  source: 'polygon' | 'dxlink',
   expirations: string[],
   exposureFor: (exp: string, strike: number) => CellExposures,
   strikesIn: (exp: string) => number[],
@@ -1145,7 +964,7 @@ interface ComputeOutput {
   zero_gamma_strike: number | null
   largest_positive_strike: number
   largest_negative_strike: number
-  source: 'polygon' | 'dxlink' | 'yahoo'
+  source: 'polygon' | 'dxlink'
   computed_at: string
 }
 
@@ -1155,7 +974,7 @@ function shapeOutput(
   expiration: string,
   daysToExpiration: number,
   results: StrikeResult[],
-  source: 'polygon' | 'dxlink' | 'yahoo',
+  source: 'polygon' | 'dxlink',
   availableExpirations: ExpirationInfo[],
 ): ComputeOutput {
   let cumulative = 0
@@ -1309,14 +1128,14 @@ serve(async (req) => {
   }
 
   // Matrix mode short-circuits — different output shape, different
-  // pipeline. Polygon first (real-time + every ticker), DXLink fallback,
-  // Yahoo fallback, then EOD-snapshot fallback from gex_history so the
-  // matrix never goes blank overnight.
+  // pipeline. Polygon first (real-time + every ticker, unlimited under
+  // our Massive plan), DXLink fallback for streamed tickers when
+  // Polygon hiccups, then EOD-snapshot fallback from gex_history so
+  // the matrix never goes blank overnight.
   if (matrixMode) {
     let matrix: MatrixOutput | null = null
     let pgErr: string | null = null
     let dxErr: string | null = null
-    let yhErr: string | null = null
     if (POLYGON_ENABLED) {
       try {
         const pgModule = await loadPolygon()
@@ -1342,20 +1161,11 @@ serve(async (req) => {
         dxErr = e instanceof Error ? e.message : 'dxlink threw'
       }
     }
-    if (!matrix) {
-      try {
-        const y = await computeMatrixFromYahoo(ticker, matrixOpts)
-        if (y.matrix) matrix = y.matrix
-        else yhErr = y.error ?? 'yahoo unknown error'
-      } catch (e) {
-        yhErr = e instanceof Error ? e.message : String(e)
-      }
-    }
-    // Sparse-result detection — Yahoo sometimes returns a chain where
-    // only the bootstrap expiration has cells (crumb rotates, follow-up
-    // fetches silently fail). If <20% of cells are populated AND we
-    // have an EOD snapshot to fall back to, prefer the snapshot. This
-    // also handles the overnight case (both live paths empty).
+    // Sparse-result detection — Polygon occasionally returns a chain
+    // where only the bootstrap expiration has cells. If <20% of cells
+    // are populated AND we have an EOD snapshot to fall back to,
+    // prefer the snapshot. Also handles the overnight case (both live
+    // paths empty).
     const cellCount = matrix
       ? matrix.cells.reduce((s, row) => s + row.length, 0)
       : 0
@@ -1389,7 +1199,7 @@ serve(async (req) => {
         } as MatrixOutput
       } else if (!matrix) {
         return json(
-          { success: false, error: `dxlink: ${dxErr ?? 'n/a'}; yahoo: ${yhErr ?? 'n/a'}; eod: no snapshot` },
+          { success: false, error: `polygon: ${pgErr ?? 'n/a'}; dxlink: ${dxErr ?? 'n/a'}; eod: no snapshot` },
           502,
         )
       }
@@ -1499,25 +1309,10 @@ serve(async (req) => {
   }
 
   if (!result) {
-    try {
-      const y = await computeFromYahoo({ ticker, preferredDte, expirationOverride })
-      if (y.result) result = y.result
-      else {
-        return json(
-          {
-            success: false,
-            error: `polygon: ${polygonError}; dxlink: ${dxLinkError}; yahoo: ${y.error}`,
-          },
-          502,
-        )
-      }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      return json(
-        { success: false, error: `polygon: ${polygonError}; dxlink: ${dxLinkError}; yahoo: ${msg}` },
-        502,
-      )
-    }
+    return json(
+      { success: false, error: `polygon: ${polygonError}; dxlink: ${dxLinkError}` },
+      502,
+    )
   }
 
   // Snapshot the response so repeated tab-clicks don't re-query.

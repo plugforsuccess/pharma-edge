@@ -12,15 +12,18 @@
 // the service role JWT). Refuses anything else.
 //
 // Price source order:
-//   1. Tastytrade /market-data/by-type?equity-option=long_occ,short_occ
-//      (production REST endpoint usually returns 502 — same gotcha as
-//      compute-gex — but cheap to try)
-//   2. Yahoo /v7/finance/options/{ticker}?date=<expiry-unix> filtered to
-//      our two strikes (15-min delayed but reliable)
+//   1. Polygon /v3/snapshot/options REST — primary. Real-time, every
+//      US options ticker, unlimited under the Massive plan. Single
+//      source of truth that works for every position regardless of
+//      strike / expiration / ticker.
+//   2. dxlink_quotes — secondary fallback. Real-time stream the
+//      dxlink-worker keeps subscribed for a curated universe; used
+//      when Polygon hiccups (rate-limit retry, network glitch).
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { buildOccSymbol, tastytradeFetch, TastytradeError, type TtEnv } from '../_shared/tastytrade.ts'
+import { fetchPolygonOptionQuote } from '../_shared/optionPricing.ts'
 import { computeThesisVerdict, type VerdictState } from './thesisVerdict.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
@@ -38,52 +41,6 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   })
-}
-
-const UA =
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
-  '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-let yahooCachedAuth: { cookie: string; crumb: string; expiresAt: number } | null = null
-
-async function getYahooAuth(): Promise<{ cookie: string; crumb: string }> {
-  const now = Date.now()
-  if (yahooCachedAuth && yahooCachedAuth.expiresAt > now) {
-    return { cookie: yahooCachedAuth.cookie, crumb: yahooCachedAuth.crumb }
-  }
-  const cookieResp = await fetch('https://fc.yahoo.com/', {
-    headers: { 'User-Agent': UA, 'Accept': '*/*' },
-    redirect: 'manual',
-  })
-  await cookieResp.body?.cancel().catch(() => {})
-  type HeadersWithSet = Headers & { getSetCookie?: () => string[] }
-  const headers = cookieResp.headers as HeadersWithSet
-  let setCookies: string[] = []
-  if (typeof headers.getSetCookie === 'function') setCookies = headers.getSetCookie()
-  if (setCookies.length === 0) {
-    const raw = cookieResp.headers.get('set-cookie')
-    if (raw) setCookies = raw.split(/,(?=\s*[A-Za-z][A-Za-z0-9_-]*=)/)
-  }
-  const parts = setCookies.map((c) => c.split(';')[0].trim()).filter(Boolean)
-  if (parts.length === 0) throw new Error('yahoo: no session cookies')
-  const cookie = parts.join('; ')
-  const crumbResp = await fetch('https://query1.finance.yahoo.com/v1/test/getcrumb', {
-    headers: { 'User-Agent': UA, 'Cookie': cookie, 'Accept': '*/*' },
-  })
-  if (!crumbResp.ok) throw new Error(`yahoo crumb: ${crumbResp.status}`)
-  const crumb = (await crumbResp.text()).trim()
-  if (!crumb || crumb.length > 64 || crumb.includes('<')) {
-    throw new Error('yahoo crumb: invalid')
-  }
-  yahooCachedAuth = { cookie, crumb, expiresAt: now + 30 * 60 * 1000 }
-  return { cookie, crumb }
-}
-
-interface YahooContract {
-  contractSymbol: string
-  strike: number
-  lastPrice: number | undefined
-  bid: number | undefined
-  ask: number | undefined
 }
 
 // Read both legs from dxlink_quotes and return the spread mid. The
@@ -136,7 +93,12 @@ async function fetchDxlinkSpreadMid(
   }
 }
 
-async function fetchYahooSpreadMid(
+// Polygon REST snapshot for both legs. Real-time, unlimited under our
+// plan, covers every US options ticker — picks up everything dxlink
+// doesn't stream. Rejects >5min stale quotes (Polygon flags
+// last_updated; outside RTH this rapidly goes stale and is correctly
+// excluded).
+async function fetchPolygonSpreadMid(
   ticker: string,
   expiration: string,
   longStrike: number,
@@ -144,42 +106,22 @@ async function fetchYahooSpreadMid(
   optionType: 'C' | 'P',
 ): Promise<{ mid: number | null; source: string; error?: string }> {
   try {
-    const expUnix = Math.floor(new Date(expiration + 'T00:00:00Z').getTime() / 1000)
-    const { cookie, crumb } = await getYahooAuth()
-    const params = new URLSearchParams({ crumb, date: String(expUnix) })
-    const resp = await fetch(
-      `https://query1.finance.yahoo.com/v7/finance/options/${encodeURIComponent(ticker)}?${params}`,
-      { headers: { 'User-Agent': UA, 'Accept': 'application/json', 'Cookie': cookie } },
-    )
-    if (!resp.ok) {
-      if (resp.status === 401) yahooCachedAuth = null
-      return { mid: null, source: 'yahoo', error: `yahoo status ${resp.status}` }
+    const [longQ, shortQ] = await Promise.all([
+      fetchPolygonOptionQuote(ticker, expiration, optionType, longStrike),
+      fetchPolygonOptionQuote(ticker, expiration, optionType, shortStrike),
+    ])
+    if (!longQ || !shortQ) {
+      return { mid: null, source: 'polygon', error: 'leg quote unavailable' }
     }
-    const body = await resp.json()
-    const result = body?.optionChain?.result?.[0]?.options?.[0]
-    if (!result) return { mid: null, source: 'yahoo', error: 'no options block' }
-    const list: YahooContract[] = optionType === 'C' ? (result.calls ?? []) : (result.puts ?? [])
-    const long = list.find((c) => Math.abs(Number(c.strike) - longStrike) < 0.001)
-    const short = list.find((c) => Math.abs(Number(c.strike) - shortStrike) < 0.001)
-    if (!long || !short) {
-      return { mid: null, source: 'yahoo', error: 'strikes not found in chain' }
+    if (longQ.age_seconds > 300 || shortQ.age_seconds > 300) {
+      return { mid: null, source: 'polygon', error: `stale quote: long ${longQ.age_seconds}s short ${shortQ.age_seconds}s` }
     }
-    const mid = (priceOf(long) ?? 0) - (priceOf(short) ?? 0)
-    return { mid, source: 'yahoo' }
+    const mid = longQ.mid - shortQ.mid
+    if (!(mid > 0)) return { mid: null, source: 'polygon', error: 'non-positive net' }
+    return { mid, source: 'polygon' }
   } catch (e) {
-    return { mid: null, source: 'yahoo', error: e instanceof Error ? e.message : 'yahoo threw' }
+    return { mid: null, source: 'polygon', error: e instanceof Error ? e.message : 'polygon threw' }
   }
-}
-
-function priceOf(c: YahooContract): number | null {
-  const last = Number(c.lastPrice)
-  const bid = Number(c.bid)
-  const ask = Number(c.ask)
-  if (Number.isFinite(bid) && Number.isFinite(ask) && bid > 0 && ask > 0) {
-    return (bid + ask) / 2
-  }
-  if (Number.isFinite(last) && last > 0) return last
-  return null
 }
 
 interface Position {
@@ -952,13 +894,13 @@ serve(async (req) => {
       continue
     }
 
-    // Fetch current spread mid. dxlink first (real-time stream via
-    // dxlink-worker, ATM±25% × front 2 expirations). Yahoo (15-min
-    // delayed) as fallback for positions outside the streamed window
-    // or when the worker is down. The chosen source is stamped onto
-    // last_poll_source so the UI freshness card labels it honestly.
-    let { mid, source, error: fetchErr } = await fetchDxlinkSpreadMid(
-      supabase,
+    // Fetch current spread mid. Polygon first — it's what we pay for,
+    // real-time across every US options ticker, no coverage gaps.
+    // dxlink_quotes is the secondary fallback for the curated subset
+    // the worker streams; it's a single DB read so it's effectively
+    // free if Polygon transient-fails. last_poll_source stamps which
+    // one served the row so the UI freshness card labels it honestly.
+    let { mid, source, error: fetchErr } = await fetchPolygonSpreadMid(
       pos.ticker,
       pos.expiration,
       pos.long_strike,
@@ -966,7 +908,8 @@ serve(async (req) => {
       optionType,
     )
     if (mid == null) {
-      ;({ mid, source, error: fetchErr } = await fetchYahooSpreadMid(
+      ;({ mid, source, error: fetchErr } = await fetchDxlinkSpreadMid(
+        supabase,
         pos.ticker,
         pos.expiration,
         pos.long_strike,
