@@ -202,6 +202,8 @@ serve(async (req) => {
       total_cost_usd: totalCostUsd,
       ranked_plays: rankedPlays,
       errors: Object.keys(errors).length > 0 ? errors : null,
+      pricing_source: 'verified',
+      pricing_verified_at: new Date().toISOString(),
     })
   if (insertError) {
     console.error('[scan] top_plays_feed insert failed:', insertError.message)

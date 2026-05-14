@@ -132,7 +132,13 @@ serve(async (req) => {
     computed_at: new Date().toISOString(),
   }
   adminClient.from('play_suggestions').upsert(
-    { cache_key: cacheKey, payload, computed_at: new Date().toISOString() },
+    {
+      cache_key: cacheKey,
+      payload,
+      computed_at: new Date().toISOString(),
+      pricing_source: 'verified',
+      pricing_verified_at: new Date().toISOString(),
+    },
     { onConflict: 'cache_key' },
   ).then(() => {})
 

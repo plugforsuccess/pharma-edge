@@ -19,6 +19,7 @@
 //     backtest read the same universe.
 
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { priceSpread, computeContracts } from './optionPricing.ts'
 
 // ─── Constants ──────────────────────────────────────────────────────
 
@@ -106,28 +107,35 @@ VELOCITY (∆GEX over the last N minutes) — short-horizon CONFIRMATION ONLY, n
 - Velocity of zero / near-zero is fine; it just means dealer positioning is stable and the static GEX read is the full story. Do NOT manufacture a velocity narrative when there isn't a clear shift.
 - If the VELOCITY block says "not available," ignore — do not speculate about velocity.
 
+PRICING DIVISION OF LABOR — READ THIS CAREFULLY:
+- You propose STRUCTURE ONLY: ticker, strategy type, long/short strikes, expiration.
+- The server fetches live Polygon mids for both legs and computes
+  max_profit, max_loss, R/R, breakeven, POP, EV from first principles.
+- DO NOT output estimated_debit_pct_of_width, max_loss_per_spread,
+  max_profit_per_spread, risk_reward, entry_pop_bp, breakeven_pop_bp,
+  ev_edge_bp, or contracts. The server overwrites all of them.
+- Your edge is regime + king-node reading, not pricing. Picking a
+  structure with sound thesis and letting the server reject it on
+  bad live economics is the CORRECT workflow.
+
 CASH MOVES RULES — NEVER VIOLATE:
 - SPREADS ONLY. No naked options.
-- R/R ≥ 1:1.5 is the OBJECTIVE FUNCTION. The server filters every
-  play that doesn't clear it. DTE is a free parameter you optimize
-  IN SERVICE OF R/R + EV — pick whatever expiration in the chain
-  yields the best risk/reward for the structure given spot's
-  position relative to the king nodes. Do NOT bucket trades into
-  rigid DTE bands and pick from the band; pick the DTE that makes
-  the R/R math work.
+- R/R ≥ 1:1.5 is the OBJECTIVE FUNCTION. The server prices each
+  candidate against live Polygon mids and filters anything that
+  doesn't clear it (and anything with EV edge ≤ 0). DTE is a free
+  parameter you optimize IN SERVICE OF R/R — pick whatever
+  expiration in the chain yields the best risk/reward for the
+  structure given spot's position relative to the king nodes. Do
+  NOT bucket trades into rigid DTE bands.
 - DTE sanity floors (these are the ONLY hard rules on DTE):
     * No same-day / 1 DTE entries unless it's an explicit Regime A
       pin trade where spot is INSIDE a tight wall cluster and theta
       decay is the trade's edge (not its risk).
     * No 60+ DTE entries without a named catalyst — vega exposure
       starts dominating the P/L curve.
-- Within those floors, optimize freely: a 9 DTE swing to the wall
-  with R/R 1:2.4 beats a 28 DTE play with R/R 1:1.6. A 4 DTE pin
-  with R/R 1:3.1 beats both. The market_view + rationale must name
-  the king node being targeted and the days-to-touch the trade
-  needs to win.
-- Max 40% of spread width in net debit (R/R cap).
-- Position size = floor(account * 2% / max_loss_per_spread). Always include this in the response.
+- Within those floors, optimize freely. The market_view + rationale
+  must name the king node being targeted and the days-to-touch the
+  trade needs to win.
 - 30–45 days past any catalyst for catalyst-driven plays.
 
 GAMMA ROLL-OFF RISK — MUST FLAG:
@@ -156,17 +164,11 @@ OUTPUT — STRICT JSON, NO PROSE:
       "short_strike": <number>,
       "expiration": "YYYY-MM-DD",
       "dte": <integer>,
-      "estimated_debit_pct_of_width": <integer 0-40>,
-      "max_loss_per_spread": <number, dollars>,
-      "max_profit_per_spread": <number, dollars>,
-      "risk_reward": <number, e.g. 1.5>,
-      "contracts": <integer, sized to account_size with the 2% rule>,
       "market_view": "1 short sentence stating the EXACT forecast this trade requires to be profitable.",
       "rationale": "1-2 sentences citing specific GEX numbers (call wall at $X, flip at $Y, etc.)",
       "what_invalidates": "1 sentence — what move or event kills this thesis",
       "gamma_rolloff_risk": <boolean>,
       "rolloff_note": "<string, REQUIRED when gamma_rolloff_risk=true; empty string otherwise>",
-      "entry_pop_bp": <integer 0-10000, OPTIONAL — server overwrites>,
       "target_king_node": "call_wall" | "put_wall" | "flip",
       "target_strike": <number>,
       "target_expiration": "YYYY-MM-DD",
@@ -585,90 +587,85 @@ export function validatePlays(parsed: any, matrix: MatrixData): any {
   return parsed
 }
 
-// ─── Per-play POP + R/R filter ──────────────────────────────────────
+// ─── Live-pricing pass (Polygon-verified per candidate) ────────────
 
-export async function computePopAndFilter(
-  adminClient: SupabaseClient,
-  ticker: string,
-  matrix: MatrixData,
+const VERIFIED_STRUCTURES = new Set([
+  'BULL_CALL', 'BEAR_PUT', 'BEAR_CALL_CREDIT', 'BULL_PUT_CREDIT',
+])
+
+export async function verifyAndFilter(
+  _adminClient: SupabaseClient,
+  _ticker: string,
+  _matrix: MatrixData,
   parsed: any,
   topN: number,
+  accountSize: number,
 ): Promise<any> {
   if (!parsed?.plays || !Array.isArray(parsed.plays) || parsed.plays.length === 0) {
     return parsed
   }
-  const ivLookup = await fetchIvLookup(adminClient, ticker, parsed.plays)
+  const tickerSym = String(_ticker).toUpperCase()
+  const beforeCount = parsed.plays.length
+  const verified: any[] = []
   for (const p of parsed.plays) {
-    const expiry: string = p.expiration
-    const longK: number = Number(p.long_strike)
-    const shortK: number = Number(p.short_strike)
-    const anchor = p.type === 'IRON_CONDOR'
-      ? Math.round((longK + shortK) / 2)
-      : (p.type === 'BEAR_CALL_CREDIT' || p.type === 'BULL_PUT_CREDIT') ? shortK : longK
-    const sigma =
-      ivLookup.get(`${anchor}|${expiry}|*`) ??
-      ivLookup.get(`${longK}|${expiry}|*`) ??
-      ivLookup.get(`${shortK}|${expiry}|*`) ??
-      0
-    const width = Math.abs(longK - shortK)
-    const debitPct = Number(p.estimated_debit_pct_of_width) / 100
-    const isDebit = p.type === 'BULL_CALL' || p.type === 'BEAR_PUT'
-    const netDebit = isDebit && Number.isFinite(debitPct) ? width * debitPct : undefined
-    const netCredit = !isDebit && Number.isFinite(debitPct) ? width * (1 - debitPct) : undefined
-
-    p.entry_pop_bp = computePopBp({
-      spot: matrix.spot,
-      sigma,
-      dte: Number(p.dte) || 0,
-      type: p.type,
-      long_strike: longK,
-      short_strike: shortK,
-      inner_call_strike: p.type === 'IRON_CONDOR' ? Math.max(longK, shortK) : undefined,
-      inner_put_strike: p.type === 'IRON_CONDOR' ? Math.min(longK, shortK) : undefined,
-      net_debit: netDebit,
-      net_credit: netCredit,
-    })
-
-    const maxLoss = Number(p.max_loss_per_spread)
-    const maxWin = Number(p.max_profit_per_spread)
-    p.breakeven_pop_bp =
-      Number.isFinite(maxLoss) && Number.isFinite(maxWin) && maxLoss + maxWin > 0
-        ? Math.round((maxLoss / (maxLoss + maxWin)) * 10000)
-        : null
-    p.ev_edge_bp =
-      p.entry_pop_bp != null && p.breakeven_pop_bp != null
-        ? p.entry_pop_bp - p.breakeven_pop_bp
-        : null
-
-    // SERVER-SIDE R/R OVERRIDE. Claude has been observed returning
-    // a risk_reward that's inconsistent with its own max_profit /
-    // max_loss outputs — especially on credit spreads where the
-    // model occasionally inverts the ratio (returning width/credit
-    // instead of credit/(width-credit)). Recompute from the two
-    // dollar fields so what we filter on matches what we display.
-    //
-    // PLTR 137/135 credit @ $0.345 example seen in production:
-    //   Claude returned: max_loss=172, max_profit=78, risk_reward=1.85
-    //   Self-consistent: 78/172 = 0.453 → fails the R/R >= 1.5 gate
-    //   That's the correct outcome — the play would have been
-    //   filtered out instead of surfaced with broken math.
-    if (Number.isFinite(maxLoss) && Number.isFinite(maxWin) && maxLoss > 0 && maxWin > 0) {
-      p.risk_reward = Number((maxWin / maxLoss).toFixed(2))
+    if (!VERIFIED_STRUCTURES.has(p.type)) {
+      console.log(`[playSuggester] skip ${p.type} — live pricing not yet supported`)
+      continue
     }
+    const priced = await priceSpread({
+      ticker: tickerSym,
+      structure: p.type,
+      long_strike: Number(p.long_strike),
+      short_strike: Number(p.short_strike),
+      expiration: p.expiration,
+    })
+    if (priced.pricing_source === 'rejected') {
+      console.log(`[playSuggester] reject ${p.type} ${p.long_strike}/${p.short_strike} @ ${p.expiration}: ${priced.rejection_reason}`)
+      continue
+    }
+    if (priced.risk_reward < 1.5) {
+      console.log(`[playSuggester] reject ${p.type} ${p.long_strike}/${p.short_strike}: live R/R ${priced.risk_reward} < 1.5`)
+      continue
+    }
+    if (priced.ev_edge_bp <= 0) {
+      console.log(`[playSuggester] reject ${p.type} ${p.long_strike}/${p.short_strike}: EV edge ${priced.ev_edge_bp}bp ≤ 0`)
+      continue
+    }
+    if (priced.entry_pop_bp < 5000) {
+      console.log(`[playSuggester] reject ${p.type} ${p.long_strike}/${p.short_strike}: POP ${priced.entry_pop_bp}bp < 5000`)
+      continue
+    }
+    p.risk_reward = priced.risk_reward
+    p.entry_pop_bp = priced.entry_pop_bp
+    p.ev_edge_bp = priced.ev_edge_bp
+    p.breakeven = priced.breakeven
+    p.breakeven_pop_bp = priced.entry_pop_bp
+    p.max_profit_per_spread = priced.max_profit_per_spread
+    p.max_loss_per_spread = priced.max_loss_per_spread
+    p.max_profit_dollars = priced.max_profit_dollars
+    p.max_loss_dollars = priced.max_loss_dollars
+    p.credit_mid = priced.credit_mid
+    p.debit_mid = priced.debit_mid
+    p.width = priced.width
+    p.is_credit = priced.is_credit
+    p.iv_used = priced.iv_used
+    p.spot = priced.spot
+    p.long_mid = priced.long_mid
+    p.short_mid = priced.short_mid
+    p.contracts = computeContracts(priced.max_loss_per_spread, accountSize)
+    p.estimated_debit_pct_of_width = priced.width > 0
+      ? Math.round((priced.is_credit ? (priced.width - (priced.credit_mid ?? 0)) : (priced.debit_mid ?? 0)) / priced.width * 100)
+      : null
+    p.pricing_source = 'verified'
+    p.pricing_verified_at = new Date().toISOString()
+    p.quote_age_seconds = priced.quote_age_seconds
+    verified.push(p)
   }
 
-  const beforeCount = parsed.plays.length
-  parsed.plays = parsed.plays
-    .filter((p: any) => Number(p.risk_reward) >= 1.5)
-    .filter((p: any) => p.ev_edge_bp == null || p.ev_edge_bp >= 0)
-    .sort((a: any, b: any) => {
-      const ae = a.ev_edge_bp ?? -Infinity
-      const be = b.ev_edge_bp ?? -Infinity
-      return be - ae
-    })
-    .slice(0, topN)
+  verified.sort((a, b) => (b.ev_edge_bp ?? -Infinity) - (a.ev_edge_bp ?? -Infinity))
+  parsed.plays = verified.slice(0, topN)
   if (parsed.plays.length < beforeCount) {
-    console.log(`[playSuggester] filtered ${beforeCount - parsed.plays.length} plays; ${parsed.plays.length} survive`)
+    console.log(`[playSuggester] verified ${parsed.plays.length}/${beforeCount} plays (live Polygon mids)`)
   }
   return parsed
 }
@@ -813,7 +810,7 @@ export async function generatePlaysForTicker(
     throw new Error(e instanceof Error ? e.message : 'parse error')
   }
   parsed = validatePlays(parsed, matrix)
-  parsed = await computePopAndFilter(adminClient, ticker, matrix, parsed, options.topN)
+  parsed = await verifyAndFilter(adminClient, ticker, matrix, parsed, options.topN, accountSize)
 
   // 5. Persist the claude_calls row + recover its id for the FK.
   const usage = (claudeBody?.usage ?? {}) as Record<string, number | undefined>
