@@ -491,7 +491,7 @@ export default function PositionDetail() {
             <h1 className="text-lg font-semibold leading-tight">{pos.ticker}</h1>
             <Link
               to={`/markets?ticker=${pos.ticker}`}
-              className="text-[10px] uppercase tracking-wider text-amber-400 hover:text-amber-300 border border-amber-400/30 hover:border-amber-300/60 rounded px-1.5 py-0.5 leading-none"
+              className="text-[10px] uppercase tracking-wider text-amber-400 hover:text-amber-300 border border-amber-400/30 hover:border-amber-300/60 rounded px-1.5 py-1 leading-none"
             >
               View matrix →
             </Link>
