@@ -31,6 +31,19 @@ function fmtMoney(n) {
 // (what you buy) and short_strike (what you sell) regardless of
 // strategy — option type comes from the strategy.
 function describeLegs(play) {
+  if (play.type === 'IRON_CONDOR') {
+    // Four legs: long_put (lower wing), short_put + short_call (body),
+    // long_call (upper wing). Render all four so the reader can see
+    // both wing widths at a glance.
+    const lp = play.long_put_strike
+    const sp = play.short_put_strike
+    const sc = play.short_call_strike
+    const lc = play.long_call_strike
+    if ([lp, sp, sc, lc].every((k) => Number.isFinite(Number(k)))) {
+      return `Long $${lp}P · Short $${sp}P · Short $${sc}C · Long $${lc}C`
+    }
+    return `$${play.long_strike} / $${play.short_strike}`
+  }
   const opt = (() => {
     switch (play.type) {
       case 'BULL_CALL':
@@ -39,17 +52,13 @@ function describeLegs(play) {
       case 'BEAR_PUT':
       case 'BULL_PUT_CREDIT':
         return 'put'
-      case 'IRON_CONDOR':
       default:
         return null
     }
   })()
   const long = `$${play.long_strike}`
   const short = `$${play.short_strike}`
-  if (opt === null) {
-    // Iron condor — both wings, can't label with a single option type
-    return `${long} / ${short}`
-  }
+  if (opt === null) return `${long} / ${short}`
   return `Long ${long} ${opt} · Short ${short} ${opt}`
 }
 const TIER_TEXT = {

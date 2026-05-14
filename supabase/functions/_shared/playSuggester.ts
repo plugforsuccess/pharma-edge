@@ -19,7 +19,7 @@
 //     backtest read the same universe.
 
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { priceSpread, computeContracts } from './optionPricing.ts'
+import { priceSpread, priceIronCondor, computeContracts } from './optionPricing.ts'
 
 // ─── Constants ──────────────────────────────────────────────────────
 
@@ -160,8 +160,12 @@ OUTPUT — STRICT JSON, NO PROSE:
     {
       "strategy": "Bull Call Spread" | "Bear Put Spread" | "Iron Condor" | "Bull Put Spread (credit)" | "Bear Call Spread (credit)",
       "type": "BULL_CALL" | "BEAR_PUT" | "IRON_CONDOR" | "BULL_PUT_CREDIT" | "BEAR_CALL_CREDIT",
-      "long_strike": <number>,
-      "short_strike": <number>,
+      "long_strike": <number, OMIT for IRON_CONDOR>,
+      "short_strike": <number, OMIT for IRON_CONDOR>,
+      "long_put_strike": <number, IRON_CONDOR ONLY — the lower wing>,
+      "short_put_strike": <number, IRON_CONDOR ONLY — bottom of the body>,
+      "short_call_strike": <number, IRON_CONDOR ONLY — top of the body>,
+      "long_call_strike": <number, IRON_CONDOR ONLY — the upper wing>,
       "expiration": "YYYY-MM-DD",
       "dte": <integer>,
       "market_view": "1 short sentence stating the EXACT forecast this trade requires to be profitable.",
@@ -175,6 +179,19 @@ OUTPUT — STRICT JSON, NO PROSE:
       "target_thesis_kind": "pin_to" | "break_through" | "fade"
     }
   ]
+
+IRON CONDOR STRIKE ORDERING (when type="IRON_CONDOR"):
+- All four strikes MUST satisfy: long_put_strike < short_put_strike < short_call_strike < long_call_strike.
+- All four strikes MUST exist in the matrix strikes[] array.
+- The body (short_put_strike to short_call_strike) is where the trade
+  profits at expiration; the wings (long_put_strike below and
+  long_call_strike above) cap the risk.
+- Equal-width wings preferred (call_wing_width = put_wing_width);
+  unequal is allowed but the server uses max(wing_widths) as the
+  loss-cap basis.
+- Spot at scan time MUST be inside the body or the play is filtered.
+- DO NOT include long_strike or short_strike on IRON_CONDOR plays —
+  they are ignored.
 }
 
 If no high-conviction setup exists, return { "regime": "...", "regime_explanation": "...", "plays": [] } — DO NOT invent low-conviction trades to pad the response.
@@ -548,12 +565,33 @@ export function validatePlays(parsed: any, matrix: MatrixData): any {
   const dominantExp: string | null =
     typeof parsed.dominant_gex_expiration === 'string' ? parsed.dominant_gex_expiration : null
   parsed.plays = parsed.plays.filter((p: any) => {
-    if (!strikeSet.has(p.long_strike) || !strikeSet.has(p.short_strike)) {
-      console.warn(`[validate] dropped play: strike not in matrix`, p)
-      return false
-    }
     if (!expDates.has(p.expiration)) {
       console.warn(`[validate] dropped play: expiration not in matrix`, p)
+      return false
+    }
+    if (p.type === 'IRON_CONDOR') {
+      const ks = [p.long_put_strike, p.short_put_strike, p.short_call_strike, p.long_call_strike]
+      if (!ks.every((k) => strikeSet.has(k))) {
+        console.warn(`[validate] dropped IC: one or more strikes not in matrix`, p)
+        return false
+      }
+      if (!(p.long_put_strike < p.short_put_strike &&
+            p.short_put_strike < p.short_call_strike &&
+            p.short_call_strike < p.long_call_strike)) {
+        console.warn(`[validate] dropped IC: strike ordering invalid`, p)
+        return false
+      }
+      // Mirror the body bounds onto the legacy two-strike fields so
+      // downstream code (UI, signal-log payload) that still reads
+      // long_strike/short_strike has sensible values without needing
+      // a schema migration. Use the body bounds — that's what the
+      // 2-leg convention historically pointed at.
+      p.long_strike = p.long_call_strike
+      p.short_strike = p.long_put_strike
+      return true
+    }
+    if (!strikeSet.has(p.long_strike) || !strikeSet.has(p.short_strike)) {
+      console.warn(`[validate] dropped play: strike not in matrix`, p)
       return false
     }
     return true
@@ -589,9 +627,35 @@ export function validatePlays(parsed: any, matrix: MatrixData): any {
 
 // ─── Live-pricing pass (Polygon-verified per candidate) ────────────
 
-const VERIFIED_STRUCTURES = new Set([
+const SPREAD_STRUCTURES = new Set([
   'BULL_CALL', 'BEAR_PUT', 'BEAR_CALL_CREDIT', 'BULL_PUT_CREDIT',
 ])
+
+function stampVerified(p: any, priced: {
+  spot: number; iv_used: number; quote_age_seconds: number
+  is_credit: boolean
+  width: number
+  max_profit_per_spread: number; max_loss_per_spread: number
+  max_profit_dollars: number; max_loss_dollars: number
+  risk_reward: number; entry_pop_bp: number; ev_edge_bp: number
+}, accountSize: number) {
+  p.risk_reward = priced.risk_reward
+  p.entry_pop_bp = priced.entry_pop_bp
+  p.ev_edge_bp = priced.ev_edge_bp
+  p.breakeven_pop_bp = priced.entry_pop_bp
+  p.max_profit_per_spread = priced.max_profit_per_spread
+  p.max_loss_per_spread = priced.max_loss_per_spread
+  p.max_profit_dollars = priced.max_profit_dollars
+  p.max_loss_dollars = priced.max_loss_dollars
+  p.width = priced.width
+  p.is_credit = priced.is_credit
+  p.iv_used = priced.iv_used
+  p.spot = priced.spot
+  p.contracts = computeContracts(priced.max_loss_per_spread, accountSize)
+  p.pricing_source = 'verified'
+  p.pricing_verified_at = new Date().toISOString()
+  p.quote_age_seconds = priced.quote_age_seconds
+}
 
 export async function verifyAndFilter(
   _adminClient: SupabaseClient,
@@ -608,57 +672,80 @@ export async function verifyAndFilter(
   const beforeCount = parsed.plays.length
   const verified: any[] = []
   for (const p of parsed.plays) {
-    if (!VERIFIED_STRUCTURES.has(p.type)) {
-      console.log(`[playSuggester] skip ${p.type} — live pricing not yet supported`)
+    let priced: {
+      pricing_source: 'verified' | 'rejected'
+      rejection_reason?: string
+      risk_reward: number; ev_edge_bp: number; entry_pop_bp: number
+      max_profit_per_spread: number; max_loss_per_spread: number
+      max_profit_dollars: number; max_loss_dollars: number
+      width: number; is_credit: boolean
+      spot: number; iv_used: number; quote_age_seconds: number
+      [key: string]: any
+    }
+
+    if (p.type === 'IRON_CONDOR') {
+      const ic = await priceIronCondor({
+        ticker: tickerSym,
+        long_put_strike: Number(p.long_put_strike),
+        short_put_strike: Number(p.short_put_strike),
+        short_call_strike: Number(p.short_call_strike),
+        long_call_strike: Number(p.long_call_strike),
+        expiration: p.expiration,
+      })
+      priced = ic
+    } else if (SPREAD_STRUCTURES.has(p.type)) {
+      priced = await priceSpread({
+        ticker: tickerSym,
+        structure: p.type,
+        long_strike: Number(p.long_strike),
+        short_strike: Number(p.short_strike),
+        expiration: p.expiration,
+      })
+    } else {
+      console.log(`[playSuggester] skip ${p.type} — unknown structure`)
       continue
     }
-    const priced = await priceSpread({
-      ticker: tickerSym,
-      structure: p.type,
-      long_strike: Number(p.long_strike),
-      short_strike: Number(p.short_strike),
-      expiration: p.expiration,
-    })
+
+    const label = p.type === 'IRON_CONDOR'
+      ? `IC ${p.long_put_strike}/${p.short_put_strike}/${p.short_call_strike}/${p.long_call_strike}`
+      : `${p.type} ${p.long_strike}/${p.short_strike}`
+
     if (priced.pricing_source === 'rejected') {
-      console.log(`[playSuggester] reject ${p.type} ${p.long_strike}/${p.short_strike} @ ${p.expiration}: ${priced.rejection_reason}`)
+      console.log(`[playSuggester] reject ${label} @ ${p.expiration}: ${priced.rejection_reason}`)
       continue
     }
     if (priced.risk_reward < 1.5) {
-      console.log(`[playSuggester] reject ${p.type} ${p.long_strike}/${p.short_strike}: live R/R ${priced.risk_reward} < 1.5`)
+      console.log(`[playSuggester] reject ${label}: live R/R ${priced.risk_reward} < 1.5`)
       continue
     }
     if (priced.ev_edge_bp <= 0) {
-      console.log(`[playSuggester] reject ${p.type} ${p.long_strike}/${p.short_strike}: EV edge ${priced.ev_edge_bp}bp ≤ 0`)
+      console.log(`[playSuggester] reject ${label}: EV edge ${priced.ev_edge_bp}bp ≤ 0`)
       continue
     }
     if (priced.entry_pop_bp < 5000) {
-      console.log(`[playSuggester] reject ${p.type} ${p.long_strike}/${p.short_strike}: POP ${priced.entry_pop_bp}bp < 5000`)
+      console.log(`[playSuggester] reject ${label}: POP ${priced.entry_pop_bp}bp < 5000`)
       continue
     }
-    p.risk_reward = priced.risk_reward
-    p.entry_pop_bp = priced.entry_pop_bp
-    p.ev_edge_bp = priced.ev_edge_bp
-    p.breakeven = priced.breakeven
-    p.breakeven_pop_bp = priced.entry_pop_bp
-    p.max_profit_per_spread = priced.max_profit_per_spread
-    p.max_loss_per_spread = priced.max_loss_per_spread
-    p.max_profit_dollars = priced.max_profit_dollars
-    p.max_loss_dollars = priced.max_loss_dollars
-    p.credit_mid = priced.credit_mid
-    p.debit_mid = priced.debit_mid
-    p.width = priced.width
-    p.is_credit = priced.is_credit
-    p.iv_used = priced.iv_used
-    p.spot = priced.spot
-    p.long_mid = priced.long_mid
-    p.short_mid = priced.short_mid
-    p.contracts = computeContracts(priced.max_loss_per_spread, accountSize)
-    p.estimated_debit_pct_of_width = priced.width > 0
-      ? Math.round((priced.is_credit ? (priced.width - (priced.credit_mid ?? 0)) : (priced.debit_mid ?? 0)) / priced.width * 100)
-      : null
-    p.pricing_source = 'verified'
-    p.pricing_verified_at = new Date().toISOString()
-    p.quote_age_seconds = priced.quote_age_seconds
+
+    stampVerified(p, priced, accountSize)
+    if (p.type === 'IRON_CONDOR') {
+      p.total_credit = priced.total_credit
+      p.credit_mid = priced.total_credit
+      p.breakeven_lower = priced.breakeven_lower
+      p.breakeven_upper = priced.breakeven_upper
+      p.estimated_debit_pct_of_width = priced.width > 0
+        ? Math.round(((priced.width - priced.total_credit) / priced.width) * 100)
+        : null
+    } else {
+      p.credit_mid = priced.credit_mid
+      p.debit_mid = priced.debit_mid
+      p.breakeven = priced.breakeven
+      p.long_mid = priced.long_mid
+      p.short_mid = priced.short_mid
+      p.estimated_debit_pct_of_width = priced.width > 0
+        ? Math.round((priced.is_credit ? (priced.width - (priced.credit_mid ?? 0)) : (priced.debit_mid ?? 0)) / priced.width * 100)
+        : null
+    }
     verified.push(p)
   }
 

@@ -16,7 +16,7 @@
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { priceSpread, classifySpread } from '../_shared/optionPricing.ts'
+import { priceSpread, priceIronCondor, classifySpread } from '../_shared/optionPricing.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!
@@ -40,9 +40,21 @@ function json(body: unknown, status = 200): Response {
 interface PlayRequest {
   ticker: string
   structure: string
-  long_strike: number
-  short_strike: number
+  long_strike?: number
+  short_strike?: number
+  // Iron Condor needs all four strikes; the structure carries one wing
+  // each side of the body. Body = short_put → short_call. Wings =
+  // long_put (below) and long_call (above).
+  long_put_strike?: number
+  short_put_strike?: number
+  short_call_strike?: number
+  long_call_strike?: number
   expiration: string  // YYYY-MM-DD
+}
+
+function isIronCondor(structure: string): boolean {
+  const norm = structure.toUpperCase().replace(/-/g, '_').replace(/_SPREAD$/, '')
+  return norm === 'IRON_CONDOR'
 }
 
 serve(async (req) => {
@@ -62,21 +74,39 @@ serve(async (req) => {
   if (!body || !body.ticker || !body.structure || !body.expiration) {
     return json({ success: false, error: 'invalid request body' }, 400)
   }
-  if (!Number.isFinite(body.long_strike) || !Number.isFinite(body.short_strike)) {
-    return json({ success: false, error: 'invalid strikes' }, 400)
-  }
-  if (!classifySpread(body.structure)) {
-    return json({ success: false, error: `unsupported structure: ${body.structure}` }, 400)
+  const ic = isIronCondor(body.structure)
+  if (ic) {
+    const ks = [body.long_put_strike, body.short_put_strike, body.short_call_strike, body.long_call_strike]
+    if (!ks.every((k) => typeof k === 'number' && Number.isFinite(k))) {
+      return json({ success: false, error: 'iron condor requires long_put_strike, short_put_strike, short_call_strike, long_call_strike' }, 400)
+    }
+  } else {
+    if (!Number.isFinite(body.long_strike) || !Number.isFinite(body.short_strike)) {
+      return json({ success: false, error: 'invalid strikes' }, 400)
+    }
+    if (!classifySpread(body.structure)) {
+      return json({ success: false, error: `unsupported structure: ${body.structure}` }, 400)
+    }
   }
 
   const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-  const cacheKey = [
-    body.ticker.toUpperCase(),
-    body.structure,
-    body.long_strike,
-    body.short_strike,
-    body.expiration,
-  ].join('|')
+  const cacheKey = ic
+    ? [
+        body.ticker.toUpperCase(),
+        'IRON_CONDOR',
+        body.long_put_strike,
+        body.short_put_strike,
+        body.short_call_strike,
+        body.long_call_strike,
+        body.expiration,
+      ].join('|')
+    : [
+        body.ticker.toUpperCase(),
+        body.structure,
+        body.long_strike,
+        body.short_strike,
+        body.expiration,
+      ].join('|')
 
   const { data: cached } = await admin
     .from('play_quote_cache')
@@ -93,13 +123,22 @@ serve(async (req) => {
     }
   }
 
-  const priced = await priceSpread({
-    ticker: body.ticker,
-    structure: body.structure,
-    long_strike: body.long_strike,
-    short_strike: body.short_strike,
-    expiration: body.expiration,
-  })
+  const priced = ic
+    ? await priceIronCondor({
+        ticker: body.ticker,
+        long_put_strike: body.long_put_strike!,
+        short_put_strike: body.short_put_strike!,
+        short_call_strike: body.short_call_strike!,
+        long_call_strike: body.long_call_strike!,
+        expiration: body.expiration,
+      })
+    : await priceSpread({
+        ticker: body.ticker,
+        structure: body.structure,
+        long_strike: body.long_strike!,
+        short_strike: body.short_strike!,
+        expiration: body.expiration,
+      })
 
   if (priced.pricing_source === 'rejected') {
     return json({
