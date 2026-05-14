@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, X, AlertTriangle, RefreshCw, Check, Clock, Target, Shield, Info } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
@@ -487,7 +487,15 @@ export default function PositionDetail() {
           <ArrowLeft size={20} />
         </button>
         <div className="flex-1">
-          <h1 className="text-lg font-semibold leading-tight">{pos.ticker}</h1>
+          <div className="flex items-baseline gap-2">
+            <h1 className="text-lg font-semibold leading-tight">{pos.ticker}</h1>
+            <Link
+              to={`/markets?ticker=${pos.ticker}`}
+              className="text-[10px] uppercase tracking-wider text-amber-400 hover:text-amber-300 border border-amber-400/30 hover:border-amber-300/60 rounded px-1.5 py-0.5"
+            >
+              View matrix →
+            </Link>
+          </div>
           <p className="text-xs text-subtle">
             {pos.strategy_type.replace(/_/g, ' ')} ·{' '}
             {pos.contracts_remaining != null && pos.contracts_remaining !== pos.contracts
