@@ -213,6 +213,13 @@ export interface MatrixData {
   vex_cells?: (number | null)[][]
   cex_cells?: (number | null)[][]
   dex_cells?: (number | null)[][]
+  // Per-cell open interest by option type. Populated by compute-gex
+  // for fresh matrices; absent on EOD-served snapshots that predate
+  // this field. When missing or null, the "vol > 5× OI" notable
+  // detection in formatFlowSection skips the strike instead of
+  // reporting against a synthetic denominator.
+  oi_call_cells?: (number | null)[][]
+  oi_put_cells?: (number | null)[][]
   net_vex?: number
   net_cex?: number
   net_dex?: number
@@ -427,11 +434,26 @@ export function buildUserPrompt(matrix: MatrixData, accountSize: number, flow: F
     return `  ${e.date} (${e.dte}d): ${w.strike} → ${sign}$${(Math.abs(w.gex) / 1e6).toFixed(1)}M${star}`
   }).join('\n')
 
+  // Real per-(strike, exp, type) open interest, sourced from
+  // compute-gex's oi_call_cells / oi_put_cells. Same [strike][exp]
+  // indexing as `cells`. When the matrix predates the OI surface
+  // (EOD snapshot served from gex_history before this field existed)
+  // the maps stay empty and formatFlowSection's notable detection
+  // skips the strike rather than firing against a synthetic
+  // denominator.
   const chainOI = new Map<string, number>()
-  for (const c of flat) {
-    if (c.gex != null && c.gex !== 0) {
-      chainOI.set(`${c.strike}|${c.expiration}|C`, 1000)
-      chainOI.set(`${c.strike}|${c.expiration}|P`, 1000)
+  for (let i = 0; i < matrix.strikes.length; i++) {
+    for (let j = 0; j < matrix.expirations.length; j++) {
+      const strike = matrix.strikes[i]
+      const exp = matrix.expirations[j].date
+      const callOI = matrix.oi_call_cells?.[i]?.[j]
+      const putOI = matrix.oi_put_cells?.[i]?.[j]
+      if (Number.isFinite(callOI) && (callOI as number) > 0) {
+        chainOI.set(`${strike}|${exp}|C`, callOI as number)
+      }
+      if (Number.isFinite(putOI) && (putOI as number) > 0) {
+        chainOI.set(`${strike}|${exp}|P`, putOI as number)
+      }
     }
   }
 
