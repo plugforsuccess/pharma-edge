@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import Spinner from '../components/Spinner'
 import { computeThesisVerdict } from '../utils/thesisVerdict'
+import useLiveSpot from '../hooks/useLiveSpot'
 
 // Detail view for a single open_position. Shows entry, live mid, P&L,
 // triggered alerts, and a "Close Position" flow that submits an inverse
@@ -40,6 +41,12 @@ export default function PositionDetail() {
   // across a refresh — so tapping Refresh felt like a no-op.
   const [refreshTick, setRefreshTick] = useState(0)
   const [wallInfo, setWallInfo] = useState(null)
+  // Live equity-spot poll (dxlink_quotes, 2s interval). moveInfo.spot
+  // is the snapshot value baked into compute-gex's 5-min cache; for
+  // cards that ask "where is spot RIGHT NOW vs my anchors" we prefer
+  // this live read so the card and the Markets matrix cursor never
+  // disagree.
+  const { spot: liveSpot } = useLiveSpot(pos?.ticker)
   // Move context derived from the same compute-gex fetch — today's
   // realized move vs the option market's expected move, plus an
   // expected move scaled to the trade's remaining DTE (using iv_used
@@ -557,7 +564,7 @@ export default function PositionDetail() {
 
       <PnLLadderCard pos={pos} />
 
-      <DistanceToActionCard pos={pos} moveInfo={moveInfo} />
+      <DistanceToActionCard pos={pos} moveInfo={moveInfo} liveSpot={liveSpot} />
 
       <TimePressureCard pos={pos} />
 
@@ -1272,11 +1279,15 @@ function Tick({ pct, label, tone }) {
 // underlying-price moves the user can compare to the spot they're
 // watching. Uses a simple delta heuristic since we don't have the
 // option chain Greeks loaded on this page.
-function DistanceToActionCard({ pos, moveInfo }) {
+function DistanceToActionCard({ pos, moveInfo, liveSpot }) {
   const g = spreadGeometry(pos)
   const [showDetail, setShowDetail] = useState(false)
   if (!g) return null
-  const spot = moveInfo?.spot
+  // Prefer dxlink live mid (2s poll) over moveInfo.spot, which comes
+  // from compute-gex's 5-min snapshot cache. Without this the card's
+  // spot label and proximity %s drift away from the Markets matrix
+  // cursor during the cache window.
+  const spot = Number.isFinite(liveSpot) && liveSpot > 0 ? liveSpot : moveInfo?.spot
   if (!Number.isFinite(spot)) return null
 
   // Net delta heuristic: a vertical debit spread halfway through
