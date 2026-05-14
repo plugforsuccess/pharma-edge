@@ -163,6 +163,15 @@ async function fetchPrevClose(underlying: string): Promise<number | null> {
   }
 }
 
+// Midnight UTC of today, in epoch ms. DTE math compares expiry
+// midnight to today midnight so tomorrow's expiry is always 1, not 0
+// (which the prior `(expMs - Date.now())/86_400_000` would yield any
+// time `now` was more than 12h past last midnight UTC).
+function startOfTodayUtcMs(): number {
+  const d = new Date()
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
+}
+
 function unixSeconds(yyyyMmDd: string): number {
   return Math.floor(new Date(yyyyMmDd + 'T16:00:00-04:00').getTime() / 1000)
 }
@@ -173,16 +182,16 @@ function pickExpiration(
   override?: string | null,
 ): { date: string; dte: number } | null {
   if (!candidates.length) return null
+  const today = startOfTodayUtcMs()
   if (override) {
     if (candidates.includes(override)) {
       const dte = Math.max(0, Math.round(
-        (new Date(override + 'T00:00:00Z').getTime() - Date.now()) / 86_400_000,
+        (new Date(override + 'T00:00:00Z').getTime() - today) / 86_400_000,
       ))
       return { date: override, dte }
     }
     // not in chain, fall through to closest-to-preferred
   }
-  const today = Date.now()
   const withDte = candidates.map((d) => ({
     date: d,
     dte: Math.max(0, Math.round((new Date(d + 'T00:00:00Z').getTime() - today) / 86_400_000)),
@@ -406,9 +415,10 @@ export async function fetchPolygonMatrixChain(
 
   // Sort expiries ascending, take the first maxExpirations
   const sortedExpiries = Array.from(byExpiry.keys()).sort().slice(0, maxExpirations)
+  const todayMs = startOfTodayUtcMs()
   const expiries: PolygonMatrixExpiry[] = sortedExpiries.map((d) => ({
     date: d,
-    dte: Math.max(0, Math.round((new Date(d + 'T00:00:00Z').getTime() - Date.now()) / 86_400_000)),
+    dte: Math.max(0, Math.round((new Date(d + 'T00:00:00Z').getTime() - todayMs) / 86_400_000)),
     strikes: Array.from(byExpiry.get(d)!.values()).sort((a, b) => a.strike - b.strike),
   }))
 

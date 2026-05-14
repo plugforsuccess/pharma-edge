@@ -114,6 +114,16 @@ function clamp(n: number, min: number, max: number, fallback: number): number {
   return Math.max(min, Math.min(max, n))
 }
 
+// Start of today (00:00 UTC) in epoch ms. Used by every DTE
+// computation: subtracting from a midnight-aligned reference gives a
+// clean integer number of calendar days. Subtracting from Date.now()
+// instead causes tomorrow's expiry to round to 0 whenever "now" is
+// more than 12 hours past last midnight UTC.
+function startOfTodayUtcMs(): number {
+  const d = new Date()
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
+}
+
 // ─── Black-Scholes gamma (used when a source ships IV but not gamma) ──
 function normPdf(x: number): number {
   return Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI)
@@ -261,7 +271,7 @@ async function computeFromDxLink(
     arr.push(r)
     byExpiry.set(r.expiration_date, arr)
   }
-  const todayMs = Date.now()
+  const todayMs = startOfTodayUtcMs()
   const dteOf = (exp: string) => {
     const expMs = new Date(exp + 'T00:00:00Z').getTime()
     return Math.max(0, Math.round((expMs - todayMs) / 86_400_000))
@@ -363,7 +373,7 @@ async function computeFromPolygon(
   if (!Number.isFinite(spot) || spot <= 0) return { error: `no spot for ${ticker}` }
 
   // Available expirations list — same shape as Yahoo path.
-  const todayMs = Date.now()
+  const todayMs = startOfTodayUtcMs()
   const availableExpirations: ExpirationInfo[] = expirations
     .map((u) => {
       const ms = u * 1000
@@ -662,7 +672,8 @@ async function computeMatrixFromDxLink(
 
   const dteOf = (exp: string): number => {
     const expMs = new Date(exp + 'T00:00:00Z').getTime()
-    return Math.max(1, Math.round((expMs - Date.now()) / 86_400_000))
+    // Math.max(1, …) floor preserves the BS-t = dte/365 division below.
+    return Math.max(1, Math.round((expMs - startOfTodayUtcMs()) / 86_400_000))
   }
 
   // Front-expiry median ATM IV — see Polygon path for rationale.
@@ -866,7 +877,7 @@ function buildMatrix(
     dexCells.push(dexRow)
   }
 
-  const todayMs = Date.now()
+  const todayMs = startOfTodayUtcMs()
   const expirationInfos: ExpirationInfo[] = expirations.map((date) => {
     const dte = dteByExp?.get(date) ??
       Math.max(0, Math.round((new Date(date + 'T00:00:00Z').getTime() - todayMs) / 86_400_000))
