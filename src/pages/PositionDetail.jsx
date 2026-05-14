@@ -1345,6 +1345,16 @@ function DistanceToActionCard({ pos, moveInfo }) {
             {targetMovePct >= 0 ? '+' : ''}{targetMovePct.toFixed(2)}%
           </span>
           <span className="text-muted uppercase tracking-wider text-[10px]">
+            Max profit
+          </span>
+          <span className="text-green-400 font-mono-tab">
+            ${g.short.toFixed(2)}
+          </span>
+          <span className="text-subtle font-mono-tab text-right text-[10px]">
+            {(((g.short - spot) / spot) * 100) >= 0 ? '+' : ''}
+            {(((g.short - spot) / spot) * 100).toFixed(2)}%
+          </span>
+          <span className="text-muted uppercase tracking-wider text-[10px]">
             Stop fires
           </span>
           <span className="text-crimson font-mono-tab">
@@ -1362,8 +1372,11 @@ function DistanceToActionCard({ pos, moveInfo }) {
       </div>
       {showDetail && (
         <p className="text-[11px] text-subtle leading-relaxed">
-          Estimated using a midpoint delta — actual fill prices may
-          differ on deep ITM or far OTM spreads.
+          50% target and stop fires are estimated via a midpoint delta
+          on the spread mid — actual fill prices may differ on deep
+          ITM or far OTM spreads. Max profit is the literal short
+          strike: a debit vertical pays full width only with spot
+          at-or-past the short at expiration.
         </p>
       )}
     </div>
