@@ -268,3 +268,182 @@ export function computeContracts(maxLossPerSpread: number, accountSize: number):
   const riskPerContract = maxLossPerSpread * 100
   return Math.max(1, Math.floor(targetRisk / riskPerContract))
 }
+
+// ─── Iron Condor ────────────────────────────────────────────────────
+//
+// Four legs: long_put < short_put < short_call < long_call. Equivalent
+// to a bull-put-credit + bear-call-credit at the same expiration. We
+// price each wing via priceSpread() then combine into the condor's
+// aggregate economics.
+//
+// max_profit = total_credit (both wings expire worthless inside the
+//              body)
+// max_loss   = max(call_wing_width, put_wing_width) - total_credit
+//              (only the broken side can lose its full width)
+// breakevens: lower = short_put - total_credit,
+//             upper = short_call + total_credit
+// POP        = P(lower_be < S_T < upper_be) ≈ N(d2_lower) - N(d2_upper)
+
+export interface PricedIronCondor {
+  ticker: string
+  structure: 'IRON_CONDOR'
+  long_put_strike: number
+  short_put_strike: number
+  short_call_strike: number
+  long_call_strike: number
+  expiration: string
+  spot: number
+  call_wing: PricedSpread
+  put_wing: PricedSpread
+  total_credit: number
+  width: number
+  max_profit_per_spread: number
+  max_loss_per_spread: number
+  max_profit_dollars: number
+  max_loss_dollars: number
+  risk_reward: number
+  breakeven_lower: number
+  breakeven_upper: number
+  entry_pop_bp: number
+  ev_edge_bp: number
+  iv_used: number
+  quote_age_seconds: number
+  is_credit: true
+  pricing_source: 'verified' | 'rejected'
+  rejection_reason?: string
+}
+
+export async function priceIronCondor(args: {
+  ticker: string
+  long_put_strike: number
+  short_put_strike: number
+  short_call_strike: number
+  long_call_strike: number
+  expiration: string
+  max_quote_age_seconds?: number
+}): Promise<PricedIronCondor> {
+  const reject = (reason: string): PricedIronCondor => ({
+    ticker: args.ticker.toUpperCase(),
+    structure: 'IRON_CONDOR',
+    long_put_strike: args.long_put_strike,
+    short_put_strike: args.short_put_strike,
+    short_call_strike: args.short_call_strike,
+    long_call_strike: args.long_call_strike,
+    expiration: args.expiration,
+    spot: 0,
+    call_wing: {} as PricedSpread,
+    put_wing: {} as PricedSpread,
+    total_credit: 0,
+    width: 0,
+    max_profit_per_spread: 0,
+    max_loss_per_spread: 0,
+    max_profit_dollars: 0,
+    max_loss_dollars: 0,
+    risk_reward: 0,
+    breakeven_lower: 0,
+    breakeven_upper: 0,
+    entry_pop_bp: 0,
+    ev_edge_bp: 0,
+    iv_used: 0,
+    quote_age_seconds: 0,
+    is_credit: true,
+    pricing_source: 'rejected',
+    rejection_reason: reason,
+  })
+
+  if (!(args.long_put_strike < args.short_put_strike &&
+        args.short_put_strike < args.short_call_strike &&
+        args.short_call_strike < args.long_call_strike)) {
+    return reject('iron condor strikes must satisfy long_put < short_put < short_call < long_call')
+  }
+
+  const [callWing, putWing] = await Promise.all([
+    priceSpread({
+      ticker: args.ticker,
+      structure: 'BEAR_CALL_CREDIT',
+      long_strike: args.long_call_strike,
+      short_strike: args.short_call_strike,
+      expiration: args.expiration,
+      max_quote_age_seconds: args.max_quote_age_seconds,
+    }),
+    priceSpread({
+      ticker: args.ticker,
+      structure: 'BULL_PUT_CREDIT',
+      long_strike: args.long_put_strike,
+      short_strike: args.short_put_strike,
+      expiration: args.expiration,
+      max_quote_age_seconds: args.max_quote_age_seconds,
+    }),
+  ])
+  if (callWing.pricing_source === 'rejected') return reject(`call wing: ${callWing.rejection_reason}`)
+  if (putWing.pricing_source === 'rejected') return reject(`put wing: ${putWing.rejection_reason}`)
+
+  const callWidth = args.long_call_strike - args.short_call_strike
+  const putWidth = args.short_put_strike - args.long_put_strike
+  const totalCredit = (callWing.credit_mid ?? 0) + (putWing.credit_mid ?? 0)
+  const maxLossWingWidth = Math.max(callWidth, putWidth)
+  const maxLoss = maxLossWingWidth - totalCredit
+  if (!(totalCredit > 0) || !(maxLoss > 0)) {
+    return reject(`degenerate condor: credit $${totalCredit.toFixed(3)} vs max-loss $${maxLoss.toFixed(3)}`)
+  }
+  const maxProfit = totalCredit
+  const riskReward = maxProfit / maxLoss
+  const breakevenLower = args.short_put_strike - totalCredit
+  const breakevenUpper = args.short_call_strike + totalCredit
+
+  const spot = callWing.spot ?? putWing.spot
+  const iv = callWing.iv_used || putWing.iv_used || 0.30
+  const dte = daysBetween(args.expiration)
+  const popBp = computeIronCondorPopBp({
+    spot, iv, dte,
+    lower_be: breakevenLower,
+    upper_be: breakevenUpper,
+  })
+  const popDecimal = popBp / 10000
+  const evDollars = popDecimal * maxProfit - (1 - popDecimal) * maxLoss
+  const evEdgeBp = Math.round((evDollars / maxLoss) * 10000)
+
+  return {
+    ticker: args.ticker.toUpperCase(),
+    structure: 'IRON_CONDOR',
+    long_put_strike: args.long_put_strike,
+    short_put_strike: args.short_put_strike,
+    short_call_strike: args.short_call_strike,
+    long_call_strike: args.long_call_strike,
+    expiration: args.expiration,
+    spot,
+    call_wing: callWing,
+    put_wing: putWing,
+    total_credit: totalCredit,
+    width: maxLossWingWidth,
+    max_profit_per_spread: maxProfit,
+    max_loss_per_spread: maxLoss,
+    max_profit_dollars: Math.round(maxProfit * 100 * 100) / 100,
+    max_loss_dollars: Math.round(maxLoss * 100 * 100) / 100,
+    risk_reward: Number(riskReward.toFixed(4)),
+    breakeven_lower: Number(breakevenLower.toFixed(4)),
+    breakeven_upper: Number(breakevenUpper.toFixed(4)),
+    entry_pop_bp: popBp,
+    ev_edge_bp: evEdgeBp,
+    iv_used: iv,
+    quote_age_seconds: Math.max(callWing.quote_age_seconds, putWing.quote_age_seconds),
+    is_credit: true,
+    pricing_source: 'verified',
+  }
+}
+
+function computeIronCondorPopBp(args: {
+  spot: number; iv: number; dte: number
+  lower_be: number; upper_be: number
+}): number {
+  const r = 0.045
+  const t = args.dte / 365
+  if (!(args.iv > 0 && t > 0 && args.spot > 0 &&
+        args.lower_be > 0 && args.upper_be > args.lower_be)) return 5000
+  const sqrtT = Math.sqrt(t)
+  const d2 = (k: number) =>
+    (Math.log(args.spot / k) + (r - 0.5 * args.iv * args.iv) * t) / (args.iv * sqrtT)
+  // P(lower_be < S_T < upper_be) = N(d2(lower)) - N(d2(upper))
+  const p = normCdf(d2(args.lower_be)) - normCdf(d2(args.upper_be))
+  return Math.round(clampProb(p) * 10000)
+}

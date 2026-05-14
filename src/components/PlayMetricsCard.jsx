@@ -26,6 +26,7 @@ function normalizeStructure(play) {
   if (t === 'BEAR_PUT') return 'bear_put_spread'
   if (t === 'BEAR_CALL_CREDIT') return 'bear_call_spread'
   if (t === 'BULL_PUT_CREDIT') return 'bull_put_spread'
+  if (t === 'IRON_CONDOR') return 'IRON_CONDOR'
   return null
 }
 
@@ -92,21 +93,38 @@ export default function PlayMetricsCard({ play }) {
 
   const structure = normalizeStructure(play)
 
+  const isIC = play.type === 'IRON_CONDOR'
   const fetchLive = useCallback(async () => {
     if (!structure) return
+    const reqBody = isIC
+      ? {
+          ticker: play.ticker,
+          structure: 'IRON_CONDOR',
+          long_put_strike: Number(play.long_put_strike),
+          short_put_strike: Number(play.short_put_strike),
+          short_call_strike: Number(play.short_call_strike),
+          long_call_strike: Number(play.long_call_strike),
+          expiration: play.expiration,
+        }
+      : {
+          ticker: play.ticker,
+          structure,
+          long_strike: Number(play.long_strike),
+          short_strike: Number(play.short_strike),
+          expiration: play.expiration,
+        }
     const { data, error: e } = await supabase.functions.invoke('refresh-play-quote', {
-      body: {
-        ticker: play.ticker,
-        structure,
-        long_strike: Number(play.long_strike),
-        short_strike: Number(play.short_strike),
-        expiration: play.expiration,
-      },
+      body: reqBody,
     })
     if (e) return { error: e.message }
     if (!data?.success) return { error: data?.error || 'live quote failed' }
     return { data: data.data }
-  }, [play.ticker, structure, play.long_strike, play.short_strike, play.expiration])
+  }, [
+    play.ticker, structure, isIC, play.expiration,
+    play.long_strike, play.short_strike,
+    play.long_put_strike, play.short_put_strike,
+    play.short_call_strike, play.long_call_strike,
+  ])
 
   useEffect(() => {
     if (!structure) {
@@ -218,7 +236,14 @@ export default function PlayMetricsCard({ play }) {
             value={`$${Math.round(Number(live.max_loss_dollars ?? live.max_loss_per_spread * 100))}`}
             valueClass="text-rose-400"
           />
-          <SmallStat label="Breakeven" value={fmtMoney(live.breakeven)} />
+          {live.structure === 'IRON_CONDOR' ? (
+            <SmallStat
+              label="Breakevens"
+              value={`${fmtMoney(live.breakeven_lower)} – ${fmtMoney(live.breakeven_upper)}`}
+            />
+          ) : (
+            <SmallStat label="Breakeven" value={fmtMoney(live.breakeven)} />
+          )}
           <SmallStat label="Spot" value={fmtMoney(live.spot)} />
           <SmallStat label="IV used" value={live.iv_used != null ? `${(live.iv_used * 100).toFixed(0)}%` : '—'} />
         </div>
