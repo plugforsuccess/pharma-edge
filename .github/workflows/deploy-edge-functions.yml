@@ -13,8 +13,16 @@
 # How it works:
 #   1. Detect which subdirectories under supabase/functions/ changed
 #      between the previous push and HEAD.
-#   2. For each changed function, run `supabase functions deploy <name>`.
-#   3. workflow_dispatch with `function` input lets you redeploy a
+#   2. If any change touched supabase/functions/_shared/, expand the
+#      deploy set to EVERY real function directory — _shared has no
+#      manifest of which functions import from it, so the safe move
+#      is to redeploy them all. (The alternative — letting _shared/
+#      changes silently skip — caused #207 and #209 to ship the
+#      shared playSuggester update without any consumer picking it up.)
+#   3. Underscore-prefixed dirs (like _shared) are filtered from the
+#      actual deploy list since they're not deployable functions.
+#   4. For each remaining function, run `supabase functions deploy <name>`.
+#   5. workflow_dispatch with `function` input lets you redeploy a
 #      specific function manually if a cron-triggered call needs it.
 
 name: Deploy Edge Functions
@@ -67,15 +75,32 @@ jobs:
           # functions changed. `git diff --name-only HEAD~1 HEAD`
           # returns paths like supabase/functions/compute-gex/index.ts;
           # we want unique function names from the second path segment.
-          changed=$(git diff --name-only HEAD~1 HEAD -- 'supabase/functions/' \
+          changed_raw=$(git diff --name-only HEAD~1 HEAD -- 'supabase/functions/' \
             | awk -F/ '/^supabase\/functions\/[^\/]+/ { print $3 }' \
-            | sort -u \
-            | tr '\n' ' ')
-          if [ -z "$changed" ]; then
+            | sort -u)
+          if [ -z "$changed_raw" ]; then
             echo "No edge function changes detected. Nothing to deploy."
             echo "functions=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # If _shared/ (or any underscore-prefixed dir) changed,
+          # expand to every real function directory — every function
+          # that imports from _shared needs to pick up the new bundle.
+          if echo "$changed_raw" | grep -q '^_'; then
+            echo "Detected change under a shared dir — expanding to all functions"
+            changed=$(ls -1 supabase/functions/ \
+              | grep -vE '^(_|\.)' \
+              | tr '\n' ' ')
           else
-            echo "Changed functions: $changed"
+            # Otherwise just deploy the directly-changed function dirs,
+            # filtering out anything underscore-prefixed defensively.
+            changed=$(echo "$changed_raw" | grep -vE '^_' | tr '\n' ' ')
+          fi
+          if [ -z "$changed" ]; then
+            echo "No deployable function names after filtering. Nothing to deploy."
+            echo "functions=" >> "$GITHUB_OUTPUT"
+          else
+            echo "Functions to deploy: $changed"
             echo "functions=$changed" >> "$GITHUB_OUTPUT"
           fi
 
