@@ -227,9 +227,15 @@ interface CellExposures {
   vex: number | null
   cex: number | null
   dex: number | null
+  // Per-cell open interest, split by option type. Preserved through
+  // the matrix payload so suggest-plays can run real "vol > 5× OI"
+  // notable-flow detection. null when the source path had no OI for
+  // the (strike, exp) pair.
+  oi_call: number | null
+  oi_put: number | null
 }
 
-const EMPTY_CELL: CellExposures = { gex: null, vex: null, cex: null, dex: null }
+const EMPTY_CELL: CellExposures = { gex: null, vex: null, cex: null, dex: null, oi_call: null, oi_put: null }
 
 async function computeFromDxLink(
   supabase: ReturnType<typeof createClient>,
@@ -455,6 +461,14 @@ interface MatrixOutput {
   vex_cells: (number | null)[][]
   cex_cells: (number | null)[][]
   dex_cells: (number | null)[][]
+  // Per-cell open interest, split by option type. Same [strike][exp]
+  // indexing as `cells`. Surfacing OI is what lets suggest-plays
+  // compute real "vol > 5× OI" unusual-flow detection — earlier it
+  // was hardcoded to 1000 because the matrix dropped OI after gamma
+  // computation. Polygon snapshots and dxlink_quotes both carry real
+  // OI; both source paths now thread it through.
+  oi_call_cells: (number | null)[][]
+  oi_put_cells: (number | null)[][]
   // ∆GEX vs the most recent prior snapshot in gex_history (Velocity
   // Mode). Only populated when `include_velocity` is set on the
   // request body; null otherwise.
@@ -571,7 +585,7 @@ async function computeMatrixFromPolygon(
     const dC = cell.callDelta ?? bsCallDelta(spot, strike, t, sigC)
     const dP = cell.putDelta ?? (bsCallDelta(spot, strike, t, sigP) - 1)
     const dex = (cell.callOI * dC + cell.putOI * dP) * spot
-    return { gex, vex, cex, dex }
+    return { gex, vex, cex, dex, oi_call: cell.callOI, oi_put: cell.putOI }
   }, (exp) => {
     return Array.from(byExp.get(exp)?.keys() ?? [])
   }, opts, undefined, polygonFrontIv, previousClose)
@@ -705,7 +719,7 @@ async function computeMatrixFromDxLink(
     // Put delta = call delta - 1 (per put-call parity).
     const dP = bucket.put_delta ?? (bsCallDelta(spot, strike, t, sigP) - 1)
     const dex = (bucket.call_oi * dC + bucket.put_oi * dP) * spot
-    return { gex, vex, cex, dex }
+    return { gex, vex, cex, dex, oi_call: bucket.call_oi, oi_put: bucket.put_oi }
   }, (exp) => {
     return Array.from(byExpFull.get(exp)?.keys() ?? [])
   }, opts, undefined, dxlinkFrontIv, prevClose)
@@ -837,6 +851,8 @@ function buildMatrix(
   const vexCells: (number | null)[][] = []
   const cexCells: (number | null)[][] = []
   const dexCells: (number | null)[][] = []
+  const oiCallCells: (number | null)[][] = []
+  const oiPutCells: (number | null)[][] = []
   let largest: MatrixOutput['largest'] = null
   let netGex = 0
   let netVex = 0
@@ -848,12 +864,16 @@ function buildMatrix(
     const vexRow: (number | null)[] = []
     const cexRow: (number | null)[] = []
     const dexRow: (number | null)[] = []
+    const oiCallRow: (number | null)[] = []
+    const oiPutRow: (number | null)[] = []
     for (let j = 0; j < expirations.length; j++) {
       const e = exposureFor(expirations[j], strikes[i])
       gexRow.push(e.gex)
       vexRow.push(e.vex)
       cexRow.push(e.cex)
       dexRow.push(e.dex)
+      oiCallRow.push(e.oi_call)
+      oiPutRow.push(e.oi_put)
       if (e.vex != null) netVex += e.vex
       if (e.cex != null) netCex += e.cex
       if (e.dex != null) netDex += e.dex
@@ -875,6 +895,8 @@ function buildMatrix(
     vexCells.push(vexRow)
     cexCells.push(cexRow)
     dexCells.push(dexRow)
+    oiCallCells.push(oiCallRow)
+    oiPutCells.push(oiPutRow)
   }
 
   const todayMs = startOfTodayUtcMs()
@@ -940,6 +962,8 @@ function buildMatrix(
       vex_cells: vexCells,
       cex_cells: cexCells,
       dex_cells: dexCells,
+      oi_call_cells: oiCallCells,
+      oi_put_cells: oiPutCells,
       velocity_cells: null,
       velocity_window_minutes: null,
       largest,
