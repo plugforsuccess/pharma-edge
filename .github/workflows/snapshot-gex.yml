@@ -15,22 +15,17 @@
 #                                  pass the service-role JWT which it
 #                                  accepts as a real user)
 
+# SCHEDULING has moved to Supabase pg_cron — see
+# supabase/migrations/20260514130000_snapshot_gex_cron.sql
+# (jobs: snapshot-gex-rth and snapshot-gex-eod). GitHub Actions cron
+# was dropping ticks under hosted-runner load — on 2026-05-14 the
+# last successful snapshot was 87 minutes stale during RTH. pg_cron
+# runs in-database and doesn't slip. The workflow stays around as a
+# manual rescue lever for ad-hoc reseeds.
+
 name: Snapshot GEX
 
 on:
-  schedule:
-    # */5 minutes within 13:30–20:55 UTC, M-F. Cron in GHA can't span
-    # half-hour boundaries cleanly so we use two entries: the second
-    # half of 13:00 (35, 40, 45, 50, 55) and 14:00–20:55 every 5min.
-    - cron: '35,40,45,50,55 13 * * 1-5'
-    - cron: '*/5 14-20 * * 1-5'
-    # EOD close snapshot — fires at 20:30 UTC EDT (4:30pm ET) and 21:30
-    # UTC EST (also 4:30pm ET) so we capture the close-of-day matrix
-    # regardless of DST. OPRA's EOD OI update lands ~4:15pm ET, so by
-    # 4:30 we have fresh OI to compute against. This is the snapshot
-    # compute-gex's overnight EOD fallback reads from.
-    - cron: '30 20 * * 1-5'
-    - cron: '30 21 * * 1-5'
   workflow_dispatch:
 
 concurrency:
