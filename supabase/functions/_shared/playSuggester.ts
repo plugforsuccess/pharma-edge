@@ -139,10 +139,13 @@ CASH MOVES RULES — NEVER VIOLATE:
 - 30–45 days past any catalyst for catalyst-driven plays.
 
 GAMMA ROLL-OFF RISK — MUST FLAG:
-- The user prompt will include a "DOMINANT GEX EXPIRATION" line — the single expiration that holds the largest share of total |GEX| in the matrix. That expiration is what's anchoring the current pinning / regime behavior.
-- Once it expires, dealer hedges roll off, positioning resets, and the regime can shift (freer price discovery, larger moves, less suppression). Plays whose expiration is AFTER the dominant one are inheriting a thesis that may not survive the roll-off.
-- For each play, set "gamma_rolloff_risk" = true if play.expiration > dominant_gex_expiration. Otherwise false.
-- When true, include a "rolloff_note" of one short sentence describing the specific risk for THIS structure (e.g. "Condor expires after the May 8 wall cluster rolls off — the pinning regime anchoring this thesis ends mid-trade.").
+- The user prompt includes a "WALLS BY EXPIRATION" table — the max |GEX| cell in each column, plus a "DOMINANT GEX EXPIRATION" line marking the column that owns the largest share of total |GEX|. That dominant column is the cluster the *headline* GEX number describes; it's the strongest pinning gravity right now.
+- Rolloff risk only matters when your play depends on a wall that expires before your play does. Your play depends on a wall when:
+  (a) target_king_node === "call_wall" or "put_wall", AND
+  (b) your target_strike is the dominant expiration's wall strike (not your own column's wall strike).
+- Set "gamma_rolloff_risk" = true ONLY when both (a) AND (b) are satisfied AND play.expiration !== dominant_gex_expiration. Otherwise set false.
+- If your target_strike matches the wall of your OWN expiration column, you're self-anchored — set rolloff_risk false even if play.expiration > dominant_gex_expiration. Your only risk is your own time decay.
+- When rolloff_risk is true, "rolloff_note" is one short sentence describing the specific risk (e.g. "Bull call targets the May 14 wall but expires May 18 — the cluster anchoring the pin rolls off three days before you exit.").
 - When the dominant expiration also satisfies the trade's other constraints (DTE rules, sufficient strike spread), PREFER it over later expirations.
 
 WALL TIMING — APPLIES TO PLAYS THAT EXPIRE BEFORE THE DOMINANT WALL:
@@ -392,14 +395,37 @@ export function buildUserPrompt(matrix: MatrixData, accountSize: number, flow: F
   const top5neg = flat.filter((c) => c.gex != null && c.gex < 0).sort((a, b) => (a.gex as number) - (b.gex as number)).slice(0, 5)
 
   const expAbsGex = new Map<string, number>()
+  // Per-expiration max-abs cell — the wall that anchors each column.
+  // The single matrix-wide ★ wall was misleading during RTH on
+  // 0DTE-dominated tickers (every multi-day play looked like it
+  // depended on a wall about to expire). Surfacing one wall per
+  // expiration lets Claude reason about which column a play actually
+  // anchors to.
+  const wallByExp = new Map<string, { strike: number; gex: number }>()
   for (const c of flat) {
     if (c.gex == null) continue
     expAbsGex.set(c.expiration, (expAbsGex.get(c.expiration) ?? 0) + Math.abs(c.gex))
+    const cur = wallByExp.get(c.expiration)
+    if (!cur || Math.abs(c.gex) > Math.abs(cur.gex)) {
+      wallByExp.set(c.expiration, { strike: c.strike, gex: c.gex })
+    }
   }
   const totalAbs = Array.from(expAbsGex.values()).reduce((s, v) => s + v, 0)
   const expRanked = Array.from(expAbsGex.entries()).sort((a, b) => b[1] - a[1])
   const dominantExp = expRanked[0]?.[0] ?? null
   const dominantSharePct = totalAbs > 0 && expRanked[0] ? Math.round((expRanked[0][1] / totalAbs) * 100) : 0
+
+  // Walls keyed in the same order as expirations[] for the prompt
+  // table; tag the row that owns the matrix-wide ★.
+  const matrixMaxAbs = Array.from(wallByExp.values())
+    .reduce((m, w) => Math.max(m, Math.abs(w.gex)), 0)
+  const wallsByExpRows = matrix.expirations.map((e) => {
+    const w = wallByExp.get(e.date)
+    if (!w) return `  ${e.date} (${e.dte}d): (no GEX in column)`
+    const star = matrixMaxAbs > 0 && Math.abs(w.gex) === matrixMaxAbs ? ' ★' : ''
+    const sign = w.gex >= 0 ? '+' : '-'
+    return `  ${e.date} (${e.dte}d): ${w.strike} → ${sign}$${(Math.abs(w.gex) / 1e6).toFixed(1)}M${star}`
+  }).join('\n')
 
   const chainOI = new Map<string, number>()
   for (const c of flat) {
@@ -431,10 +457,11 @@ ${top5neg.length > 0
   ? top5neg.map((c) => `  ${c.strike} @ ${c.expiration}: -$${(Math.abs(c.gex as number) / 1e6).toFixed(1)}M`).join('\n')
   : '  (none in visible window — flip strike likely below)'}
 
-LARGEST ABSOLUTE WALL (★): ${matrix.largest ? `${matrix.largest.strike} @ ${matrix.largest.expiration} = $${(matrix.largest.gex_net / 1e6).toFixed(1)}M` : 'none'}
+WALLS BY EXPIRATION (max |GEX| cell per column — the wall anchoring each expiration; ★ marks the matrix-wide max):
+${wallsByExpRows}
 
 DOMINANT GEX EXPIRATION: ${dominantExp ? `${dominantExp} (${dominantSharePct}% of total |GEX| in this matrix)` : 'unknown'}
-GAMMA ROLL-OFF NOTE: any play with expiration > ${dominantExp ?? 'the dominant expiration above'} MUST set gamma_rolloff_risk=true and explain it in rolloff_note.
+GAMMA ROLL-OFF NOTE: set gamma_rolloff_risk=true ONLY when target_king_node is call_wall or put_wall AND target_strike matches the DOMINANT EXPIRATION's wall AND play.expiration !== dominant_gex_expiration. If target_strike is the wall of your own expiration column, set false — your play is self-anchored.
 
 ${buildSecondaryGreeksSection(matrix)}
 ${buildVelocitySection(matrix) ?? 'VELOCITY: not available (first snapshot of session or no prior history within lookback window).'}
@@ -564,6 +591,27 @@ export function validatePlays(parsed: any, matrix: MatrixData): any {
   const expDates = new Set(matrix.expirations.map((e) => e.date))
   const dominantExp: string | null =
     typeof parsed.dominant_gex_expiration === 'string' ? parsed.dominant_gex_expiration : null
+
+  // Recompute the per-expiration max-abs wall from the matrix so the
+  // validator can enforce the tightened rolloff-risk semantics
+  // independently of what Claude returned. Mirrors the calculation in
+  // buildUserPrompt — kept inline rather than shared to keep the
+  // validator pure and easy to test in isolation.
+  const wallByExp = new Map<string, { strike: number; gex: number }>()
+  for (let i = 0; i < matrix.cells.length; i++) {
+    const strike = matrix.strikes[i]
+    for (let j = 0; j < matrix.cells[i].length; j++) {
+      const v = matrix.cells[i][j]
+      if (v == null || !Number.isFinite(v)) continue
+      const expDate = matrix.expirations[j]?.date
+      if (!expDate) continue
+      const cur = wallByExp.get(expDate)
+      if (!cur || Math.abs(v) > Math.abs(cur.gex)) {
+        wallByExp.set(expDate, { strike, gex: v })
+      }
+    }
+  }
+  const dominantWall = dominantExp ? wallByExp.get(dominantExp) ?? null : null
   parsed.plays = parsed.plays.filter((p: any) => {
     if (!expDates.has(p.expiration)) {
       console.warn(`[validate] dropped play: expiration not in matrix`, p)
@@ -599,11 +647,32 @@ export function validatePlays(parsed: any, matrix: MatrixData): any {
   const VALID_KING_NODES = new Set(['call_wall', 'put_wall', 'flip'])
   const VALID_THESIS_KINDS = new Set(['pin_to', 'break_through', 'fade'])
   for (const p of parsed.plays) {
-    if (typeof p.gamma_rolloff_risk !== 'boolean') {
-      p.gamma_rolloff_risk = dominantExp != null && p.expiration > dominantExp
-    }
+    // Server-side recompute of gamma_rolloff_risk regardless of what
+    // Claude returned. Old rule was "play.expiration > dominantExp" —
+    // fired on every multi-day play during 0DTE-dominated RTH, making
+    // the warning noise. New rule: the play is at risk only when it
+    // explicitly targets the dominant cluster's wall AND outlives it.
+    // A play that anchors to its own expiration's wall doesn't have
+    // rolloff risk — its only concern is its own time decay.
+    const targetsAWall = p.target_king_node === 'call_wall' || p.target_king_node === 'put_wall'
+    const targetStrike = Number(p.target_strike)
+    const ownColumnWall = wallByExp.get(p.expiration) ?? null
+    const targetMatchesDominantWall =
+      dominantWall != null &&
+      Number.isFinite(targetStrike) &&
+      Math.abs(targetStrike - dominantWall.strike) < 0.01
+    const selfAnchored =
+      ownColumnWall != null &&
+      Number.isFinite(targetStrike) &&
+      Math.abs(targetStrike - ownColumnWall.strike) < 0.01
+    p.gamma_rolloff_risk =
+      targetsAWall &&
+      targetMatchesDominantWall &&
+      !selfAnchored &&
+      p.expiration !== dominantExp
+
     if (p.gamma_rolloff_risk && (!p.rolloff_note || typeof p.rolloff_note !== 'string')) {
-      p.rolloff_note = `Expires after the dominant gamma expiration (${dominantExp ?? 'n/a'}); the pinning regime anchoring this thesis rolls off mid-trade.`
+      p.rolloff_note = `Targets the ${dominantExp} wall at $${dominantWall?.strike} but expires ${p.expiration} — the cluster anchoring this thesis rolls off before you exit.`
     }
     if (!p.gamma_rolloff_risk) p.rolloff_note = ''
     if (!VALID_KING_NODES.has(p.target_king_node)) {
