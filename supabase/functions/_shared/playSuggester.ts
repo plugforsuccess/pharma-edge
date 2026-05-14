@@ -1,5 +1,10 @@
 // Cash Moves — shared playSuggester module.
 //
+// PROMPT VERSION: 2026-05-14b — per-expiration wall table (#207),
+// tightened gamma_rolloff_risk gate (#207), real per-cell OI sourced
+// from compute-gex matrix (#209). Bump this header on any
+// prompt-shape change so deploys are visible in PR diffs.
+//
 // Pulled out of suggest-plays/index.ts so the user-facing endpoint
 // AND the cross-ticker scanner (scan-universe-plays) speak the same
 // prompt + same validation + same POP math. Forking the prompt would
