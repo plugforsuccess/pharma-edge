@@ -494,7 +494,7 @@ export default function Markets() {
             </div>
             <div className="text-right">
               <div className="text-xl font-mono-tab tabular-nums">
-                ${formatNumber(data.spot)}
+                ${formatNumber(liveSpot ?? data.spot)}
               </div>
               <div className="text-[10px] uppercase tracking-wider text-subtle">
                 spot
@@ -648,7 +648,7 @@ export default function Markets() {
             <ChevronDown size={14} className="text-subtle" />
           </button>
           <div className="text-2xl font-mono-tab tabular-nums text-fg">
-            ${formatNumber(data.spot)}
+            ${formatNumber(liveSpot ?? data.spot)}
           </div>
           <SourceBadge source={data.source} eodAt={data.eod_snapshot_at} />
           {data.largest && (
