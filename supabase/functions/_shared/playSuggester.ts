@@ -1,9 +1,11 @@
 // Cash Moves — shared playSuggester module.
 //
-// PROMPT VERSION: 2026-05-14b — per-expiration wall table (#207),
+// PROMPT VERSION: 2026-05-14c — per-expiration wall table (#207),
 // tightened gamma_rolloff_risk gate (#207), real per-cell OI sourced
-// from compute-gex matrix (#209). Bump this header on any
-// prompt-shape change so deploys are visible in PR diffs.
+// from compute-gex matrix (#209), intraday price path + king-node
+// interaction history sourced from Polygon 5-min bars (this PR).
+// Bump this header on any prompt-shape change so deploys are visible
+// in PR diffs.
 //
 // Pulled out of suggest-plays/index.ts so the user-facing endpoint
 // AND the cross-ticker scanner (scan-universe-plays) speak the same
@@ -394,7 +396,147 @@ TOP MOVERS (by |∆GEX|):
 ${top}`
 }
 
-export function buildUserPrompt(matrix: MatrixData, accountSize: number, flow: FlowRow[]): string {
+// Polygon 5-min intraday bars. Used by buildIntradaySection to give
+// Claude today's price path + king-node interaction history. Returns
+// null when Polygon errors / pre-market / no key (caller renders a
+// "not available" line and Claude reasons from the snapshot only).
+export interface IntradayBar {
+  t: number        // start of bar, unix ms
+  o: number
+  h: number
+  l: number
+  c: number
+  v: number
+}
+
+export async function fetchPolygonIntradayBars(ticker: string): Promise<IntradayBar[] | null> {
+  const key = Deno.env.get('MASSIVE_API_KEY')
+  if (!key) return null
+  // Pull from 9:00 ET today through now. Polygon's aggregates endpoint
+  // is timezone-aware via the from/to dates; we widen the range a bit
+  // to capture pre-market interactions at the king nodes too.
+  const now = new Date()
+  const fromDate = now.toISOString().slice(0, 10)
+  const toDate = fromDate
+  const url = `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(ticker.toUpperCase())}` +
+    `/range/5/minute/${fromDate}/${toDate}` +
+    `?adjusted=true&sort=asc&limit=200&apiKey=${key}`
+  try {
+    const resp = await fetch(url, { signal: AbortSignal.timeout(5000) })
+    if (!resp.ok) return null
+    const body = await resp.json() as { results?: IntradayBar[] }
+    if (!Array.isArray(body.results) || body.results.length === 0) return null
+    return body.results
+  } catch {
+    return null
+  }
+}
+
+// Format the two new intraday sections. Splits into:
+//   * INTRADAY PRICE PATH — high, low, current, % range consumed,
+//     time of high/low.
+//   * KING NODE INTERACTIONS TODAY — for each of the top 5 GEX walls
+//     (positive & negative), whether spot has come within ±0.5% of
+//     the strike during the session, when, and what happened next.
+function buildIntradaySection(
+  bars: IntradayBar[] | null,
+  matrix: MatrixData,
+): string {
+  if (!bars || bars.length === 0) {
+    return 'INTRADAY PRICE PATH: not available (pre-market, polygon error, or off-hours).'
+  }
+  const high = bars.reduce((m, b) => Math.max(m, b.h), -Infinity)
+  const low = bars.reduce((m, b) => Math.min(m, b.l), Infinity)
+  const last = bars[bars.length - 1].c
+  const highBar = bars.find((b) => b.h === high)!
+  const lowBar = bars.find((b) => b.l === low)!
+  const range = high - low
+  const consumedFromLow = range > 0 ? ((last - low) / range) * 100 : 50
+  const fmtTime = (ms: number) => {
+    const d = new Date(ms)
+    // Format as HH:MM ET (UTC−4 for EDT)
+    const et = new Date(d.getTime() - 4 * 60 * 60 * 1000)
+    return `${String(et.getUTCHours()).padStart(2, '0')}:${String(et.getUTCMinutes()).padStart(2, '0')} ET`
+  }
+
+  // Find top 5 positive + top 5 negative cells (the walls). Same
+  // shape as the WALLS BY EXPIRATION table but flattened.
+  const flat = matrix.cells.flatMap((row, i) =>
+    row.map((v, j) => ({
+      strike: matrix.strikes[i],
+      expiration: matrix.expirations[j]?.date ?? '?',
+      gex: v,
+    })),
+  ).filter((c) => c.gex != null && c.gex !== 0)
+  const topPos = [...flat].filter((c) => c.gex! > 0)
+    .sort((a, b) => (b.gex as number) - (a.gex as number)).slice(0, 5)
+  const topNeg = [...flat].filter((c) => c.gex! < 0)
+    .sort((a, b) => (a.gex as number) - (b.gex as number)).slice(0, 5)
+
+  // For each wall: did spot get within ±0.5% of the strike today? If
+  // yes, when and what was the price path after (held/retraced/broke)?
+  function classifyInteraction(strike: number): string {
+    const tol = strike * 0.005   // ±0.5%
+    let firstTouchIdx = -1
+    for (let i = 0; i < bars.length; i++) {
+      if (bars[i].h >= strike - tol && bars[i].l <= strike + tol) {
+        firstTouchIdx = i
+        break
+      }
+    }
+    if (firstTouchIdx < 0) {
+      // No touch — measure closest approach as a % of strike.
+      const closest = bars.reduce((m, b) =>
+        Math.min(m, Math.abs(b.h - strike), Math.abs(b.l - strike)), Infinity)
+      const closestPct = (closest / strike) * 100
+      return `untested today (closest approach ${closestPct.toFixed(2)}%)`
+    }
+    const touchBar = bars[firstTouchIdx]
+    const touchTime = fmtTime(touchBar.t)
+    // Look at the close N bars later vs. the strike to decide held/broke.
+    const afterIdx = Math.min(firstTouchIdx + 6, bars.length - 1)  // ~30 min after first touch
+    const afterClose = bars[afterIdx].c
+    const moveAfter = ((afterClose - strike) / strike) * 100
+    // If spot moved away from the strike in the direction opposite to
+    // its approach, that's a rejection. If it stayed within ±0.5%,
+    // it's holding (pinning). If it crossed and stayed across, it
+    // broke through.
+    if (Math.abs(afterClose - strike) <= tol) {
+      return `tested ${touchTime}, holding (pin in progress)`
+    }
+    const approachFromBelow = touchBar.o < strike
+    const movedAway = approachFromBelow ? afterClose < strike - tol : afterClose > strike + tol
+    if (movedAway) {
+      return `tested ${touchTime}, REJECTED (now ${moveAfter >= 0 ? '+' : ''}${moveAfter.toFixed(2)}% from strike)`
+    }
+    return `tested ${touchTime}, BROKE THROUGH (now ${moveAfter >= 0 ? '+' : ''}${moveAfter.toFixed(2)}% past)`
+  }
+
+  const callRows = topPos.map((c) =>
+    `  ${c.strike} @ ${c.expiration}: ${classifyInteraction(c.strike)}`).join('\n')
+  const putRows = topNeg.map((c) =>
+    `  ${c.strike} @ ${c.expiration}: ${classifyInteraction(c.strike)}`).join('\n')
+
+  return `INTRADAY PRICE PATH (today's 5-min bars, source polygon):
+  spot now:  $${last.toFixed(2)}
+  high:      $${high.toFixed(2)}  at ${fmtTime(highBar.t)}
+  low:       $${low.toFixed(2)}  at ${fmtTime(lowBar.t)}
+  range:     $${range.toFixed(2)} (${(((range) / last) * 100).toFixed(2)}% of spot)
+  position in range: ${consumedFromLow.toFixed(0)}% from low
+
+KING NODE INTERACTIONS TODAY (has spot tested each wall this session?):
+Call walls:
+${callRows || '  (no positive cells in matrix)'}
+Put walls:
+${putRows || '  (no negative cells in matrix)'}`
+}
+
+export function buildUserPrompt(
+  matrix: MatrixData,
+  accountSize: number,
+  flow: FlowRow[],
+  intradayBars: IntradayBar[] | null = null,
+): string {
   const totalGex = matrix.cells.flat().reduce((s, v) => s + (v ?? 0), 0)
   const flat = matrix.cells.flatMap((row, i) =>
     row.map((v, j) => ({
@@ -492,6 +634,7 @@ GAMMA ROLL-OFF NOTE: set gamma_rolloff_risk=true ONLY when target_king_node is c
 
 ${buildSecondaryGreeksSection(matrix)}
 ${buildVelocitySection(matrix) ?? 'VELOCITY: not available (first snapshot of session or no prior history within lookback window).'}
+${buildIntradaySection(intradayBars, matrix)}
 ${formatFlowSection(flow, chainOI)}
 
 INTERPRETATION HINTS:
@@ -499,6 +642,7 @@ INTERPRETATION HINTS:
 - Flow concentrating AT a call wall = traders growing the wall (more resistance forming).
 - Flow CONCENTRATING THROUGH a wall (vol > 5x OI at strikes ABOVE the wall) = directional bullish bet, wall may break.
 - Mismatch between GEX (where positioning sits) and flow (where new bets land) = transition signal — regime may be shifting.
+- INTRADAY context (KING NODE INTERACTIONS TODAY) is a hard input, not advisory: if a wall is marked REJECTED today, downgrade pin_to plays targeting that wall — the wall is reinforced for the remainder of the session. A wall marked "untested today (closest approach X%)" with X > 2% is a red flag for pin_to: spot has stayed away from it all session. For break_through setups, REJECTED is a hard contraindication unless a catalyst overlaps.
 
 Propose 0-5 spread trades following the rules in the system prompt. When you return 2 or more, span at least 2 distinct strategy types. Strict JSON only.`
 }
@@ -934,8 +1078,13 @@ export async function generatePlaysForTicker(
   }
   const matrix = gexBody.data as MatrixData
 
-  // 2. Flow
-  const flow = await fetchTodayFlow(adminClient, ticker)
+  // 2. Flow + intraday bars (in parallel — independent network calls).
+  //    Bars are nullable (pre-market / Polygon hiccup) and the prompt
+  //    falls back to a "not available" line; never blocks generation.
+  const [flow, intradayBars] = await Promise.all([
+    fetchTodayFlow(adminClient, ticker),
+    fetchPolygonIntradayBars(ticker),
+  ])
 
   // 3. Claude
   const claudeRequestBody = {
@@ -945,7 +1094,7 @@ export async function generatePlaysForTicker(
     system: [
       { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
     ],
-    messages: [{ role: 'user', content: buildUserPrompt(matrix, accountSize, flow) }],
+    messages: [{ role: 'user', content: buildUserPrompt(matrix, accountSize, flow, intradayBars) }],
   }
   const claudeStartedAt = Date.now()
   const claudeResp = await fetch('https://api.anthropic.com/v1/messages', {
