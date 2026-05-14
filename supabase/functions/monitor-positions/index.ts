@@ -86,6 +86,56 @@ interface YahooContract {
   ask: number | undefined
 }
 
+// Read both legs from dxlink_quotes and return the spread mid. The
+// dxlink-worker keeps front-2-expirations × ATM±25% subscribed in real
+// time, so for positions that fall inside that window this delivers
+// sub-second-fresh mids instead of Yahoo's 15-min delay. Returns null
+// when either leg is missing, all rows >30s stale (worker stalled), or
+// the net is non-positive (data glitch).
+async function fetchDxlinkSpreadMid(
+  supabase: ReturnType<typeof createClient>,
+  ticker: string,
+  expiration: string,
+  longStrike: number,
+  shortStrike: number,
+  optionType: 'C' | 'P',
+): Promise<{ mid: number | null; source: string; error?: string }> {
+  try {
+    const { data, error } = await supabase
+      .from('dxlink_quotes')
+      .select('strike, mid, updated_at')
+      .eq('underlying', ticker)
+      .eq('kind', 'option')
+      .eq('expiration_date', expiration)
+      .eq('option_type', optionType)
+      .in('strike', [longStrike, shortStrike])
+    if (error) return { mid: null, source: 'dxlink', error: error.message }
+    if (!Array.isArray(data) || data.length < 2) {
+      return { mid: null, source: 'dxlink', error: 'legs not subscribed' }
+    }
+    const long = data.find((r) => Math.abs(Number(r.strike) - longStrike) < 0.001)
+    const short = data.find((r) => Math.abs(Number(r.strike) - shortStrike) < 0.001)
+    if (!long || !short) return { mid: null, source: 'dxlink', error: 'strike match miss' }
+    const longMid = Number(long.mid)
+    const shortMid = Number(short.mid)
+    if (!Number.isFinite(longMid) || !Number.isFinite(shortMid)) {
+      return { mid: null, source: 'dxlink', error: 'null mids' }
+    }
+    const newest = Math.max(
+      new Date(long.updated_at).getTime(),
+      new Date(short.updated_at).getTime(),
+    )
+    if (Date.now() - newest > 5 * 60_000) {
+      return { mid: null, source: 'dxlink', error: 'both legs stale' }
+    }
+    const mid = longMid - shortMid
+    if (!(mid > 0)) return { mid: null, source: 'dxlink', error: 'non-positive net' }
+    return { mid, source: 'dxlink' }
+  } catch (e) {
+    return { mid: null, source: 'dxlink', error: e instanceof Error ? e.message : 'dxlink threw' }
+  }
+}
+
 async function fetchYahooSpreadMid(
   ticker: string,
   expiration: string,
@@ -902,16 +952,28 @@ serve(async (req) => {
       continue
     }
 
-    // Fetch current spread mid. Yahoo only for now (Tastytrade REST is
-    // broken on prod — see CLAUDE.md). 15-min delayed is acceptable
-    // for stop-loss and profit-take alerts.
-    const { mid, source, error: fetchErr } = await fetchYahooSpreadMid(
+    // Fetch current spread mid. dxlink first (real-time stream via
+    // dxlink-worker, ATM±25% × front 2 expirations). Yahoo (15-min
+    // delayed) as fallback for positions outside the streamed window
+    // or when the worker is down. The chosen source is stamped onto
+    // last_poll_source so the UI freshness card labels it honestly.
+    let { mid, source, error: fetchErr } = await fetchDxlinkSpreadMid(
+      supabase,
       pos.ticker,
       pos.expiration,
       pos.long_strike,
       pos.short_strike,
       optionType,
     )
+    if (mid == null) {
+      ;({ mid, source, error: fetchErr } = await fetchYahooSpreadMid(
+        pos.ticker,
+        pos.expiration,
+        pos.long_strike,
+        pos.short_strike,
+        optionType,
+      ))
+    }
 
     if (mid == null) {
       pollFailed++
