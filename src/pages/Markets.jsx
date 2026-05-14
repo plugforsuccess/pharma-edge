@@ -509,7 +509,7 @@ export default function Markets() {
                 {openPositionId && (
                   <Link
                     to={`/position/${openPositionId}`}
-                    className="text-[10px] uppercase tracking-wider text-amber-400 hover:text-amber-300 border border-amber-400/30 hover:border-amber-300/60 rounded px-1.5 py-0.5 leading-none"
+                    className="text-[10px] uppercase tracking-wider text-amber-400 hover:text-amber-300 border border-amber-400/30 hover:border-amber-300/60 rounded px-1.5 py-1 leading-none"
                   >
                     View position →
                   </Link>
@@ -685,7 +685,7 @@ export default function Markets() {
           {openPositionId && (
             <Link
               to={`/position/${openPositionId}`}
-              className="text-[10px] uppercase tracking-wider text-amber-400 hover:text-amber-300 border border-amber-400/30 hover:border-amber-300/60 rounded px-1.5 py-0.5 leading-none"
+              className="text-[10px] uppercase tracking-wider text-amber-400 hover:text-amber-300 border border-amber-400/30 hover:border-amber-300/60 rounded px-1.5 py-1 leading-none"
             >
               View position →
             </Link>
