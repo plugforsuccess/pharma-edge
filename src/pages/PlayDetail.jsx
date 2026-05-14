@@ -81,7 +81,7 @@ export default function PlayDetail() {
       const [feedRes, callRes] = await Promise.all([
         supabase
           .from('top_plays_feed')
-          .select('id, computed_at, ranked_plays, tickers_succeeded, universe')
+          .select('id, computed_at, ranked_plays, tickers_succeeded, universe, pricing_source')
           .order('computed_at', { ascending: false })
           .limit(20),
         supabase
@@ -118,7 +118,12 @@ export default function PlayDetail() {
 
   const play = useMemo(() => {
     if (!feedRow) return null
-    return feedRow.ranked_plays.find((p) => p?.claude_call_id === claudeCallId)
+    const found = feedRow.ranked_plays.find((p) => p?.claude_call_id === claudeCallId)
+    if (!found) return null
+    // Row-level pricing_source is the source of truth for plays scanned
+    // before per-play stamping rolled out. Newer plays carry their own
+    // pricing_source; fall back to the row when missing.
+    return { ...found, pricing_source: found.pricing_source ?? feedRow.pricing_source ?? 'estimated' }
   }, [feedRow, claudeCallId])
 
   const otherPlays = useMemo(() => {
@@ -209,6 +214,20 @@ export default function PlayDetail() {
             </p>
           )}
         </section>
+
+        {/* Plays scanned before the verified-pricing rollout carry
+            heuristic numbers from Claude — flag them so the user
+            knows the scan-time metrics aren't market-anchored. */}
+        {play.pricing_source === 'estimated' && (
+          <div className="bg-amber-950/30 border border-amber-900/40 rounded-lg px-3 py-2">
+            <p className="text-amber-200 text-[11px] leading-relaxed">
+              <span className="font-semibold">Scan-time numbers are estimated.</span>{' '}
+              This play was scanned before live Polygon pricing was wired in.
+              The struck-through metrics below are heuristics, not market mids — trust
+              the live recompute.
+            </p>
+          </div>
+        )}
 
         {/* ── Live risk metrics ─────────────────────────────────
             At-scan numbers (struck-through, muted) vs live Polygon
