@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ArrowLeft, RefreshCw, Activity, Star, Lock, ChevronDown, Clock, BookOpen, Search, Sparkles } from 'lucide-react'
 import clsx from 'clsx'
 import { isWithinRth } from '../utils/marketHours'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { useSubscription } from '../hooks/useSubscription'
@@ -300,6 +300,33 @@ export default function Markets() {
   // cursor to stay where it was at snapshot time).
   const { spot: liveSpot } = useLiveSpot(replayActive ? null : ticker)
 
+  // Check whether the current viewer has an open position on this
+  // ticker. If yes, surface a chip in the header that jumps to the
+  // position page — the inverse of the "View matrix →" link on
+  // PositionDetail. Re-queries whenever the ticker changes or the
+  // user signs in/out; cheap (single indexed row by user_id + ticker).
+  const [openPositionId, setOpenPositionId] = useState(null)
+  useEffect(() => {
+    if (!user?.id || !ticker) {
+      setOpenPositionId(null)
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      const { data } = await supabase
+        .from('open_positions')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('ticker', ticker.toUpperCase())
+        .eq('status', 'open')
+        .order('entry_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (!cancelled) setOpenPositionId(data?.id ?? null)
+    })()
+    return () => { cancelled = true }
+  }, [user?.id, ticker])
+
   return (
     <div className="px-4 lg:px-6 py-5 space-y-4 max-w-md mx-auto lg:max-w-7xl">
       <PullToRefreshIndicator
@@ -479,6 +506,14 @@ export default function Markets() {
                     }
                   />
                 </button>
+                {openPositionId && (
+                  <Link
+                    to={`/position/${openPositionId}`}
+                    className="text-[10px] uppercase tracking-wider text-amber-400 hover:text-amber-300 border border-amber-400/30 hover:border-amber-300/60 rounded px-1.5 py-0.5 leading-none"
+                  >
+                    View position →
+                  </Link>
+                )}
               </div>
               <div className="text-xs text-subtle flex items-center gap-2 flex-wrap">
                 <span>
@@ -647,6 +682,14 @@ export default function Markets() {
             {data.ticker}
             <ChevronDown size={14} className="text-subtle" />
           </button>
+          {openPositionId && (
+            <Link
+              to={`/position/${openPositionId}`}
+              className="text-[10px] uppercase tracking-wider text-amber-400 hover:text-amber-300 border border-amber-400/30 hover:border-amber-300/60 rounded px-1.5 py-0.5 leading-none"
+            >
+              View position →
+            </Link>
+          )}
           <div className="text-2xl font-mono-tab tabular-nums text-fg">
             ${formatNumber(liveSpot ?? data.spot)}
           </div>
