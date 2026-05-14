@@ -1060,15 +1060,31 @@ serve(async (req) => {
   }
   const bearer = authHeader.slice('Bearer '.length).trim()
   // Service-role bypass for internal calls from other edge functions
-  // (scan-universe-plays, post-scan analytics). The platform's gateway
-  // rejects service-role JWTs as UNAUTHORIZED_INVALID_JWT_FORMAT for
-  // some internal call paths; this lets the function recognize the
-  // role directly and skip the user-JWT validation that would
-  // otherwise 401 a system-driven request.
-  // NOTE: verify_jwt=false in config.toml — this function self-validates
-  // service-role vs user-JWT below.
-  const isServiceRole = SUPABASE_SERVICE_ROLE_KEY && bearer === SUPABASE_SERVICE_ROLE_KEY
-  if (!isServiceRole) {
+  // (scan-universe-plays, post-scan analytics) and pg_cron jobs.
+  // Two acceptance paths:
+  //   1. Exact match against SUPABASE_SERVICE_ROLE_KEY env var (legacy
+  //      callers that pass the env-value directly, e.g. GH Actions).
+  //   2. JWT payload check for role: 'service_role' (pg_cron jobs that
+  //      read a vault-stored service-role JWT — works even when the
+  //      vault JWT is a different rotation than this function's
+  //      SUPABASE_SERVICE_ROLE_KEY env var, as long as both are valid
+  //      service-role keys for this project).
+  // verify_jwt=false in config.toml — we self-validate below.
+  function isServiceRole(b: string): boolean {
+    if (SUPABASE_SERVICE_ROLE_KEY && b === SUPABASE_SERVICE_ROLE_KEY) return true
+    try {
+      const parts = b.split('.')
+      if (parts.length !== 3) return false
+      // base64url → base64 (pad if needed) → decode → parse
+      const padded = parts[1].replace(/-/g, '+').replace(/_/g, '/')
+      const pad = padded.length % 4 ? '='.repeat(4 - (padded.length % 4)) : ''
+      const payload = JSON.parse(atob(padded + pad))
+      return payload?.role === 'service_role'
+    } catch {
+      return false
+    }
+  }
+  if (!isServiceRole(bearer)) {
     const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       global: { headers: { Authorization: authHeader } },
     })
