@@ -110,8 +110,38 @@ export default function PositionDetail() {
       })
       if (cancelled) return
       if (gexErr || !data?.success || !data?.data?.largest) return
-      const wallExp = data.data.largest.expiration
-      const wallStrike = data.data.largest.strike
+      // Pick the wall anchored to the TRADE's expiration column, not
+      // the matrix-wide `largest`. compute-gex's `largest` is the max
+      // abs cell across the whole grid — for the curated tickers the
+      // 0DTE column dominates intraday, which renders "Wall already
+      // peaked N days ago" on every multi-day trade. The relevant wall
+      // for a 5-18 spread is the 5-18 column's max-abs cell. Falls
+      // back to matrix-wide largest only when the trade's expiration
+      // isn't in the matrix window.
+      const expIdx = Array.isArray(data.data.expirations)
+        ? data.data.expirations.findIndex((e) => e?.date === pos.expiration)
+        : -1
+      let wallStrike = data.data.largest.strike
+      let wallExp = data.data.largest.expiration
+      if (
+        expIdx >= 0 &&
+        Array.isArray(data.data.strikes) &&
+        Array.isArray(data.data.cells)
+      ) {
+        let bestStrike = null
+        let bestAbs = 0
+        for (let i = 0; i < data.data.cells.length; i++) {
+          const v = data.data.cells[i]?.[expIdx]
+          if (Number.isFinite(v) && Math.abs(v) > bestAbs) {
+            bestAbs = Math.abs(v)
+            bestStrike = data.data.strikes[i]
+          }
+        }
+        if (bestStrike != null) {
+          wallStrike = bestStrike
+          wallExp = pos.expiration
+        }
+      }
       const wallDte = daysUntil(wallExp)
       const tradeDte = daysUntil(pos.expiration)
       const diff = wallDte - tradeDte
