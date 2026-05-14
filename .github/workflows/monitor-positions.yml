@@ -4,13 +4,18 @@
 #
 # Idempotent on `triggers_fired` JSONB so repeated cron runs only
 # send a given alert once per position.
+#
+# SCHEDULING has moved to Supabase pg_cron — see
+# supabase/migrations/20260514110000_monitor_positions_cron.sql
+# (job: monitor-positions-rth). GitHub Actions cron was dropping
+# ticks under hosted-runner load; pg_cron runs in-database and
+# doesn't slip. The workflow stays around as a manual rescue lever
+# (Actions → Monitor open positions → Run workflow) for when the
+# pg_cron job is paused or the user wants an immediate refresh.
 
 name: Monitor open positions
 
 on:
-  schedule:
-    - cron: '35,40,45,50,55 13 * * 1-5'   # 13:35–13:55 UTC = 9:35–9:55 ET (DST)
-    - cron: '*/5 14-20 * * 1-5'           # 14:00–20:55 UTC = 10:00–16:55 ET
   workflow_dispatch:
 
 concurrency:

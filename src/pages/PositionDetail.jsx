@@ -406,7 +406,11 @@ export default function PositionDetail() {
     const shortMid = Number(legGreeks.short?.mid)
     if (!Number.isFinite(longMid) || !Number.isFinite(shortMid)) return null
     const strat = (pos.strategy_type || '').toLowerCase()
-    const isDebit = strat === 'bull_call_spread' || strat === 'bear_put_spread'
+    // open_positions.strategy_type stores 'BULL_CALL' / 'BEAR_PUT' (per
+    // the DB check constraint), not the trailing-_spread form. Match the
+    // actual values or live P&L silently falls back to the stale Yahoo
+    // worker poll.
+    const isDebit = strat === 'bull_call' || strat === 'bear_put'
     if (!isDebit) return null
     const currentMid = longMid - shortMid
     const entry = Number(pos.entry_debit_per_spread)
