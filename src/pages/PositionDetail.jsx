@@ -487,11 +487,11 @@ export default function PositionDetail() {
           <ArrowLeft size={20} />
         </button>
         <div className="flex-1">
-          <div className="flex items-baseline gap-2">
+          <div className="flex items-center gap-2">
             <h1 className="text-lg font-semibold leading-tight">{pos.ticker}</h1>
             <Link
               to={`/markets?ticker=${pos.ticker}`}
-              className="text-[10px] uppercase tracking-wider text-amber-400 hover:text-amber-300 border border-amber-400/30 hover:border-amber-300/60 rounded px-1.5 py-0.5"
+              className="text-[10px] uppercase tracking-wider text-amber-400 hover:text-amber-300 border border-amber-400/30 hover:border-amber-300/60 rounded px-1.5 py-0.5 leading-none"
             >
               View matrix →
             </Link>
