@@ -105,6 +105,27 @@ export const HOT_TICKERS = [
   { symbol: 'ARM',   label: 'Arm' },
   { symbol: 'BABA',  label: 'Alibaba' },
   { symbol: 'GME',   label: 'GameStop' },
+  // ── Leopold Aschenbrenner portfolio (AI buildout: data-center
+  //    operators, GPU cloud, power/oilfield infra, memory). INTC,
+  //    SNDK, CRWV, BE already covered in groups above.
+  { symbol: 'PUMP',  label: 'ProPetro' },
+  { symbol: 'KEEL',  label: 'Keel Infrastructure' },
+  { symbol: 'RIOT',  label: 'Riot Platforms' },
+  { symbol: 'SEI',   label: 'Solaris Energy Infra' },
+  { symbol: 'HUT',   label: 'Hut 8' },
+  { symbol: 'LBRT',  label: 'Liberty Energy' },
+  { symbol: 'EQT',   label: 'EQT Corp' },
+  { symbol: 'KRC',   label: 'Kilroy Realty' },
+  { symbol: 'CLSK',  label: 'CleanSpark' },
+  { symbol: 'BW',    label: 'Babcock & Wilcox' },
+  { symbol: 'TSEM',  label: 'Tower Semiconductor' },
+  { symbol: 'PSIX',  label: 'Power Solutions Intl' },
+  { symbol: 'COHR',  label: 'Coherent' },
+  { symbol: 'CIFR',  label: 'Cipher Mining' },
+  { symbol: 'CORZ',  label: 'Core Scientific' },
+  { symbol: 'LITE',  label: 'Lumentum' },
+  { symbol: 'WYFI',  label: 'WhiteFiber' },
+  { symbol: 'APLD',  label: 'Applied Digital' },
 ]
 
 // Full S&P 500 constituents (Nov 2025), plus a handful of additional

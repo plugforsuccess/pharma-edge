@@ -52,7 +52,8 @@ jobs:
           # The hot ticker list is duplicated here so the cron doesn't
           # need to read TS files. Keep synced with HOT_TICKERS in
           # src/lib/tickerUniverse.js and TRACKED_TICKERS in
-          # dxlink-worker/src/tickers.ts. Last sync 2026-05-07.
+          # dxlink-worker/src/tickers.ts. Last sync 2026-05-14
+          # (added Leopold Aschenbrenner portfolio group).
           TICKERS=(
             SPY QQQ IWM DIA
             GLD SLV TLT USO
@@ -65,8 +66,12 @@ jobs:
             LLY NVO PFE MRK JNJ UNH ABBV
             WMT COST HD MCD NKE DIS
             XOM CVX COP
-            VST CEG NEE SMR OKLO CCJ
+            VST CEG NEE SMR OKLO CCJ BE
             COIN PLTR UBER ARM BABA GME
+            # Leopold portfolio (AI buildout: data-center, GPU cloud,
+            # energy infra, memory). INTC SNDK CRWV BE already above.
+            PUMP KEEL RIOT SEI HUT LBRT EQT KRC CLSK BW
+            TSEM PSIX COHR CIFR CORZ LITE WYFI APLD
           )
 
           ok=0
