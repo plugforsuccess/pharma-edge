@@ -1,6 +1,14 @@
 // Cash Moves — shared playSuggester module.
 //
-// PROMPT VERSION: 2026-05-15f — price-verification resilience +
+// PROMPT VERSION: 2026-05-15g — structure↔R/R geometry rule. Claude
+// was spending ~half its proposals on credit spreads / ICs whose
+// geometry (credit ≈ 20-40% of width) is mathematically incapable of
+// clearing the server's 1.5 R/R floor — sub-1.0 R/R structures, dead
+// on arrival, pure wasted output. Added an explicit pre-proposal
+// geometry rule + a hard bright-line ban on credit/IC structures
+// below credit ≥ 60% of width. Server gate UNCHANGED — this only
+// stops Claude proposing what the gate already (correctly) nukes.
+// Prior: 2026-05-15f — price-verification resilience +
 // observability. Polygon option-quote fetch: 5s→12s timeout + one
 // retry (a slow-but-alive provider was silently nulling every leg →
 // 100% play wipe). verifyAndFilter now emits a why-killed roll-up
@@ -154,6 +162,33 @@ CASH MOVES RULES — NEVER VIOLATE:
   expiration in the chain yields the best risk/reward for the
   structure given spot's position relative to the king nodes. Do
   NOT bucket trades into rigid DTE bands.
+- STRUCTURE ↔ R/R GEOMETRY — apply this BEFORE proposing. The 1.5
+  floor is pure geometry, not a preference, and it is the single
+  biggest reason proposals get rejected:
+    * DEBIT vertical (Bull Call / Bear Put): R/R = (width − debit) /
+      debit. Clears 1.5 ONLY if net debit ≤ 40% of width. Anchor the
+      long leg at/just-inside the targeted king node and keep the
+      spread tight enough that the debit is ≤ ~40% of width. A debit
+      spread whose legs straddle a far move pays too much premium —
+      structurally doomed, do not propose it.
+    * CREDIT vertical / Iron Condor: R/R = credit / (width − credit).
+      Clears 1.5 ONLY if net credit ≥ 60% of width, which requires
+      selling strikes close to / through the money (rich credit, low
+      POP). HARD RULE: never propose a credit spread or Iron Condor
+      unless you can see its net credit is ≥ 60% of the width
+      (R/R ≥ 1.5) AND POP ≥ 50%. A credit structure whose credit is
+      < 50% of width has R/R < 1.0 — risking more than you can make —
+      and must NEVER appear in your output under any thesis. A
+      comfortable-POP credit spread (credit ≈ 20–40% of width) is
+      mathematically dead on arrival; do not propose it. In most
+      regimes a credit/IC that clears does not exist, so these
+      structures should be RARE, never a default. When in doubt,
+      express the same directional/regime thesis as a tight DEBIT
+      vertical instead.
+  Proposing a structure you can already compute won't clear 1.5 is
+  wasted output. If the only structures the king nodes support are
+  sub-1.5, return plays: [] — that is the correct, expected answer on
+  a thin tape, not a failure to find something.
 - DTE sanity floors (these are the ONLY hard rules on DTE):
     * No same-day / 1 DTE entries unless it's an explicit Regime A
       pin trade where spot is INSIDE a tight wall cluster and theta
