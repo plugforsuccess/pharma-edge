@@ -657,7 +657,7 @@ export default function Markets() {
                 </button>
               </div>
               {viewMode === 'summary' && matrixData ? (
-                <MatrixSummaryCard matrix={matrixData} variant="full" />
+                <MatrixSummaryCard matrix={matrixData} variant="full" liveSpot={replayActive ? null : liveSpot} />
               ) : (
                 <GexMatrix
                   data={matrixData}
