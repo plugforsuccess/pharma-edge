@@ -1,6 +1,8 @@
 // Cash Moves — shared playSuggester module.
 //
-// PROMPT VERSION: 2026-05-14d — per-expiration wall table (#207),
+// PROMPT VERSION: 2026-05-14e — pre-trade data-integrity gate
+// (refuse generation off a stale matrix during RTH; this PR),
+// per-expiration wall table (#207),
 // tightened gamma_rolloff_risk gate (#207), real per-cell OI sourced
 // from compute-gex matrix (#209), intraday price path + king-node
 // interaction history sourced from Polygon 5-min bars (#215),
@@ -222,6 +224,11 @@ export interface MatrixData {
   live_spot?: number | null
   live_spot_at?: string | null
   session?: 'rth' | 'pre-market' | 'after-hours' | 'overnight' | 'weekend'
+  // ISO timestamp the matrix was computed by compute-gex. Used by the
+  // pre-trade data-integrity gate to refuse generation off a stale
+  // matrix during RTH (a stale matrix during extended hours / weekend
+  // is expected and fine — it's the frozen RTH close).
+  computed_at?: string
   source: string
   expirations: Array<{ date: string; dte: number }>
   strikes: number[]
@@ -1099,6 +1106,44 @@ export async function generatePlaysForTicker(
     throw new Error(gexBody?.error ?? 'compute-gex returned no data')
   }
   const matrix = gexBody.data as MatrixData
+
+  // ── Pre-trade data-integrity gate ──────────────────────────────
+  // Refuse to generate plays off untrustworthy inputs rather than
+  // letting Claude rationalize a thesis on stale data (the AMD
+  // failure mode: bad data flowed through silently). Fail CLOSED —
+  // an empty plays[] with an explicit hold reason, no Claude call.
+  //
+  // Only gates during RTH. Outside RTH the matrix is *correctly* the
+  // frozen RTH close (extended hours / weekend / overnight) — that's
+  // expected, not stale, and generating next-session plays off it is
+  // valid.
+  const STALE_MATRIX_MS = 12 * 60 * 1000   // cache TTL (5m) + slack
+  const isRth = matrix.session === 'rth' || matrix.session == null
+  if (isRth && matrix.computed_at) {
+    const matrixAgeMs = Date.now() - new Date(matrix.computed_at).getTime()
+    if (Number.isFinite(matrixAgeMs) && matrixAgeMs > STALE_MATRIX_MS) {
+      const mins = Math.round(matrixAgeMs / 60000)
+      return {
+        matrix,
+        flow: [],
+        parsed: {
+          regime: null,
+          regime_explanation:
+            `Data-integrity hold: the GEX matrix is ${mins} min old during market hours ` +
+            `(threshold ${Math.round(STALE_MATRIX_MS / 60000)} min). ` +
+            `Suggested Plays will not generate off a stale matrix — the snapshot ` +
+            `pipeline is likely behind. Re-analyze once it catches up.`,
+          dominant_gex_expiration: null,
+          data_integrity_hold: true,
+          plays: [],
+        },
+        claudeCallId: null,
+        costUsd: 0,
+        durationMs: 0,
+        confidence: 0,
+      }
+    }
+  }
 
   // 2. Flow + intraday bars (in parallel — independent network calls).
   //    Bars are nullable (pre-market / Polygon hiccup) and the prompt
