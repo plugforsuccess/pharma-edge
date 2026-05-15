@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Check, ChevronDown } from 'lucide-react'
 import { supabase } from '../lib/supabase'
@@ -77,6 +77,17 @@ export default function LogSignal() {
   // chain is only credible if the user explicitly confirms the number
   // they're locking into the public hash.
   const [popVerifyOpen, setPopVerifyOpen] = useState(false)
+  // Pre-lock data-integrity / risk acknowledgments. When the user
+  // reaches the Confirm step we re-fetch the matrix and surface the
+  // same class of warnings the Suggested-Plays gate enforces — stale
+  // matrix during RTH, OPEX gamma-roll-off, extended-hours spot
+  // divergence — because a manual signal bypasses that gate entirely.
+  // Fail LOUD, not closed: the user can still log (manual override is
+  // a valid path) but each warning is a required conscious
+  // acknowledgment, matching the StopLossCheck emotion-check pattern.
+  const [riskChecks, setRiskChecks] = useState([])
+  const [riskAck, setRiskAck] = useState({})
+  const [riskLoading, setRiskLoading] = useState(false)
   // The POP value that came in from prefill (suggested-play handoff or
   // calculator output). We capture it once at mount so we can detect
   // whether the user has typed a different value at submit time. Auto-
@@ -153,6 +164,75 @@ export default function LogSignal() {
   function update(key, value) {
     setForm((prev) => ({ ...prev, [key]: value }))
   }
+
+  // On entering Confirm (step 4), re-fetch the matrix and evaluate
+  // the same integrity/risk dimensions the Suggested-Plays
+  // data-integrity gate (#219) enforces — manual entry skips that
+  // gate, so without this a hand-picked spread gets zero of the
+  // protections the suggested path has. Best-effort: a compute-gex
+  // failure leaves riskChecks empty (don't block logging on a
+  // transient network error — that would itself be a footgun).
+  useEffect(() => {
+    if (step !== 4 || !form.ticker) return
+    let cancelled = false
+    setRiskLoading(true)
+    ;(async () => {
+      const checks = []
+      try {
+        const { data: resp, error } = await supabase.functions.invoke(
+          'compute-gex',
+          { body: { ticker: form.ticker, matrix: true } },
+        )
+        if (!cancelled && !error && resp?.success && resp?.data) {
+          const m = resp.data
+          const session = m.session ?? 'rth'
+          // 1. Stale matrix during RTH — same threshold as the gate.
+          if ((session === 'rth') && m.computed_at) {
+            const ageMin = Math.round((Date.now() - new Date(m.computed_at).getTime()) / 60000)
+            if (Number.isFinite(ageMin) && ageMin > 12) {
+              checks.push({
+                key: 'stale_matrix',
+                message: `The GEX matrix is ${ageMin} min old during market hours. The dealer positioning you're locking your thesis against may already be out of date.`,
+              })
+            }
+          }
+          // 2. OPEX gamma-roll-off — chosen expiry on/after the next
+          //    OPEX while that OPEX is the dominant cluster.
+          if (m.opex?.next_date && form.expiry_date) {
+            const exp = form.expiry_date
+            const opx = m.opex.next_date
+            if (exp >= opx) {
+              const kind = m.opex.is_quarterly ? 'quarterly (quad-witching)' : 'monthly'
+              const when = m.opex.is_today ? 'expires TODAY' : `expires ${opx} (${m.opex.days_until}d)`
+              checks.push({
+                key: 'opex_rolloff',
+                message: `The ${kind} OPEX cluster ${when}. Any wall/pin thesis anchored to that expiration is temporary — the gamma that creates it evaporates at OPEX and your trade outlives it.`,
+              })
+            }
+          }
+          // 3. Extended-hours spot divergence — structure priced off
+          //    a stale RTH close while price has moved.
+          if (session !== 'rth' && Number.isFinite(Number(m.live_spot)) && Number.isFinite(Number(m.spot)) && m.spot > 0) {
+            const dPct = ((Number(m.live_spot) - Number(m.spot)) / Number(m.spot)) * 100
+            if (Math.abs(dPct) >= 0.5) {
+              checks.push({
+                key: 'eh_divergence',
+                message: `${session} session: the matrix spot ($${Number(m.spot).toFixed(2)}) is the RTH close but live is $${Number(m.live_spot).toFixed(2)} (${dPct >= 0 ? '+' : ''}${dPct.toFixed(2)}%). The walls you're anchoring to were computed at a price that no longer holds.`,
+              })
+            }
+          }
+        }
+      } catch {
+        /* swallow — don't block a manual log on a transient error */
+      }
+      if (!cancelled) {
+        setRiskChecks(checks)
+        setRiskAck({})
+        setRiskLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [step, form.ticker, form.expiry_date])
 
   function updateDirection(newDirection) {
     setForm((prev) => ({
@@ -853,6 +933,44 @@ export default function LogSignal() {
             </p>
           </div>
 
+          {riskLoading && (
+            <p className="text-subtle text-xs">Checking data integrity…</p>
+          )}
+          {riskChecks.length > 0 && (
+            <div className="bg-orange-950/20 border border-orange-800/50 rounded-xl p-4 space-y-3">
+              <p className="text-orange-400 text-xs font-semibold">
+                ⚠ {riskChecks.length} data-integrity warning{riskChecks.length > 1 ? 's' : ''} — acknowledge each to lock
+              </p>
+              <p className="text-subtle text-[11px] leading-relaxed">
+                A manually-logged signal bypasses the Suggested-Plays integrity gate.
+                These are the same checks that gate the suggested path. You can still
+                log — but consciously, not by accident.
+              </p>
+              {riskChecks.map((c) => (
+                <button
+                  key={c.key}
+                  type="button"
+                  onClick={() => setRiskAck((p) => ({ ...p, [c.key]: !p[c.key] }))}
+                  className={clsx(
+                    'w-full flex items-start gap-3 p-3 rounded-lg border text-left transition-colors',
+                    riskAck[c.key] ? 'border-orange-700/60 bg-orange-950/30' : 'border-border bg-card',
+                  )}
+                  aria-pressed={!!riskAck[c.key]}
+                >
+                  <div className={clsx(
+                    'w-5 h-5 rounded flex items-center justify-center flex-shrink-0 mt-0.5',
+                    riskAck[c.key] ? 'bg-orange-600' : 'border border-zinc-700',
+                  )}>
+                    {riskAck[c.key] && <Check size={12} className="text-white" />}
+                  </div>
+                  <p className={clsx('text-xs leading-relaxed', riskAck[c.key] ? 'text-white' : 'text-subtle')}>
+                    {c.message}
+                  </p>
+                </button>
+              ))}
+            </div>
+          )}
+
           {submitError && (
             <div className="bg-red-950/30 border border-red-900/50 rounded-lg p-3">
               <p className="text-red-400 text-xs" role="alert">
@@ -883,10 +1001,13 @@ export default function LogSignal() {
                   submitSignal()
                 }
               }}
-              disabled={loading}
-              className="flex-1 bg-red-600 hover:bg-red-500 disabled:bg-red-900 text-white font-semibold rounded-xl py-3 text-sm transition-colors"
+              disabled={loading || riskLoading || riskChecks.some((c) => !riskAck[c.key])}
+              className="flex-1 bg-red-600 hover:bg-red-500 disabled:bg-red-900 disabled:text-red-700 text-white font-semibold rounded-xl py-3 text-sm transition-colors"
             >
-              {loading ? 'Logging…' : '🔒 Lock & Log Signal'}
+              {loading ? 'Logging…'
+                : riskChecks.some((c) => !riskAck[c.key])
+                  ? `Acknowledge ${riskChecks.filter((c) => !riskAck[c.key]).length} warning${riskChecks.filter((c) => !riskAck[c.key]).length > 1 ? 's' : ''}`
+                  : '🔒 Lock & Log Signal'}
             </button>
           </div>
       </div>
