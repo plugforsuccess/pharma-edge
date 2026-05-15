@@ -110,6 +110,7 @@ serve(async (req) => {
     error?: string
     cost_usd: number
     claude_call_id: string | null
+    rejections: Record<string, unknown> | null
   }> = []
 
   // Scan universe = the user's curated watchlist (stars) ∪ tickers
@@ -166,6 +167,7 @@ serve(async (req) => {
             plays: result.parsed?.plays ?? [],
             cost_usd: result.costUsd,
             claude_call_id: result.claudeCallId,
+            rejections: result.rejections,
           })
         } catch (err) {
           results.push({
@@ -175,6 +177,7 @@ serve(async (req) => {
             error: err instanceof Error ? err.message : String(err),
             cost_usd: 0,
             claude_call_id: null,
+            rejections: null,
           })
         }
       })()
@@ -189,6 +192,15 @@ serve(async (req) => {
   // full provenance. Rank by ev_edge_bp DESC; null edge goes last.
   const allPlays: any[] = []
   const errors: Record<string, string> = {}
+  // Why-killed roll-up. Without this, a scan where Claude proposed
+  // strong plays but every one died at Polygon price-verification is
+  // indistinguishable from a genuine no-setup day — the exact
+  // ambiguity that made "0 plays all day" un-diagnosable.
+  const rejAgg = {
+    pricing: 0, rr: 0, ev: 0, pop: 0, structure: 0,
+    proposed: 0, verified: 0,
+    by_ticker: {} as Record<string, Record<string, unknown>>,
+  }
   let totalCostUsd = 0
   for (const r of results) {
     if (!r.success) {
@@ -196,6 +208,17 @@ serve(async (req) => {
       continue
     }
     totalCostUsd += r.cost_usd
+    const rej = r.rejections as Record<string, number> | null
+    if (rej && Number(rej.total) > 0) {
+      rejAgg.pricing += Number(rej.pricing) || 0
+      rejAgg.rr += Number(rej.rr) || 0
+      rejAgg.ev += Number(rej.ev) || 0
+      rejAgg.pop += Number(rej.pop) || 0
+      rejAgg.structure += Number(rej.structure) || 0
+      rejAgg.proposed += Number(rej.proposed) || 0
+      rejAgg.verified += Number(rej.verified) || 0
+      rejAgg.by_ticker[r.ticker] = r.rejections!
+    }
     for (const play of r.plays) {
       allPlays.push({
         ...play,
@@ -204,6 +227,8 @@ serve(async (req) => {
       })
     }
   }
+  const pricingRejections = (rejAgg.pricing + rejAgg.rr + rejAgg.ev +
+    rejAgg.pop + rejAgg.structure) > 0 ? rejAgg : null
   allPlays.sort((a, b) => {
     const ae = typeof a.ev_edge_bp === 'number' ? a.ev_edge_bp : -Infinity
     const be = typeof b.ev_edge_bp === 'number' ? b.ev_edge_bp : -Infinity
@@ -229,6 +254,7 @@ serve(async (req) => {
       total_cost_usd: totalCostUsd,
       ranked_plays: rankedPlays,
       errors: Object.keys(errors).length > 0 ? errors : null,
+      pricing_rejections: pricingRejections,
       pricing_source: 'verified',
       pricing_verified_at: new Date().toISOString(),
     })
@@ -248,6 +274,7 @@ serve(async (req) => {
     total_plays_after_filter: rankedPlays.length,
     total_cost_usd: totalCostUsd,
     errors: Object.keys(errors).length > 0 ? errors : null,
+    pricing_rejections: pricingRejections,
   }, 200)
 })
 
