@@ -47,7 +47,7 @@ export default function TodaysPlaysFeed() {
       const { data, error: e } = await supabase
         .from('top_plays_feed')
         .select(
-          'computed_at, ranked_plays, tickers_succeeded, tickers_failed, total_plays_after_filter, universe',
+          'computed_at, ranked_plays, tickers_succeeded, tickers_failed, total_plays_after_filter, universe, pricing_rejections',
         )
         .order('computed_at', { ascending: false })
         .limit(1)
@@ -99,23 +99,53 @@ export default function TodaysPlaysFeed() {
   const universeSize = Array.isArray(feed?.universe) ? feed.universe.length : 19
   const tickersSucceeded = feed?.tickers_succeeded ?? 0
 
-  // Empty / pre-launch state
+  // Empty state. Distinguish a genuine no-setup scan from a scan where
+  // Claude proposed plays that all died at live price-verification —
+  // conflating the two is what made "0 plays all day" undiagnosable.
   if (plays.length === 0) {
+    const rej = feed?.pricing_rejections || null
+    const proposed = Number(rej?.proposed) || 0
+    const pricingKills = Number(rej?.pricing) || 0
+    // "Pricing-degraded" = Claude had setups but the quote provider
+    // couldn't price the legs. That's an infra problem, not a market
+    // read — say so plainly instead of implying a quiet tape.
+    const pricingDegraded = proposed > 0 && pricingKills > 0 &&
+      pricingKills >= (proposed - (Number(rej?.verified) || 0)) * 0.5
+
     return (
       <section className="bg-card border border-border rounded-xl p-4 space-y-2">
         <div className="flex items-center gap-2">
           <Flame size={14} className="text-amber-400" />
           <h2 className="text-white text-sm font-semibold">Today's Plays</h2>
         </div>
-        <p className="text-muted text-xs leading-relaxed">
-          No high-conviction plays right now. The scanner runs every
-          15 minutes during market hours.
-          {feed?.computed_at && (
-            <span className="block mt-1 text-[10px] text-zinc-500">
-              Last scan {minutesAgo(feed.computed_at)} · {tickersSucceeded}/{universeSize} tickers
-            </span>
-          )}
-        </p>
+        {pricingDegraded ? (
+          <p className="text-muted text-xs leading-relaxed">
+            <span className="text-amber-300 font-semibold">
+              Not a quiet market — a data issue.
+            </span>{' '}
+            The scanner generated {proposed} setup{proposed === 1 ? '' : 's'} but
+            couldn't get live option quotes to verify {pricingKills === proposed ? 'any' : pricingKills} of
+            them (pricing provider degraded). These are suppressed rather
+            than shown unpriced — no fabricated numbers. They'll surface
+            once quotes recover.
+            {feed?.computed_at && (
+              <span className="block mt-1 text-[10px] text-zinc-500">
+                Last scan {minutesAgo(feed.computed_at)} · {tickersSucceeded}/{universeSize} tickers ·
+                {' '}{pricingKills} dropped at pricing
+              </span>
+            )}
+          </p>
+        ) : (
+          <p className="text-muted text-xs leading-relaxed">
+            No high-conviction plays right now. The scanner runs every
+            30 minutes during market hours.
+            {feed?.computed_at && (
+              <span className="block mt-1 text-[10px] text-zinc-500">
+                Last scan {minutesAgo(feed.computed_at)} · {tickersSucceeded}/{universeSize} tickers
+              </span>
+            )}
+          </p>
+        )}
       </section>
     )
   }

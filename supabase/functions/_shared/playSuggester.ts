@@ -1,8 +1,14 @@
 // Cash Moves — shared playSuggester module.
 //
-// PROMPT VERSION: 2026-05-15e — concentration / portfolio awareness
+// PROMPT VERSION: 2026-05-15f — price-verification resilience +
+// observability. Polygon option-quote fetch: 5s→12s timeout + one
+// retry (a slow-but-alive provider was silently nulling every leg →
+// 100% play wipe). verifyAndFilter now emits a why-killed roll-up
+// (_rejections) that bubbles to top_plays_feed so a "0 plays" scan
+// is self-explaining instead of ambiguous. No prompt-text change.
+// Prior: 2026-05-15e — concentration / portfolio awareness
 // (the user's other open positions + a correlation/stacking rule so
-// Claude stops evaluating each trade in isolation; this PR),
+// Claude stops evaluating each trade in isolation),
 // geometry-relative untested-wall
 // judgment ($ + % closest approach, half-spread-width rule
 // replacing the blunt flat 2%; this PR), event calendar honesty
@@ -1138,6 +1144,18 @@ export async function verifyAndFilter(
   const tickerSym = String(_ticker).toUpperCase()
   const beforeCount = parsed.plays.length
   const verified: any[] = []
+  // Observability: count *why* plays die here so "0 plays" is never
+  // again ambiguous between "no setups", "rate-limited" and "the
+  // pricing provider timed out". Bubbles up to top_plays_feed.
+  const rejections = {
+    pricing: 0, rr: 0, ev: 0, pop: 0, structure: 0,
+    total: 0, samples: [] as string[],
+  }
+  const note = (bucket: 'pricing' | 'rr' | 'ev' | 'pop' | 'structure', detail: string) => {
+    rejections[bucket]++
+    rejections.total++
+    if (rejections.samples.length < 4) rejections.samples.push(detail)
+  }
   for (const p of parsed.plays) {
     let priced: {
       pricing_source: 'verified' | 'rejected'
@@ -1170,6 +1188,7 @@ export async function verifyAndFilter(
       })
     } else {
       console.log(`[playSuggester] skip ${p.type} — unknown structure`)
+      note('structure', `${p.type} unknown structure`)
       continue
     }
 
@@ -1179,18 +1198,22 @@ export async function verifyAndFilter(
 
     if (priced.pricing_source === 'rejected') {
       console.log(`[playSuggester] reject ${label} @ ${p.expiration}: ${priced.rejection_reason}`)
+      note('pricing', `${label}: ${priced.rejection_reason}`)
       continue
     }
     if (priced.risk_reward < 1.5) {
       console.log(`[playSuggester] reject ${label}: live R/R ${priced.risk_reward} < 1.5`)
+      note('rr', `${label}: R/R ${priced.risk_reward} < 1.5`)
       continue
     }
     if (priced.ev_edge_bp <= 0) {
       console.log(`[playSuggester] reject ${label}: EV edge ${priced.ev_edge_bp}bp ≤ 0`)
+      note('ev', `${label}: EV ${priced.ev_edge_bp}bp ≤ 0`)
       continue
     }
     if (priced.entry_pop_bp < 5000) {
       console.log(`[playSuggester] reject ${label}: POP ${priced.entry_pop_bp}bp < 5000`)
+      note('pop', `${label}: POP ${priced.entry_pop_bp}bp < 5000`)
       continue
     }
 
@@ -1220,6 +1243,11 @@ export async function verifyAndFilter(
   parsed.plays = verified.slice(0, topN)
   if (parsed.plays.length < beforeCount) {
     console.log(`[playSuggester] verified ${parsed.plays.length}/${beforeCount} plays (live Polygon mids)`)
+  }
+  parsed._rejections = {
+    proposed: beforeCount,
+    verified: parsed.plays.length,
+    ...rejections,
   }
   return parsed
 }
@@ -1269,6 +1297,10 @@ export interface GeneratedPlays {
   /** Aggregate 0..1 confidence — derived from per-play ev_edge_bp.
    * Mirrors the value reasoning_history stores. */
   confidence: number
+  /** Why plays died in verifyAndFilter (pricing/rr/ev/pop/structure
+   * counts + samples). Null when nothing was rejected. Surfaced to
+   * top_plays_feed so a "0 plays" scan is self-explaining. */
+  rejections: Record<string, unknown> | null
 }
 
 /** Run the full per-ticker pipeline: compute-gex → flow → Claude →
@@ -1339,6 +1371,7 @@ export async function generatePlaysForTicker(
         costUsd: 0,
         durationMs: 0,
         confidence: 0,
+        rejections: null,
       }
     }
   }
@@ -1474,5 +1507,6 @@ export async function generatePlaysForTicker(
     costUsd: cost,
     durationMs: claudeDurationMs,
     confidence,
+    rejections: parsed?._rejections ?? null,
   }
 }

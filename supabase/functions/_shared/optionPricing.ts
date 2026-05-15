@@ -87,32 +87,59 @@ export async function fetchPolygonOptionQuote(
 ): Promise<OptionQuote | null> {
   const occTicker = buildOccTicker(ticker, expiration, optType, strike)
   const url = `https://api.polygon.io/v3/snapshot/options/${ticker.toUpperCase()}/${occTicker}?apiKey=${POLYGON_API_KEY}`
-  try {
-    const resp = await fetch(url, { signal: AbortSignal.timeout(5000) })
-    if (!resp.ok) return null
-    const body = await resp.json()
-    const r = body?.results
-    if (!r) return null
-    const bid = Number(r.last_quote?.bid)
-    const ask = Number(r.last_quote?.ask)
-    const midpoint = Number(r.last_quote?.midpoint)
-    if (!Number.isFinite(bid) || !Number.isFinite(ask) || bid < 0 || ask <= 0 || ask < bid) return null
-    const mid = Number.isFinite(midpoint) && midpoint > 0 ? midpoint : (bid + ask) / 2
-    const iv = Number(r.implied_volatility)
-    const underlying_price = Number(r.underlying_asset?.price)
-    const tsNs = Number(r.last_quote?.last_updated)
-    const ageSeconds = Number.isFinite(tsNs) && tsNs > 0
-      ? Math.max(0, Math.floor((Date.now() - tsNs / 1e6) / 1000))
-      : 0
-    return {
-      mid, bid, ask,
-      iv: Number.isFinite(iv) && iv > 0 ? iv : null,
-      age_seconds: ageSeconds,
-      underlying_price: Number.isFinite(underlying_price) && underlying_price > 0 ? underlying_price : null,
+
+  // Polygon's options-snapshot endpoint degrades hard on heavy days
+  // (OPEX, vol spikes) — single-call latency can run 8-15s when it's
+  // alive but slow. A 5s timeout with a silent null-return turned that
+  // latency into a 100% play wipe that was invisible end to end (every
+  // play "rejected: polygon quote unavailable", logged only to a
+  // console line). 12s budget + one retry rides out the slow-but-alive
+  // case; we still return null (→ honest rejection) when Polygon truly
+  // can't answer. We never synthesize a mid.
+  const TIMEOUT_MS = 12_000
+  const MAX_ATTEMPTS = 2
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const resp = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS) })
+      // 429 / 5xx are transient — retry once. 4xx (bad symbol) is not.
+      if (!resp.ok) {
+        if ((resp.status === 429 || resp.status >= 500) && attempt < MAX_ATTEMPTS) {
+          await new Promise((r) => setTimeout(r, 500 * attempt))
+          continue
+        }
+        return null
+      }
+      const body = await resp.json()
+      const r = body?.results
+      if (!r) return null
+      const bid = Number(r.last_quote?.bid)
+      const ask = Number(r.last_quote?.ask)
+      const midpoint = Number(r.last_quote?.midpoint)
+      if (!Number.isFinite(bid) || !Number.isFinite(ask) || bid < 0 || ask <= 0 || ask < bid) return null
+      const mid = Number.isFinite(midpoint) && midpoint > 0 ? midpoint : (bid + ask) / 2
+      const iv = Number(r.implied_volatility)
+      const underlying_price = Number(r.underlying_asset?.price)
+      const tsNs = Number(r.last_quote?.last_updated)
+      const ageSeconds = Number.isFinite(tsNs) && tsNs > 0
+        ? Math.max(0, Math.floor((Date.now() - tsNs / 1e6) / 1000))
+        : 0
+      return {
+        mid, bid, ask,
+        iv: Number.isFinite(iv) && iv > 0 ? iv : null,
+        age_seconds: ageSeconds,
+        underlying_price: Number.isFinite(underlying_price) && underlying_price > 0 ? underlying_price : null,
+      }
+    } catch {
+      // Timeout / network drop — transient. Retry once, then give up
+      // (null → caller rejects the play honestly, never fabricates).
+      if (attempt < MAX_ATTEMPTS) {
+        await new Promise((r) => setTimeout(r, 500 * attempt))
+        continue
+      }
+      return null
     }
-  } catch {
-    return null
   }
+  return null
 }
 
 export async function priceSpread(args: {
