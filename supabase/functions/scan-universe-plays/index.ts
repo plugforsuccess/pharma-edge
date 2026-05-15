@@ -2,7 +2,8 @@
 // Verified working 2026-05-13: 7 plays from 2/3 tickers, $0.06 cost,
 // 86s duration. compute-gex now self-validates (config.toml verify_jwt=false).
 //
-// Cross-ticker GEX scanner. Iterates SCAN_UNIVERSE, runs the same
+// Cross-ticker GEX scanner. Iterates the user's watchlist (stars) ∪
+// open-position tickers, runs the same
 // Claude prompt as suggest-plays for each ticker, aggregates and
 // ranks the resulting plays by ev_edge_bp, writes a snapshot row to
 // top_plays_feed.
@@ -18,7 +19,6 @@ import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import {
   generatePlaysForTicker,
-  SCAN_UNIVERSE,
   SCAN_ACCOUNT_SIZE_REFERENCE,
 } from '../_shared/playSuggester.ts'
 
@@ -39,7 +39,7 @@ const SCAN_AUTH_TOKEN = Deno.env.get('SCAN_AUTH_TOKEN')
 // successful HTTP queue but no rows landed. Bumped to 8 → ~75-95s
 // per scan, well under the runtime cap. Don't go above 12 without
 // measuring Anthropic 429s.
-const CONCURRENCY = 8
+const CONCURRENCY = 2
 
 // Cap on plays per feed row. Most users won't scroll past 10; 15
 // gives breathing room so the next user opening the app sees a fresh
@@ -112,7 +112,34 @@ serve(async (req) => {
     claude_call_id: string | null
   }> = []
 
-  const queue = [...SCAN_UNIVERSE]
+  // Scan universe = the user's curated watchlist (stars) ∪ tickers
+  // they hold an open position in. NOT the old hardcoded 19-name
+  // SCAN_UNIVERSE — that 19 × CONCURRENCY-8 × every-15-min × the
+  // (now enriched) prompt is what blew the Anthropic 30K-tokens/min
+  // org cap and drained the credit balance. Discovery is now
+  // explicitly manual: star a name to have it auto-scanned. Empty
+  // watchlist + no open positions → scan nothing (correct + free;
+  // we deliberately do NOT fall back to the 19-list, that would
+  // recreate the blowout the moment credits are restored).
+  const { data: wl } = await adminClient
+    .from('watchlist').select('ticker')
+  const { data: op } = await adminClient
+    .from('open_positions').select('ticker').eq('status', 'open')
+  const dynamicUniverse = Array.from(new Set([
+    ...(wl ?? []).map((r: { ticker: string }) => String(r.ticker).toUpperCase()),
+    ...(op ?? []).map((r: { ticker: string }) => String(r.ticker).toUpperCase()),
+  ])).filter(Boolean)
+
+  if (dynamicUniverse.length === 0) {
+    return json({
+      skipped: true,
+      reason: 'empty watchlist + no open positions — nothing to scan',
+      scan_kind: scanKind,
+      tickers_scanned: 0,
+    }, 200)
+  }
+
+  const queue = [...dynamicUniverse]
   const inflight = new Set<Promise<void>>()
   while (queue.length > 0 || inflight.size > 0) {
     while (inflight.size < CONCURRENCY && queue.length > 0) {
@@ -192,8 +219,8 @@ serve(async (req) => {
     .from('top_plays_feed')
     .insert({
       scan_kind: scanKind,
-      universe: SCAN_UNIVERSE,
-      tickers_scanned: SCAN_UNIVERSE.length,
+      universe: dynamicUniverse,
+      tickers_scanned: dynamicUniverse.length,
       tickers_succeeded: tickersSucceeded,
       tickers_failed: tickersFailed,
       total_plays_generated: totalGenerated,
@@ -214,7 +241,7 @@ serve(async (req) => {
     success: true,
     scan_kind: scanKind,
     duration_ms: durationMs,
-    tickers_scanned: SCAN_UNIVERSE.length,
+    tickers_scanned: dynamicUniverse.length,
     tickers_succeeded: tickersSucceeded,
     tickers_failed: tickersFailed,
     total_plays_generated: totalGenerated,
