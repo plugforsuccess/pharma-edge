@@ -262,9 +262,15 @@ function json(body: unknown, status = 200): Response {
 }
 
 function isWithinRth(): boolean {
-  // ET: Mon-Fri, 9:30am-4:00pm. Holidays are out of scope here — the
-  // function will run and produce a feed; that's harmless (cost is
-  // bounded by SCAN_UNIVERSE size and Anthropic prompt caching).
+  // ET: Mon-Fri, 10:00am-4:00pm. Scan starts at 10:00, not the 9:30
+  // open: the first 30 min is the least-reliable GEX read of the day —
+  // dealer hedges from the opening auction haven't settled, overnight
+  // gamma is still unwinding, and spreads are wide, so a 9:30 scan
+  // surfaces noise dressed as a setup. Letting the matrix stabilize
+  // until 10:00 trades one scan for materially better signal.
+  // Holidays are out of scope here — the function will run and produce
+  // a feed; that's harmless (cost is bounded by the dynamic universe
+  // size and Anthropic prompt caching).
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/New_York',
     weekday: 'short',
@@ -277,5 +283,5 @@ function isWithinRth(): boolean {
   const minute = Number(parts.find((p) => p.type === 'minute')?.value)
   if (weekday === 'Sat' || weekday === 'Sun') return false
   const mins = hour * 60 + minute
-  return mins >= 9 * 60 + 30 && mins < 16 * 60
+  return mins >= 10 * 60 && mins < 16 * 60
 }
