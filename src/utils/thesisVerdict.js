@@ -570,12 +570,21 @@ function computeStructuredVerdict(entry, live, trade) {
     // Trade wins when spot stays at or near target_strike at
     // expiration. Wall break in EITHER direction = thesis broken.
     //
-    // Audit #7: thresholds scale by spot, not absolute dollars, so
-    // they work on SPX (0.5% of 5000 = 25 points) AND $30 stocks
-    // (0.5% of 30 = $0.15).
+    // Audit #7: pct-of-spot thresholds work for SPX vs $30 stocks.
+    // Audit #12: ALSO cap by spread width × DTE multiplier. A 5%-of-
+    // spot band ($22 on a $440 stock) is far too loose for a narrow
+    // 10-wide vertical that loses everything once spot leaves the
+    // strike pair. The width cap tightens as DTE→0 (a pin with hours
+    // left has no time for gamma to drag spot back). trade.dte is
+    // supplied by production callers; absent in fixtures/legacy
+    // callers → multiplier 1.0 so existing behavior is unchanged.
     const distance = Math.abs(liveSpot - targetStrike)
-    const driftMin = liveSpot * PIN_DRIFT_PCT
-    const invalidateMin = liveSpot * PIN_INVALIDATE_PCT
+    const width = Math.abs(Number(trade.short_strike) - Number(trade.long_strike))
+    const dteVal = Number(trade.dte)
+    const dteMult = Number.isFinite(dteVal) ? Math.min(1, Math.max(0.3, dteVal / 7)) : 1
+    const widthCap = Number.isFinite(width) && width > 0 ? width * dteMult : Infinity
+    const driftMin = Math.min(liveSpot * PIN_DRIFT_PCT, widthCap)
+    const invalidateMin = Math.min(liveSpot * PIN_INVALIDATE_PCT, widthCap * 2)
     if (distance >= driftMin) {
       const direction = liveSpot > targetStrike ? 'above' : 'below'
       const pctMove = ((distance / liveSpot) * 100).toFixed(2)
@@ -634,6 +643,24 @@ function computeStructuredVerdict(entry, live, trade) {
         reasons.push(`Live dominant wall is at ${formatStrike(liveWallStrike)} — your target was ${formatStrike(targetStrike)}. Different cluster anchoring the regime now.`)
         state = 'drifting'
       }
+    }
+  }
+
+  // Audit #12: P&L cross-check. The structural verdict can read
+  // "intact" while the position is at deep loss — a comparator blind
+  // spot (loose thresholds, stale wall data). The market's mark is
+  // ground truth. trade.pnl_pct is supplied by production callers
+  // (absent in fixtures). Only DOWNGRADES — never upgrades a
+  // structurally-broken read, and never overrides a break_through
+  // success (which is in profit by definition).
+  const pnlPct = Number(trade.pnl_pct)
+  if (!breakThroughFired && Number.isFinite(pnlPct)) {
+    if (pnlPct <= -90 && state !== 'invalidated') {
+      state = 'invalidated'
+      reasons.push(`Position is at ${pnlPct.toFixed(0)}% — thesis cannot be salvaged regardless of structural read. Mark is ground truth.`)
+    } else if (pnlPct <= -75 && state === 'intact') {
+      state = 'drifting'
+      reasons.push(`Structural thesis reads intact but the position is at ${pnlPct.toFixed(0)}%. The market disagrees with the structure — re-read the wall before holding.`)
     }
   }
 
