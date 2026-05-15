@@ -1032,6 +1032,9 @@ serve(async (req) => {
           target_expiration: sigRow?.target_expiration ?? null,
           target_thesis_kind: sigRow?.target_thesis_kind ?? null,
           regime_at_entry: sigRow?.regime_at_entry ?? null,
+          // Audit #12: width-scaled pin band + P&L cross-check.
+          dte,
+          pnl_pct: pnlPct,
         },
       )
       verdictUpdate = {

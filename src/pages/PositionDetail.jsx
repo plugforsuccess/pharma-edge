@@ -388,6 +388,9 @@ export default function PositionDetail() {
       target_expiration: signalRow?.target_expiration ?? null,
       target_thesis_kind: signalRow?.target_thesis_kind ?? null,
       regime_at_entry: signalRow?.regime_at_entry ?? null,
+      // Audit #12: width-scaled pin band + P&L cross-check inputs.
+      dte: pos?.expiration ? daysUntil(pos.expiration) : null,
+      pnl_pct: Number.isFinite(Number(pos?.last_pnl_pct)) ? Number(pos.last_pnl_pct) : null,
     })
   }, [
     pos,

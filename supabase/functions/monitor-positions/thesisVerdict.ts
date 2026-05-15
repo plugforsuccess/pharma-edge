@@ -59,6 +59,12 @@ export interface TradeShape {
   target_expiration?: string | null
   target_thesis_kind?: 'pin_to' | 'break_through' | 'fade' | null
   regime_at_entry?: 'A' | 'B' | 'mixed' | null
+  // Audit #12: production callers pass remaining DTE + live P&L so
+  // the structured verdict can width-scale the pin band and
+  // cross-check against the market mark. Optional — fixtures and
+  // legacy callers omit them (multiplier 1.0, P&L check skipped).
+  dte?: number | null
+  pnl_pct?: number | null
 }
 
 export type VerdictState = 'intact' | 'drifting' | 'invalidated' | 'not_evaluable'
@@ -348,10 +354,16 @@ function computeStructuredVerdict(
       state = 'drifting'
     }
   } else if (targetKind === 'pin_to') {
-    // Audit #7: thresholds scale by spot.
+    // Audit #7: pct-of-spot thresholds. Audit #12: also cap by
+    // spread width × DTE multiplier (see src/utils/thesisVerdict.js
+    // for the full rationale — these two files must agree).
     const distance = Math.abs(liveSpot - targetStrike)
-    const driftMin = liveSpot * PIN_DRIFT_PCT
-    const invalidateMin = liveSpot * PIN_INVALIDATE_PCT
+    const width = Math.abs(Number(trade.short_strike) - Number(trade.long_strike))
+    const dteVal = Number(trade.dte)
+    const dteMult = Number.isFinite(dteVal) ? Math.min(1, Math.max(0.3, dteVal / 7)) : 1
+    const widthCap = Number.isFinite(width) && width > 0 ? width * dteMult : Infinity
+    const driftMin = Math.min(liveSpot * PIN_DRIFT_PCT, widthCap)
+    const invalidateMin = Math.min(liveSpot * PIN_INVALIDATE_PCT, widthCap * 2)
     if (distance >= driftMin) {
       const direction = liveSpot > targetStrike ? 'above' : 'below'
       const pctMove = ((distance / liveSpot) * 100).toFixed(2)
@@ -391,6 +403,18 @@ function computeStructuredVerdict(
         reasons.push(`Live dominant wall is at ${formatStrike(liveWallStrike)} — your target was ${formatStrike(targetStrike)}. Different cluster anchoring the regime now.`)
         state = 'drifting'
       }
+    }
+  }
+
+  // Audit #12: P&L cross-check (see src/utils/thesisVerdict.js).
+  const pnlPct = Number(trade.pnl_pct)
+  if (!breakThroughFired && Number.isFinite(pnlPct)) {
+    if (pnlPct <= -90 && state !== 'invalidated') {
+      state = 'invalidated'
+      reasons.push(`Position is at ${pnlPct.toFixed(0)}% — thesis cannot be salvaged regardless of structural read. Mark is ground truth.`)
+    } else if (pnlPct <= -75 && state === 'intact') {
+      state = 'drifting'
+      reasons.push(`Structural thesis reads intact but the position is at ${pnlPct.toFixed(0)}%. The market disagrees with the structure — re-read the wall before holding.`)
     }
   }
 
