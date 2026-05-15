@@ -487,6 +487,55 @@ function classifySession(d = new Date()): MarketSession {
   return 'overnight'
 }
 
+// OPEX context from the holiday-adjusted opex_dates table (source of
+// truth — already populated, includes monthly/quarterly flag and any
+// holiday shifts; never reinvent third-Friday math). Returns the next
+// OPEX on/after today plus whether today IS an OPEX. The whole point:
+// a pin/wall thesis anchored to the monthly-OPEX expiration carries
+// acute gamma-roll-off risk — that cluster is the biggest of the
+// month and it evaporates on OPEX. Surfacing this lets Claude and the
+// UI warn instead of silently treating an expiring wall as permanent.
+export interface OpexContext {
+  next_date: string | null
+  type: 'monthly' | 'quarterly' | null
+  is_quarterly: boolean
+  is_today: boolean
+  days_until: number | null
+}
+async function fetchOpexContext(
+  adminClient: ReturnType<typeof createClient>,
+): Promise<OpexContext> {
+  const empty: OpexContext = {
+    next_date: null, type: null, is_quarterly: false,
+    is_today: false, days_until: null,
+  }
+  try {
+    const today = new Date()
+    const todayStr = `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, '0')}-${String(today.getUTCDate()).padStart(2, '0')}`
+    const { data, error } = await adminClient
+      .from('opex_dates')
+      .select('opex_date, opex_type, is_quarterly')
+      .gte('opex_date', todayStr)
+      .order('opex_date', { ascending: true })
+      .limit(1)
+      .maybeSingle()
+    if (error || !data) return empty
+    const od = String(data.opex_date)
+    const daysUntil = Math.round(
+      (new Date(od + 'T00:00:00Z').getTime() - new Date(todayStr + 'T00:00:00Z').getTime()) / 86_400_000,
+    )
+    return {
+      next_date: od,
+      type: (data.opex_type as 'monthly' | 'quarterly') ?? null,
+      is_quarterly: !!data.is_quarterly,
+      is_today: od === todayStr,
+      days_until: Number.isFinite(daysUntil) ? daysUntil : null,
+    }
+  } catch {
+    return empty
+  }
+}
+
 interface MatrixOutput {
   ticker: string
   spot: number
@@ -1232,6 +1281,7 @@ serve(async (req) => {
         // hours when matrix cells (Greeks/OI) are correctly frozen.
         const liveTrade = POLYGON_ENABLED ? await (await loadPolygon())?.fetchPolygonLastTrade(ticker) : null
         const session = classifySession()
+        const opex = await fetchOpexContext(adminClient)
         return json({
           success: true,
           data: {
@@ -1239,6 +1289,7 @@ serve(async (req) => {
             live_spot: liveTrade?.price ?? null,
             live_spot_at: liveTrade?.ts_ms ? new Date(liveTrade.ts_ms).toISOString() : null,
             session,
+            opex,
             from_cache: true,
             cache_age_ms: age,
           },
@@ -1392,6 +1443,7 @@ serve(async (req) => {
     // and Claude where price actually is right now.
     const liveTrade = POLYGON_ENABLED ? await (await loadPolygon())?.fetchPolygonLastTrade(ticker) : null
     const session = classifySession()
+    const opex = await fetchOpexContext(adminClient)
     return json({
       success: true,
       data: {
@@ -1399,6 +1451,7 @@ serve(async (req) => {
         live_spot: liveTrade?.price ?? null,
         live_spot_at: liveTrade?.ts_ms ? new Date(liveTrade.ts_ms).toISOString() : null,
         session,
+        opex,
         from_cache: false,
         cache_age_ms: 0,
       },
