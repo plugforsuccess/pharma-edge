@@ -1,9 +1,10 @@
 // Cash Moves — shared playSuggester module.
 //
-// PROMPT VERSION: 2026-05-14c — per-expiration wall table (#207),
+// PROMPT VERSION: 2026-05-14d — per-expiration wall table (#207),
 // tightened gamma_rolloff_risk gate (#207), real per-cell OI sourced
 // from compute-gex matrix (#209), intraday price path + king-node
-// interaction history sourced from Polygon 5-min bars (this PR).
+// interaction history sourced from Polygon 5-min bars (#215),
+// extended-hours LIVE SPOT divergence + session label (this PR).
 // Bump this header on any prompt-shape change so deploys are visible
 // in PR diffs.
 //
@@ -213,6 +214,14 @@ Both strikes you propose MUST exist in the matrix's strikes[] array. Use the mat
 export interface MatrixData {
   ticker: string
   spot: number
+  // Live equity spot from Polygon /v2/last/trade, updated through
+  // pre-market + RTH + after-hours. Diverges from `spot` (RTH-close
+  // snapshot price) during extended hours — surface both so Claude
+  // can reason about gap-up / gap-down situations honestly instead
+  // of asserting the stale close price as current.
+  live_spot?: number | null
+  live_spot_at?: string | null
+  session?: 'rth' | 'pre-market' | 'after-hours' | 'overnight' | 'weekend'
   source: string
   expirations: Array<{ date: string; dte: number }>
   strikes: number[]
@@ -605,7 +614,19 @@ export function buildUserPrompt(
   }
 
   return `TICKER: ${matrix.ticker}
-SPOT: $${matrix.spot.toFixed(2)}
+SPOT: $${matrix.spot.toFixed(2)}${
+  matrix.session && matrix.session !== 'rth' && Number.isFinite(matrix.live_spot)
+    ? ` (RTH close — see LIVE SPOT below for current ${matrix.session} price)`
+    : ''
+}${
+  matrix.live_spot != null && Number.isFinite(matrix.live_spot)
+    ? `\nLIVE SPOT: $${(matrix.live_spot as number).toFixed(2)} (session: ${matrix.session ?? 'unknown'}${
+        matrix.spot
+          ? `, Δ from RTH close: ${(((matrix.live_spot as number) - matrix.spot) / matrix.spot * 100).toFixed(2)}%`
+          : ''
+      })`
+    : ''
+}
 DATA SOURCE: ${matrix.source}
 ACCOUNT SIZE: $${accountSize.toLocaleString()}
 MAX RISK PER TRADE (2% rule): $${Math.floor(accountSize * 0.02).toLocaleString()}
@@ -643,6 +664,7 @@ INTERPRETATION HINTS:
 - Flow CONCENTRATING THROUGH a wall (vol > 5x OI at strikes ABOVE the wall) = directional bullish bet, wall may break.
 - Mismatch between GEX (where positioning sits) and flow (where new bets land) = transition signal — regime may be shifting.
 - INTRADAY context (KING NODE INTERACTIONS TODAY) is a hard input, not advisory: if a wall is marked REJECTED today, downgrade pin_to plays targeting that wall — the wall is reinforced for the remainder of the session. A wall marked "untested today (closest approach X%)" with X > 2% is a red flag for pin_to: spot has stayed away from it all session. For break_through setups, REJECTED is a hard contraindication unless a catalyst overlaps.
+- SPOT vs LIVE SPOT: when a LIVE SPOT line is present, the matrix's cells/walls/GEX numbers are frozen at the RTH close (options stop trading at 4pm ET) but the underlying has moved in extended hours. Phrase the thesis against LIVE SPOT, not SPOT. A gap of |Δ| > 0.3% materially changes the wall-distance math even though GEX cells stay constant. If session is 'pre-market' and live spot is meaningfully below the dominant call wall, the pin-to-wall thesis still works but the path is longer (spot must climb from live, not from close). If session is 'after-hours' / 'overnight' and live spot has dropped through a put wall the close held, that's a regime-flip warning for tomorrow's open. Never assert spot is at the RTH close when LIVE SPOT says otherwise.
 
 Propose 0-5 spread trades following the rules in the system prompt. When you return 2 or more, span at least 2 distinct strategy types. Strict JSON only.`
 }

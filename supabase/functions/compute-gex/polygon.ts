@@ -163,6 +163,32 @@ async function fetchPrevClose(underlying: string): Promise<number | null> {
   }
 }
 
+// Last trade on the equity (including extended hours). Returns
+// {price, ts_ms} or null. Polygon's /v2/last/trade/{ticker} updates
+// continuously through pre-market + RTH + after-hours, unlike the
+// option snapshot's underlying_asset.price which freezes at RTH
+// close. compute-gex pairs this with the snapshot's RTH-close spot
+// so the UI + prompt can show extended-hours moves honestly.
+export async function fetchPolygonLastTrade(
+  underlying: string,
+): Promise<{ price: number; ts_ms: number } | null> {
+  if (!MASSIVE_API_KEY) return null
+  const url = new URL(`${POLYGON_BASE}/v2/last/trade/${polygonUnderlying(underlying)}`)
+  url.searchParams.set('apiKey', MASSIVE_API_KEY)
+  try {
+    const resp = await fetch(url.toString(), { signal: AbortSignal.timeout(3000) })
+    if (!resp.ok) return null
+    const body: { results?: { p?: number; t?: number } } = await resp.json()
+    const p = Number(body.results?.p)
+    const tNs = Number(body.results?.t)   // nanoseconds since epoch
+    if (!Number.isFinite(p) || p <= 0) return null
+    const ts_ms = Number.isFinite(tNs) && tNs > 0 ? Math.floor(tNs / 1e6) : Date.now()
+    return { price: p, ts_ms }
+  } catch {
+    return null
+  }
+}
+
 // Midnight UTC of today, in epoch ms. DTE math compares expiry
 // midnight to today midnight so tomorrow's expiry is always 1, not 0
 // (which the prior `(expMs - Date.now())/86_400_000` would yield any

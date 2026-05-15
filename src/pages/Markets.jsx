@@ -520,12 +520,14 @@ export default function Markets() {
                   {data.expirations?.length ?? 0} expirations · {data.strikes?.length ?? 0} strikes
                 </span>
                 <SourceBadge source={data.source} eodAt={data.eod_snapshot_at} />
+                <SessionBadge session={data.session} />
                 {data.from_cache && (
                   <span className="text-muted">
                     · cached {formatCacheAge(data.cache_age_ms)} ago
                   </span>
                 )}
               </div>
+              <ExtendedHoursDivergenceBanner data={data} liveSpot={liveSpot} />
             </div>
             <div className="text-right">
               <div className="text-xl font-mono-tab tabular-nums">
@@ -842,6 +844,56 @@ function Metric({ label, value, tone = 'muted' }) {
       <span className={'font-mono-tab tabular-nums text-sm font-semibold ' + toneClass}>
         {value}
       </span>
+    </div>
+  )
+}
+
+// Small session chip — 'rth' renders nothing (no signal); extended
+// sessions render a colored pill so the user knows the matrix's spot
+// is a frozen RTH-close value while live price is moving underneath.
+function SessionBadge({ session }) {
+  if (!session || session === 'rth') return null
+  const config = {
+    'pre-market':  { label: 'PRE-MARKET',  cls: 'bg-blue-950 text-blue-300 border-blue-800' },
+    'after-hours': { label: 'AFTER-HOURS', cls: 'bg-amber-950 text-amber-300 border-amber-800' },
+    'overnight':   { label: 'OVERNIGHT',   cls: 'bg-zinc-900 text-zinc-300 border-zinc-700' },
+    'weekend':     { label: 'WEEKEND',     cls: 'bg-zinc-900 text-zinc-300 border-zinc-700' },
+  }[session] ?? { label: session.toUpperCase(), cls: 'bg-zinc-900 text-zinc-300 border-zinc-700' }
+  return (
+    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wider font-semibold border ${config.cls}`}>
+      {config.label}
+    </span>
+  )
+}
+
+// Banner that fires when (a) we're outside RTH and (b) live equity
+// price has diverged ≥0.2% from the matrix's spot (RTH close). The
+// matrix's cells/walls/Greeks are frozen at the close — accurate —
+// but the wall-distance math relative to the user's actual entry
+// point changes when price has moved overnight. Tells the user what
+// the matrix doesn't say.
+function ExtendedHoursDivergenceBanner({ data, liveSpot }) {
+  const session = data?.session
+  if (!session || session === 'rth') return null
+  const close = Number(data?.spot)
+  const live = Number.isFinite(liveSpot) && liveSpot > 0
+    ? liveSpot
+    : Number.isFinite(Number(data?.live_spot)) ? Number(data.live_spot) : NaN
+  if (!Number.isFinite(close) || !Number.isFinite(live) || close <= 0) return null
+  const deltaPct = ((live - close) / close) * 100
+  if (Math.abs(deltaPct) < 0.2) return null   // below threshold, hide
+  const direction = deltaPct >= 0 ? 'gap up' : 'gap down'
+  const tone = Math.abs(deltaPct) >= 0.5 ? 'amber-400' : 'amber-300'
+  const sessionLabel = {
+    'pre-market': 'Pre-market',
+    'after-hours': 'After-hours',
+    'overnight': 'Overnight',
+    'weekend': 'Weekend',
+  }[session] ?? session
+  return (
+    <div className={`mt-1.5 rounded border border-amber-800/60 bg-amber-950/30 px-2 py-1.5 text-[10px] leading-relaxed text-${tone}`}>
+      {sessionLabel} {direction} {deltaPct >= 0 ? '+' : ''}{deltaPct.toFixed(2)}%
+      <span className="text-subtle"> · matrix spot ${close.toFixed(2)} is RTH close; live ${live.toFixed(2)}. Cells/walls/Greeks are frozen — re-read wall distances against live spot, not close.</span>
     </div>
   )
 }

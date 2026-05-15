@@ -442,9 +442,65 @@ async function computeFromPolygon(
 // it cached) and pivots into a 2D grid. Yahoo path fans out parallel
 // chain fetches, one per expiration.
 
+// Coarse market-session classifier in ET. Anything outside RTH gets
+// a label so the UI can call out that the matrix's `spot` (frozen at
+// RTH close) and the equity's actual current price (in `live_spot`)
+// disagree. Public US options exchanges don't trade in extended
+// hours, so the option Greeks / OI / GEX cells in `cells` are
+// captured at RTH close regardless of when this function runs —
+// `session` tells consumers how to interpret the gap.
+//
+// Holidays + early closes aren't handled here; the cron stops calling
+// on weekends so weekend classification is mostly a defensive code
+// path for ad-hoc calls.
+export type MarketSession =
+  | 'rth'           // 9:30 AM – 4:00 PM ET, M-F
+  | 'pre-market'    // 4:00 AM – 9:30 AM ET, M-F
+  | 'after-hours'   // 4:00 PM – 8:00 PM ET, M-F
+  | 'overnight'     // 8:00 PM Mon-Thu – 4:00 AM next weekday
+  | 'weekend'       // Sat / Sun
+function classifySession(d = new Date()): MarketSession {
+  // Convert UTC to America/New_York. ET is UTC-5 EST or UTC-4 EDT.
+  // We don't have full timezone-rule data in Deno's std edge runtime,
+  // so we approximate by checking whether DST is in effect for the
+  // given UTC instant. DST: second Sunday March → first Sunday Nov.
+  function isDst(date: Date): boolean {
+    const y = date.getUTCFullYear()
+    // Second Sunday in March
+    const marStart = new Date(Date.UTC(y, 2, 1))
+    const marDow = marStart.getUTCDay()
+    const dstStart = new Date(Date.UTC(y, 2, 1 + ((7 - marDow) % 7) + 7))
+    // First Sunday in November
+    const novStart = new Date(Date.UTC(y, 10, 1))
+    const novDow = novStart.getUTCDay()
+    const dstEnd = new Date(Date.UTC(y, 10, 1 + ((7 - novDow) % 7)))
+    return date >= dstStart && date < dstEnd
+  }
+  const offsetHours = isDst(d) ? -4 : -5
+  const et = new Date(d.getTime() + offsetHours * 60 * 60 * 1000)
+  const dow = et.getUTCDay()
+  if (dow === 0 || dow === 6) return 'weekend'
+  const minutes = et.getUTCHours() * 60 + et.getUTCMinutes()
+  if (minutes >= 4 * 60 && minutes < 9 * 60 + 30) return 'pre-market'
+  if (minutes >= 9 * 60 + 30 && minutes < 16 * 60) return 'rth'
+  if (minutes >= 16 * 60 && minutes < 20 * 60) return 'after-hours'
+  return 'overnight'
+}
+
 interface MatrixOutput {
   ticker: string
   spot: number
+  // Spot from Polygon's equity /v2/last/trade endpoint. Updates
+  // through pre-market + RTH + after-hours, unlike `spot` (which is
+  // the option snapshot's underlying_asset.price, frozen at RTH
+  // close). Null when the call failed or no key. Use this to render
+  // the live price; use `spot` for math anchored to where the
+  // Greeks/OI in `cells` were captured.
+  live_spot?: number | null
+  live_spot_at?: string | null   // ISO timestamp of the last_trade.t
+  // Market session at the time this matrix was built, so the UI can
+  // label extended-hours divergence honestly.
+  session?: MarketSession
   // 'eod' = served from gex_history when both live paths failed (or
   // returned sparse data); UI renders a yellow EOD CLOSE badge with
   // eod_snapshot_at as the timestamp.
@@ -1170,9 +1226,22 @@ serve(async (req) => {
         if (includeVelocity && matrixMode) {
           payload = await attachVelocity(adminClient, ticker, payload)
         }
+        // Live-spot overlay is recomputed on every served response,
+        // even for cached payloads — Polygon's last_trade is a free
+        // call and the price moves under the cache during extended
+        // hours when matrix cells (Greeks/OI) are correctly frozen.
+        const liveTrade = POLYGON_ENABLED ? await (await loadPolygon())?.fetchPolygonLastTrade(ticker) : null
+        const session = classifySession()
         return json({
           success: true,
-          data: { ...payload, from_cache: true, cache_age_ms: age },
+          data: {
+            ...payload,
+            live_spot: liveTrade?.price ?? null,
+            live_spot_at: liveTrade?.ts_ms ? new Date(liveTrade.ts_ms).toISOString() : null,
+            session,
+            from_cache: true,
+            cache_age_ms: age,
+          },
         })
       }
     }
@@ -1315,9 +1384,24 @@ serve(async (req) => {
     if (includeVelocity && matrix) {
       matrix = await attachVelocity(adminClient, ticker, matrix)
     }
+    // Extended-hours overlay. Polygon's equity /v2/last/trade updates
+    // through pre-market + RTH + after-hours, unlike the option
+    // snapshot's underlying_asset.price which freezes at RTH close.
+    // Surface both: matrix.spot stays anchored to where Greeks/OI in
+    // cells were captured (correct for math); live_spot tells the UI
+    // and Claude where price actually is right now.
+    const liveTrade = POLYGON_ENABLED ? await (await loadPolygon())?.fetchPolygonLastTrade(ticker) : null
+    const session = classifySession()
     return json({
       success: true,
-      data: { ...matrix, from_cache: false, cache_age_ms: 0 },
+      data: {
+        ...matrix,
+        live_spot: liveTrade?.price ?? null,
+        live_spot_at: liveTrade?.ts_ms ? new Date(liveTrade.ts_ms).toISOString() : null,
+        session,
+        from_cache: false,
+        cache_age_ms: 0,
+      },
     })
   }
 
