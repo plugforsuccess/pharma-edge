@@ -1,6 +1,9 @@
 // Cash Moves — shared playSuggester module.
 //
-// PROMPT VERSION: 2026-05-15c — event calendar honesty (UPCOMING
+// PROMPT VERSION: 2026-05-15d — geometry-relative untested-wall
+// judgment ($ + % closest approach, half-spread-width rule
+// replacing the blunt flat 2%; this PR), event calendar honesty
+// (UPCOMING
 // EVENTS block + explicit "you do NOT know earnings/macro timing"
 // instruction so Claude stops fabricating catalysts; this PR),
 // node-retest decay + per-node ∆GEX
@@ -579,7 +582,13 @@ function buildIntradaySection(
       const closest = bars.reduce((m, b) =>
         Math.min(m, Math.abs(b.h - strike), Math.abs(b.l - strike)), Infinity)
       const closestPct = (closest / strike) * 100
-      return `untested today (closest approach ${closestPct.toFixed(2)}%)${rocTag}`
+      // Report BOTH $ and % so Claude can reason proportionally to
+      // the structure it's about to build — a flat 2% is too blunt
+      // for narrow verticals on high-priced names (the AMD miss:
+      // $9.50 / 2.05% barely cleared the old 2% line; a $1 higher
+      // session high would have slipped under it on an equally-dead
+      // trade).
+      return `untested today (closest approach $${closest.toFixed(2)} / ${closestPct.toFixed(2)}%)${rocTag}`
     }
     const touchCount = touchStartIdxs.length
     const firstIdx = touchStartIdxs[0]
@@ -791,7 +800,8 @@ INTERPRETATION HINTS:
 - Flow concentrating AT a call wall = traders growing the wall (more resistance forming).
 - Flow CONCENTRATING THROUGH a wall (vol > 5x OI at strikes ABOVE the wall) = directional bullish bet, wall may break.
 - Mismatch between GEX (where positioning sits) and flow (where new bets land) = transition signal — regime may be shifting.
-- INTRADAY context (KING NODE INTERACTIONS TODAY) is a hard input, not advisory: if a wall is marked REJECTED today, downgrade pin_to plays targeting that wall — the wall is reinforced for the remainder of the session. A wall marked "untested today (closest approach X%)" with X > 2% is a red flag for pin_to: spot has stayed away from it all session. For break_through setups, REJECTED is a hard contraindication unless a catalyst overlaps.
+- INTRADAY context (KING NODE INTERACTIONS TODAY) is a hard input, not advisory: if a wall is marked REJECTED today, downgrade pin_to plays targeting that wall — the wall is reinforced for the remainder of the session. For break_through setups, REJECTED is a hard contraindication unless a catalyst overlaps.
+- UNTESTED-WALL judgment is GEOMETRY-RELATIVE, not a flat percentage. Each untested wall reports closest approach in BOTH $ and %. A wall is a red flag for pin_to when the day's closest approach exceeds roughly HALF the width of the vertical you would use to target it (a 10-wide spread targeting that wall tolerates spot wandering ~$5; if the session never came within $5, the pin never had a chance today). On a $40 stock $2 away is severe; on a $700 index $2 away is noise — judge the $ gap against the spread you're about to build and the strike spacing, never a fixed 2%. The wider the gap relative to your structure, the harder the downgrade; a gap exceeding the full spread width is a hard contraindication, not a caution.
 - NODE RETEST DECAY (price-delivery framework — directional priors, NOT measured probabilities; weigh, don't compute with): node influence weakens with each retest. A node tagged FRESH (1st touch) carries the strongest reversal/bounce prior — prefer these for fade/bounce plays. "2nd touch" = moderate, watch for a double-top/bottom failing. "3rd+ touched" = weak prior, the level is stale; do NOT propose a fade/bounce back to a 3rd+-touched node unless its node ∆GEX is clearly growing. Prioritise the FRESHEST untouched-or-1st-touch node available over chasing a stale one.
 - NODE ∆GEX (rate of change at the specific node a play targets): growing (positive ∆GEX) → reversion/defense of that node is MORE likely, the play is better supported. Decaying (negative ∆GEX) → the node is losing dealer commitment, reversion is LESS likely — do not chase a bounce/pin to a decaying node even if it was strong earlier. When ∆GEX is unavailable (no velocity), treat node strength as unknown and lean on touch-count freshness alone.
 - SPOT vs LIVE SPOT: when a LIVE SPOT line is present, the matrix's cells/walls/GEX numbers are frozen at the RTH close (options stop trading at 4pm ET) but the underlying has moved in extended hours. Phrase the thesis against LIVE SPOT, not SPOT. A gap of |Δ| > 0.3% materially changes the wall-distance math even though GEX cells stay constant. If session is 'pre-market' and live spot is meaningfully below the dominant call wall, the pin-to-wall thesis still works but the path is longer (spot must climb from live, not from close). If session is 'after-hours' / 'overnight' and live spot has dropped through a put wall the close held, that's a regime-flip warning for tomorrow's open. Never assert spot is at the RTH close when LIVE SPOT says otherwise.
