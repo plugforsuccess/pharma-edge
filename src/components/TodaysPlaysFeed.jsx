@@ -28,7 +28,11 @@ function minutesAgo(iso) {
   const ms = Date.now() - new Date(iso).getTime()
   if (ms < 0) return 'just now'
   const mins = Math.floor(ms / 60_000)
-  return mins === 0 ? 'just now' : `${mins}m ago`
+  if (mins === 0) return 'just now'
+  if (mins < 60) return `${mins}m ago`
+  const hrs = Math.floor(mins / 60)
+  const rem = mins % 60
+  return rem === 0 ? `${hrs}h ago` : `${hrs}h ${rem}m ago`
 }
 
 export default function TodaysPlaysFeed() {
