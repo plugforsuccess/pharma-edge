@@ -19,7 +19,7 @@ import { supabase } from '../lib/supabase'
 
 // Derive presentational summary from a compute-gex MatrixOutput payload.
 // All compute lives in compute-gex; we just project.
-function deriveSummary(matrix) {
+function deriveSummary(matrix, liveSpot = null) {
   if (!matrix) return null
   const netGex = Number(matrix.net_gex ?? 0)
   const regime = netGex >= 0 ? 'A' : 'B'
@@ -53,7 +53,15 @@ function deriveSummary(matrix) {
 
   return {
     ticker: matrix.ticker,
-    spot: Number(matrix.spot ?? 0),
+    // Prefer the live dxlink poll over matrix.spot (server-cached up
+    // to 5 min) so the headline spot matches the Markets header and
+    // the GexMatrix ▶ cursor exactly — they use this same idiom
+    // (GexMatrix.jsx:79). The EM-today / EM-realized tiles below
+    // stay server-as-of-compute on purpose (they're timestamped
+    // "Updated HH:MM") — only the headline spot tracks live.
+    spot: (Number.isFinite(liveSpot) && liveSpot > 0)
+      ? Number(liveSpot)
+      : Number(matrix.spot ?? 0),
     regime,
     regimeLabel,
     netGex,
@@ -93,8 +101,8 @@ function fmtTime(iso) {
   catch { return '' }
 }
 
-export default function MatrixSummaryCard({ matrix, variant = 'full', play = null }) {
-  const summary = deriveSummary(matrix)
+export default function MatrixSummaryCard({ matrix, variant = 'full', play = null, liveSpot = null }) {
+  const summary = deriveSummary(matrix, liveSpot)
   const [narrative, setNarrative] = useState(null)
   const [narrativeLoading, setNarrativeLoading] = useState(true)
 
