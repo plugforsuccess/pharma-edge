@@ -24,6 +24,11 @@
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import {
+  classifySession,
+  startOfTodayUtcMs,
+  type MarketSession,
+} from '../_shared/marketTime.ts'
 
 // Polygon (Massive) integration is loaded LAZILY via dynamic import
 // inside the dispatcher. Static `import { ... } from './polygon.ts'`
@@ -114,15 +119,10 @@ function clamp(n: number, min: number, max: number, fallback: number): number {
   return Math.max(min, Math.min(max, n))
 }
 
-// Start of today (00:00 UTC) in epoch ms. Used by every DTE
-// computation: subtracting from a midnight-aligned reference gives a
-// clean integer number of calendar days. Subtracting from Date.now()
-// instead causes tomorrow's expiry to round to 0 whenever "now" is
-// more than 12 hours past last midnight UTC.
-function startOfTodayUtcMs(): number {
-  const d = new Date()
-  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
-}
+// startOfTodayUtcMs / classifySession / MarketSession now live in
+// _shared/marketTime.ts so the regression harness imports the REAL
+// implementations (see scripts/check-market-time.ts). Imported at
+// the top of this file.
 
 // ─── Black-Scholes gamma (used when a source ships IV but not gamma) ──
 function normPdf(x: number): number {
@@ -453,39 +453,9 @@ async function computeFromPolygon(
 // Holidays + early closes aren't handled here; the cron stops calling
 // on weekends so weekend classification is mostly a defensive code
 // path for ad-hoc calls.
-export type MarketSession =
-  | 'rth'           // 9:30 AM – 4:00 PM ET, M-F
-  | 'pre-market'    // 4:00 AM – 9:30 AM ET, M-F
-  | 'after-hours'   // 4:00 PM – 8:00 PM ET, M-F
-  | 'overnight'     // 8:00 PM Mon-Thu – 4:00 AM next weekday
-  | 'weekend'       // Sat / Sun
-function classifySession(d = new Date()): MarketSession {
-  // Convert UTC to America/New_York. ET is UTC-5 EST or UTC-4 EDT.
-  // We don't have full timezone-rule data in Deno's std edge runtime,
-  // so we approximate by checking whether DST is in effect for the
-  // given UTC instant. DST: second Sunday March → first Sunday Nov.
-  function isDst(date: Date): boolean {
-    const y = date.getUTCFullYear()
-    // Second Sunday in March
-    const marStart = new Date(Date.UTC(y, 2, 1))
-    const marDow = marStart.getUTCDay()
-    const dstStart = new Date(Date.UTC(y, 2, 1 + ((7 - marDow) % 7) + 7))
-    // First Sunday in November
-    const novStart = new Date(Date.UTC(y, 10, 1))
-    const novDow = novStart.getUTCDay()
-    const dstEnd = new Date(Date.UTC(y, 10, 1 + ((7 - novDow) % 7)))
-    return date >= dstStart && date < dstEnd
-  }
-  const offsetHours = isDst(d) ? -4 : -5
-  const et = new Date(d.getTime() + offsetHours * 60 * 60 * 1000)
-  const dow = et.getUTCDay()
-  if (dow === 0 || dow === 6) return 'weekend'
-  const minutes = et.getUTCHours() * 60 + et.getUTCMinutes()
-  if (minutes >= 4 * 60 && minutes < 9 * 60 + 30) return 'pre-market'
-  if (minutes >= 9 * 60 + 30 && minutes < 16 * 60) return 'rth'
-  if (minutes >= 16 * 60 && minutes < 20 * 60) return 'after-hours'
-  return 'overnight'
-}
+// MarketSession + classifySession + startOfTodayUtcMs moved to
+// _shared/marketTime.ts (imported below). Single source of truth so
+// the Deno regression harness tests the real code, not a copy.
 
 // OPEX context from the holiday-adjusted opex_dates table (source of
 // truth — already populated, includes monthly/quarterly flag and any
