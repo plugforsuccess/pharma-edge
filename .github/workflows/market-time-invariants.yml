@@ -1,0 +1,34 @@
+# Regression guard for the pure market-time helpers (gap #3).
+#
+# DTE midnight math (#202) and the session classifier (#216) are
+# deterministic and load-bearing — a stale-data gate, OPEX flag, and
+# the whole extended-hours overlay key off them. Without a test they
+# could silently regress in any nearby edit and nothing would go red.
+#
+# scripts/check-market-time.ts imports the REAL _shared/marketTime.ts
+# (not a copy) and runs it against scripts/market-time-fixtures.json.
+# Same drift-guard discipline as verdict-fixtures.yml.
+
+name: Market-time invariants
+
+on:
+  pull_request:
+    paths:
+      - 'supabase/functions/_shared/marketTime.ts'
+      - 'supabase/functions/compute-gex/index.ts'
+      - 'scripts/check-market-time.ts'
+      - 'scripts/market-time-fixtures.json'
+      - '.github/workflows/market-time-invariants.yml'
+  workflow_dispatch:
+
+jobs:
+  market-time:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v1
+        with:
+          deno-version: v1.x
+      - name: Run market-time fixtures
+        run: deno run --allow-read scripts/check-market-time.ts

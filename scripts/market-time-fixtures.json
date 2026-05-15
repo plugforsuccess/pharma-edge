@@ -1,0 +1,105 @@
+[
+  {
+    "name": "dte_tomorrow_is_1_not_0_midday_utc",
+    "note": "#202 bug: a <24h gap from now to tomorrow's expiry rounded to 0 any time of day. Pin now=14:00 UTC, expiry=tomorrow -> must be 1.",
+    "fn": "dteFor",
+    "now": "2026-05-14T14:00:00Z",
+    "arg": "2026-05-15",
+    "expected": 1
+  },
+  {
+    "name": "dte_tomorrow_is_1_late_utc",
+    "note": "Same, now=23:30 UTC (worst case for the old bug). Still 1.",
+    "fn": "dteFor",
+    "now": "2026-05-14T23:30:00Z",
+    "arg": "2026-05-15",
+    "expected": 1
+  },
+  {
+    "name": "dte_today_is_0",
+    "note": "Expiry == today -> 0 DTE.",
+    "fn": "dteFor",
+    "now": "2026-05-15T18:00:00Z",
+    "arg": "2026-05-15",
+    "expected": 0
+  },
+  {
+    "name": "dte_eight_calendar_days",
+    "note": "5-14 to 5-22 = 8 calendar days (the 05-22 column that showed 7d under the bug).",
+    "fn": "dteFor",
+    "now": "2026-05-14T17:00:00Z",
+    "arg": "2026-05-22",
+    "expected": 8
+  },
+  {
+    "name": "dte_past_expiry_floors_at_0",
+    "note": "Expiry in the past -> floored at 0, never negative.",
+    "fn": "dteFor",
+    "now": "2026-05-20T12:00:00Z",
+    "arg": "2026-05-15",
+    "expected": 0
+  },
+  {
+    "name": "session_rth_midday_edt",
+    "note": "2026-05-15 17:00 UTC = 13:00 EDT (DST) -> rth.",
+    "fn": "classifySession",
+    "now": "2026-05-15T17:00:00Z",
+    "expected": "rth"
+  },
+  {
+    "name": "session_premarket_edt",
+    "note": "2026-05-15 12:00 UTC = 08:00 EDT -> pre-market.",
+    "fn": "classifySession",
+    "now": "2026-05-15T12:00:00Z",
+    "expected": "pre-market"
+  },
+  {
+    "name": "session_rth_open_boundary_edt",
+    "note": "13:30 UTC = 09:30 EDT exactly -> rth (inclusive lower bound).",
+    "fn": "classifySession",
+    "now": "2026-05-15T13:30:00Z",
+    "expected": "rth"
+  },
+  {
+    "name": "session_just_before_open_is_premarket_edt",
+    "note": "13:29 UTC = 09:29 EDT -> still pre-market.",
+    "fn": "classifySession",
+    "now": "2026-05-15T13:29:00Z",
+    "expected": "pre-market"
+  },
+  {
+    "name": "session_after_hours_edt",
+    "note": "20:30 UTC = 16:30 EDT -> after-hours.",
+    "fn": "classifySession",
+    "now": "2026-05-15T20:30:00Z",
+    "expected": "after-hours"
+  },
+  {
+    "name": "session_overnight_edt",
+    "note": "01:00 UTC Fri = 21:00 EDT Thu -> overnight.",
+    "fn": "classifySession",
+    "now": "2026-05-15T01:00:00Z",
+    "expected": "overnight"
+  },
+  {
+    "name": "session_weekend_saturday",
+    "note": "2026-05-16 is a Saturday in ET -> weekend.",
+    "fn": "classifySession",
+    "now": "2026-05-16T17:00:00Z",
+    "expected": "weekend"
+  },
+  {
+    "name": "session_est_offset_january",
+    "note": "Winter: 2026-01-15 14:30 UTC = 09:30 EST (UTC-5) -> rth. Proves the DST switch picks -5 in January.",
+    "fn": "classifySession",
+    "now": "2026-01-15T14:30:00Z",
+    "expected": "rth"
+  },
+  {
+    "name": "session_est_premarket_january",
+    "note": "Winter: 2026-01-15 14:29 UTC = 09:29 EST -> pre-market (proves -5 offset, not -4).",
+    "fn": "classifySession",
+    "now": "2026-01-15T14:29:00Z",
+    "expected": "pre-market"
+  }
+]
