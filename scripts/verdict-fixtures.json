@@ -546,5 +546,100 @@
       "state": "intact",
       "reasons_contains_any": ["Dealer book reconcentrated in your direction"]
     }
+  },
+  {
+    "name": "audit12_narrow_pin_width_scaled_drifts_early",
+    "note": "Audit #12. $440 stock, 10-wide pin (long 452.5 / short 462.5), target 462.5, live $13.5 away, 5 DTE. Old 5%-of-spot band ($22) said intact; width-scaled cap (10 x clamp(5/7)=7.14) flags drifting. This is the exact AMD blind spot.",
+    "input": {
+      "entry": { "spot": 451.2, "net_gex": 150000000, "largest_wall": { "strike": 462.5, "expiration": "2026-06-01", "gex_net": 16000000 } },
+      "live":  { "spot": 449.0, "net_gex": 145000000, "largest_wall": { "strike": 462.5, "expiration": "2026-06-01", "gex_net": 15000000 } },
+      "trade": {
+        "long_strike": 452.5, "short_strike": 462.5,
+        "strategy_type": "BULL_CALL", "expiration": "2026-06-01",
+        "target_king_node": "call_wall", "target_strike": 462.5,
+        "target_expiration": "2026-06-01", "target_thesis_kind": "pin_to",
+        "regime_at_entry": "A", "dte": 5
+      }
+    },
+    "expected": {
+      "state": "drifting",
+      "reasons_contains_any": ["Pin thesis weakening"]
+    }
+  },
+  {
+    "name": "audit12_narrow_pin_dte_zero_invalidates",
+    "note": "Audit #12. Same 10-wide pin but 0 DTE — multiplier clamps to 0.3, cap = 10 x 0.3 = 3, invalidate at 2x = 6. Live $13.5 from target -> invalidated. A pin with no time left and spot far off the strike pair is dead.",
+    "input": {
+      "entry": { "spot": 451.2, "net_gex": 150000000, "largest_wall": { "strike": 462.5, "expiration": "2026-06-01", "gex_net": 16000000 } },
+      "live":  { "spot": 449.0, "net_gex": 145000000, "largest_wall": { "strike": 462.5, "expiration": "2026-06-01", "gex_net": 15000000 } },
+      "trade": {
+        "long_strike": 452.5, "short_strike": 462.5,
+        "strategy_type": "BULL_CALL", "expiration": "2026-06-01",
+        "target_king_node": "call_wall", "target_strike": 462.5,
+        "target_expiration": "2026-06-01", "target_thesis_kind": "pin_to",
+        "regime_at_entry": "A", "dte": 0
+      }
+    },
+    "expected": {
+      "state": "invalidated",
+      "reasons_contains_any": ["Pin thesis weakening"]
+    }
+  },
+  {
+    "name": "audit12_pnl_invalidates_intact_structure",
+    "note": "Audit #12. Structure reads intact (spot near target, regime stable) but the position is at -92%. Market mark is ground truth -> invalidated. This is the AMD case: thesis intact while bleeding out.",
+    "input": {
+      "entry": { "spot": 100, "net_gex": 50000000, "largest_wall": { "strike": 100, "expiration": "2026-06-01", "gex_net": 20000000 } },
+      "live":  { "spot": 100.5, "net_gex": 49000000, "largest_wall": { "strike": 100, "expiration": "2026-06-01", "gex_net": 19500000 } },
+      "trade": {
+        "long_strike": 95, "short_strike": 100,
+        "strategy_type": "BULL_PUT_CREDIT", "expiration": "2026-06-01",
+        "target_king_node": "call_wall", "target_strike": 100,
+        "target_expiration": "2026-06-01", "target_thesis_kind": "pin_to",
+        "regime_at_entry": "A", "pnl_pct": -92
+      }
+    },
+    "expected": {
+      "state": "invalidated",
+      "reasons_contains_any": ["Mark is ground truth"]
+    }
+  },
+  {
+    "name": "audit12_pnl_downgrades_intact_to_drifting",
+    "note": "Audit #12. Structure intact, position at -78% -> downgraded to drifting (not invalidated; -78 is past the -75 drift gate but not the -90 invalidate gate).",
+    "input": {
+      "entry": { "spot": 100, "net_gex": 50000000, "largest_wall": { "strike": 100, "expiration": "2026-06-01", "gex_net": 20000000 } },
+      "live":  { "spot": 100.5, "net_gex": 49000000, "largest_wall": { "strike": 100, "expiration": "2026-06-01", "gex_net": 19500000 } },
+      "trade": {
+        "long_strike": 95, "short_strike": 100,
+        "strategy_type": "BULL_PUT_CREDIT", "expiration": "2026-06-01",
+        "target_king_node": "call_wall", "target_strike": 100,
+        "target_expiration": "2026-06-01", "target_thesis_kind": "pin_to",
+        "regime_at_entry": "A", "pnl_pct": -78
+      }
+    },
+    "expected": {
+      "state": "drifting",
+      "reasons_contains_any": ["market disagrees with the structure"]
+    }
+  },
+  {
+    "name": "audit12_no_dte_no_pnl_unchanged_regression_guard",
+    "note": "Audit #12 regression guard. Same shape as structured_pin_drifting_7_away but explicitly proves: with dte AND pnl_pct absent, the width cap defaults to multiplier 1.0 and the P&L block is skipped, so legacy behavior is byte-identical. If a future change makes the new logic fire without these inputs, this fixture goes red.",
+    "input": {
+      "entry": { "spot": 100, "net_gex": 50000000, "largest_wall": { "strike": 100, "expiration": "2026-06-01", "gex_net": 20000000 } },
+      "live":  { "spot": 107, "net_gex": 45000000, "largest_wall": { "strike": 100, "expiration": "2026-06-01", "gex_net": 18000000 } },
+      "trade": {
+        "long_strike": 95, "short_strike": 100,
+        "strategy_type": "BULL_PUT_CREDIT", "expiration": "2026-06-01",
+        "target_king_node": "call_wall", "target_strike": 100,
+        "target_expiration": "2026-06-01", "target_thesis_kind": "pin_to",
+        "regime_at_entry": "A"
+      }
+    },
+    "expected": {
+      "state": "drifting",
+      "reasons_contains_any": ["above the pin target"]
+    }
   }
 ]
