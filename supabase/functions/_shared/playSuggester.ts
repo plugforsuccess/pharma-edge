@@ -1,6 +1,9 @@
 // Cash Moves — shared playSuggester module.
 //
-// PROMPT VERSION: 2026-05-15d — geometry-relative untested-wall
+// PROMPT VERSION: 2026-05-15e — concentration / portfolio awareness
+// (the user's other open positions + a correlation/stacking rule so
+// Claude stops evaluating each trade in isolation; this PR),
+// geometry-relative untested-wall
 // judgment ($ + % closest approach, half-spread-width rule
 // replacing the blunt flat 2%; this PR), event calendar honesty
 // (UPCOMING
@@ -329,6 +332,37 @@ export async function fetchUpcomingEvents(
       .order('event_date', { ascending: true })
     if (error || !Array.isArray(data)) return []
     return data as MarketEvent[]
+  } catch {
+    return []
+  }
+}
+
+export interface OpenExposureRow {
+  ticker: string
+  strategy_type: string
+  contracts: number
+}
+
+// The user's OTHER open positions, so Claude can flag correlated /
+// stacked exposure. AMD + QQQ were the same long-delta AI-buildout
+// bet and nothing said "you're doubling a theme" — a correlated
+// drawdown then compounded it. Empty for scanner rows (userId null
+// → system scan, no portfolio) and when the user holds nothing.
+export async function fetchOpenExposure(
+  supabase: SupabaseClient,
+  userId: string | null,
+  excludeTicker: string,
+): Promise<OpenExposureRow[]> {
+  if (!userId) return []
+  try {
+    const { data, error } = await supabase
+      .from('open_positions')
+      .select('ticker, strategy_type, contracts')
+      .eq('user_id', userId)
+      .eq('status', 'open')
+    if (error || !Array.isArray(data)) return []
+    return (data as OpenExposureRow[])
+      .filter((r) => r.ticker?.toUpperCase() !== excludeTicker.toUpperCase())
   } catch {
     return []
   }
@@ -668,12 +702,40 @@ EVENT-DATA HONESTY — READ BEFORE USING "catalyst" REASONING:
 - OPEX is the ONLY event type you can fully trust (rendered in the OPEX line above; sourced from a holiday-adjusted table). Treat every other catalyst as UNKNOWN unless it appears in the list above.`
 }
 
+// Crude per-strategy delta sign. Good enough to flag direction
+// stacking — not a Greeks engine.
+function deltaSign(strategyType: string): 'long' | 'short' | 'neutral' {
+  const t = (strategyType || '').toUpperCase()
+  if (t === 'BULL_CALL' || t === 'BULL_PUT_CREDIT' || t === 'WHALE_LONG_CALL') return 'long'
+  if (t === 'BEAR_PUT' || t === 'BEAR_CALL_CREDIT' || t === 'WHALE_LONG_PUT') return 'short'
+  return 'neutral'   // iron condors / strangles / butterflies
+}
+
+function buildExposureSection(exposure: OpenExposureRow[], ticker: string): string {
+  if (exposure.length === 0) {
+    return `EXISTING OPEN EXPOSURE: none on file (or system scan). No concentration constraint.`
+  }
+  let longN = 0, shortN = 0, neutralN = 0
+  const lines = exposure.map((r) => {
+    const s = deltaSign(r.strategy_type)
+    if (s === 'long') longN++
+    else if (s === 'short') shortN++
+    else neutralN++
+    return `  ${r.ticker} ${r.strategy_type} ×${r.contracts} (${s} δ)`
+  })
+  return `EXISTING OPEN EXPOSURE (the user's OTHER live positions — concentration check):
+${lines.join('\n')}
+  net: ${longN} long-δ, ${shortN} short-δ, ${neutralN} neutral
+CONCENTRATION RULE: a new ${ticker} play that ADDS to an already one-sided book (esp. if ${ticker} is correlated with names held — mega-cap AI, semis, and the index ETFs all co-move) is risk stacking, not diversification. If your proposal piles more of the dominant δ-direction into a correlated complex, say so explicitly in the rationale, prefer half-size, and favour a play that hedges or diversifies the existing book over one that doubles it. A correlated drawdown hits every same-direction position at once.`
+}
+
 export function buildUserPrompt(
   matrix: MatrixData,
   accountSize: number,
   flow: FlowRow[],
   intradayBars: IntradayBar[] | null = null,
   events: MarketEvent[] = [],
+  exposure: OpenExposureRow[] = [],
 ): string {
   const totalGex = matrix.cells.flat().reduce((s, v) => s + (v ?? 0), 0)
   const flat = matrix.cells.flatMap((row, i) =>
@@ -767,6 +829,8 @@ ACCOUNT SIZE: $${accountSize.toLocaleString()}
 MAX RISK PER TRADE (2% rule): $${Math.floor(accountSize * 0.02).toLocaleString()}
 
 ${buildEventsSection(events, matrix.ticker)}
+
+${buildExposureSection(exposure, matrix.ticker)}
 
 EXPIRATIONS AVAILABLE:
 ${matrix.expirations.map((e) => `  ${e.date} (${e.dte} DTE)`).join('\n')}
@@ -1282,10 +1346,11 @@ export async function generatePlaysForTicker(
   // 2. Flow + intraday bars (in parallel — independent network calls).
   //    Bars are nullable (pre-market / Polygon hiccup) and the prompt
   //    falls back to a "not available" line; never blocks generation.
-  const [flow, intradayBars, events] = await Promise.all([
+  const [flow, intradayBars, events, exposure] = await Promise.all([
     fetchTodayFlow(adminClient, ticker),
     fetchPolygonIntradayBars(ticker),
     fetchUpcomingEvents(adminClient, ticker),
+    fetchOpenExposure(adminClient, options.userId, ticker),
   ])
 
   // 3. Claude
@@ -1296,7 +1361,7 @@ export async function generatePlaysForTicker(
     system: [
       { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
     ],
-    messages: [{ role: 'user', content: buildUserPrompt(matrix, accountSize, flow, intradayBars, events) }],
+    messages: [{ role: 'user', content: buildUserPrompt(matrix, accountSize, flow, intradayBars, events, exposure) }],
   }
   const claudeStartedAt = Date.now()
   const claudeResp = await fetch('https://api.anthropic.com/v1/messages', {
