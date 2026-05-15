@@ -1,9 +1,10 @@
 // Cash Moves — shared playSuggester module.
 //
-// PROMPT VERSION: 2026-05-15a — OPEX gamma-roll-off awareness
-// (flag pin/wall theses anchored to an expiring monthly/quarterly
-// OPEX cluster; this PR), pre-trade data-integrity gate (#219),
-// per-expiration wall table (#207),
+// PROMPT VERSION: 2026-05-15b — node-retest decay + per-node ∆GEX
+// (touch-count freshness priors + reversion-likelihood from node
+// rate-of-change; this PR), OPEX gamma-roll-off awareness (#221),
+// pre-trade data-integrity gate (#219), per-expiration wall table
+// (#207),
 // tightened gamma_rolloff_risk gate (#207), real per-cell OI sourced
 // from compute-gex matrix (#209), intraday price path + king-node
 // interaction history sourced from Polygon 5-min bars (#215),
@@ -503,49 +504,82 @@ function buildIntradaySection(
   const topNeg = [...flat].filter((c) => c.gex! < 0)
     .sort((a, b) => (a.gex as number) - (b.gex as number)).slice(0, 5)
 
-  // For each wall: did spot get within ±0.5% of the strike today? If
-  // yes, when and what was the price path after (held/retraced/broke)?
-  function classifyInteraction(strike: number): string {
+  // Per-node ∆GEX lookup from velocity_cells (15-min rate of change).
+  // A node growing since price was delivered from it -> reversion
+  // back to it is MORE likely. A node decaying -> the level is going
+  // stale, don't chase a bounce to it. Indexed [strikeIdx][expIdx],
+  // same shape as cells. Null when velocity isn't available (first
+  // snapshot of session / no prior history).
+  function nodeRoc(strike: number, expiration: string): number | null {
+    const vc = matrix.velocity_cells
+    if (!vc) return null
+    const si = matrix.strikes.indexOf(strike)
+    const ei = matrix.expirations.findIndex((e) => e.date === expiration)
+    if (si < 0 || ei < 0) return null
+    const v = vc[si]?.[ei]
+    return typeof v === 'number' && Number.isFinite(v) ? v : null
+  }
+
+  // For each wall: count DISTINCT touches of the ±0.5% band today
+  // (a touch ends when price exits the band; re-entry = new touch),
+  // classify the price action after the MOST RECENT touch (the
+  // freshest interaction governs a current bounce/fade decision),
+  // and tag a touch-count prior. Node-influence decays with retests:
+  // 1st touch = strongest reaction, 2nd = moderate, 3rd+ = weak —
+  // these are DIRECTIONAL priors from the price-delivery framework,
+  // not measured-in-our-data probabilities; weigh accordingly.
+  function classifyInteraction(strike: number, expiration: string): string {
     const tol = strike * 0.005   // ±0.5%
-    let firstTouchIdx = -1
+    const inBand = (i: number) => bars[i].h >= strike - tol && bars[i].l <= strike + tol
+    const touchStartIdxs: number[] = []
+    let wasIn = false
     for (let i = 0; i < bars.length; i++) {
-      if (bars[i].h >= strike - tol && bars[i].l <= strike + tol) {
-        firstTouchIdx = i
-        break
-      }
+      const isIn = inBand(i)
+      if (isIn && !wasIn) touchStartIdxs.push(i)
+      wasIn = isIn
     }
-    if (firstTouchIdx < 0) {
-      // No touch — measure closest approach as a % of strike.
+    const rocVal = nodeRoc(strike, expiration)
+    const rocTag = rocVal == null
+      ? ''
+      : `, node ∆GEX ${rocVal >= 0 ? '+' : ''}$${(rocVal / 1e6).toFixed(1)}M (${rocVal >= 0 ? 'growing → reversion more likely' : 'decaying → do not chase'})`
+
+    if (touchStartIdxs.length === 0) {
       const closest = bars.reduce((m, b) =>
         Math.min(m, Math.abs(b.h - strike), Math.abs(b.l - strike)), Infinity)
       const closestPct = (closest / strike) * 100
-      return `untested today (closest approach ${closestPct.toFixed(2)}%)`
+      return `untested today (closest approach ${closestPct.toFixed(2)}%)${rocTag}`
     }
-    const touchBar = bars[firstTouchIdx]
-    const touchTime = fmtTime(touchBar.t)
-    // Look at the close N bars later vs. the strike to decide held/broke.
-    const afterIdx = Math.min(firstTouchIdx + 6, bars.length - 1)  // ~30 min after first touch
+    const touchCount = touchStartIdxs.length
+    const firstIdx = touchStartIdxs[0]
+    const lastIdx = touchStartIdxs[touchStartIdxs.length - 1]
+    const tier = touchCount === 1
+      ? 'FRESH (1st touch — strongest reaction prior)'
+      : touchCount === 2
+        ? '2nd touch (moderate; double-top/bottom risk)'
+        : `${touchCount}× touched (3rd+ — weak reversal prior, level is stale)`
+    // Classify action after the MOST RECENT touch.
+    const touchBar = bars[lastIdx]
+    const afterIdx = Math.min(lastIdx + 6, bars.length - 1)  // ~30 min after
     const afterClose = bars[afterIdx].c
     const moveAfter = ((afterClose - strike) / strike) * 100
-    // If spot moved away from the strike in the direction opposite to
-    // its approach, that's a rejection. If it stayed within ±0.5%,
-    // it's holding (pinning). If it crossed and stayed across, it
-    // broke through.
+    const times = `1st ${fmtTime(bars[firstIdx].t)}${touchCount > 1 ? `, last ${fmtTime(touchBar.t)}` : ''}`
+    let action: string
     if (Math.abs(afterClose - strike) <= tol) {
-      return `tested ${touchTime}, holding (pin in progress)`
+      action = 'holding (pin in progress)'
+    } else {
+      const approachFromBelow = touchBar.o < strike
+      const movedAway = approachFromBelow ? afterClose < strike - tol : afterClose > strike + tol
+      action = movedAway
+        ? `REJECTED (now ${moveAfter >= 0 ? '+' : ''}${moveAfter.toFixed(2)}% from strike)`
+        : `BROKE THROUGH (now ${moveAfter >= 0 ? '+' : ''}${moveAfter.toFixed(2)}% past)`
     }
-    const approachFromBelow = touchBar.o < strike
-    const movedAway = approachFromBelow ? afterClose < strike - tol : afterClose > strike + tol
-    if (movedAway) {
-      return `tested ${touchTime}, REJECTED (now ${moveAfter >= 0 ? '+' : ''}${moveAfter.toFixed(2)}% from strike)`
-    }
-    return `tested ${touchTime}, BROKE THROUGH (now ${moveAfter >= 0 ? '+' : ''}${moveAfter.toFixed(2)}% past)`
+    return `${tier}, ${times}, ${action}${rocTag}`
   }
 
   const callRows = topPos.map((c) =>
-    `  ${c.strike} @ ${c.expiration}: ${classifyInteraction(c.strike)}`).join('\n')
+    `  ${c.strike} @ ${c.expiration}: ${classifyInteraction(c.strike, c.expiration)}`).join('\n')
   const putRows = topNeg.map((c) =>
-    `  ${c.strike} @ ${c.expiration}: ${classifyInteraction(c.strike)}`).join('\n')
+    `  ${c.strike} @ ${c.expiration}: ${classifyInteraction(c.strike, c.expiration)}`).join('\n')
 
   return `INTRADAY PRICE PATH (today's 5-min bars, source polygon):
   spot now:  $${last.toFixed(2)}
@@ -554,7 +588,7 @@ function buildIntradaySection(
   range:     $${range.toFixed(2)} (${(((range) / last) * 100).toFixed(2)}% of spot)
   position in range: ${consumedFromLow.toFixed(0)}% from low
 
-KING NODE INTERACTIONS TODAY (has spot tested each wall this session?):
+KING NODE INTERACTIONS TODAY (touch count + freshness + node ∆GEX — node influence decays with each retest):
 Call walls:
 ${callRows || '  (no positive cells in matrix)'}
 Put walls:
@@ -691,6 +725,8 @@ INTERPRETATION HINTS:
 - Flow CONCENTRATING THROUGH a wall (vol > 5x OI at strikes ABOVE the wall) = directional bullish bet, wall may break.
 - Mismatch between GEX (where positioning sits) and flow (where new bets land) = transition signal — regime may be shifting.
 - INTRADAY context (KING NODE INTERACTIONS TODAY) is a hard input, not advisory: if a wall is marked REJECTED today, downgrade pin_to plays targeting that wall — the wall is reinforced for the remainder of the session. A wall marked "untested today (closest approach X%)" with X > 2% is a red flag for pin_to: spot has stayed away from it all session. For break_through setups, REJECTED is a hard contraindication unless a catalyst overlaps.
+- NODE RETEST DECAY (price-delivery framework — directional priors, NOT measured probabilities; weigh, don't compute with): node influence weakens with each retest. A node tagged FRESH (1st touch) carries the strongest reversal/bounce prior — prefer these for fade/bounce plays. "2nd touch" = moderate, watch for a double-top/bottom failing. "3rd+ touched" = weak prior, the level is stale; do NOT propose a fade/bounce back to a 3rd+-touched node unless its node ∆GEX is clearly growing. Prioritise the FRESHEST untouched-or-1st-touch node available over chasing a stale one.
+- NODE ∆GEX (rate of change at the specific node a play targets): growing (positive ∆GEX) → reversion/defense of that node is MORE likely, the play is better supported. Decaying (negative ∆GEX) → the node is losing dealer commitment, reversion is LESS likely — do not chase a bounce/pin to a decaying node even if it was strong earlier. When ∆GEX is unavailable (no velocity), treat node strength as unknown and lean on touch-count freshness alone.
 - SPOT vs LIVE SPOT: when a LIVE SPOT line is present, the matrix's cells/walls/GEX numbers are frozen at the RTH close (options stop trading at 4pm ET) but the underlying has moved in extended hours. Phrase the thesis against LIVE SPOT, not SPOT. A gap of |Δ| > 0.3% materially changes the wall-distance math even though GEX cells stay constant. If session is 'pre-market' and live spot is meaningfully below the dominant call wall, the pin-to-wall thesis still works but the path is longer (spot must climb from live, not from close). If session is 'after-hours' / 'overnight' and live spot has dropped through a put wall the close held, that's a regime-flip warning for tomorrow's open. Never assert spot is at the RTH close when LIVE SPOT says otherwise.
 - OPEX is a hard input for any pin/wall thesis. When an OPEX line is present and a play's expiration is ON or AFTER the OPEX date AND the play targets a wall whose expiration is the OPEX date: that wall is the monthly (or quarterly) cluster that EXPIRES on OPEX. It is NOT a durable magnet — its gamma evaporates that afternoon and the regime can flip violently post-OPEX. Treat a pin_to targeting an expiring-OPEX wall as gamma_rolloff_risk=true regardless of the dominant-expiration check, and say so in rolloff_note. A pin_to whose own expiration IS the OPEX date is the highest-risk version: you are betting the cluster holds price exactly through its own expiration — only justify it when spot is already inside a tight wall cluster (true Regime-A pin) AND intraday context shows the wall is being actively tested and held. If spot is not near the wall, do not propose pinning to an expiring-OPEX wall at all. Quarterly/triple-witch OPEX amplifies all of this.
 
