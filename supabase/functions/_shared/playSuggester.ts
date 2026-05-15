@@ -1,6 +1,9 @@
 // Cash Moves — shared playSuggester module.
 //
-// PROMPT VERSION: 2026-05-15b — node-retest decay + per-node ∆GEX
+// PROMPT VERSION: 2026-05-15c — event calendar honesty (UPCOMING
+// EVENTS block + explicit "you do NOT know earnings/macro timing"
+// instruction so Claude stops fabricating catalysts; this PR),
+// node-retest decay + per-node ∆GEX
 // (touch-count freshness priors + reversion-likelihood from node
 // rate-of-change; this PR), OPEX gamma-roll-off awareness (#221),
 // pre-trade data-integrity gate (#219), per-expiration wall table
@@ -299,6 +302,35 @@ interface PopArgs {
 
 // ─── Flow helpers ───────────────────────────────────────────────────
 
+// Upcoming scheduled events for the next 14 days: market-wide rows
+// (ticker IS NULL — FOMC/CPI/jobs) plus this ticker's rows
+// (earnings). Empty until a feed is wired; buildEventsSection then
+// states the absence explicitly rather than letting Claude guess.
+export async function fetchUpcomingEvents(
+  supabase: SupabaseClient,
+  ticker: string,
+): Promise<MarketEvent[]> {
+  const today = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date())
+  const horizon = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date(Date.now() + 14 * 86400_000))
+  try {
+    const { data, error } = await supabase
+      .from('market_events')
+      .select('event_date, ticker, event_type, session, label')
+      .gte('event_date', today)
+      .lte('event_date', horizon)
+      .or(`ticker.is.null,ticker.eq.${ticker.toUpperCase()}`)
+      .order('event_date', { ascending: true })
+    if (error || !Array.isArray(data)) return []
+    return data as MarketEvent[]
+  } catch {
+    return []
+  }
+}
+
 export async function fetchTodayFlow(
   supabase: SupabaseClient,
   ticker: string,
@@ -595,11 +627,44 @@ Put walls:
 ${putRows || '  (no negative cells in matrix)'}`
 }
 
+export interface MarketEvent {
+  event_date: string
+  ticker: string | null
+  event_type: string
+  session: string | null
+  label: string
+}
+
+// Build the UPCOMING EVENTS block. Two halves, and the second is the
+// point: state explicitly what is NOT known so Claude stops
+// hallucinating earnings/FOMC timing. OPEX is rendered separately
+// (matrix.opex, trustworthy). market_events is empty until a feed is
+// wired — when it is, say so plainly.
+function buildEventsSection(events: MarketEvent[], ticker: string): string {
+  const known = events
+    .filter((e) => e.event_type !== 'opex')
+    .map((e) => {
+      const scope = e.ticker ? e.ticker : 'MARKET'
+      const sess = e.session && e.session !== 'UNKNOWN' ? ` ${e.session}` : ''
+      return `  ${e.event_date} [${scope}] ${e.event_type.toUpperCase()}${sess}: ${e.label}`
+    })
+  const hasEarnings = events.some((e) => e.event_type === 'earnings' && e.ticker === ticker)
+  const hasMacro = events.some((e) => e.ticker == null && ['fomc', 'cpi', 'jobs'].includes(e.event_type))
+  return `UPCOMING EVENTS (next 14d, from market_events):
+${known.length ? known.join('\n') : '  (none on file)'}
+
+EVENT-DATA HONESTY — READ BEFORE USING "catalyst" REASONING:
+- ${hasEarnings ? `${ticker} earnings IS on file above — weigh it.` : `NO ${ticker} earnings date is on file. You do NOT know when ${ticker} reports. Do NOT assert, assume, or imply an earnings date or "earnings approaching". If a structure is earnings-sensitive (short premium / IV-crush plays), say in what_invalidates that the user MUST verify the earnings date externally before placing — you cannot.`}
+- ${hasMacro ? `Macro events ARE on file above.` : `NO macro calendar (FOMC/CPI/jobs) is wired. Do NOT assert any FOMC/CPI/jobs timing. If a play depends on a macro print, flag that the user must confirm the schedule externally.`}
+- OPEX is the ONLY event type you can fully trust (rendered in the OPEX line above; sourced from a holiday-adjusted table). Treat every other catalyst as UNKNOWN unless it appears in the list above.`
+}
+
 export function buildUserPrompt(
   matrix: MatrixData,
   accountSize: number,
   flow: FlowRow[],
   intradayBars: IntradayBar[] | null = null,
+  events: MarketEvent[] = [],
 ): string {
   const totalGex = matrix.cells.flat().reduce((s, v) => s + (v ?? 0), 0)
   const flat = matrix.cells.flatMap((row, i) =>
@@ -691,6 +756,8 @@ DATA SOURCE: ${matrix.source}${
 }
 ACCOUNT SIZE: $${accountSize.toLocaleString()}
 MAX RISK PER TRADE (2% rule): $${Math.floor(accountSize * 0.02).toLocaleString()}
+
+${buildEventsSection(events, matrix.ticker)}
 
 EXPIRATIONS AVAILABLE:
 ${matrix.expirations.map((e) => `  ${e.date} (${e.dte} DTE)`).join('\n')}
@@ -1205,9 +1272,10 @@ export async function generatePlaysForTicker(
   // 2. Flow + intraday bars (in parallel — independent network calls).
   //    Bars are nullable (pre-market / Polygon hiccup) and the prompt
   //    falls back to a "not available" line; never blocks generation.
-  const [flow, intradayBars] = await Promise.all([
+  const [flow, intradayBars, events] = await Promise.all([
     fetchTodayFlow(adminClient, ticker),
     fetchPolygonIntradayBars(ticker),
+    fetchUpcomingEvents(adminClient, ticker),
   ])
 
   // 3. Claude
@@ -1218,7 +1286,7 @@ export async function generatePlaysForTicker(
     system: [
       { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
     ],
-    messages: [{ role: 'user', content: buildUserPrompt(matrix, accountSize, flow, intradayBars) }],
+    messages: [{ role: 'user', content: buildUserPrompt(matrix, accountSize, flow, intradayBars, events) }],
   }
   const claudeStartedAt = Date.now()
   const claudeResp = await fetch('https://api.anthropic.com/v1/messages', {
