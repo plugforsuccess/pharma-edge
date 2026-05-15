@@ -1,7 +1,8 @@
 // Cash Moves — shared playSuggester module.
 //
-// PROMPT VERSION: 2026-05-14e — pre-trade data-integrity gate
-// (refuse generation off a stale matrix during RTH; this PR),
+// PROMPT VERSION: 2026-05-15a — OPEX gamma-roll-off awareness
+// (flag pin/wall theses anchored to an expiring monthly/quarterly
+// OPEX cluster; this PR), pre-trade data-integrity gate (#219),
 // per-expiration wall table (#207),
 // tightened gamma_rolloff_risk gate (#207), real per-cell OI sourced
 // from compute-gex matrix (#209), intraday price path + king-node
@@ -229,6 +230,19 @@ export interface MatrixData {
   // matrix during RTH (a stale matrix during extended hours / weekend
   // is expected and fine — it's the frozen RTH close).
   computed_at?: string
+  // OPEX context from the holiday-adjusted opex_dates table. A pin /
+  // wall thesis anchored to the monthly-OPEX expiration carries acute
+  // gamma-roll-off risk — that cluster is the largest of the month and
+  // it dies on OPEX. Surfaced so Claude stops treating an expiring
+  // wall as a durable magnet (the AMD failure: pinned to the $462.5
+  // monthly-OPEX wall that evaporated on expiry day).
+  opex?: {
+    next_date: string | null
+    type: 'monthly' | 'quarterly' | null
+    is_quarterly: boolean
+    is_today: boolean
+    days_until: number | null
+  } | null
   source: string
   expirations: Array<{ date: string; dte: number }>
   strikes: number[]
@@ -634,7 +648,13 @@ SPOT: $${matrix.spot.toFixed(2)}${
       })`
     : ''
 }
-DATA SOURCE: ${matrix.source}
+DATA SOURCE: ${matrix.source}${
+  matrix.opex && matrix.opex.next_date
+    ? `\nOPEX: ${matrix.opex.is_today
+        ? `TODAY is ${matrix.opex.type ?? 'monthly'} OPEX${matrix.opex.is_quarterly ? ' (quarterly / triple-witching)' : ''} — the largest gamma cluster of the ${matrix.opex.is_quarterly ? 'quarter' : 'month'} expires this afternoon.`
+        : `next OPEX ${matrix.opex.next_date} (${matrix.opex.type ?? 'monthly'}${matrix.opex.is_quarterly ? ', quarterly/triple-witch' : ''}), in ${matrix.opex.days_until ?? '?'} day(s).`}`
+    : ''
+}
 ACCOUNT SIZE: $${accountSize.toLocaleString()}
 MAX RISK PER TRADE (2% rule): $${Math.floor(accountSize * 0.02).toLocaleString()}
 
@@ -672,6 +692,7 @@ INTERPRETATION HINTS:
 - Mismatch between GEX (where positioning sits) and flow (where new bets land) = transition signal — regime may be shifting.
 - INTRADAY context (KING NODE INTERACTIONS TODAY) is a hard input, not advisory: if a wall is marked REJECTED today, downgrade pin_to plays targeting that wall — the wall is reinforced for the remainder of the session. A wall marked "untested today (closest approach X%)" with X > 2% is a red flag for pin_to: spot has stayed away from it all session. For break_through setups, REJECTED is a hard contraindication unless a catalyst overlaps.
 - SPOT vs LIVE SPOT: when a LIVE SPOT line is present, the matrix's cells/walls/GEX numbers are frozen at the RTH close (options stop trading at 4pm ET) but the underlying has moved in extended hours. Phrase the thesis against LIVE SPOT, not SPOT. A gap of |Δ| > 0.3% materially changes the wall-distance math even though GEX cells stay constant. If session is 'pre-market' and live spot is meaningfully below the dominant call wall, the pin-to-wall thesis still works but the path is longer (spot must climb from live, not from close). If session is 'after-hours' / 'overnight' and live spot has dropped through a put wall the close held, that's a regime-flip warning for tomorrow's open. Never assert spot is at the RTH close when LIVE SPOT says otherwise.
+- OPEX is a hard input for any pin/wall thesis. When an OPEX line is present and a play's expiration is ON or AFTER the OPEX date AND the play targets a wall whose expiration is the OPEX date: that wall is the monthly (or quarterly) cluster that EXPIRES on OPEX. It is NOT a durable magnet — its gamma evaporates that afternoon and the regime can flip violently post-OPEX. Treat a pin_to targeting an expiring-OPEX wall as gamma_rolloff_risk=true regardless of the dominant-expiration check, and say so in rolloff_note. A pin_to whose own expiration IS the OPEX date is the highest-risk version: you are betting the cluster holds price exactly through its own expiration — only justify it when spot is already inside a tight wall cluster (true Regime-A pin) AND intraday context shows the wall is being actively tested and held. If spot is not near the wall, do not propose pinning to an expiring-OPEX wall at all. Quarterly/triple-witch OPEX amplifies all of this.
 
 Propose 0-5 spread trades following the rules in the system prompt. When you return 2 or more, span at least 2 distinct strategy types. Strict JSON only.`
 }

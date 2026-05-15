@@ -521,6 +521,7 @@ export default function Markets() {
                 </span>
                 <SourceBadge source={data.source} eodAt={data.eod_snapshot_at} />
                 <SessionBadge session={data.session} />
+                <OpexBadge opex={data.opex} />
                 {data.from_cache && (
                   <span className="text-muted">
                     · cached {formatCacheAge(data.cache_age_ms)} ago
@@ -862,6 +863,31 @@ function SessionBadge({ session }) {
   return (
     <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wider font-semibold border ${config.cls}`}>
       {config.label}
+    </span>
+  )
+}
+
+// OPEX chip. "OPEX TODAY" (red, quarterly = brighter) when the
+// monthly/quarterly expiration is today — the day the largest gamma
+// cluster of the month dies and pin theses anchored to it evaporate.
+// "OPEX 3d" muted countdown otherwise. Nothing if no opex context or
+// it's > 7 days out (not yet decision-relevant).
+function OpexBadge({ opex }) {
+  if (!opex || !opex.next_date) return null
+  if (opex.is_today) {
+    const cls = opex.is_quarterly
+      ? 'bg-red-900 text-red-200 border-red-600'
+      : 'bg-red-950 text-red-300 border-red-800'
+    return (
+      <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wider font-semibold border ${cls}`}>
+        {opex.is_quarterly ? 'TRIPLE-WITCH TODAY' : 'OPEX TODAY'}
+      </span>
+    )
+  }
+  if (opex.days_until == null || opex.days_until > 7) return null
+  return (
+    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wider font-semibold border bg-zinc-900 text-zinc-400 border-zinc-700">
+      OPEX {opex.days_until}d{opex.is_quarterly ? ' (Q)' : ''}
     </span>
   )
 }
