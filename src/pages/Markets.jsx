@@ -902,9 +902,17 @@ function ExtendedHoursDivergenceBanner({ data, liveSpot }) {
   const session = data?.session
   if (!session || session === 'rth') return null
   const close = Number(data?.spot)
+  // A live spot of 0 / non-positive means "no live quote" (weekend,
+  // holiday, feed down) — NOT that the stock printed zero. Treat it as
+  // absent, same guard deriveSummary uses for the headline. Without
+  // the `> 0` on the data.live_spot fallback, a weekend (live 0) makes
+  // deltaPct = (0 - close)/close = -100% and renders a bogus
+  // "Weekend gap down -100.00%" banner.
   const live = Number.isFinite(liveSpot) && liveSpot > 0
     ? liveSpot
-    : Number.isFinite(Number(data?.live_spot)) ? Number(data.live_spot) : NaN
+    : (Number.isFinite(Number(data?.live_spot)) && Number(data?.live_spot) > 0)
+      ? Number(data.live_spot)
+      : NaN
   if (!Number.isFinite(close) || !Number.isFinite(live) || close <= 0) return null
   const deltaPct = ((live - close) / close) * 100
   if (Math.abs(deltaPct) < 0.2) return null   // below threshold, hide

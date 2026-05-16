@@ -1,6 +1,12 @@
 // Cash Moves — shared playSuggester module.
 //
-// PROMPT VERSION: 2026-05-15g — structure↔R/R geometry rule. Claude
+// PROMPT VERSION: 2026-05-15h — structure-mix instrument (no prompt
+// or filter change). verifyAndFilter now tallies credit-vs-debit
+// proposed/verified counts (rejections.mix), aggregated universe-wide
+// in scan-universe-plays, so compliance with the g credit rule is
+// measurable over time instead of guessed. Re-deploys _shared
+// consumers via the version bump.
+// Prior: 2026-05-15g — structure↔R/R geometry rule. Claude
 // was spending ~half its proposals on credit spreads / ICs whose
 // geometry (credit ≈ 20-40% of width) is mathematically incapable of
 // clearing the server's 1.5 R/R floor — sub-1.0 R/R structures, dead
@@ -1185,13 +1191,23 @@ export async function verifyAndFilter(
   const rejections = {
     pricing: 0, rr: 0, ev: 0, pop: 0, structure: 0,
     total: 0, samples: [] as string[],
+    // Structure-mix instrument: are we still spending proposals on
+    // credit/IC structures that almost never clear the 1.5 floor?
+    // This measures Claude's compliance with the 2026-05-15g prompt
+    // rule over time so escalation (worked example / model change) is
+    // a data decision, not a guess. Not a filter — the R/R gate is.
+    mix: { credit_proposed: 0, debit_proposed: 0, credit_verified: 0, debit_verified: 0 },
   }
+  const isCreditType = (t: unknown) =>
+    t === 'IRON_CONDOR' || (typeof t === 'string' && t.endsWith('_CREDIT'))
   const note = (bucket: 'pricing' | 'rr' | 'ev' | 'pop' | 'structure', detail: string) => {
     rejections[bucket]++
     rejections.total++
     if (rejections.samples.length < 4) rejections.samples.push(detail)
   }
   for (const p of parsed.plays) {
+    if (isCreditType(p.type)) rejections.mix.credit_proposed++
+    else rejections.mix.debit_proposed++
     let priced: {
       pricing_source: 'verified' | 'rejected'
       rejection_reason?: string
@@ -1271,6 +1287,8 @@ export async function verifyAndFilter(
         ? Math.round((priced.is_credit ? (priced.width - (priced.credit_mid ?? 0)) : (priced.debit_mid ?? 0)) / priced.width * 100)
         : null
     }
+    if (isCreditType(p.type)) rejections.mix.credit_verified++
+    else rejections.mix.debit_verified++
     verified.push(p)
   }
 
