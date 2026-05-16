@@ -81,19 +81,39 @@ export default function Reasoning() {
     }
   }
 
-  // History fetch — last 20 reasoning_history rows for this user ×
-  // ticker. RLS pins it to the calling user; we filter by ticker
-  // client-side here so switching tickers doesn't refetch.
+  // History fetch — the regime/confidence drift trail, merged from
+  // two sources so it isn't blind to the scanner:
+  //   * reasoning_history — your own manual "Analyze plays" clicks
+  //     (RLS-pinned to you). Carries server-computed confidence.
+  //   * scanner_reasoning — the scan-universe-plays cron's read on
+  //     watchlist ∪ holdings every 30 min, projected from claude_calls
+  //     (regime derived deterministically, same taxonomy as the live
+  //     banner; play_count is Claude's PROPOSED count, pre R/R+EV
+  //     filter; confidence null — not recomputed in SQL).
+  // Both filtered by ticker; merged, newest-first, capped at 20.
   async function fetchHistory() {
     if (!user?.id) return
-    const { data } = await supabase
-      .from('reasoning_history')
-      .select('id, computed_at, regime, regime_explanation, spot, net_gex, expected_move, pinning_probability, call_wall, put_wall, flip_strike, play_count, confidence')
-      .eq('user_id', user.id)
-      .eq('ticker', ticker)
-      .order('computed_at', { ascending: false })
-      .limit(20)
-    if (data) setHistory(data)
+    const [manualRes, scanRes] = await Promise.all([
+      supabase
+        .from('reasoning_history')
+        .select('id, computed_at, regime, regime_explanation, play_count, confidence')
+        .eq('user_id', user.id)
+        .eq('ticker', ticker)
+        .order('computed_at', { ascending: false })
+        .limit(20),
+      supabase
+        .from('scanner_reasoning')
+        .select('id, computed_at, regime, regime_explanation, play_count, confidence')
+        .eq('ticker', ticker)
+        .order('computed_at', { ascending: false })
+        .limit(20),
+    ])
+    const manual = (manualRes.data ?? []).map((r) => ({ ...r, source: 'manual' }))
+    const scan = (scanRes.data ?? []).map((r) => ({ ...r, source: 'scan' }))
+    const merged = [...manual, ...scan]
+      .sort((a, b) => new Date(b.computed_at) - new Date(a.computed_at))
+      .slice(0, 20)
+    setHistory(merged)
   }
 
   useEffect(() => {
@@ -242,21 +262,32 @@ export default function Reasoning() {
         )}
       </div>
 
-      {/* History panel — regime + confidence drift across recent
-          evaluations. Reads from reasoning_history (RLS-pinned). */}
+      {/* History panel — regime/confidence drift, merged from your
+          manual Analyze runs (reasoning_history) + the 30-min scanner
+          cadence on watchlist ∪ holdings (scanner_reasoning view). */}
       <div className="bg-card border border-border rounded-xl p-4 lg:p-5">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold">History</h2>
-          <span className="text-[10px] text-muted uppercase tracking-wider">
-            Last {history.length} for {ticker}
+          <div>
+            <h2 className="text-sm font-semibold">History</h2>
+            <p className="text-[10px] text-muted leading-relaxed">
+              Your <span className="text-subtle">Analyze</span> runs +
+              the <span className="text-amber-400/80">scan</span> cadence
+              (every 30 min if {ticker} is watched/held).
+            </p>
+          </div>
+          <span className="text-[10px] text-muted uppercase tracking-wider shrink-0">
+            Last {history.length}
           </span>
         </div>
         {history.length === 0 ? (
-          <p className="text-xs text-muted italic">No prior evaluations yet — analyze plays to start the trail.</p>
+          <p className="text-xs text-muted italic">
+            No trail yet for {ticker}. Star it (or hold a position) and the
+            30-min scanner starts logging here, or tap Analyze plays now.
+          </p>
         ) : (
           <ul className="divide-y divide-border/60">
             {history.map((row) => (
-              <HistoryRow key={row.id} row={row} />
+              <HistoryRow key={`${row.source}-${row.id}`} row={row} />
             ))}
           </ul>
         )}
@@ -355,6 +386,7 @@ function HistoryRow({ row }) {
   const t = new Date(row.computed_at)
   const time = t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   const conf = row.confidence != null ? Math.round(row.confidence * 100) : null
+  const isScan = row.source === 'scan'
   return (
     <li className="py-2 flex items-baseline gap-3 text-xs">
       <span className="font-mono-tab text-muted shrink-0 w-12">{time}</span>
@@ -362,14 +394,32 @@ function HistoryRow({ row }) {
       <span className="flex-1 text-subtle truncate" title={row.regime_explanation}>
         {row.regime_explanation || '—'}
       </span>
-      <span className="text-muted shrink-0 font-mono-tab">{row.play_count}p</span>
-      {conf != null && (
+      <span
+        className={clsx(
+          'shrink-0 text-[9px] uppercase tracking-wider px-1 py-0.5 rounded border',
+          isScan
+            ? 'text-amber-400/80 border-amber-800/50 bg-amber-950/30'
+            : 'text-subtle border-border',
+        )}
+        title={isScan ? 'Auto scan (every 30 min, watchlist ∪ holdings)' : 'You ran Analyze plays'}
+      >
+        {isScan ? 'scan' : 'you'}
+      </span>
+      <span
+        className="text-muted shrink-0 font-mono-tab"
+        title={isScan ? 'Plays Claude proposed (pre R/R+EV filter)' : 'Plays after the R/R+EV filter'}
+      >
+        {row.play_count}p
+      </span>
+      {conf != null ? (
         <span className={clsx(
-          'shrink-0 font-mono-tab tabular-nums',
+          'shrink-0 font-mono-tab tabular-nums w-9 text-right',
           conf >= 65 ? 'text-green-400' : conf >= 45 ? 'text-amber-400' : 'text-red-400',
         )}>
           {conf}%
         </span>
+      ) : (
+        <span className="shrink-0 font-mono-tab text-muted w-9 text-right">—</span>
       )}
     </li>
   )
