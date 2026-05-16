@@ -4,6 +4,8 @@ import { ArrowLeft, X, AlertTriangle, RefreshCw, Check, Clock, Target, Shield, I
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import Spinner from '../components/Spinner'
+import LogOutcomeModal from '../components/LogOutcomeModal'
+import { deriveOutcomePrefill } from '../utils/deriveOutcome'
 import { computeThesisVerdict } from '../utils/thesisVerdict'
 import useLiveSpot from '../hooks/useLiveSpot'
 
@@ -29,6 +31,14 @@ export default function PositionDetail() {
   const [closeMode, setCloseMode] = useState(searchParams.get('close') === '1')
   const [exitCredit, setExitCredit] = useState('')
   const [closing, setClosing] = useState(false)
+  // Closing a position and recording its outcome are one user
+  // intention, not two. When the manual close succeeds we carry
+  // straight into the outcome modal (prefilled when execution data
+  // supports it) instead of dropping the user back and relying on
+  // them later finding the OutcomeInbox nudge. OutcomeInbox stays as
+  // the safety net for bot/auto closes and for a dismissed modal.
+  const [outcomeSignal, setOutcomeSignal] = useState(null)
+  const [outcomePrefill, setOutcomePrefill] = useState(null)
   // Wall-timing context. Lazy-fetched after the position loads — we
   // need pos.ticker to ask compute-gex for the live matrix, then we
   // surface the relationship between the wall's expiration and the
@@ -336,6 +346,29 @@ export default function PositionDetail() {
     }
     await load()
     setCloseMode(false)
+
+    // Carry the close straight into outcome logging. Only when the
+    // position is linked to a signal — outcomes are 1:1 with signals,
+    // so an unlinked manual position has no outcome to attach. Prefill
+    // is best-effort: deriveOutcomePrefill reconstructs from execution
+    // data (broker fills / triggers); a manual close usually has none,
+    // so it returns null and the modal opens on the manual 3-step
+    // flow. Either way the outcome is logged as part of THIS action,
+    // not a deferred one. A derive failure must not strand the user
+    // on a closed-but-unlogged position, so fall back to null prefill.
+    if (!pos.signal_id) return
+    let prefill = null
+    try {
+      prefill = await deriveOutcomePrefill(pos.signal_id)
+    } catch {
+      prefill = null
+    }
+    setOutcomePrefill(prefill)
+    setOutcomeSignal({
+      id: pos.signal_id,
+      ticker: pos.ticker,
+      structure: pos.strategy_type,
+    })
   }
 
   // Dynamic thesis verdict — computed client-side from already-loaded
@@ -827,6 +860,24 @@ export default function PositionDetail() {
             tone={pos.realized_pnl != null && pos.realized_pnl >= 0 ? 'pos' : 'neg'}
           />
         </div>
+      )}
+
+      {outcomeSignal && (
+        <LogOutcomeModal
+          signal={outcomeSignal}
+          prefill={outcomePrefill}
+          onClose={() => {
+            // Dismissed without logging — OutcomeInbox will still
+            // surface this closed signal as the safety net.
+            setOutcomeSignal(null)
+            setOutcomePrefill(null)
+          }}
+          onComplete={() => {
+            setOutcomeSignal(null)
+            setOutcomePrefill(null)
+            load()
+          }}
+        />
       )}
     </div>
   )
