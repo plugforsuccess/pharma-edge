@@ -19,7 +19,7 @@ export default function Dashboard() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const [signals, setSignals] = useState([])
-  const [stats, setStats] = useState({ wins: 0, losses: 0, open: 0, winRate: 0, total: 0 })
+  const [stats, setStats] = useState({ wins: 0, losses: 0, open: 0, winRate: 0, total: 0, realizedPnl: 0 })
   const [loading, setLoading] = useState(true)
   const [showOnboarding, setShowOnboarding] = useState(false)
 
@@ -66,7 +66,7 @@ export default function Dashboard() {
         .select('id', { count: 'exact', head: true })
         .eq('user_id', user.id)
         .eq('status', 'open'),
-      supabase.from('outcomes').select('thesis_correct').eq('user_id', user.id),
+      supabase.from('outcomes').select('thesis_correct, pnl_dollars').eq('user_id', user.id),
     ])
 
     setSignals(signalRes.data ?? [])
@@ -75,12 +75,22 @@ export default function Dashboard() {
     const wins = outcomes.filter((o) => o.thesis_correct).length
     const losses = outcomes.filter((o) => !o.thesis_correct).length
     const total = wins + losses
+    // Realized P&L only — summed from logged outcomes. We deliberately
+    // do NOT add open/unrealized here: we don't have a reliable live
+    // mark for every open position, and a fabricated unrealized number
+    // on the headline is exactly the kind of false precision this
+    // codebase avoids. Honest = closed trades, what actually settled.
+    const realizedPnl = outcomes.reduce(
+      (sum, o) => sum + (Number.isFinite(Number(o.pnl_dollars)) ? Number(o.pnl_dollars) : 0),
+      0,
+    )
     setStats({
       wins,
       losses,
       open: openCountRes.count ?? 0,
       winRate: total > 0 ? Math.round((wins / total) * 100) : 0,
       total,
+      realizedPnl,
     })
     setLoading(false)
   }
@@ -210,6 +220,29 @@ export default function Dashboard() {
           decision the moment you open the app. Keeping it visible
           but de-emphasized below the action surfaces. */}
       <section className="surface rounded-xl px-2 py-2 mt-6">
+        {/* Realized P&L headline — the single most decision-relevant
+            number, given a 1.5-R/R system where win rate alone is
+            misleading. Realized only (see fetch comment); shown when
+            there's at least one closed trade, otherwise the strip
+            stays as-is so a new account isn't headlined by "$0". */}
+        {stats.total > 0 && (
+          <div className="flex items-baseline justify-between px-3 pt-1.5 pb-2 mb-1 border-b border-border/70">
+            <span className="eyebrow text-[10px]">Realized P&amp;L · {stats.total} closed</span>
+            <span
+              className={clsx(
+                'font-display text-xl leading-none num-tab',
+                stats.realizedPnl > 0
+                  ? 'text-green-400'
+                  : stats.realizedPnl < 0
+                    ? 'text-[#f25068]'
+                    : 'text-fg',
+              )}
+            >
+              {stats.realizedPnl >= 0 ? '+' : '−'}$
+              {Math.abs(Math.round(stats.realizedPnl)).toLocaleString()}
+            </span>
+          </div>
+        )}
         <div className="grid grid-cols-4">
           <Stat label="Open" value={stats.open} />
           <Stat label="Wins" value={stats.wins} tone="green" divider />
