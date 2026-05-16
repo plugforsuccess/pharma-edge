@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Bell, BellOff, Check, Copy, Download, ExternalLink, Link2, LogOut, Plus, Share2, Trash2, Zap } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Bell, BellOff, Check, Copy, Download, ExternalLink, Link2, LogOut, Share2, Zap } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { useSubscription } from '../hooks/useSubscription'
@@ -302,6 +301,32 @@ export default function Settings() {
           settings. The DB columns stay; their values are still used
           where set, but new users default to the constants. */}
 
+      {/* Risk Management was removed as an *editable* section (account
+          size syncs from Tastytrade NLV; the caps are project-policy
+          constants). But the rules were then invisible — a real-money
+          operator should be able to see the discipline that's being
+          enforced on their behalf. Read-only by design: these are not
+          settings, they're the contract. */}
+      <Section title="Risk Discipline (enforced)">
+        <p className="text-subtle text-xs">
+          These are enforced in the calculator, the suggested-plays
+          filter, and the order flow — not user-editable. They are the
+          rules the track record is built on.
+        </p>
+        <ul className="text-xs space-y-1.5 mt-1">
+          <RuleRow rule="Max 2% of account at risk per spread" />
+          <RuleRow rule="Max 20% of account in any one underlying" />
+          <RuleRow rule="R/R ≥ 1.5 and EV edge ≥ 0 — server-filtered before a play is shown" />
+          <RuleRow rule="Hard stop at −50% of spread debit" />
+          <RuleRow rule="Spreads only — no naked options" />
+        </ul>
+        <p className="text-muted text-[10px] leading-relaxed">
+          Account size syncs live from your Tastytrade NLV (shown in the
+          Bot section) — the 2% / 20% caps are computed off that, not a
+          number you set here.
+        </p>
+      </Section>
+
       <Section title="Appearance">
         <div className="flex items-center justify-between">
           <div className="flex-1 pr-4">
@@ -332,13 +357,20 @@ export default function Settings() {
         </div>
       )}
 
+      {/* Scoped + brand-colored. This button persists ONLY the
+          Profile/visibility fields (name, slug, public toggle) — the
+          Bot, Push, and Broker sections each save themselves. A
+          page-spanning red "Save Settings" implied it saved
+          everything and used the destructive-action color for a
+          benign write; "Save Profile" in the brand color is honest
+          about scope. Red stays reserved for Sign Out. */}
       <button
         type="button"
         onClick={save}
         disabled={saving}
-        className="w-full bg-red-600 hover:bg-red-500 disabled:bg-red-950 text-white font-semibold rounded-xl py-3 text-sm transition-colors"
+        className="w-full bg-amber-400 hover:bg-amber-300 disabled:opacity-50 text-bg font-semibold rounded-xl py-3 text-sm transition-colors"
       >
-        {saving ? 'Saving…' : savedFlash ? 'Saved ✓' : 'Save Settings'}
+        {saving ? 'Saving…' : savedFlash ? 'Saved ✓' : 'Save Profile'}
       </button>
 
       <ExportDataButton userId={user?.id} email={user?.email} />
@@ -456,6 +488,15 @@ function Section({ title, children }) {
       <h3 className="text-subtle text-xs font-semibold uppercase tracking-wider mb-4">{title}</h3>
       <div className="space-y-3">{children}</div>
     </div>
+  )
+}
+
+function RuleRow({ rule }) {
+  return (
+    <li className="flex items-start gap-2 text-zinc-300">
+      <Check size={13} className="text-amber-400 mt-0.5 shrink-0" />
+      <span>{rule}</span>
+    </li>
   )
 }
 
@@ -681,150 +722,6 @@ function PushSection({ userId }) {
         </button>
       </div>
       {feedback && <p className="text-subtle text-xs">{feedback}</p>}
-    </Section>
-  )
-}
-
-function WatchlistSection({ userId }) {
-  const navigate = useNavigate()
-  const [items, setItems] = useState([])
-  const [ticker, setTicker] = useState('')
-  const [companyName, setCompanyName] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-
-  const load = useCallback(async () => {
-    if (!userId) return
-    const { data } = await supabase
-      .from('watchlist')
-      .select('id, ticker, company_name, added_at')
-      .eq('user_id', userId)
-      .order('added_at', { ascending: false })
-    setItems(data ?? [])
-  }, [userId])
-
-  useEffect(() => {
-    load()
-  }, [load])
-
-  async function add(e) {
-    e?.preventDefault?.()
-    if (!userId) return
-    const t = ticker.trim().toUpperCase()
-    const c = companyName.trim()
-    if (!t || !c) {
-      setError('Ticker and company name are both required')
-      return
-    }
-    setBusy(true)
-    setError('')
-    const { error: insertError } = await supabase.from('watchlist').insert({
-      user_id: userId,
-      ticker: t,
-      company_name: c,
-    })
-    setBusy(false)
-    if (insertError) {
-      setError(insertError.message)
-      return
-    }
-    setTicker('')
-    setCompanyName('')
-    load()
-  }
-
-  async function remove(id) {
-    if (!userId) return
-    setBusy(true)
-    await supabase.from('watchlist').delete().eq('id', id).eq('user_id', userId)
-    setBusy(false)
-    load()
-  }
-
-  function openLogForTicker(item) {
-    navigate('/log', {
-      state: {
-        prefill: {
-          ticker: item.ticker,
-        },
-      },
-    })
-  }
-
-  return (
-    <Section title="My Tickers (Watchlist)">
-      <p className="text-subtle text-xs">
-        A personal list of tickers you're tracking. Tap any row to open a
-        pre-filled Log a Move with the ticker selected.
-      </p>
-
-      <form onSubmit={add} className="grid grid-cols-2 gap-2">
-        <input
-          type="text"
-          value={ticker}
-          onChange={(e) => setTicker(e.target.value.toUpperCase())}
-          placeholder="ALDX"
-          maxLength={10}
-          className="bg-bg border border-border text-white placeholder-zinc-700 rounded-xl
-                     px-3 py-2 text-sm focus:outline-none focus:border-red-500 font-mono"
-        />
-        <input
-          type="text"
-          value={companyName}
-          onChange={(e) => setCompanyName(e.target.value)}
-          placeholder="Aldeyra Therapeutics"
-          className="bg-bg border border-border text-white placeholder-zinc-700 rounded-xl
-                     px-3 py-2 text-sm focus:outline-none focus:border-red-500"
-        />
-        <button
-          type="submit"
-          disabled={busy || !ticker || !companyName}
-          className="col-span-2 flex items-center justify-center gap-2 bg-red-600 hover:bg-red-500
-                     disabled:bg-red-950 disabled:text-red-900 text-white font-semibold
-                     rounded-xl py-2 text-sm transition-colors"
-        >
-          <Plus size={14} />
-          Add to Watchlist
-        </button>
-      </form>
-
-      {error && (
-        <p className="text-red-400 text-xs" role="alert">
-          {error}
-        </p>
-      )}
-
-      {items.length === 0 ? (
-        <p className="text-muted text-xs italic">No tickers yet. Add one above.</p>
-      ) : (
-        <div className="space-y-1">
-          {items.map((item) => (
-            <div
-              key={item.id}
-              className="flex items-center gap-2 bg-bg border border-border rounded-lg px-3 py-2"
-            >
-              <button
-                type="button"
-                onClick={() => openLogForTicker(item)}
-                className="flex-1 text-left"
-                aria-label={`Log signal for ${item.ticker}`}
-              >
-                <p className="text-white font-mono text-sm">{item.ticker}</p>
-                <p className="text-subtle text-[10px] truncate">{item.company_name}</p>
-              </button>
-              <button
-                type="button"
-                onClick={() => remove(item.id)}
-                disabled={busy}
-                aria-label={`Remove ${item.ticker} from watchlist`}
-                className="text-muted hover:text-red-400 transition-colors p-1"
-              >
-                <Trash2 size={14} />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
     </Section>
   )
 }
