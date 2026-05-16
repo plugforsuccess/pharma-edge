@@ -199,6 +199,10 @@ serve(async (req) => {
   const rejAgg = {
     pricing: 0, rr: 0, ev: 0, pop: 0, structure: 0,
     proposed: 0, verified: 0,
+    // Universe-wide structure mix — how much of Claude's proposal
+    // budget is still going to credit/IC structures that almost never
+    // clear. Trend this across scans to judge prompt-rule compliance.
+    mix: { credit_proposed: 0, debit_proposed: 0, credit_verified: 0, debit_verified: 0 },
     by_ticker: {} as Record<string, Record<string, unknown>>,
   }
   let totalCostUsd = 0
@@ -217,6 +221,13 @@ serve(async (req) => {
       rejAgg.structure += Number(rej.structure) || 0
       rejAgg.proposed += Number(rej.proposed) || 0
       rejAgg.verified += Number(rej.verified) || 0
+      const m = (r.rejections as { mix?: Record<string, number> } | null)?.mix
+      if (m) {
+        rejAgg.mix.credit_proposed += Number(m.credit_proposed) || 0
+        rejAgg.mix.debit_proposed += Number(m.debit_proposed) || 0
+        rejAgg.mix.credit_verified += Number(m.credit_verified) || 0
+        rejAgg.mix.debit_verified += Number(m.debit_verified) || 0
+      }
       rejAgg.by_ticker[r.ticker] = r.rejections!
     }
     for (const play of r.plays) {
