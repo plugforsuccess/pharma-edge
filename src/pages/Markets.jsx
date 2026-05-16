@@ -709,11 +709,11 @@ export default function Markets() {
         </div>
       )}
 
-      {/* Replay slider — flows below the ticker bar. Inactive state
-          shows a discoverable hint card on desktop so users know it
-          exists; the clock icon in the top toolbar still works. */}
-      <div className="lg:max-w-md lg:mx-auto">
-        {replayActive ? (
+      {/* Replay slider — flows below the ticker bar. Only rendered
+          once the user explicitly enters replay via the clock icon in
+          the top toolbar; no persistent hint/entry card. */}
+      {replayActive && (
+        <div className="lg:max-w-md lg:mx-auto">
           <ReplaySlider
             ticker={ticker}
             active={replayActive}
@@ -723,27 +723,8 @@ export default function Markets() {
               setReplaySnapshot(null)
             }}
           />
-        ) : (
-          /* Discoverable hint card on BOTH mobile and desktop now —
-             previously hidden behind lg:flex. The replay feature is
-             non-obvious; without surfacing it on the page itself,
-             nobody finds the clock-icon entry. */
-          <button
-            type="button"
-            onClick={() => setReplayActive(true)}
-            className="tap-spring w-full flex items-center gap-2 px-4 py-3 bg-card border border-border rounded-xl text-left hover:border-amber-400/40 transition group"
-          >
-            <Clock size={14} className="text-amber-400/80 group-hover:text-amber-400" />
-            <div className="flex-1 min-w-0">
-              <div className="text-xs font-semibold text-fg">Replay today's GEX</div>
-              <div className="text-[10px] text-muted">
-                Scrub 5-min snapshots from open → now to see how the
-                wall built up.
-              </div>
-            </div>
-          </button>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Suggested plays */}
       <div className="lg:max-w-2xl lg:mx-auto">
