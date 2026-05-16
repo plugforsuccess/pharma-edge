@@ -9,6 +9,7 @@ import NotificationCenter from '../components/NotificationCenter'
 import OpenPositions from '../components/OpenPositions'
 import OutcomeInbox from '../components/OutcomeInbox'
 import TodaysPlaysFeed from '../components/TodaysPlaysFeed'
+import TapeDigest from '../components/TapeDigest'
 import OnboardingModal, { shouldShowOnboarding } from '../components/OnboardingModal'
 import PullToRefreshIndicator from '../components/PullToRefreshIndicator'
 import usePullToRefresh from '../hooks/usePullToRefresh'
@@ -139,6 +140,12 @@ export default function Dashboard() {
         </div>
       </header>
 
+      {/* "Since you were away" delta digest. Renders nothing on a
+          first visit or when there are no deltas, so it never adds
+          clutter — only appears when there's something that changed
+          while the user was gone. */}
+      <TapeDigest />
+
       {/* Today's Plays is the primary hero of the Tape now. The
           per-ticker Suggested Plays card moved to /markets (Pulse)
           where users go specifically to explore one ticker — splitting
@@ -210,7 +217,21 @@ export default function Dashboard() {
           <Stat
             label="Win Rate"
             value={`${stats.winRate}%`}
-            tone={stats.winRate >= 55 ? 'green' : stats.winRate > 0 ? 'amber' : 'neutral'}
+            // Breakeven for the system's R/R ≥ 1.5 discipline is
+            // ~40% (1 / (1 + 1.5)). A 48% win rate is *profitable*,
+            // so the old ≥55 green / else amber thresholds mislabeled
+            // winning records as warnings. Color off the real
+            // breakeven: comfortably profitable ≥ 45, around
+            // breakeven 38–45, losing < 38, no data 0.
+            tone={
+              stats.total === 0
+                ? 'neutral'
+                : stats.winRate >= 45
+                  ? 'green'
+                  : stats.winRate >= 38
+                    ? 'amber'
+                    : 'red'
+            }
             divider
           />
         </div>
@@ -386,7 +407,7 @@ function SignalCard({ signal, onClick }) {
       {/* Thesis is the only body text — same for every Move type. */}
       <div className="flex items-center justify-between gap-3">
         <p className="text-subtle text-xs line-clamp-1 flex-1 italic font-display">
-          {signal.thesis?.slice(0, 90)}…
+          {signal.thesis?.slice(0, 90)}{signal.thesis?.length > 90 ? '…' : ''}
         </p>
         <ConfidenceMeter level={confidence} />
       </div>
