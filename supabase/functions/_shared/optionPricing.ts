@@ -161,9 +161,37 @@ export async function priceSpread(args: {
   ])
   if (!longQ || !shortQ) return rejection(args, 'polygon quote unavailable for one or both legs')
 
+  // Quote-staleness model. age_seconds is the NBBO's last_updated —
+  // NOT a trade time. On an illiquid OTM leg the bid/ask routinely
+  // sit UNCHANGED for 10-25 min during normal RTH while the near leg
+  // updates every second; that is stable microstructure, not bad
+  // data. Bid/ask validity is already enforced upstream
+  // (fetchPolygonOptionQuote rejects crossed/zero/negative → null)
+  // and by the degenerate-pricing check below. The old "either leg
+  // > 5 min → reject" therefore nuked ~70% of every scan on healthy
+  // data (one leg always fresh, the other 700-1300s).
+  //
+  // Reject only when the data is genuinely untrustworthy:
+  //   * BOTH legs stale → the snapshot itself isn't updating (chain
+  //     lag / halt / off-hours); even the spread relationship is
+  //     suspect.
+  //   * ANY leg absurdly old (> 30 min) → that strike's quotes were
+  //     pulled / are prior-session; distrust even next to a fresh
+  //     partner.
+  // A single fresh leg proves the chain is live; the stable partner
+  // is then acceptable — its far-OTM value is low-delta (bounded
+  // error) and the R/R + EV gates downstream are the final backstop.
   const maxAge = args.max_quote_age_seconds ?? 300
-  if (longQ.age_seconds > maxAge || shortQ.age_seconds > maxAge) {
-    return rejection(args, `stale quote: long ${longQ.age_seconds}s short ${shortQ.age_seconds}s`)
+  const HARD_STALE_SECONDS = 1800
+  const bothStale = longQ.age_seconds > maxAge && shortQ.age_seconds > maxAge
+  const extremeStale =
+    longQ.age_seconds > HARD_STALE_SECONDS || shortQ.age_seconds > HARD_STALE_SECONDS
+  if (bothStale || extremeStale) {
+    return rejection(
+      args,
+      `stale quote: long ${longQ.age_seconds}s short ${shortQ.age_seconds}s` +
+        ` (both=${bothStale} extreme=${extremeStale})`,
+    )
   }
   const spot = longQ.underlying_price ?? shortQ.underlying_price
   if (!spot) return rejection(args, 'no underlying price on snapshots')
