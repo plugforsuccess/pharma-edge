@@ -1,6 +1,13 @@
 // Cash Moves — shared playSuggester module.
 //
-// PROMPT VERSION: 2026-05-15h — structure-mix instrument (no prompt
+// PROMPT VERSION: 2026-05-18i — quote-staleness model fix in
+// optionPricing.priceSpread. The old "either leg NBBO > 5 min →
+// reject" conflated a stable illiquid-OTM NBBO with bad data and
+// nuked ~70% of every scan (one leg always fresh, the other
+// 700-1300s). Now: reject only if BOTH legs stale (snapshot not
+// updating) or ANY leg > 30 min (quotes pulled). No prompt-text
+// change. Re-deploys _shared consumers via the bump.
+// Prior: 2026-05-15h — structure-mix instrument (no prompt
 // or filter change). verifyAndFilter now tallies credit-vs-debit
 // proposed/verified counts (rejections.mix), aggregated universe-wide
 // in scan-universe-plays, so compliance with the g credit rule is
