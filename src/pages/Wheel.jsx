@@ -43,6 +43,7 @@ import {
   fmtUsd0,
   fmtPct,
   fmtDate,
+  fmtGex,
   formatRelative,
 } from '../lib/wheelFormat'
 
@@ -124,17 +125,22 @@ export default function Wheel() {
           <ErrorState message={error} />
         ) : !row ? (
           <NoScanYet />
-        ) : suggestions.length === 0 ? (
-          <ExplainedEmpty row={row} />
         ) : (
           <>
-            <ScanMeta row={row} />
-            <div className="space-y-3">
-              {suggestions.map((s, i) => (
-                <SuggestionCard key={`${s.ticker}-${s.leg}-${i}`} s={s} rank={i + 1} />
-              ))}
-            </div>
-            <RejectionFootNote row={row} />
+            {suggestions.length === 0 ? (
+              <ExplainedEmpty row={row} />
+            ) : (
+              <>
+                <ScanMeta row={row} />
+                <div className="space-y-3">
+                  {suggestions.map((s, i) => (
+                    <SuggestionCard key={`${s.ticker}-${s.leg}-${i}`} s={s} rank={i + 1} />
+                  ))}
+                </div>
+                <RejectionFootNote row={row} />
+              </>
+            )}
+            <GexLeaderboard rows={row.gex_ranking} />
           </>
         )}
       </div>
@@ -341,6 +347,69 @@ function ExplainedEmpty({ row }) {
           {summary}
         </p>
       )}
+    </div>
+  )
+}
+
+// Universe GEX leaderboard — always shown when a scan exists, so the
+// page has useful content (biggest dealer-gamma names, ranked) even
+// when zero CSPs clear the gate.
+function GexLeaderboard({ rows }) {
+  if (!Array.isArray(rows) || rows.length === 0) return null
+  return (
+    <div className="mt-5 bg-card border border-border rounded-xl overflow-hidden">
+      <div className="px-4 py-3 border-b border-border">
+        <p className="text-fg text-sm font-semibold leading-tight">
+          Universe by GEX
+        </p>
+        <p className="text-muted text-[10px] leading-tight">
+          Scanned tickers ranked by dealer gamma footprint (|net GEX|)
+        </p>
+      </div>
+      <div className="divide-y divide-border">
+        {rows.map((r, i) => {
+          const regA = r.regime === 'A'
+          return (
+            <div
+              key={`${r.ticker}-${i}`}
+              className="px-4 py-2.5 flex items-center justify-between gap-3"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="text-muted text-xs font-mono-tab w-5 text-center shrink-0">
+                  {i + 1}
+                </span>
+                <span className="text-fg font-bold text-sm">{r.ticker}</span>
+                <span
+                  className={clsx(
+                    'px-1.5 py-0.5 rounded text-[10px] font-semibold border',
+                    regA
+                      ? 'text-green-300 bg-green-950 border-green-800'
+                      : 'text-red-300 bg-red-950 border-red-800',
+                  )}
+                  title={regA ? 'Regime A — positive net GEX (pinning)' : 'Regime B — negative net GEX (trending)'}
+                >
+                  {regA ? 'A · pin' : 'B · trend'}
+                </span>
+              </div>
+              <div className="text-right shrink-0">
+                <div
+                  className={clsx(
+                    'font-mono-tab tabular-nums text-sm font-semibold',
+                    regA ? 'text-green-400' : 'text-red-400',
+                  )}
+                >
+                  {fmtGex(r.net_gex)}
+                </div>
+                {r.spot != null && (
+                  <div className="text-muted text-[10px]">
+                    spot {fmtUsd(r.spot)}
+                  </div>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }

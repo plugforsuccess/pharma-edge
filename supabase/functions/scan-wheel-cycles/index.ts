@@ -115,6 +115,15 @@ interface MatrixData {
   opex?: { next_date?: string | null; days_until?: number | null } | null
 }
 
+// Per-ticker GEX summary for the universe leaderboard (independent of
+// the 7-gate suggestion pipeline — populated for every ticker whose
+// matrix resolved, even rejected ones).
+interface GexInfo {
+  net_gex: number
+  spot: number
+  regime: 'A' | 'B'
+}
+
 function isWithinRth(): boolean {
   const fmt = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/New_York',
@@ -318,7 +327,7 @@ serve(async (req) => {
   // row (attributed to requested_by) so it is auditable but kept out
   // of the batch surfaces.
   if (oneTicker) {
-    let r: { suggestion: Record<string, unknown> | null; rejections: string[]; constructable: boolean }
+    let r: { suggestion: Record<string, unknown> | null; rejections: string[]; constructable: boolean; gex: GexInfo | null }
     try {
       r = await evaluateTicker(admin, oneTicker)
     } catch (err) {
@@ -328,7 +337,7 @@ serve(async (req) => {
         tickers_scanned: 1, tickers_succeeded: 0, tickers_failed: 1,
         candidates_generated: 0, candidates_after_gate: 0,
         duration_ms: Date.now() - startedAt,
-        ranked_suggestions: [], gate_rejections: null,
+        ranked_suggestions: [], gex_ranking: null, gate_rejections: null,
         errors: { [oneTicker]: msg }, requested_by: userId,
       })
       return json({
@@ -344,6 +353,7 @@ serve(async (req) => {
       candidates_after_gate: sug.length,
       duration_ms: Date.now() - startedAt,
       ranked_suggestions: sug,
+      gex_ranking: r.gex ? [{ ticker: oneTicker, net_gex: r.gex.net_gex, spot: r.gex.spot, regime: r.gex.regime }] : null,
       gate_rejections: r.rejections.length ? { [oneTicker]: r.rejections } : null,
       errors: null, requested_by: userId,
     })
@@ -354,6 +364,7 @@ serve(async (req) => {
       suggestion: r.suggestion,
       rejections: r.rejections,
       constructable: r.constructable,
+      gex: r.gex ?? null,
       computed_at: new Date().toISOString(),
     }, 200)
   }
@@ -373,6 +384,7 @@ serve(async (req) => {
     suggestion: Record<string, unknown> | null
     rejections: string[]
     constructable: boolean
+    gex?: GexInfo | null
     error?: string
   }[] = []
 
@@ -388,7 +400,7 @@ serve(async (req) => {
         } catch (err) {
           results.push({
             ticker, ok: false, suggestion: null, rejections: [],
-            constructable: false,
+            constructable: false, gex: null,
             error: err instanceof Error ? err.message : String(err),
           })
         }
@@ -413,6 +425,19 @@ serve(async (req) => {
     (a, b) => Number(b.annualized_pct ?? 0) - Number(a.annualized_pct ?? 0),
   )
 
+  // Universe GEX leaderboard — biggest dealer gamma footprint first,
+  // independent of whether the ticker produced a CSP. Gives /wheel
+  // useful content even when zero setups pass the gate.
+  const gexRanking = results
+    .filter((r) => r.ok && r.gex)
+    .map((r) => ({
+      ticker: r.ticker,
+      net_gex: (r.gex as GexInfo).net_gex,
+      spot: (r.gex as GexInfo).spot,
+      regime: (r.gex as GexInfo).regime,
+    }))
+    .sort((a, b) => Math.abs(b.net_gex) - Math.abs(a.net_gex))
+
   const tickersFailed = results.filter((r) => !r.ok).length
   const { error: insertErr } = await admin.from('wheel_suggestions').insert({
     scan_kind: scanKind,
@@ -424,6 +449,7 @@ serve(async (req) => {
     candidates_after_gate: suggestions.length,
     duration_ms: Date.now() - startedAt,
     ranked_suggestions: suggestions,
+    gex_ranking: gexRanking.length ? gexRanking : null,
     gate_rejections: Object.keys(gateRejections).length ? gateRejections : null,
     errors: Object.keys(errors).length ? errors : null,
   })
@@ -451,8 +477,9 @@ serve(async (req) => {
 async function evaluateTicker(
   admin: ReturnType<typeof createClient>,
   ticker: string,
-): Promise<{ suggestion: Record<string, unknown> | null; rejections: string[]; constructable: boolean }> {
+): Promise<{ suggestion: Record<string, unknown> | null; rejections: string[]; constructable: boolean; gex: GexInfo | null }> {
   const rej: string[] = []
+  let gexOut: GexInfo | null = null
 
   // 1. Live GEX matrix (wide strike window so walls aren't clipped).
   const gexResp = await fetch(`${SUPABASE_URL}/functions/v1/compute-gex`, {
@@ -468,29 +495,32 @@ async function evaluateTicker(
     body: JSON.stringify({ ticker, matrix: true, matrix_strike_window_pct: 0.15, matrix_max_expirations: 12 }),
   })
   if (!gexResp.ok) {
-    return { suggestion: null, rejections: ['no_gex'], constructable: false }
+    return { suggestion: null, rejections: ['no_gex'], constructable: false, gex: null }
   }
   const gexBody = await gexResp.json()
   if (!gexBody?.success || !gexBody?.data) {
-    return { suggestion: null, rejections: ['no_gex'], constructable: false }
+    return { suggestion: null, rejections: ['no_gex'], constructable: false, gex: null }
   }
   const m = gexBody.data as MatrixData
 
   // Freshness: never act on stale / overnight snapshots.
   if (m.source === 'eod') {
-    return { suggestion: null, rejections: ['stale_eod_data'], constructable: false }
+    return { suggestion: null, rejections: ['stale_eod_data'], constructable: false, gex: null }
   }
   if (m.computed_at && Date.now() - new Date(m.computed_at).getTime() > STALE_MATRIX_MS) {
-    return { suggestion: null, rejections: ['stale_matrix'], constructable: false }
+    return { suggestion: null, rejections: ['stale_matrix'], constructable: false, gex: null }
   }
 
   const spot = Number(m.spot)
   if (!Number.isFinite(spot) || spot <= 0) {
-    return { suggestion: null, rejections: ['no_spot'], constructable: false }
+    return { suggestion: null, rejections: ['no_spot'], constructable: false, gex: null }
   }
+  // Matrix + spot resolved → capture GEX for the universe leaderboard
+  // (even if the ticker is later rejected by the gates).
+  gexOut = { net_gex: Number(m.net_gex), spot, regime: Number(m.net_gex) > 0 ? 'A' : 'B' }
   const { callWall, putWall, flip, strikeStep } = deriveWalls(m.strikes || [], m.cells || [])
   if (callWall == null || putWall == null) {
-    return { suggestion: null, rejections: ['no_walls'], constructable: false }
+    return { suggestion: null, rejections: ['no_walls'], constructable: false, gex: gexOut }
   }
 
   // ── Condition 1: net GEX positive (Regime A / pinning) ──
@@ -656,7 +686,7 @@ async function evaluateTicker(
     .sort((a, b) => Math.abs(a.dte - DTE_TARGET) - Math.abs(b.dte - DTE_TARGET))
   if (pool.length === 0) {
     if (!rej.includes('no_target_expiration')) rej.push('no_target_expiration')
-    return { suggestion: null, rejections: rej, constructable: false }
+    return { suggestion: null, rejections: rej, constructable: false, gex: gexOut }
   }
   const exp = pool[0]
 
@@ -736,12 +766,12 @@ async function evaluateTicker(
   }
   if (bestStrike == null) {
     if (!rej.includes('no_csp_strike')) rej.push('no_csp_strike')
-    return { suggestion: null, rejections: rej, constructable: false }
+    return { suggestion: null, rejections: rej, constructable: false, gex: gexOut }
   }
   const quote = await polygonPutMid(ticker, exp.date, bestStrike)
   if (!quote || !(quote.mid > 0)) {
     if (!rej.includes('no_csp_quote')) rej.push('no_csp_quote')
-    return { suggestion: null, rejections: rej, constructable: false }
+    return { suggestion: null, rejections: rej, constructable: false, gex: gexOut }
   }
   const best = { strike: bestStrike, mid: quote.mid, delta: bestDelta }
 
@@ -764,7 +794,7 @@ async function evaluateTicker(
   }
   const allPass = Object.values(conditions).every(Boolean) && annualizedPct >= MIN_ANNUALIZED_PCT
   if (!allPass) {
-    return { suggestion: null, rejections: Array.from(new Set(rej)), constructable }
+    return { suggestion: null, rejections: Array.from(new Set(rej)), constructable, gex: gexOut }
   }
 
   // Sizing vs a reference NLV (per-user 25%/60% caps are enforced at
@@ -776,6 +806,7 @@ async function evaluateTicker(
   return {
     constructable,
     rejections: [],
+    gex: gexOut,
     suggestion: {
       ticker,
       leg: 'csp',
