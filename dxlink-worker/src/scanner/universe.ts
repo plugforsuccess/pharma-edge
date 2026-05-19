@@ -15,7 +15,7 @@ export const SCAN_UNIVERSE: readonly string[] = [
   // Mega-cap tech
   'AAPL', 'MSFT', 'NVDA', 'GOOGL', 'META', 'AMZN', 'TSLA', 'AVGO', 'AMD',
   // High-flow single names
-  'NFLX', 'COIN', 'PLTR', 'CRWD', 'SNOW', 'ORCL', 'CRM', 'ADBE',
+  'NFLX', 'COIN', 'PLTR', 'CRWD', 'SNOW', 'ORCL', 'CRM', 'ADBE', 'NOK',
   // High-RV small/mid
   'MSTR', 'HOOD', 'RBLX', 'SOFI', 'RIVN', 'LCID',
   // Pharma / biotech

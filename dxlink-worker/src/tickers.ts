@@ -67,6 +67,7 @@ export const TRACKED_TICKERS: string[] = [
   'BTMR',
   'SMCI',
   'ANET',
+  'NOK',
   // Banks
   'JPM',
   'GS',
