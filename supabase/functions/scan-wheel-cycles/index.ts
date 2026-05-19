@@ -22,9 +22,10 @@
 // in gate_rejections so an empty feed is ALWAYS explainable:
 //   1 net_gex_positive   net GEX > 0 (dealers long gamma / pinning)
 //   2 pin_prob_ok        pinning_probability >= 0.35
-//   3 spot_between_walls spot strictly between put & call wall, not
-//                        within EXTREME_PCT of either
-//   4 expected_move_ok   expected_move < 80% of distance to nearest wall
+//   3 spot_between_walls spot inside the channel AND >= 2% above the
+//                        put wall (downside-only; CSP is asymmetric)
+//   4 expected_move_ok   spot-to-put-wall cushion >= 1 expected move
+//                        (downside standoff; no delta double-count)
 //   5 iv_rank_ok         IV rank (from gex_history iv_used) >= 30
 //   6 walls_stable       put wall has not migrated 2+ strikes; thin
 //                        history → low-confidence PASS (not a reject)
@@ -67,8 +68,8 @@ const WHEEL_BASE_UNIVERSE = [
 
 const CONCURRENCY = 3
 const STALE_MATRIX_MS = 12 * 60 * 1000
-const EXTREME_PCT = 0.01            // "at a wall extreme" = within 1%
-const EM_WALL_FRACTION = 0.8        // expected move must be < 80% to wall
+const PUT_WALL_BUFFER_PCT = 0.02    // spot must sit >= 2% above the put wall
+const EM_PUT_WALL_MULT = 1.0        // ...and >= 1 expected move above it
 const PIN_MIN = 0.35
 const IV_RANK_MIN = 30
 const IV_RANK_MIN_SAMPLES = 12      // below this → iv_history_insufficient
@@ -498,17 +499,29 @@ async function evaluateTicker(
   const c2 = Number.isFinite(pin) && pin >= PIN_MIN
   if (!c2) rej.push('pin_prob_low')
 
-  // ── Condition 3: spot between walls, not at an extreme ──
+  // ── Condition 3: spot clear of the support it sells against ──
+  // Downside-only — a CSP is asymmetric. Spot must be inside the
+  // channel AND at least PUT_WALL_BUFFER_PCT above the put wall.
+  // Proximity to the CALL wall is irrelevant to a put seller, so the
+  // old symmetric extreme test (which deleted profitable CSPs) is
+  // gone.
   const insideChannel = spot > putWall && spot < callWall
-  const nearPut = Math.abs(spot - putWall) / spot <= EXTREME_PCT
-  const nearCall = Math.abs(spot - callWall) / spot <= EXTREME_PCT
-  const c3 = insideChannel && !nearPut && !nearCall
+  const putBufferOk = (spot - putWall) / spot >= PUT_WALL_BUFFER_PCT
+  const c3 = insideChannel && putBufferOk
   if (!c3) rej.push('spot_at_extreme')
 
-  // ── Condition 4: expected move < 80% of distance to nearest wall ──
-  const distNearest = Math.min(spot - putWall, callWall - spot)
+  // ── Condition 4: volatility-aware downside standoff ──
+  // The genuine kernel of the old EM gate, made downside-only and
+  // free of the delta double-count: the cushion from spot down to the
+  // put wall (the support being sold against) must cover at least one
+  // expected move. Replaces the old symmetric "EM < 80% of nearest
+  // wall", which over-rejected whenever the CALL wall was nearer (the
+  // common Regime-A pin). Note this gates spot-vs-wall geometry, NOT
+  // strike placement — a literal "strike >= 1 EM below spot" would
+  // contradict the ~0.30Δ strike (which is only ~0.5 EM OTM) and
+  // re-introduce over-restriction.
   const em = Number(m.expected_move)
-  const c4 = Number.isFinite(em) && distNearest > 0 && em < EM_WALL_FRACTION * distNearest
+  const c4 = Number.isFinite(em) && em > 0 && (spot - putWall) >= EM_PUT_WALL_MULT * em
   if (!c4) rej.push('expected_move_high')
 
   // ── Condition 5: IV rank (from gex_history iv_used) >= 30 ──

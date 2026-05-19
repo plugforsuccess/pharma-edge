@@ -11,8 +11,8 @@
 export const CONDITIONS = [
   { key: 'net_gex_positive', label: 'Net GEX +', hint: 'Dealers long gamma (pinning regime)' },
   { key: 'pin_prob_ok', label: 'Pin ≥ 35%', hint: 'Pin probability at or above 35%' },
-  { key: 'spot_between_walls', label: 'In channel', hint: 'Spot between put & call wall, not at an extreme' },
-  { key: 'expected_move_ok', label: 'EM < 80%', hint: 'Expected move under 80% of distance to nearest wall' },
+  { key: 'spot_between_walls', label: 'In channel', hint: 'Spot inside the channel and ≥2% above the put wall' },
+  { key: 'expected_move_ok', label: 'EM cushion', hint: 'Spot is ≥1 expected move above the put wall' },
   { key: 'iv_rank_ok', label: 'IVR ≥ 30', hint: 'IV rank at or above 30' },
   { key: 'walls_stable', label: 'Walls stable', hint: 'No 2+ strike wall migration (thin history → low-confidence pass)' },
   { key: 'catalyst_clear', label: 'No catalyst', hint: 'No earnings / FOMC / CPI within DTE' },
@@ -21,8 +21,8 @@ export const CONDITIONS = [
 export const REASON_LABEL = {
   net_gex_negative: 'negative net GEX',
   pin_prob_low: 'pin probability < 35%',
-  spot_at_extreme: 'spot at a wall extreme',
-  expected_move_high: 'expected move ≥ 80% to wall',
+  spot_at_extreme: 'spot not clear of the put wall',
+  expected_move_high: 'less than 1 EM of room to the put wall',
   iv_rank_low: 'IV rank < 30',
   iv_history_insufficient: 'thin IV history',
   walls_migrating: 'walls migrated 2+ strikes',
