@@ -35,3 +35,9 @@ verify_jwt = false
 # key OR a real user JWT — and 401s anonymous callers itself.
 [functions.compute-gex]
 verify_jwt = false
+
+# scan-wheel-cycles: deterministic wheel-strategy scanner. Same auth
+# triad as scan-universe-plays (cron vault token / SCAN_AUTH_TOKEN /
+# service-role); self-validates inside the function, no user JWT path.
+[functions.scan-wheel-cycles]
+verify_jwt = false
