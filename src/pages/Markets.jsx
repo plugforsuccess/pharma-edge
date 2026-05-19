@@ -13,6 +13,7 @@ import TickerDrawer from '../components/TickerDrawer'
 import ReplaySlider from '../components/ReplaySlider'
 import SuggestedPlays from '../components/SuggestedPlays'
 import SuggestedWheel from '../components/SuggestedWheel'
+import WheelAnalyze from '../components/WheelAnalyze'
 import TrinityView from '../components/TrinityView'
 import UpgradeNotice from '../components/UpgradeNotice'
 import LiveDataStatus from '../components/LiveDataStatus'
@@ -732,8 +733,14 @@ export default function Markets() {
         <SuggestedPlays ticker={ticker} isPro={isPro} />
       </div>
 
-      {/* Wheel CSPs — universe-wide, alongside the ticker-scoped
-          Claude spreads above. Same wheel_suggestions feed as /wheel. */}
+      {/* On-demand wheel CSP analysis for THIS matrix ticker —
+          click-to-run, same deterministic engine as the batch scan. */}
+      <div className="lg:max-w-2xl lg:mx-auto">
+        <WheelAnalyze ticker={ticker} />
+      </div>
+
+      {/* Wheel CSPs — universe-wide batch feed, alongside the
+          ticker-scoped Claude spreads above. Same feed as /wheel. */}
       <div className="lg:max-w-2xl lg:mx-auto">
         <SuggestedWheel />
       </div>

@@ -35,43 +35,16 @@ import {
 } from 'lucide-react'
 import clsx from 'clsx'
 import { supabase } from '../lib/supabase'
-
-// The 7 entry conditions, in spec order. `key` matches the boolean the
-// scanner writes into each suggestion's `conditions` object and the
-// reason-code prefix it uses in gate_rejections.
-const CONDITIONS = [
-  { key: 'net_gex_positive', label: 'Net GEX +', hint: 'Dealers long gamma (pinning regime)' },
-  { key: 'pin_prob_ok', label: 'Pin ≥ 35%', hint: 'Pin probability at or above 35%' },
-  { key: 'spot_between_walls', label: 'In channel', hint: 'Spot between put & call wall, not at an extreme' },
-  { key: 'expected_move_ok', label: 'EM < 80%', hint: 'Expected move under 80% of distance to nearest wall' },
-  { key: 'iv_rank_ok', label: 'IVR ≥ 30', hint: 'IV rank at or above 30' },
-  { key: 'walls_stable', label: 'Walls stable', hint: 'No 2+ strike wall migration (thin history → low-confidence pass)' },
-  { key: 'catalyst_clear', label: 'No catalyst', hint: 'No earnings / FOMC / CPI within DTE' },
-]
-
-const REASON_LABEL = {
-  net_gex_negative: 'negative net GEX',
-  pin_prob_low: 'pin probability < 35%',
-  spot_at_extreme: 'spot at a wall extreme',
-  expected_move_high: 'expected move ≥ 80% to wall',
-  iv_rank_low: 'IV rank < 30',
-  iv_history_insufficient: 'thin IV history',
-  walls_migrating: 'walls migrated 2+ strikes',
-  wall_history_insufficient: 'thin wall history',
-  opex_within_dte: 'OPEX within DTE',
-  earnings_within_dte: 'earnings within DTE',
-  macro_within_dte: 'macro event within DTE',
-  yield_below_min: 'yield below minimum',
-  no_csp_strike: 'no qualifying CSP strike',
-  no_csp_quote: 'no live CSP quote',
-  no_target_expiration: 'no monthly in DTE band',
-  no_gex: 'no GEX data',
-  no_walls: 'walls undefined',
-  no_spot: 'no spot price',
-  stale_matrix: 'stale matrix',
-  stale_eod_data: 'overnight data',
-  no_chain: 'no option chain',
-}
+import {
+  CONDITIONS,
+  rejectionSummary,
+  fmtStrike,
+  fmtUsd,
+  fmtUsd0,
+  fmtPct,
+  fmtDate,
+  formatRelative,
+} from '../lib/wheelFormat'
 
 export default function Wheel() {
   const [row, setRow] = useState(null)
@@ -86,6 +59,9 @@ export default function Wheel() {
     supabase
       .from('wheel_suggestions')
       .select('*')
+      // Batch surface only — exclude on-demand single-ticker rows so a
+      // user's /markets analysis can't hijack the universe feed.
+      .neq('scan_kind', 'ondemand')
       .order('computed_at', { ascending: false })
       .limit(1)
       .maybeSingle()
@@ -431,56 +407,7 @@ function LoadingSkeleton() {
   )
 }
 
-// ────────────────────────────────────────────────────────────────────
-// Formatting helpers
-// ────────────────────────────────────────────────────────────────────
-
-function rejectionSummary(gateRejections) {
-  if (!gateRejections || typeof gateRejections !== 'object') return null
-  const counts = {}
-  for (const reasons of Object.values(gateRejections)) {
-    for (const r of Array.isArray(reasons) ? reasons : [reasons]) {
-      counts[r] = (counts[r] || 0) + 1
-    }
-  }
-  const parts = Object.entries(counts)
-    .sort((a, b) => b[1] - a[1])
-    .map(([reason, n]) => `${n} ${REASON_LABEL[reason] || reason}`)
-  return parts.length ? parts.join(' · ') : null
-}
-
-function fmtStrike(v) {
-  if (v == null) return '—'
-  return `$${Number(v).toFixed(Number(v) % 1 === 0 ? 0 : 2)}`
-}
-
-function fmtUsd(v) {
-  if (v == null) return '—'
-  return `$${Number(v).toFixed(2)}`
-}
-
-function fmtUsd0(v) {
-  if (v == null) return '—'
-  return `$${Math.round(Number(v)).toLocaleString()}`
-}
-
-function fmtPct(v) {
-  if (v == null) return '—'
-  return `${Number(v).toFixed(1)}%`
-}
-
-function fmtDate(d) {
-  if (!d) return '—'
-  const dt = new Date(`${d}T00:00:00`)
-  if (Number.isNaN(dt.getTime())) return String(d)
-  return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-}
-
-function formatRelative(iso) {
-  if (!iso) return 'just now'
-  const ms = Date.now() - new Date(iso).getTime()
-  if (ms < 60_000) return 'just now'
-  if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m ago`
-  if (ms < 86_400_000) return `${Math.round(ms / 3_600_000)}h ago`
-  return `${Math.round(ms / 86_400_000)}d ago`
-}
+// Presentation helpers (CONDITIONS, REASON_LABEL, rejectionSummary,
+// formatters) are centralised in ../lib/wheelFormat so /wheel, the
+// Pulse SuggestedWheel strip, and the on-demand WheelAnalyze panel
+// never drift on the locked UX contracts.

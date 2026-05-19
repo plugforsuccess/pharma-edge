@@ -21,31 +21,9 @@ import { RefreshCw, AlertTriangle } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import clsx from 'clsx'
 import { supabase } from '../lib/supabase'
+import { rejectionSummary, fmtStrike, fmtUsd, fmtPct, fmtDate } from '../lib/wheelFormat'
 
 const TOP_N = 3
-
-const REASON_LABEL = {
-  net_gex_negative: 'negative net GEX',
-  pin_prob_low: 'pin probability < 35%',
-  spot_at_extreme: 'spot at a wall extreme',
-  expected_move_high: 'expected move ≥ 80% to wall',
-  iv_rank_low: 'IV rank < 30',
-  iv_history_insufficient: 'thin IV history',
-  walls_migrating: 'walls migrated 2+ strikes',
-  wall_history_insufficient: 'thin wall history',
-  opex_within_dte: 'OPEX within DTE',
-  earnings_within_dte: 'earnings within DTE',
-  macro_within_dte: 'macro event within DTE',
-  yield_below_min: 'yield below minimum',
-  no_csp_strike: 'no qualifying CSP strike',
-  no_csp_quote: 'no live CSP quote',
-  no_target_expiration: 'no monthly in DTE band',
-  no_gex: 'no GEX data',
-  no_walls: 'walls undefined',
-  no_spot: 'no spot price',
-  stale_matrix: 'stale matrix',
-  stale_eod_data: 'overnight data',
-}
 
 export default function SuggestedWheel() {
   const [row, setRow] = useState(null)
@@ -59,6 +37,7 @@ export default function SuggestedWheel() {
     supabase
       .from('wheel_suggestions')
       .select('*')
+      .neq('scan_kind', 'ondemand')
       .order('computed_at', { ascending: false })
       .limit(1)
       .maybeSingle()
@@ -205,7 +184,7 @@ function WheelRow({ s }) {
 
 // Never a silent zero — show the per-condition tally inline.
 function ExplainedEmpty({ row }) {
-  const summary = rejectionSummary(row?.gate_rejections)
+  const summary = rejectionSummary(row?.gate_rejections, 4)
   return (
     <div className="px-4 py-4 text-center space-y-1.5">
       <p className="text-subtle text-xs">
@@ -223,38 +202,4 @@ function ExplainedEmpty({ row }) {
       </Link>
     </div>
   )
-}
-
-function rejectionSummary(gateRejections) {
-  if (!gateRejections || typeof gateRejections !== 'object') return null
-  const counts = {}
-  for (const reasons of Object.values(gateRejections)) {
-    for (const r of Array.isArray(reasons) ? reasons : [reasons]) {
-      counts[r] = (counts[r] || 0) + 1
-    }
-  }
-  const parts = Object.entries(counts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 4)
-    .map(([reason, n]) => `${n} ${REASON_LABEL[reason] || reason}`)
-  return parts.length ? parts.join(' · ') : null
-}
-
-function fmtStrike(v) {
-  if (v == null) return '—'
-  return `$${Number(v).toFixed(Number(v) % 1 === 0 ? 0 : 2)}`
-}
-function fmtUsd(v) {
-  if (v == null) return '—'
-  return `$${Number(v).toFixed(2)}`
-}
-function fmtPct(v) {
-  if (v == null) return '—'
-  return `${Number(v).toFixed(1)}%`
-}
-function fmtDate(d) {
-  if (!d) return '—'
-  const dt = new Date(`${d}T00:00:00`)
-  if (Number.isNaN(dt.getTime())) return String(d)
-  return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }

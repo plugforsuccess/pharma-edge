@@ -84,6 +84,7 @@ const DELTA_TARGET = 0.30
 const MIN_ANNUALIZED_PCT = 15
 const ACCOUNT_SIZE_REFERENCE = 25_000
 const PER_TICKER_COLLATERAL_CAP = 0.25  // locked: 25% per ticker
+const ONDEMAND_RATE_LIMIT_PER_HOUR = 60 // per-user cap on single-ticker calls
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -249,7 +250,20 @@ serve(async (req) => {
   const startedAt = Date.now()
   const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
-  // ── Auth: SCAN_AUTH_TOKEN (cron) | service-role | vault cron token ─
+  let body: Record<string, unknown> = {}
+  try { body = await req.json() } catch { /* empty body ok */ }
+  const oneTicker = typeof body.ticker === 'string' && body.ticker.trim()
+    ? body.ticker.trim().toUpperCase().slice(0, 12)
+    : null
+  if (oneTicker && !/^[A-Z0-9.\-]{1,12}$/.test(oneTicker)) {
+    return json({ error: 'invalid ticker' }, 400)
+  }
+  const force = body.force === true
+
+  // ── Auth ──
+  // Triad (cron token / service-role / vault token) may run anything.
+  // A logged-in end user may run ONLY the single-ticker on-demand
+  // analysis (oneTicker set) — never a full universe scan.
   const authHeader = req.headers.get('Authorization') || ''
   const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : ''
   const isCron = !!SCAN_AUTH_TOKEN && bearer === SCAN_AUTH_TOKEN
@@ -259,17 +273,85 @@ serve(async (req) => {
     const { data: vaultToken } = await admin.rpc('get_cron_scan_auth_token')
     isVaultCron = typeof vaultToken === 'string' && vaultToken.length > 0 && bearer === vaultToken
   }
-  if (!isCron && !isServiceRole && !isVaultCron) {
-    return json({ error: 'unauthorized' }, 401)
+  const isTriad = isCron || isServiceRole || isVaultCron
+
+  let userId: string | null = null
+  if (!isTriad) {
+    // Only the single-ticker on-demand path is open to end users.
+    if (!oneTicker) return json({ error: 'unauthorized' }, 401)
+    if (!bearer || !SUPABASE_ANON_KEY) return json({ error: 'unauthorized' }, 401)
+    // verify_jwt=false on this function (cron uses opaque tokens), so
+    // validate the end-user JWT ourselves via the anon client.
+    const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      global: { headers: { Authorization: `Bearer ${bearer}` } },
+    })
+    const { data: u } = await userClient.auth.getUser()
+    userId = u?.user?.id ?? null
+    if (!userId) return json({ error: 'unauthorized' }, 401)
+    const sinceIso = new Date(Date.now() - 3_600_000).toISOString()
+    const { count } = await admin
+      .from('wheel_suggestions')
+      .select('*', { count: 'exact', head: true })
+      .eq('requested_by', userId)
+      .eq('scan_kind', 'ondemand')
+      .gte('computed_at', sinceIso)
+    if ((count ?? 0) >= ONDEMAND_RATE_LIMIT_PER_HOUR) {
+      return json({ error: 'rate limit: too many on-demand analyses this hour' }, 429)
+    }
   }
 
-  let body: Record<string, unknown> = {}
-  try { body = await req.json() } catch { /* empty body ok */ }
-  const scanKind = body.scan_kind === 'manual' || body.scan_kind === 'eod' ? body.scan_kind : 'rth'
-  const force = body.force === true
+  const scanKind = oneTicker
+    ? 'ondemand'
+    : (body.scan_kind === 'manual' || body.scan_kind === 'eod' ? body.scan_kind : 'rth')
 
-  if (!force && scanKind === 'rth' && !isWithinRth()) {
+  if (!oneTicker && !force && scanKind === 'rth' && !isWithinRth()) {
     return json({ skipped: true, reason: 'outside RTH' }, 200)
+  }
+
+  // ── On-demand single-ticker analysis (button on the matrix view) ──
+  // Reuses the exact deterministic evaluateTicker() — one engine, no
+  // logic fork — and persists the result as a scan_kind='ondemand'
+  // row (attributed to requested_by) so it is auditable but kept out
+  // of the batch surfaces.
+  if (oneTicker) {
+    let r: { suggestion: Record<string, unknown> | null; rejections: string[]; constructable: boolean }
+    try {
+      r = await evaluateTicker(admin, oneTicker)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      await admin.from('wheel_suggestions').insert({
+        scan_kind: 'ondemand', universe: [oneTicker],
+        tickers_scanned: 1, tickers_succeeded: 0, tickers_failed: 1,
+        candidates_generated: 0, candidates_after_gate: 0,
+        duration_ms: Date.now() - startedAt,
+        ranked_suggestions: [], gate_rejections: null,
+        errors: { [oneTicker]: msg }, requested_by: userId,
+      })
+      return json({
+        success: true, scan_kind: 'ondemand', ticker: oneTicker,
+        suggestion: null, rejections: [], constructable: false, error: msg,
+      }, 200)
+    }
+    const sug = r.suggestion ? [r.suggestion] : []
+    await admin.from('wheel_suggestions').insert({
+      scan_kind: 'ondemand', universe: [oneTicker],
+      tickers_scanned: 1, tickers_succeeded: 1, tickers_failed: 0,
+      candidates_generated: r.constructable ? 1 : 0,
+      candidates_after_gate: sug.length,
+      duration_ms: Date.now() - startedAt,
+      ranked_suggestions: sug,
+      gate_rejections: r.rejections.length ? { [oneTicker]: r.rejections } : null,
+      errors: null, requested_by: userId,
+    })
+    return json({
+      success: true,
+      scan_kind: 'ondemand',
+      ticker: oneTicker,
+      suggestion: r.suggestion,
+      rejections: r.rejections,
+      constructable: r.constructable,
+      computed_at: new Date().toISOString(),
+    }, 200)
   }
 
   // Universe = curated streamed names ∪ watchlist ∪ open positions.
