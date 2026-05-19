@@ -22,6 +22,12 @@ interface Fixture {
     suggested_put_strike?: number | null
     disqualify_reasons_empty?: boolean
     reasons_contains_any?: string[]
+    wall_trend?: 'TRENDING_UP' | 'ESTABLISHED_PIN' | 'TRENDING_DOWN' | 'UNKNOWN'
+    trade_side?: 'put_only' | 'call_only' | 'full'
+    wall_confidence?: 'high' | 'reduced' | 'unknown'
+    effective_call_strike?: number | null
+    effective_put_strike?: number | null
+    wall_message_contains_any?: string[]
   }
 }
 
@@ -70,6 +76,31 @@ for (const f of fixtures) {
     if (!needles.some((n) => hay.includes(n))) {
       errors.push(`reasons missing any of [${needles.join(' | ')}] — got: ${hay}`)
     }
+  }
+
+  const wm = r.wall_migration
+  if (has(e, 'wall_trend') && wm.trend !== e.wall_trend) {
+    errors.push(`expected wall_trend=${e.wall_trend}, got ${wm.trend}`)
+  }
+  if (has(e, 'trade_side') && wm.trade_side !== e.trade_side) {
+    errors.push(`expected trade_side=${e.trade_side}, got ${wm.trade_side}`)
+  }
+  if (has(e, 'wall_confidence') && wm.confidence !== e.wall_confidence) {
+    errors.push(`expected wall_confidence=${e.wall_confidence}, got ${wm.confidence}`)
+  }
+  if (has(e, 'effective_call_strike') && wm.effective_call_strike !== e.effective_call_strike) {
+    errors.push(
+      `expected effective_call_strike=${e.effective_call_strike}, got ${wm.effective_call_strike}`,
+    )
+  }
+  if (has(e, 'effective_put_strike') && wm.effective_put_strike !== e.effective_put_strike) {
+    errors.push(
+      `expected effective_put_strike=${e.effective_put_strike}, got ${wm.effective_put_strike}`,
+    )
+  }
+  const wmNeedles = e.wall_message_contains_any ?? []
+  if (wmNeedles.length > 0 && !wmNeedles.some((n) => wm.message.includes(n))) {
+    errors.push(`wall message missing any of [${wmNeedles.join(' | ')}] — got: ${wm.message}`)
   }
 
   if (errors.length === 0) {

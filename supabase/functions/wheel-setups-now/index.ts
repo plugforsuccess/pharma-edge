@@ -23,7 +23,12 @@
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { evaluateWheelSetup, type WheelInput } from '../_shared/wheelStrategy.ts'
+import {
+  evaluateWheelSetup,
+  identifyWall,
+  type WheelInput,
+  type WallObservation,
+} from '../_shared/wheelStrategy.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')
@@ -65,10 +70,26 @@ function todayUtcMs(): number {
   return Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate())
 }
 
-function dteFromDate(dateStr: string): number {
+// DTE of `dateStr` relative to an "as of" UTC-midnight instant. The
+// asOfMs param lets the SAME 7–10 DTE expiration rule be applied to a
+// historical snapshot as of the day it was taken (apples-to-apples
+// wall comparison), not relative to today.
+function dteFromDate(dateStr: string, asOfMs: number = todayUtcMs()): number {
   const [y, m, d] = dateStr.split('-').map(Number)
   if (!y || !m || !d) return Number.POSITIVE_INFINITY
-  return Math.round((Date.UTC(y, m - 1, d) - todayUtcMs()) / 86_400_000)
+  return Math.round((Date.UTC(y, m - 1, d) - asOfMs) / 86_400_000)
+}
+
+// ET (America/New_York) calendar date as YYYY-MM-DD. Groups
+// gex_history snapshots into trading days the way the desk sees them
+// (handles DST + the UTC date-boundary skew automatically).
+function etDateString(d: Date): string {
+  return d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+}
+
+function utcMidnightOfEtDate(etDate: string): number {
+  const [y, m, day] = etDate.split('-').map(Number)
+  return Date.UTC(y, m - 1, day)
 }
 
 // §4.2 targets 7–10 DTE. Prefer the soonest expiration inside that
@@ -76,13 +97,14 @@ function dteFromDate(dateStr: string): number {
 // expired one).
 function pickExpirationIndex(
   expirations: Array<{ date?: string }>,
+  asOfMs: number = todayUtcMs(),
 ): { index: number; date: string; dte: number } | null {
   let inWindow: { index: number; date: string; dte: number } | null = null
   let nearest: { index: number; date: string; dte: number } | null = null
   for (let i = 0; i < expirations.length; i++) {
     const date = expirations[i]?.date
     if (typeof date !== 'string') continue
-    const dte = dteFromDate(date)
+    const dte = dteFromDate(date, asOfMs)
     if (!Number.isFinite(dte) || dte < 1) continue
     if (dte >= 7 && dte <= 10) {
       if (inWindow === null || dte < inWindow.dte) inWindow = { index: i, date, dte }
@@ -118,6 +140,73 @@ async function sourceIvRank(
   const atOrBelow = series.filter((v) => v <= latest).length
   const rank = (atOrBelow / series.length) * 100
   return { iv_rank: Math.round(rank * 100) / 100, samples: series.length }
+}
+
+// Reconstruct the call wall from a historical GEX matrix payload using
+// the EXACT same wall logic as the live path (identifyWall), against
+// the comparable 7–10 DTE expiration as of that snapshot's day. A
+// re-implemented historical wall would silently drift from the live
+// definition — same failure mode the verdict-fixtures guard prevents.
+function callWallStrikeFromPayload(payload: unknown, asOfMs: number): number | null {
+  const m = payload as {
+    strikes?: unknown[]
+    expirations?: Array<{ date?: string }>
+    oi_call_cells?: Array<Array<number | null>>
+  } | null
+  if (!m || !Array.isArray(m.strikes) || !Array.isArray(m.expirations)) return null
+  const exp = pickExpirationIndex(m.expirations, asOfMs)
+  if (!exp) return null
+  const strikes = m.strikes.map(Number)
+  const callCells = m.oi_call_cells ?? []
+  const callOi = strikes.map((_, i) => Number(callCells[i]?.[exp.index] ?? 0) || 0)
+  return identifyWall(strikes, callOi)?.strike ?? null
+}
+
+// Wall-migration history (owner directive). Pull recent gex_history,
+// fold to ONE snapshot per ET trading day (the latest of that day),
+// then reconstruct the call wall at ~1 / 3 / 5 trading days ago. The
+// pure engine classifies the trajectory; absent points → it fails
+// safe to UNKNOWN.
+const WALL_HISTORY_TARGETS = [1, 3, 5]
+
+async function sourceWallHistory(
+  admin: ReturnType<typeof createClient>,
+  ticker: string,
+  nowEtDate: string,
+): Promise<WallObservation[]> {
+  // 16 calendar days comfortably spans 5 trading days through
+  // weekends + a holiday or two.
+  const cutoff = new Date(Date.now() - 16 * 86_400_000).toISOString()
+  const { data, error } = await admin
+    .from('gex_history')
+    .select('snapshot_at, payload')
+    .eq('ticker', ticker)
+    .gte('snapshot_at', cutoff)
+    .order('snapshot_at', { ascending: false })
+    .limit(1200)
+  if (error || !data || data.length === 0) return []
+
+  // rows are newest-first → first row seen for an ET date is that
+  // day's latest (closest-to-close) snapshot.
+  const latestByDate = new Map<string, unknown>()
+  for (const row of data) {
+    const etDate = etDateString(new Date(row.snapshot_at as string))
+    if (etDate >= nowEtDate) continue // exclude today / future
+    if (!latestByDate.has(etDate)) latestByDate.set(etDate, row.payload)
+  }
+
+  const priorDates = [...latestByDate.keys()].sort().reverse() // desc
+  const out: WallObservation[] = []
+  for (const tradingDaysAgo of WALL_HISTORY_TARGETS) {
+    const etDate = priorDates[tradingDaysAgo - 1]
+    if (!etDate) continue
+    const strike = callWallStrikeFromPayload(
+      latestByDate.get(etDate),
+      utcMidnightOfEtDate(etDate),
+    )
+    out.push({ trading_days_ago: tradingDaysAgo, date: etDate, call_wall_strike: strike })
+  }
+  return out
 }
 
 serve(async (req) => {
@@ -195,7 +284,10 @@ serve(async (req) => {
   const putOi = strikes.map((_, i) => Number(putCells[i]?.[exp.index] ?? 0) || 0)
 
   const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-  const iv = await sourceIvRank(admin, ticker)
+  const [iv, wallHistory] = await Promise.all([
+    sourceIvRank(admin, ticker),
+    sourceWallHistory(admin, ticker, etDateString(new Date())),
+  ])
 
   const input: WheelInput = {
     ticker,
@@ -210,6 +302,7 @@ serve(async (req) => {
     strikes,
     call_oi: callOi,
     put_oi: putOi,
+    wall_history: wallHistory,
   }
 
   const decision = evaluateWheelSetup(input)

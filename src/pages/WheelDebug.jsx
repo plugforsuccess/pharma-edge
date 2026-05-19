@@ -204,10 +204,72 @@ export default function WheelDebug() {
             />
           </div>
 
-          {/* Recommended strikes */}
+          {/* Wall migration check — runs before the setup is acted on */}
+          {d.wall_migration && (
+            <div
+              className={`bg-card border rounded-lg p-4 ${
+                d.wall_migration.warning ? 'border-red-800' : 'border-green-500/50'
+              }`}
+            >
+              <div className="text-subtle text-[10px] uppercase tracking-[0.18em] mb-2">
+                Wall Migration Check
+              </div>
+              <div className="flex items-center gap-2 mb-2">
+                <span
+                  className={`text-sm font-semibold ${
+                    d.wall_migration.trend === 'ESTABLISHED_PIN'
+                      ? 'text-green-400'
+                      : d.wall_migration.trend === 'UNKNOWN'
+                      ? 'text-subtle'
+                      : 'text-red-400'
+                  }`}
+                >
+                  {d.wall_migration.trend.replace(/_/g, ' ')}
+                </span>
+                <span className="text-muted text-xs">
+                  · sell {d.wall_migration.trade_side.replace(/_/g, ' ')} · conf{' '}
+                  {d.wall_migration.confidence}
+                </span>
+              </div>
+              <p
+                className={`text-xs leading-relaxed ${
+                  d.wall_migration.warning ? 'text-red-400' : 'text-subtle'
+                }`}
+              >
+                {d.wall_migration.message}
+              </p>
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                {[1, 3, 5].map((n) => {
+                  const o = d.wall_migration.observations?.find(
+                    (x) => x.trading_days_ago === n,
+                  )
+                  return (
+                    <div key={n} className="text-center">
+                      <div className="text-muted text-[10px]">{n}d ago</div>
+                      <div className="text-fg text-sm font-mono">
+                        {o?.call_wall_strike ?? '—'}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+              <div className="mt-3 pt-3 border-t border-border/60">
+                <Row
+                  label="Effective sell call"
+                  value={d.wall_migration.effective_call_strike ?? 'skip'}
+                />
+                <Row
+                  label="Effective sell put"
+                  value={d.wall_migration.effective_put_strike ?? 'skip'}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Recommended strikes (base §4.3 structural reference) */}
           <div className="bg-card border border-border rounded-lg p-4">
             <div className="text-subtle text-[10px] uppercase tracking-[0.18em] mb-2">
-              Recommended Strikes
+              Base Strikes (§4.3 reference)
             </div>
             <Row
               label="Sell call"
