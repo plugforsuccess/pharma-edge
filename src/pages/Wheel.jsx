@@ -1,0 +1,456 @@
+// Cash Moves — "The Wheel" (/wheel).
+//
+// Authenticated surface. Renders the latest wheel_suggestions row:
+// cash-secured-put / covered-call candidates that cleared all 7 entry
+// conditions, ranked by annualized yield.
+//
+// Two non-negotiable UX contracts, locked with the owner:
+//
+//  1. UNVERIFIED catalyst is LOUD, not silent. earnings_calendar +
+//     market_events are empty in this project (no feed wired), so the
+//     scanner can only hard-verify OPEX. Any suggestion whose
+//     catalyst_check has earnings/macro = 'UNVERIFIED' renders a
+//     blocking amber warning the user must read before entry — selling
+//     a CSP into an unflagged earnings print is the classic wheel
+//     blow-up and we will not hide that gap behind a green checkmark.
+//
+//  2. An empty feed is EXPLAINED, never a sad zero. The scanner writes
+//     gate_rejections (per-ticker, which of the 7 conditions failed),
+//     so when nothing passes we show exactly why ("9 scanned: 5
+//     negative net GEX, 3 IV rank < 30, 1 OPEX within DTE") instead of
+//     a blank screen. This is the direct fix for the silent-zero
+//     failure mode this codebase has been bitten by.
+//
+// Wheel is a desktop-sidebar + direct-URL surface; the mobile bottom
+// nav is already full at 5 slots (see Layout.jsx), so it is not added
+// there.
+
+import { useEffect, useMemo, useState } from 'react'
+import {
+  RefreshCw,
+  AlertTriangle,
+  ShieldCheck,
+  CircleSlash,
+  TrendingUp,
+} from 'lucide-react'
+import clsx from 'clsx'
+import { supabase } from '../lib/supabase'
+
+// The 7 entry conditions, in spec order. `key` matches the boolean the
+// scanner writes into each suggestion's `conditions` object and the
+// reason-code prefix it uses in gate_rejections.
+const CONDITIONS = [
+  { key: 'net_gex_positive', label: 'Net GEX +', hint: 'Dealers long gamma (pinning regime)' },
+  { key: 'pin_prob_ok', label: 'Pin ≥ 35%', hint: 'Pin probability at or above 35%' },
+  { key: 'spot_between_walls', label: 'In channel', hint: 'Spot between put & call wall, not at an extreme' },
+  { key: 'expected_move_ok', label: 'EM < 80%', hint: 'Expected move under 80% of distance to nearest wall' },
+  { key: 'iv_rank_ok', label: 'IVR ≥ 30', hint: 'IV rank at or above 30' },
+  { key: 'walls_stable', label: 'Walls stable', hint: 'No 2+ strike wall migration in 3+ days' },
+  { key: 'catalyst_clear', label: 'No catalyst', hint: 'No earnings / FOMC / CPI within DTE' },
+]
+
+const REASON_LABEL = {
+  net_gex_negative: 'negative net GEX',
+  pin_prob_low: 'pin probability < 35%',
+  spot_at_extreme: 'spot at a wall extreme',
+  expected_move_high: 'expected move ≥ 80% to wall',
+  iv_rank_low: 'IV rank < 30',
+  walls_migrating: 'walls migrated 2+ strikes',
+  catalyst_within_dte: 'catalyst within DTE',
+  no_gex: 'no GEX data',
+  no_chain: 'no option chain',
+}
+
+export default function Wheel() {
+  const [row, setRow] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError('')
+
+    supabase
+      .from('wheel_suggestions')
+      .select('*')
+      .order('computed_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+      .then(({ data, error: err }) => {
+        if (cancelled) return
+        if (err) {
+          setError(err.message)
+          setRow(null)
+        } else {
+          setRow(data)
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const suggestions = useMemo(
+    () => (Array.isArray(row?.ranked_suggestions) ? row.ranked_suggestions : []),
+    [row],
+  )
+
+  const anyUnverified = useMemo(
+    () =>
+      suggestions.some((s) => {
+        const c = s?.catalyst_check || {}
+        return c.earnings === 'UNVERIFIED' || c.macro === 'UNVERIFIED'
+      }),
+    [suggestions],
+  )
+
+  return (
+    <div className="min-h-screen bg-bg">
+      <div className="px-4 lg:px-6 pt-6 pb-12 mx-auto lg:max-w-5xl w-full">
+        {/* ── Header ──────────────────────────────────────────────── */}
+        <div className="mb-5">
+          <div className="flex items-center gap-2 mb-1">
+            <RefreshCw size={20} className="text-amber-400" />
+            <h1 className="text-fg text-xl lg:text-2xl font-bold">The Wheel</h1>
+          </div>
+          <p className="text-muted text-xs lg:text-sm leading-relaxed max-w-2xl">
+            Cash-secured puts that clear all seven entry conditions, ranked by
+            annualized yield. Get assigned → the position rolls to a covered
+            call. Premium compounds either way — as long as the regime stays
+            pinned.
+          </p>
+        </div>
+
+        {/* ── Global UNVERIFIED catalyst banner ───────────────────── */}
+        {anyUnverified && <UnverifiedBanner />}
+
+        {/* ── Body ────────────────────────────────────────────────── */}
+        {loading ? (
+          <LoadingSkeleton />
+        ) : error ? (
+          <ErrorState message={error} />
+        ) : !row ? (
+          <NoScanYet />
+        ) : suggestions.length === 0 ? (
+          <ExplainedEmpty row={row} />
+        ) : (
+          <>
+            <ScanMeta row={row} />
+            <div className="space-y-3">
+              {suggestions.map((s, i) => (
+                <SuggestionCard key={`${s.ticker}-${s.leg}-${i}`} s={s} rank={i + 1} />
+              ))}
+            </div>
+            <RejectionFootNote row={row} />
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Suggestion card
+// ────────────────────────────────────────────────────────────────────
+
+function SuggestionCard({ s, rank }) {
+  const isCsp = s?.leg === 'csp'
+  const c = s?.catalyst_check || {}
+  const unverified = c.earnings === 'UNVERIFIED' || c.macro === 'UNVERIFIED'
+
+  return (
+    <div className="bg-card border border-border rounded-xl overflow-hidden">
+      <div className="px-4 py-3 flex items-center justify-between gap-3 border-b border-border">
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="text-muted text-xs font-mono-tab w-6 text-center shrink-0">
+            #{rank}
+          </span>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="text-fg font-bold text-base">{s.ticker}</span>
+              <LegBadge isCsp={isCsp} />
+            </div>
+            <p className="text-muted text-[11px] truncate">
+              {isCsp ? 'Sell put' : 'Sell call'} · {fmtStrike(s.strike)} ·{' '}
+              {fmtDate(s.expiration)}
+              {s.dte != null && <> · {s.dte}DTE</>}
+              {s.delta != null && <> · {Math.abs(Number(s.delta)).toFixed(2)}Δ</>}
+            </p>
+          </div>
+        </div>
+        <div className="text-right shrink-0">
+          <div className="text-green-400 font-bold text-base font-mono-tab tabular-nums">
+            {fmtPct(s.annualized_pct)}
+          </div>
+          <div className="text-muted text-[10px] uppercase tracking-wide">
+            annualized
+          </div>
+        </div>
+      </div>
+
+      <div className="px-4 py-3 grid grid-cols-3 gap-3 text-center border-b border-border">
+        <Stat label="Premium" value={fmtUsd(s.premium)} />
+        <Stat label="Collateral" value={fmtUsd0(s.collateral_cash)} />
+        <Stat
+          label="Regime"
+          value={s.regime || (s.net_gex > 0 ? 'A' : '—')}
+          tone={s.net_gex > 0 ? 'green' : 'muted'}
+        />
+      </div>
+
+      {/* Per-card catalyst verification — the locked loud-warning UX */}
+      {unverified ? (
+        <div className="px-4 py-2.5 bg-amber-950/40 border-b border-amber-900/60 flex items-start gap-2">
+          <AlertTriangle size={14} className="text-amber-400 mt-0.5 shrink-0" />
+          <p className="text-amber-200 text-[11px] leading-relaxed">
+            <span className="font-semibold">Catalyst not verified.</span>{' '}
+            {c.earnings === 'UNVERIFIED' && 'No earnings feed in this project. '}
+            {c.macro === 'UNVERIFIED' && 'No FOMC/CPI feed in this project. '}
+            Confirm there is no earnings or macro event before{' '}
+            {fmtDate(s.expiration)} <span className="font-semibold">manually</span>{' '}
+            before entering. OPEX{' '}
+            {c.opex === 'clear' ? 'is clear (verified).' : 'check ran.'}
+          </p>
+        </div>
+      ) : (
+        <div className="px-4 py-2 bg-green-950/20 border-b border-green-900/40 flex items-center gap-2">
+          <ShieldCheck size={13} className="text-green-400 shrink-0" />
+          <p className="text-green-300 text-[11px]">
+            No catalyst within DTE (OPEX + earnings + macro verified clear).
+          </p>
+        </div>
+      )}
+
+      {/* 7-condition gate strip */}
+      <div className="px-4 py-3 flex flex-wrap gap-1.5">
+        {CONDITIONS.map((cond) => {
+          const passed = s?.conditions?.[cond.key]
+          return (
+            <span
+              key={cond.key}
+              title={cond.hint}
+              className={clsx(
+                'inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium border',
+                passed
+                  ? 'bg-green-950/40 border-green-900/60 text-green-300'
+                  : 'bg-zinc-900 border-border text-muted',
+              )}
+            >
+              <span
+                className={clsx(
+                  'w-1.5 h-1.5 rounded-full',
+                  passed ? 'bg-green-400' : 'bg-zinc-600',
+                )}
+              />
+              {cond.label}
+            </span>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function LegBadge({ isCsp }) {
+  return (
+    <span
+      className={clsx(
+        'px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wide border',
+        isCsp
+          ? 'text-red-300 bg-red-950 border-red-800'
+          : 'text-green-300 bg-green-950 border-green-800',
+      )}
+    >
+      {isCsp ? 'CSP' : 'COVERED CALL'}
+    </span>
+  )
+}
+
+function Stat({ label, value, tone }) {
+  return (
+    <div>
+      <div
+        className={clsx(
+          'font-mono-tab tabular-nums text-sm font-semibold',
+          tone === 'green' ? 'text-green-400' : 'text-fg',
+        )}
+      >
+        {value}
+      </div>
+      <div className="text-muted text-[10px] uppercase tracking-wide">{label}</div>
+    </div>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Scan metadata + explained-empty state (the anti-silent-zero UX)
+// ────────────────────────────────────────────────────────────────────
+
+function ScanMeta({ row }) {
+  return (
+    <div className="mb-3 flex items-center justify-between flex-wrap gap-2">
+      <p className="text-muted text-[11px]">
+        {row.candidates_after_gate} of {row.tickers_scanned} tickers passed all
+        seven conditions · scanned {formatRelative(row.computed_at)}
+      </p>
+    </div>
+  )
+}
+
+// When some passed, still surface a one-line tally of what didn't, so
+// the list is never silently shorter than the universe with no reason.
+function RejectionFootNote({ row }) {
+  const summary = rejectionSummary(row?.gate_rejections)
+  if (!summary) return null
+  return (
+    <p className="mt-4 text-muted text-[11px] leading-relaxed border-t border-border pt-3">
+      <span className="text-subtle">Rejected:</span> {summary}
+    </p>
+  )
+}
+
+function ExplainedEmpty({ row }) {
+  const summary = rejectionSummary(row?.gate_rejections)
+  return (
+    <div className="bg-card border border-border rounded-xl p-8 text-center space-y-3">
+      <div className="flex justify-center">
+        <CircleSlash size={28} className="text-muted" />
+      </div>
+      <p className="text-fg text-base font-display">
+        No wheel setups right now — and here&apos;s exactly why
+      </p>
+      <p className="text-subtle text-xs leading-relaxed max-w-md mx-auto">
+        Scanned {row.tickers_scanned} ticker{row.tickers_scanned === 1 ? '' : 's'}{' '}
+        {formatRelative(row.computed_at)}. None cleared all seven entry
+        conditions. The wheel only sells premium in a pinned, positive-net-GEX
+        regime — an empty list is the strategy working, not a bug.
+      </p>
+      {summary && (
+        <p className="text-muted text-[11px] leading-relaxed max-w-md mx-auto pt-2 border-t border-border">
+          {summary}
+        </p>
+      )}
+    </div>
+  )
+}
+
+function NoScanYet() {
+  return (
+    <div className="bg-card border border-border rounded-xl p-10 text-center space-y-3">
+      <div className="flex justify-center">
+        <TrendingUp size={28} className="text-muted" />
+      </div>
+      <p className="text-fg text-base font-display">The first scan hasn&apos;t run yet</p>
+      <p className="text-subtle text-xs leading-relaxed max-w-md mx-auto">
+        The wheel scanner runs during market hours. Once it completes its first
+        pass, qualifying cash-secured puts show up here ranked by annualized
+        yield.
+      </p>
+    </div>
+  )
+}
+
+function UnverifiedBanner() {
+  return (
+    <div className="mb-4 bg-amber-950/40 border border-amber-900/60 rounded-xl px-4 py-3 flex items-start gap-2.5">
+      <AlertTriangle size={16} className="text-amber-400 mt-0.5 shrink-0" />
+      <div>
+        <p className="text-amber-200 text-sm font-semibold">
+          Earnings &amp; macro events are NOT verified
+        </p>
+        <p className="text-amber-200/80 text-[11px] leading-relaxed mt-0.5">
+          This project has no earnings or FOMC/CPI feed wired, so the scanner
+          can only hard-check OPEX. Every suggestion below tagged
+          &ldquo;catalyst not verified&rdquo; needs a manual earnings/macro
+          check before you sell the put. A CSP through an unflagged earnings
+          print is the single classic way the wheel blows up.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+function ErrorState({ message }) {
+  return (
+    <div className="bg-card border border-border rounded-xl p-10 text-center">
+      <p className="text-fg text-sm font-display mb-2">
+        Couldn&apos;t load the wheel feed
+      </p>
+      <p className="text-muted text-xs">{message}</p>
+    </div>
+  )
+}
+
+function LoadingSkeleton() {
+  return (
+    <div className="space-y-3">
+      {Array(3)
+        .fill(0)
+        .map((_, i) => (
+          <div
+            key={i}
+            className="bg-card border border-border rounded-xl h-40 animate-pulse"
+          />
+        ))}
+    </div>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Formatting helpers
+// ────────────────────────────────────────────────────────────────────
+
+function rejectionSummary(gateRejections) {
+  if (!gateRejections || typeof gateRejections !== 'object') return null
+  const counts = {}
+  for (const reasons of Object.values(gateRejections)) {
+    for (const r of Array.isArray(reasons) ? reasons : [reasons]) {
+      counts[r] = (counts[r] || 0) + 1
+    }
+  }
+  const parts = Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([reason, n]) => `${n} ${REASON_LABEL[reason] || reason}`)
+  return parts.length ? parts.join(' · ') : null
+}
+
+function fmtStrike(v) {
+  if (v == null) return '—'
+  return `$${Number(v).toFixed(Number(v) % 1 === 0 ? 0 : 2)}`
+}
+
+function fmtUsd(v) {
+  if (v == null) return '—'
+  return `$${Number(v).toFixed(2)}`
+}
+
+function fmtUsd0(v) {
+  if (v == null) return '—'
+  return `$${Math.round(Number(v)).toLocaleString()}`
+}
+
+function fmtPct(v) {
+  if (v == null) return '—'
+  return `${Number(v).toFixed(1)}%`
+}
+
+function fmtDate(d) {
+  if (!d) return '—'
+  const dt = new Date(`${d}T00:00:00`)
+  if (Number.isNaN(dt.getTime())) return String(d)
+  return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+
+function formatRelative(iso) {
+  if (!iso) return 'just now'
+  const ms = Date.now() - new Date(iso).getTime()
+  if (ms < 60_000) return 'just now'
+  if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m ago`
+  if (ms < 86_400_000) return `${Math.round(ms / 3_600_000)}h ago`
+  return `${Math.round(ms / 86_400_000)}d ago`
+}

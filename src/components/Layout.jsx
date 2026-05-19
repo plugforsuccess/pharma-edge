@@ -7,6 +7,7 @@ import {
   Flame,
   Home,
   Plus,
+  RefreshCw,
   Settings,
   Sparkles,
   Shield,
@@ -53,9 +54,13 @@ const navRight = [
 // first-class tab. /reasoning kept between the visualization tabs
 // and operational tabs as a desktop-only quick-access (mobile reaches
 // it from the Markets page header).
+// /wheel is desktop-sidebar + direct-URL only — the mobile bottom nav
+// is full at 5 slots, and the wheel is a lower-frequency analysis
+// surface than the Tape/Pulse/Record/Top primaries.
 const navFull = [
   ...navLeft,
   ...navRight,
+  { to: '/wheel', icon: RefreshCw, label: 'Wheel' },
   { to: '/reasoning', icon: Sparkles, label: 'Reasoning' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ]
