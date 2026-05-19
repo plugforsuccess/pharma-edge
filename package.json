@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "verdict:check:client": "node scripts/check-verdict-client.mjs",
     "verdict:check:server": "deno run --allow-read scripts/check-verdict-server.ts",
-    "verdict:check": "npm run verdict:check:client && npm run verdict:check:server"
+    "verdict:check": "npm run verdict:check:client && npm run verdict:check:server",
+    "wheel:check": "deno run --allow-read scripts/check-wheel.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",

@@ -26,6 +26,7 @@ const Glossary = lazy(() => import('./pages/learn/Glossary'))
 const CashMovesRules = lazy(() => import('./pages/learn/CashMovesRules'))
 const Admin = lazy(() => import('./pages/Admin'))
 const PlayDetail = lazy(() => import('./pages/PlayDetail'))
+const WheelDebug = lazy(() => import('./pages/WheelDebug'))
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -129,6 +130,7 @@ export default function App() {
             <Route path="calendar" element={<Navigate to="/" replace />} />
             <Route path="calculator" element={<Navigate to="/" replace />} />
             <Route path="position/:id" element={<PositionDetail />} />
+            <Route path="wheel-debug" element={<AdminOnly><WheelDebug /></AdminOnly>} />
             <Route path="admin" element={<AdminOnly><Admin /></AdminOnly>} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
