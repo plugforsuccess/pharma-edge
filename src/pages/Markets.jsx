@@ -45,6 +45,16 @@ const MATRIX_OPTS = {
   strikeWindowPct: 0.07,
 }
 
+// Per-ticker matrix overrides. NOW (ServiceNow) is high-priced with
+// wide strike spacing, so the default 7% window clips the chain. Owner
+// wants ~10 strikes either side of spot across the front 4 expirations:
+// maxStrikes 21 = 10 below + ATM + 10 above (compute-gex centers the
+// cap on spot); the 15% window is wide enough that the strike COUNT —
+// not the window — is the binding constraint for NOW.
+const MATRIX_OPTS_BY_TICKER = {
+  NOW: { maxExpirations: 4, maxStrikes: 21, strikeWindowPct: 0.15 },
+}
+
 export default function Markets() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -227,13 +237,17 @@ export default function Markets() {
     try {
       // matrix:true asks compute-gex for the strikes×expirations grid
       // (Skylit-style heatmap) instead of the single-expiration shape.
+      const mopts = {
+        ...MATRIX_OPTS,
+        ...(MATRIX_OPTS_BY_TICKER[String(sym).toUpperCase()] || {}),
+      }
       const body = {
         ticker: sym,
         refresh,
         matrix: true,
-        matrix_max_expirations: MATRIX_OPTS.maxExpirations,
-        matrix_max_strikes: MATRIX_OPTS.maxStrikes,
-        matrix_strike_window_pct: MATRIX_OPTS.strikeWindowPct,
+        matrix_max_expirations: mopts.maxExpirations,
+        matrix_max_strikes: mopts.maxStrikes,
+        matrix_strike_window_pct: mopts.strikeWindowPct,
         // Velocity Mode renders ∆GEX vs the most recent prior snapshot
         // — backend skips the diff query unless we ask for it. The
         // payload size delta is small but it's an extra DB roundtrip,
