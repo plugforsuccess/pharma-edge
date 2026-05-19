@@ -27,9 +27,11 @@
 //   4 expected_move_ok   spot-to-put-wall cushion >= 1 expected move
 //                        (downside standoff; no delta double-count)
 //   5 iv_rank_ok         IV rank (from gex_history iv_used) >= 30
-//   6 walls_stable       put wall has not migrated 2+ strikes; thin
-//                        history → low-confidence PASS (not a reject)
-//   7 catalyst_clear     no INTERVENING OPEX before expiry (hard).
+//   6 walls_stable       put wall not ERODING — only a FALL > ~1 EM
+//                        rejects (rising/flat fine; downside-only;
+//                        thin history → low-confidence PASS)
+//   7 catalyst_clear     no monthly OPEX strictly between today &
+//                        expiry (hard).
 //                        earnings + macro have NO feed in this
 //                        project, so they are stamped UNVERIFIED (not
 //                        silently passed) and surfaced loudly in the
@@ -74,8 +76,9 @@ const PIN_MIN = 0.35
 const IV_RANK_MIN = 30
 const IV_RANK_MIN_SAMPLES = 12      // below this → iv_history_insufficient
 const IV_RANK_HI_CONF_DAYS = 20     // span < this → confidence 'low'
-const WALL_MIGRATION_STRIKES = 2    // 2+ strike move = migrating
 const WALL_STABLE_DAYS = 3
+const WALL_EROSION_EM_MULT = 1.0    // put wall must FALL > 1 EM to "erode"
+const WALL_EROSION_PCT_FLOOR = 0.03 // ...or > 3% of spot, whichever is larger
 const DTE_MIN = 25
 const DTE_MAX = 45
 const DTE_TARGET = 35
@@ -561,16 +564,24 @@ async function evaluateTicker(
   }
   const c5 = ivRank != null && ivRank >= IV_RANK_MIN
 
-  // ── Condition 6: put wall stable (no 2+ strike migration) ──
-  // Softened to the iv-rank pattern: thin history is NOT a hard
-  // reject. With >= 2 daily wall points we measure migration; with
-  // fewer we cannot, so we PASS the gate but stamp
-  // wall_stable_confidence='low' (window < WALL_STABLE_DAYS) so the
-  // UI warns loudly — absence of evidence is not evidence of
-  // instability. Active migration stays a HARD reject: that is
-  // positive evidence against, not missing evidence.
+  // ── Condition 6: put-wall support not ERODING ──
+  // Direction-aware + vol-normalized + downside-only (same asymmetry
+  // as 3 & 4 — a CSP is a one-sided downside structure). The put wall
+  // is the support the short put leans on:
+  //   * wall RISING or FLAT  → support holding/strengthening UNDER the
+  //     trade → fine (pass). Normal day-to-day wiggle and mean-
+  //     reverting noise net to ~0 drift → pass.
+  //   * wall FALLING by more than ~1 expected move over the window
+  //     (floor: 3% of spot, so ultra-low-vol names stay sane) →
+  //     support genuinely eroding toward where you'd be assigned →
+  //     HARD reject (put_wall_eroding).
+  // Replaces the old peak-to-trough ">=2 raw strikes" range test,
+  // which (a) conflated noise with drift and (b) wasn't normalized to
+  // price/vol, so it nuked liquid mega-caps on routine 1-strike wiggle.
+  // Thin history (<2 daily points) → low-confidence PASS, unchanged.
   let wallStableDays = 0
   let wallStableConfidence: 'high' | 'low' = 'low'
+  let putWallTrend: 'rising' | 'flat' | 'eroding' | 'unknown' = 'unknown'
   let c6 = false
   {
     const { data: hist } = await admin
@@ -580,31 +591,41 @@ async function evaluateTicker(
       .gte('snapshot_at', new Date(Date.now() - 6 * 86_400_000).toISOString())
       .order('snapshot_at', { ascending: false })
       .limit(2000)
-    // Last snapshot per UTC day → derive that day's put wall.
-    const byDay = new Map<string, { strike: number | null }>()
+    // Last snapshot per UTC day → that day's put wall.
+    const byDay = new Map<string, number | null>()
     for (const row of hist ?? []) {
       const at = (row as { snapshot_at: string }).snapshot_at
       const day = at.slice(0, 10)
-      if (byDay.has(day)) continue // rows are desc → first seen = latest
+      if (byDay.has(day)) continue // rows desc → first seen = latest that day
       const p = (row as { payload?: { strikes?: number[]; cells?: (number | null)[][] } }).payload
       const dw = p?.strikes && p?.cells ? deriveWalls(p.strikes, p.cells) : { putWall: null }
-      byDay.set(day, { strike: dw.putWall })
+      byDay.set(day, dw.putWall)
     }
+    // recentDays[0] = most recent day … last entry = oldest in window.
     const recentDays = Array.from(byDay.entries())
       .sort((a, b) => (a[0] < b[0] ? 1 : -1))
       .slice(0, WALL_STABLE_DAYS)
     const wallStrikes = recentDays
-      .map(([, v]) => v.strike)
+      .map(([, s]) => s)
       .filter((s): s is number => typeof s === 'number')
     wallStableDays = wallStrikes.length
     if (wallStrikes.length >= 2) {
-      const movedStrikes = (Math.max(...wallStrikes) - Math.min(...wallStrikes)) / (strikeStep || 1)
-      c6 = movedStrikes < WALL_MIGRATION_STRIKES
+      const latestWall = wallStrikes[0]
+      const earliestWall = wallStrikes[wallStrikes.length - 1]
+      const drift = latestWall - earliestWall // >0 rising, <0 falling
+      const tol = Math.max(
+        WALL_EROSION_EM_MULT * (Number.isFinite(em) && em > 0 ? em : 0),
+        WALL_EROSION_PCT_FLOOR * spot,
+      )
+      const eroded = drift < 0 && Math.abs(drift) > tol
+      c6 = !eroded
+      putWallTrend = eroded ? 'eroding' : drift > 0 ? 'rising' : 'flat'
       wallStableConfidence = wallStrikes.length >= WALL_STABLE_DAYS ? 'high' : 'low'
-      if (!c6) rej.push('walls_migrating')
+      if (!c6) rej.push('put_wall_eroding')
     } else {
       c6 = true
       wallStableConfidence = 'low'
+      putWallTrend = 'unknown'
     }
   }
 
@@ -642,14 +663,17 @@ async function evaluateTicker(
   // ── Condition 7: catalyst. OPEX hard-gates; earnings + macro have
   //    no feed → UNVERIFIED (loud in UI, not a silent pass). ──
   const catalystCheck: Record<string, string> = { opex: 'clear', earnings: 'UNVERIFIED', macro: 'UNVERIFIED' }
-  // OPEX is disqualifying only when one falls STRICTLY BEFORE the
-  // expiration — an intervening monthly-OPEX gamma event during the
-  // hold. The expiration's own OPEX (a monthly expiring on OPEX) is
-  // the structure's natural exit, not a mid-hold shock.
-  const opexNext = m.opex?.next_date ?? null
-  const intervening =
-    (opexNext != null && opexNext >= todayStr && opexNext < exp.date) ||
-    opexDates.some((d) => d >= todayStr && d < exp.date)
+  // OPEX is disqualifying ONLY when a monthly OPEX falls STRICTLY
+  // between today and the chosen expiration — a mid-hold gamma event
+  // you'd sit through. The wheel deliberately picks the OPEX-aligned
+  // monthly, so its OWN expiry-day OPEX (== exp.date) is the natural
+  // exit, not an intervening shock, and the prior monthly is already
+  // in the past. compute-gex's opex.next_date is the *next opex of
+  // any kind* (often days out) and was the false-positive engine that
+  // blocked ~15/18 — it is no longer used. opex_dates is monthly
+  // cadence; strict bounds make a properly monthly-aligned wheel
+  // correctly "clear".
+  const intervening = opexDates.some((d) => d > todayStr && d < exp.date)
   if (intervening) catalystCheck.opex = 'blocked'
   // Earnings / macro: if a feed ever lands rows, this hard-gates
   // automatically. Empty today → stays UNVERIFIED.
@@ -776,6 +800,7 @@ async function evaluateTicker(
       expected_move: Number(em.toFixed(2)),
       wall_stable_days: wallStableDays,
       wall_stable_confidence: wallStableConfidence,
+      put_wall_trend: putWallTrend,
       catalyst_check: catalystCheck,
       conditions,
     },

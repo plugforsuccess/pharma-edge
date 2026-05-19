@@ -14,7 +14,7 @@ export const CONDITIONS = [
   { key: 'spot_between_walls', label: 'In channel', hint: 'Spot inside the channel and ≥2% above the put wall' },
   { key: 'expected_move_ok', label: 'EM cushion', hint: 'Spot is ≥1 expected move above the put wall' },
   { key: 'iv_rank_ok', label: 'IVR ≥ 30', hint: 'IV rank at or above 30' },
-  { key: 'walls_stable', label: 'Walls stable', hint: 'No 2+ strike wall migration (thin history → low-confidence pass)' },
+  { key: 'walls_stable', label: 'Wall holding', hint: 'Put wall not eroding — a rising/flat wall is fine; only a >1 EM fall rejects' },
   { key: 'catalyst_clear', label: 'No catalyst', hint: 'No earnings / FOMC / CPI within DTE' },
 ]
 
@@ -25,7 +25,8 @@ export const REASON_LABEL = {
   expected_move_high: 'less than 1 EM of room to the put wall',
   iv_rank_low: 'IV rank < 30',
   iv_history_insufficient: 'thin IV history',
-  walls_migrating: 'walls migrated 2+ strikes',
+  put_wall_eroding: 'put wall eroding (support fell > 1 EM)',
+  walls_migrating: 'put wall migrated (legacy)',
   wall_history_insufficient: 'thin wall history',
   opex_within_dte: 'OPEX within DTE',
   earnings_within_dte: 'earnings within DTE',
