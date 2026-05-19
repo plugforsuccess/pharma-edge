@@ -12,6 +12,7 @@ import MatrixSummaryCard from '../components/MatrixSummaryCard'
 import TickerDrawer from '../components/TickerDrawer'
 import ReplaySlider from '../components/ReplaySlider'
 import SuggestedPlays from '../components/SuggestedPlays'
+import SuggestedWheel from '../components/SuggestedWheel'
 import TrinityView from '../components/TrinityView'
 import UpgradeNotice from '../components/UpgradeNotice'
 import LiveDataStatus from '../components/LiveDataStatus'
@@ -729,6 +730,12 @@ export default function Markets() {
       {/* Suggested plays */}
       <div className="lg:max-w-2xl lg:mx-auto">
         <SuggestedPlays ticker={ticker} isPro={isPro} />
+      </div>
+
+      {/* Wheel CSPs — universe-wide, alongside the ticker-scoped
+          Claude spreads above. Same wheel_suggestions feed as /wheel. */}
+      <div className="lg:max-w-2xl lg:mx-auto">
+        <SuggestedWheel />
       </div>
 
       <p className="text-[10px] text-muted leading-relaxed px-1 lg:text-center">

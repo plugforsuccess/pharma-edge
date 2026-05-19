@@ -45,7 +45,7 @@ const CONDITIONS = [
   { key: 'spot_between_walls', label: 'In channel', hint: 'Spot between put & call wall, not at an extreme' },
   { key: 'expected_move_ok', label: 'EM < 80%', hint: 'Expected move under 80% of distance to nearest wall' },
   { key: 'iv_rank_ok', label: 'IVR ≥ 30', hint: 'IV rank at or above 30' },
-  { key: 'walls_stable', label: 'Walls stable', hint: 'No 2+ strike wall migration in 3+ days' },
+  { key: 'walls_stable', label: 'Walls stable', hint: 'No 2+ strike wall migration (thin history → low-confidence pass)' },
   { key: 'catalyst_clear', label: 'No catalyst', hint: 'No earnings / FOMC / CPI within DTE' },
 ]
 
@@ -55,9 +55,21 @@ const REASON_LABEL = {
   spot_at_extreme: 'spot at a wall extreme',
   expected_move_high: 'expected move ≥ 80% to wall',
   iv_rank_low: 'IV rank < 30',
+  iv_history_insufficient: 'thin IV history',
   walls_migrating: 'walls migrated 2+ strikes',
-  catalyst_within_dte: 'catalyst within DTE',
+  wall_history_insufficient: 'thin wall history',
+  opex_within_dte: 'OPEX within DTE',
+  earnings_within_dte: 'earnings within DTE',
+  macro_within_dte: 'macro event within DTE',
+  yield_below_min: 'yield below minimum',
+  no_csp_strike: 'no qualifying CSP strike',
+  no_csp_quote: 'no live CSP quote',
+  no_target_expiration: 'no monthly in DTE band',
   no_gex: 'no GEX data',
+  no_walls: 'walls undefined',
+  no_spot: 'no spot price',
+  stale_matrix: 'stale matrix',
+  stale_eod_data: 'overnight data',
   no_chain: 'no option chain',
 }
 
@@ -162,6 +174,9 @@ function SuggestionCard({ s, rank }) {
   const isCsp = s?.leg === 'csp'
   const c = s?.catalyst_check || {}
   const unverified = c.earnings === 'UNVERIFIED' || c.macro === 'UNVERIFIED'
+  const lowConf = []
+  if (s?.iv_rank_confidence === 'low') lowConf.push('IV rank')
+  if (s?.wall_stable_confidence === 'low') lowConf.push('wall stability')
 
   return (
     <div className="bg-card border border-border rounded-xl overflow-hidden">
@@ -222,6 +237,21 @@ function SuggestionCard({ s, rank }) {
           <ShieldCheck size={13} className="text-green-400 shrink-0" />
           <p className="text-green-300 text-[11px]">
             No catalyst within DTE (OPEX + earnings + macro verified clear).
+          </p>
+        </div>
+      )}
+
+      {/* Low-confidence caveat — a softened gate (thin history) passed
+          on a metric we can't yet fully substantiate. Shown, not
+          hidden, so a soft pass never looks like a verified one. */}
+      {lowConf.length > 0 && (
+        <div className="px-4 py-2 bg-zinc-900/60 border-b border-border flex items-start gap-2">
+          <AlertTriangle size={13} className="text-zinc-400 mt-0.5 shrink-0" />
+          <p className="text-zinc-300 text-[11px] leading-relaxed">
+            <span className="font-semibold">Low confidence:</span>{' '}
+            {lowConf.join(' + ')} passed on thin history (window still
+            building). The gate is satisfied but not yet strongly
+            substantiated — size accordingly.
           </p>
         </div>
       )}

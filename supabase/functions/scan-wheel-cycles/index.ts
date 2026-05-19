@@ -26,7 +26,8 @@
 //                        within EXTREME_PCT of either
 //   4 expected_move_ok   expected_move < 80% of distance to nearest wall
 //   5 iv_rank_ok         IV rank (from gex_history iv_used) >= 30
-//   6 walls_stable       put wall has not migrated 2+ strikes in 3+ days
+//   6 walls_stable       put wall has not migrated 2+ strikes; thin
+//                        history → low-confidence PASS (not a reject)
 //   7 catalyst_clear     no INTERVENING OPEX before expiry (hard).
 //                        earnings + macro have NO feed in this
 //                        project, so they are stamped UNVERIFIED (not
@@ -39,8 +40,11 @@
 // currently spans only days. We still compute it from what exists and
 // gate on >= 30, but stamp iv_rank_confidence='low' + the lookback so
 // the UI warns. It auto-promotes to 'high' as history accrues — no
-// code change. Insufficient history is treated as a REJECT
-// (iv_history_insufficient), never a silent pass.
+// code change. Insufficient IV history is treated as a REJECT
+// (iv_history_insufficient), never a silent pass. Wall stability uses
+// the SAME confidence label (wall_stable_confidence) but is softer:
+// thin history → low-confidence PASS (you can't prove instability
+// from missing data); only measured migration hard-rejects.
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
@@ -462,8 +466,16 @@ async function evaluateTicker(
   }
   const c5 = ivRank != null && ivRank >= IV_RANK_MIN
 
-  // ── Condition 6: put wall stable (no 2+ strike migration, 3+ days) ──
+  // ── Condition 6: put wall stable (no 2+ strike migration) ──
+  // Softened to the iv-rank pattern: thin history is NOT a hard
+  // reject. With >= 2 daily wall points we measure migration; with
+  // fewer we cannot, so we PASS the gate but stamp
+  // wall_stable_confidence='low' (window < WALL_STABLE_DAYS) so the
+  // UI warns loudly — absence of evidence is not evidence of
+  // instability. Active migration stays a HARD reject: that is
+  // positive evidence against, not missing evidence.
   let wallStableDays = 0
+  let wallStableConfidence: 'high' | 'low' = 'low'
   let c6 = false
   {
     const { data: hist } = await admin
@@ -490,12 +502,14 @@ async function evaluateTicker(
       .map(([, v]) => v.strike)
       .filter((s): s is number => typeof s === 'number')
     wallStableDays = wallStrikes.length
-    if (wallStrikes.length < WALL_STABLE_DAYS) {
-      rej.push('wall_history_insufficient')
-    } else {
+    if (wallStrikes.length >= 2) {
       const movedStrikes = (Math.max(...wallStrikes) - Math.min(...wallStrikes)) / (strikeStep || 1)
       c6 = movedStrikes < WALL_MIGRATION_STRIKES
+      wallStableConfidence = wallStrikes.length >= WALL_STABLE_DAYS ? 'high' : 'low'
       if (!c6) rej.push('walls_migrating')
+    } else {
+      c6 = true
+      wallStableConfidence = 'low'
     }
   }
 
@@ -666,6 +680,7 @@ async function evaluateTicker(
       iv_rank_window_days: ivWindowDays,
       expected_move: Number(em.toFixed(2)),
       wall_stable_days: wallStableDays,
+      wall_stable_confidence: wallStableConfidence,
       catalyst_check: catalystCheck,
       conditions,
     },
