@@ -26,11 +26,13 @@
 // there.
 
 import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
   RefreshCw,
   AlertTriangle,
   ShieldCheck,
   CircleSlash,
+  ChevronRight,
   TrendingUp,
 } from 'lucide-react'
 import clsx from 'clsx'
@@ -363,22 +365,25 @@ function GexLeaderboard({ rows }) {
           Universe by GEX
         </p>
         <p className="text-muted text-[10px] leading-tight">
-          Scanned tickers ranked by dealer gamma footprint (|net GEX|)
+          Ranked by dealer gamma footprint (|net GEX|) · tap a row for its HeatPulse matrix
         </p>
       </div>
       <div className="divide-y divide-border">
         {rows.map((r, i) => {
           const regA = r.regime === 'A'
           return (
-            <div
+            <Link
               key={`${r.ticker}-${i}`}
-              className="px-4 py-2.5 flex items-center justify-between gap-3"
+              to={`/markets?ticker=${encodeURIComponent(r.ticker)}`}
+              className="px-4 py-2.5 flex items-center justify-between gap-3 hover:bg-bg-elev/60 active:bg-bg-elev transition group"
             >
               <div className="flex items-center gap-3 min-w-0">
                 <span className="text-muted text-xs font-mono-tab w-5 text-center shrink-0">
                   {i + 1}
                 </span>
-                <span className="text-fg font-bold text-sm">{r.ticker}</span>
+                <span className="text-fg font-bold text-sm group-hover:text-amber-300">
+                  {r.ticker}
+                </span>
                 <span
                   className={clsx(
                     'px-1.5 py-0.5 rounded text-[10px] font-semibold border',
@@ -391,22 +396,28 @@ function GexLeaderboard({ rows }) {
                   {regA ? 'A · pin' : 'B · trend'}
                 </span>
               </div>
-              <div className="text-right shrink-0">
-                <div
-                  className={clsx(
-                    'font-mono-tab tabular-nums text-sm font-semibold',
-                    regA ? 'text-green-400' : 'text-red-400',
-                  )}
-                >
-                  {fmtGex(r.net_gex)}
-                </div>
-                {r.spot != null && (
-                  <div className="text-muted text-[10px]">
-                    spot {fmtUsd(r.spot)}
+              <div className="flex items-center gap-2 shrink-0">
+                <div className="text-right">
+                  <div
+                    className={clsx(
+                      'font-mono-tab tabular-nums text-sm font-semibold',
+                      regA ? 'text-green-400' : 'text-red-400',
+                    )}
+                  >
+                    {fmtGex(r.net_gex)}
                   </div>
-                )}
+                  {r.spot != null && (
+                    <div className="text-muted text-[10px]">
+                      spot {fmtUsd(r.spot)}
+                    </div>
+                  )}
+                </div>
+                <ChevronRight
+                  size={15}
+                  className="text-muted group-hover:text-amber-400 shrink-0"
+                />
               </div>
-            </div>
+            </Link>
           )
         })}
       </div>
