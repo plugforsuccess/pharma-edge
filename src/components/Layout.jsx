@@ -32,35 +32,32 @@ import clsx from 'clsx'
 // don't use "Dashboard" here because The Tape is already the
 // dashboard; double-labeling would collide.
 //
-// Mobile bottom nav has 4 tabs split 2/2 around a center FAB. Per the
-// leaderboard focus-audit (2026-05-12), Flow demotes to an
-// admin-only surface (it's a bot UI, not a user product), and
-// Positions takes its slot since active-position management is the
-// thing a user opens the app to check. Final shape:
-//   [Tape] [Pulse] (LOG FAB) [Record] [Leaderboard]
-// Record links to the user's own /record dashboard; Leaderboard is
-// the public discovery surface. Settings still lives in the desktop
-// sidebar + tape header avatar (mobile reaches it via avatar tap).
+// Mobile bottom nav: 4 tabs split 2/2 around a prominent center
+// button. The center is Pulse (HeatPulse — the most-opened analysis
+// surface); Wheel sits immediately left of center. Final shape:
+//   [Tape] [Wheel] (PULSE center) [Record] [Top]
+// "Log a Move" is no longer a bottom-nav slot — it lives on the
+// desktop sidebar CTA; on mobile it is reached via /log directly.
+// Settings still lives on the desktop sidebar + tape header avatar.
 const navLeft = [
   { to: '/', icon: Home, label: 'Tape' },
-  { to: '/markets', icon: Activity, label: 'Pulse' },
+  { to: '/wheel', icon: RefreshCw, label: 'Wheel' },
 ]
 const navRight = [
   { to: '/record', icon: BarChart2, label: 'Record' },
   { to: '/leaderboard', icon: Trophy, label: 'Top' },
 ]
-// Desktop sidebar. /flow lives here ONLY for is_admin users (gated
-// in Layout(); regular users don't see it). /leaderboard added as a
-// first-class tab. /reasoning kept between the visualization tabs
-// and operational tabs as a desktop-only quick-access (mobile reaches
-// it from the Markets page header).
-// /wheel is desktop-sidebar + direct-URL only — the mobile bottom nav
-// is full at 5 slots, and the wheel is a lower-frequency analysis
-// surface than the Tape/Pulse/Record/Top primaries.
+// Mobile center button (prominent, FAB-style): Pulse → /markets.
+const navCenter = { to: '/markets', icon: Activity, label: 'Pulse' }
+// Desktop sidebar — explicit + complete. The mobile center/FAB concept
+// does not exist on desktop, so every primary is a normal rail item
+// (Pulse included). /flow is appended for is_admin users only.
 const navFull = [
-  ...navLeft,
-  ...navRight,
+  { to: '/', icon: Home, label: 'Tape' },
+  { to: '/markets', icon: Activity, label: 'Pulse' },
   { to: '/wheel', icon: RefreshCw, label: 'Wheel' },
+  { to: '/record', icon: BarChart2, label: 'Record' },
+  { to: '/leaderboard', icon: Trophy, label: 'Top' },
   { to: '/reasoning', icon: Sparkles, label: 'Reasoning' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ]
@@ -173,11 +170,10 @@ export default function Layout() {
 
       <InstallPrompt />
 
-      {/* Mobile-only bottom nav. 4 tabs split 2/2 around a center FAB
-          that routes to /log. Settings moves to the desktop sidebar
-          (still reachable via direct URL or from the Tape avatar
-          area) — frees up bottom real estate so the primary action
-          (writing a signal) gets the visual prominence it deserves. */}
+      {/* Mobile-only bottom nav. 4 tabs split 2/2 around a prominent
+          center button = Pulse (/markets). Wheel sits immediately
+          left of center. Log a Move is no longer here — desktop has
+          the sidebar CTA; mobile reaches /log directly. */}
       <nav
         className="lg:hidden fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md
                    glass border-t border-border/80 px-2 pt-2 z-50"
@@ -191,14 +187,14 @@ export default function Layout() {
           <div className="flex justify-center relative">
             <button
               type="button"
-              onClick={() => navigate('/log')}
-              aria-label="Log a Move"
+              onClick={() => navigate(navCenter.to)}
+              aria-label={navCenter.label}
               className="tap-bounce absolute -top-7 w-14 h-14 rounded-full bg-amber-400 hover:bg-amber-300 text-bg shadow-[0_4px_16px_rgba(232,181,88,0.45)] hover:shadow-[0_6px_22px_rgba(232,181,88,0.55)] flex items-center justify-center"
             >
-              <Plus size={22} strokeWidth={2.5} />
+              <navCenter.icon size={22} strokeWidth={2.5} />
             </button>
             <span className="text-[10px] font-medium tracking-wide text-muted mt-7">
-              Log
+              {navCenter.label}
             </span>
           </div>
           {navRight.map(({ to, icon: Icon, label }) => (
