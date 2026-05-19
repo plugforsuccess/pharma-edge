@@ -65,6 +65,7 @@ export const HOT_TICKERS = [
   { symbol: 'BTMR',  label: 'Bitmine Immersion' },
   { symbol: 'SMCI',  label: 'Super Micro' },
   { symbol: 'ANET',  label: 'Arista' },
+  { symbol: 'NOK',   label: 'Nokia' },
   // Banks
   { symbol: 'JPM',   label: 'JPMorgan' },
   { symbol: 'GS',    label: 'Goldman Sachs' },
