@@ -100,6 +100,12 @@ export const TRACKED_TICKERS: string[] = [
   'OKLO',
   'CCJ',
   'BE',
+  // Rare earths / lithium — supply-chain plays
+  'MP',
+  'LAC',
+  'USAR',
+  'CRML',
+  'UUU',
   // Liquid retail / meme / fintech
   'COIN',
   'PLTR',

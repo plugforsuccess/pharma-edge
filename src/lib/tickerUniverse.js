@@ -99,6 +99,12 @@ export const HOT_TICKERS = [
   { symbol: 'OKLO',  label: 'Oklo' },
   { symbol: 'CCJ',   label: 'Cameco' },
   { symbol: 'BE',    label: 'Bloom Energy' },
+  // Rare earths / lithium — supply-chain plays (US strategic materials)
+  { symbol: 'MP',    label: 'MP Materials' },
+  { symbol: 'LAC',   label: 'Lithium Americas' },
+  { symbol: 'USAR',  label: 'USA Rare Earth' },
+  { symbol: 'CRML',  label: 'Critical Metals' },
+  { symbol: 'UUU',   label: 'Universal Stainless' },
   // Liquid retail / meme / fintech
   { symbol: 'COIN',  label: 'Coinbase' },
   { symbol: 'PLTR',  label: 'Palantir' },
