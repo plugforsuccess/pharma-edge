@@ -809,12 +809,12 @@ export default function Markets() {
                         }}
                         className="bg-card border border-border rounded px-1.5 py-0.5 text-[11px] text-fg font-mono-tab focus:outline-none focus:ring-1 focus:ring-brand/40"
                       >
-                        <option value="">auto ({baseMoptsForView.maxStrikes})</option>
-                        <option value="11">11</option>
-                        <option value="21">21</option>
-                        <option value="31">31</option>
-                        <option value="41">41</option>
-                        <option value="51">51</option>
+                        <option value="">{baseMoptsForView.maxStrikes}</option>
+                        {[11, 21, 31, 41, 51]
+                          .filter((n) => n !== baseMoptsForView.maxStrikes)
+                          .map((n) => (
+                            <option key={n} value={n}>{n}</option>
+                          ))}
                       </select>
                     </label>
                     <label className="flex items-center gap-1 text-[10px] text-subtle">
@@ -827,13 +827,12 @@ export default function Markets() {
                         }}
                         className="bg-card border border-border rounded px-1.5 py-0.5 text-[11px] text-fg font-mono-tab focus:outline-none focus:ring-1 focus:ring-brand/40"
                       >
-                        <option value="">auto ({baseMoptsForView.maxExpirations})</option>
-                        <option value="2">2</option>
-                        <option value="4">4</option>
-                        <option value="6">6</option>
-                        <option value="8">8</option>
-                        <option value="10">10</option>
-                        <option value="12">12</option>
+                        <option value="">{baseMoptsForView.maxExpirations}</option>
+                        {[2, 4, 6, 8, 10, 12]
+                          .filter((n) => n !== baseMoptsForView.maxExpirations)
+                          .map((n) => (
+                            <option key={n} value={n}>{n}</option>
+                          ))}
                       </select>
                     </label>
                     <div className="flex items-center gap-1 bg-card border border-border rounded-lg p-1">
