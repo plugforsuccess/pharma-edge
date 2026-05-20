@@ -809,7 +809,7 @@ export default function Markets() {
                         }}
                         className="bg-card border border-border rounded px-1.5 py-0.5 text-[11px] text-fg font-mono-tab focus:outline-none focus:ring-1 focus:ring-brand/40"
                       >
-                        <option value="">auto</option>
+                        <option value="">auto ({baseMoptsForView.maxStrikes})</option>
                         <option value="11">11</option>
                         <option value="21">21</option>
                         <option value="31">31</option>
@@ -827,7 +827,7 @@ export default function Markets() {
                         }}
                         className="bg-card border border-border rounded px-1.5 py-0.5 text-[11px] text-fg font-mono-tab focus:outline-none focus:ring-1 focus:ring-brand/40"
                       >
-                        <option value="">auto</option>
+                        <option value="">auto ({baseMoptsForView.maxExpirations})</option>
                         <option value="2">2</option>
                         <option value="4">4</option>
                         <option value="6">6</option>
