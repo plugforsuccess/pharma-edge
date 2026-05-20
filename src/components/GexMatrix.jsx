@@ -230,22 +230,31 @@ export default function GexMatrix({ data, liveSpot = null, exposureType = 'gex',
                 const isWall = wallSet == null || wallSet.has(i * 10000 + j)
                 // Velocity chip: ∆GEX as a % of the cell's current GEX,
                 // only rendered on the gamma view (other layers have no
-                // velocity_cells parity). Skips noise <2%, caps at
-                // ±999% so the chip can't blow up a cell's width. Hidden
-                // entirely when wallsOnly is on but the cell isn't a
-                // wall — keeps the dimmed grid clean.
+                // velocity_cells parity). Hidden entirely when wallsOnly
+                // is on but the cell isn't a wall — keeps the dimmed
+                // grid clean.
+                //
+                // Two noise filters:
+                //   * Magnitude floor: |v| must be ≥1% of the chart's
+                //     maxAbs. Below that the cell is too quiet for the
+                //     ratio to mean anything (∆ / tiny denominator
+                //     produces triple-digit nonsense chips on far-OTM
+                //     strikes).
+                //   * Cap at ±99% so chips stay 2-digit. Anything past
+                //     the cap clamps and reads as "+99%" / "-99%".
                 let velocityChip = null
                 if (
                   exposureType === 'gex' &&
                   velocityCells &&
                   isWall &&
-                  v != null && Number.isFinite(v) && v !== 0
+                  v != null && Number.isFinite(v) && v !== 0 &&
+                  Math.abs(v) >= maxAbs * 0.01
                 ) {
                   const vVel = velocityCells[i]?.[j]
                   if (vVel != null && Number.isFinite(vVel)) {
                     const pct = (vVel / Math.abs(v)) * 100
                     if (Number.isFinite(pct) && Math.abs(pct) >= 2) {
-                      const capped = Math.max(-999, Math.min(999, pct))
+                      const capped = Math.max(-99, Math.min(99, pct))
                       const sign = capped >= 0 ? '+' : ''
                       const tone = capped >= 0
                         ? 'bg-emerald-500/25 text-emerald-200'
@@ -253,7 +262,7 @@ export default function GexMatrix({ data, liveSpot = null, exposureType = 'gex',
                       velocityChip = (
                         <span
                           className={`text-[8px] leading-none font-semibold px-1 py-0.5 rounded ${tone}`}
-                          title={`${sign}${capped.toFixed(0)}% vs prior 5m snapshot`}
+                          title={`${pct.toFixed(0)}% vs prior 5m snapshot (clamped to ±99%)`}
                         >
                           {sign}{Math.round(capped)}%
                         </span>
