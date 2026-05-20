@@ -59,7 +59,18 @@ function TrinityColumn({ ticker }) {
         'compute-gex',
         { body: { ticker, matrix: true, refresh } },
       )
-      if (err) throw err
+      if (err) {
+        // supabase-js wraps every non-2xx as a FunctionsHttpError with
+        // the generic message "Edge Function returned a non-2xx status
+        // code" — the real server error sits in err.context. Parse it
+        // out so the user can see WHICH data path failed (polygon vs
+        // dxlink vs eod) instead of a blanket CDN-style message. This
+        // is the diagnostic for SPXW especially, which has no dxlink
+        // subscription and is therefore entirely dependent on the
+        // Polygon SPX path.
+        const body = await readErrorBody(err)
+        throw new Error(body?.error || err.message || 'compute-gex failed')
+      }
       if (!result?.success) throw new Error(result?.error || 'compute-gex failed')
       setData(result.data)
     } catch (e) {
@@ -286,4 +297,21 @@ function formatGex(v) {
   if (abs >= 1e6) return `${sign}$${(abs / 1e6).toFixed(1)}M`
   if (abs >= 1e3) return `${sign}$${(abs / 1e3).toFixed(0)}K`
   return `${sign}$${abs.toFixed(0)}`
+}
+
+// Pull the JSON body off a supabase-js FunctionsHttpError so the real
+// server error surfaces in the UI instead of the SDK's generic "Edge
+// Function returned a non-2xx status code". Identical to the helper
+// in Markets.jsx — TODO: lift into src/lib/edgeError.js when a third
+// call site needs it.
+async function readErrorBody(invokeErr) {
+  try {
+    const ctx = invokeErr?.context
+    if (ctx && typeof ctx.json === 'function') return await ctx.json()
+    if (ctx && typeof ctx.text === 'function') {
+      const text = await ctx.text()
+      try { return JSON.parse(text) } catch { return { error: text } }
+    }
+  } catch { /* ignore */ }
+  return null
 }
