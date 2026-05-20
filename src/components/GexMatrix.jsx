@@ -72,6 +72,11 @@ export default function GexMatrix({ data, liveSpot = null, exposureType = 'gex',
   const strikes = data?.strikes ?? []
   const cellsField = CELLS_FIELD[exposureType] ?? 'cells'
   const cells = data?.[cellsField] ?? []
+  // Velocity overlay (Skylit-style ∆% chips on gamma cells). Always
+  // pulled from data.velocity_cells regardless of active view — used
+  // by the gamma layer; ignored by velocity layer itself (where the
+  // delta IS the value being colored).
+  const velocityCells = exposureType === 'gex' ? (data?.velocity_cells ?? null) : null
 
   // Walls-only filter: per-expiration top-3 by abs value. Encoded as
   // (i * 10000 + j) so we can use a flat Set instead of a 2D bitmap —
@@ -223,6 +228,39 @@ export default function GexMatrix({ data, liveSpot = null, exposureType = 'gex',
                   largest.strike_index === i &&
                   largest.expiration_index === j
                 const isWall = wallSet == null || wallSet.has(i * 10000 + j)
+                // Velocity chip: ∆GEX as a % of the cell's current GEX,
+                // only rendered on the gamma view (other layers have no
+                // velocity_cells parity). Skips noise <2%, caps at
+                // ±999% so the chip can't blow up a cell's width. Hidden
+                // entirely when wallsOnly is on but the cell isn't a
+                // wall — keeps the dimmed grid clean.
+                let velocityChip = null
+                if (
+                  exposureType === 'gex' &&
+                  velocityCells &&
+                  isWall &&
+                  v != null && Number.isFinite(v) && v !== 0
+                ) {
+                  const vVel = velocityCells[i]?.[j]
+                  if (vVel != null && Number.isFinite(vVel)) {
+                    const pct = (vVel / Math.abs(v)) * 100
+                    if (Number.isFinite(pct) && Math.abs(pct) >= 2) {
+                      const capped = Math.max(-999, Math.min(999, pct))
+                      const sign = capped >= 0 ? '+' : ''
+                      const tone = capped >= 0
+                        ? 'bg-emerald-500/25 text-emerald-200'
+                        : 'bg-rose-500/25 text-rose-200'
+                      velocityChip = (
+                        <span
+                          className={`text-[8px] leading-none font-semibold px-1 py-0.5 rounded ${tone}`}
+                          title={`${sign}${capped.toFixed(0)}% vs prior 5m snapshot`}
+                        >
+                          {sign}{Math.round(capped)}%
+                        </span>
+                      )
+                    }
+                  }
+                }
                 return (
                   <div
                     key={j}
@@ -232,6 +270,7 @@ export default function GexMatrix({ data, liveSpot = null, exposureType = 'gex',
                     }
                     style={{ backgroundColor: isWall ? gexColor(v, maxAbs) : 'transparent' }}
                   >
+                    {velocityChip}
                     {isLargest && <span className="text-[10px]">★</span>}
                     <span>{formatGex(v)}</span>
                   </div>

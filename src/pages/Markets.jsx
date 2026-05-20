@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, RefreshCw, Activity, Star, Lock, ChevronDown, Clock, BookOpen, Search, Sparkles, Maximize2, Minimize2 } from 'lucide-react'
+import { ArrowLeft, RefreshCw, Activity, Star, Lock, ChevronDown, ChevronLeft, ChevronRight, Clock, BookOpen, Search, Sparkles, Maximize2, Minimize2 } from 'lucide-react'
 import clsx from 'clsx'
 import { isWithinRth } from '../utils/marketHours'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
@@ -129,6 +129,11 @@ export default function Markets() {
     if (typeof window === 'undefined') return false
     try { return window.localStorage.getItem('pe_markets_walls_only') === '1' } catch { return false }
   })
+  // Expiration window offset for the < > stepper. Always reset to 0 on
+  // ticker change so the user sees the front of the new chain. Not
+  // persisted in localStorage — it's a transient navigation state.
+  const [expirationOffset, setExpirationOffset] = useState(0)
+  useEffect(() => { setExpirationOffset(0) }, [ticker])
   useEffect(() => {
     if (typeof window === 'undefined') return
     try {
@@ -301,10 +306,15 @@ export default function Markets() {
       }
       // User overrides from the heatmap toolbar pickers win over the
       // per-ticker defaults. Null = use the default.
+      const displayMaxExpirations = userMaxExpirations ?? baseMopts.maxExpirations
+      // Always fetch enough expirations to leave room for the < >
+      // stepper to slide the display window forward without re-fetching.
+      // 12 is the hard cap (matches the picker's highest option).
+      const fetchMaxExpirations = Math.max(displayMaxExpirations, 12)
       const mopts = {
         ...baseMopts,
         ...(userMaxStrikes != null ? { maxStrikes: userMaxStrikes } : {}),
-        ...(userMaxExpirations != null ? { maxExpirations: userMaxExpirations } : {}),
+        maxExpirations: fetchMaxExpirations,
       }
       const body = {
         ticker: sym,
@@ -313,11 +323,11 @@ export default function Markets() {
         matrix_max_expirations: mopts.maxExpirations,
         matrix_max_strikes: mopts.maxStrikes,
         matrix_strike_window_pct: mopts.strikeWindowPct,
-        // Velocity Mode renders ∆GEX vs the most recent prior snapshot
-        // — backend skips the diff query unless we ask for it. The
-        // payload size delta is small but it's an extra DB roundtrip,
-        // so only opt in when the user is actually viewing it.
-        include_velocity: view === 'velocity',
+        // Always request velocity_cells so the gamma view can render
+        // inline ∆GEX% chips next to each cell value (Skylit parity).
+        // Adds one DB roundtrip per fetch; tradeoff worth it for the
+        // signal density it gives the heatmap.
+        include_velocity: true,
       }
       const { data: result, error: invokeErr } = await supabase.functions.invoke(
         'compute-gex',
@@ -365,16 +375,8 @@ export default function Markets() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userMaxStrikes, userMaxExpirations])
 
-  // Switching to/from Velocity Mode requires a fetch that asks for
-  // include_velocity. Don't reload between non-velocity tabs — the
-  // matrix already carries vex/cex/dex cells, so those are free
-  // pivots. Only velocity needs the round-trip.
-  useEffect(() => {
-    if (view === 'velocity' && data && !data.velocity_cells) {
-      load(ticker)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view])
+  // (Was: velocity re-fetch effect. Now obsolete — include_velocity is
+  // always true so every matrix response already carries velocity_cells.)
 
   // Pull-to-refresh: dragging from the top of the page calls the
   // same `refresh: true` path as the manual refresh button. Disabled
@@ -730,6 +732,38 @@ export default function Markets() {
 
         {!loading && !error && (() => {
           const matrixData = replayActive && replaySnapshot ? replaySnapshot : data
+          // Client-side window over the fetched expirations so the < >
+          // stepper can slide instantly without round-tripping the
+          // server. displayCount is what the user picked (or the
+          // per-ticker default); matrixData carries up to
+          // FETCH_EXPIRATIONS_CAP. Largest gets re-indexed into the
+          // window, or nulled out when its column is off-screen.
+          const baseMoptsForView = {
+            ...MATRIX_OPTS,
+            ...(MATRIX_OPTS_BY_TICKER[String(ticker).toUpperCase()] || {}),
+          }
+          const displayCount = userMaxExpirations ?? baseMoptsForView.maxExpirations
+          const totalExpirations = matrixData?.expirations?.length ?? 0
+          const offset = Math.max(0, Math.min(expirationOffset, Math.max(0, totalExpirations - displayCount)))
+          const canStepBack = offset > 0
+          const canStepForward = offset + displayCount < totalExpirations
+          const sliceCols = (arr) => Array.isArray(arr) ? arr.map((row) => row.slice(offset, offset + displayCount)) : arr
+          const slicedMatrixData = matrixData && totalExpirations > displayCount
+            ? {
+                ...matrixData,
+                expirations: matrixData.expirations.slice(offset, offset + displayCount),
+                cells: sliceCols(matrixData.cells),
+                vex_cells: sliceCols(matrixData.vex_cells),
+                cex_cells: sliceCols(matrixData.cex_cells),
+                dex_cells: sliceCols(matrixData.dex_cells),
+                velocity_cells: sliceCols(matrixData.velocity_cells),
+                largest: matrixData.largest
+                  && matrixData.largest.expiration_index >= offset
+                  && matrixData.largest.expiration_index < offset + displayCount
+                  ? { ...matrixData.largest, expiration_index: matrixData.largest.expiration_index - offset }
+                  : null,
+              }
+            : matrixData
           return (
             <div className="space-y-3">
               {/* Matrix toolbar — Summary/Raw mode on the left, then
@@ -828,6 +862,35 @@ export default function Markets() {
                         Walls
                       </button>
                     </div>
+                    {totalExpirations > displayCount && (
+                      <div className="flex items-center gap-1 bg-card border border-border rounded-lg p-1">
+                        <button
+                          type="button"
+                          onClick={() => setExpirationOffset((o) => Math.max(0, o - displayCount))}
+                          disabled={!canStepBack}
+                          aria-label="Previous expirations"
+                          title="Step expiration window back"
+                          className="p-1 text-zinc-500 hover:text-zinc-300 disabled:opacity-30 disabled:hover:text-zinc-500 disabled:cursor-not-allowed"
+                        >
+                          <ChevronLeft size={14} />
+                        </button>
+                        <span className="px-1 text-[10px] tabular-nums text-subtle whitespace-nowrap">
+                          {totalExpirations === 0
+                            ? '—'
+                            : `${offset + 1}–${Math.min(offset + displayCount, totalExpirations)} / ${totalExpirations}`}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setExpirationOffset((o) => Math.min(Math.max(0, totalExpirations - displayCount), o + displayCount))}
+                          disabled={!canStepForward}
+                          aria-label="Next expirations"
+                          title="Step expiration window forward"
+                          className="p-1 text-zinc-500 hover:text-zinc-300 disabled:opacity-30 disabled:hover:text-zinc-500 disabled:cursor-not-allowed"
+                        >
+                          <ChevronRight size={14} />
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -835,7 +898,7 @@ export default function Markets() {
                 <MatrixSummaryCard matrix={matrixData} variant="full" liveSpot={replayActive ? null : liveSpot} />
               ) : (
                 <GexMatrix
-                  data={matrixData}
+                  data={slicedMatrixData}
                   liveSpot={replayActive ? null : liveSpot}
                   exposureType={view}
                   wallsOnly={wallsOnly}
@@ -845,6 +908,47 @@ export default function Markets() {
           )
         })()}
       </div>
+
+      {/* Mobile persistent spot pill — fixed above the bottom nav so
+          spot context is always visible while scrolling the matrix
+          (Skylit parity). Hidden in matrixExpanded mode (the overlay
+          already shows spot via the in-card metric strip and the
+          bottom nav is hidden under the overlay anyway). */}
+      {data && !matrixExpanded && (() => {
+        const cur = Number.isFinite(liveSpot) && liveSpot > 0 ? liveSpot : data.spot
+        const prev = data.prev_close
+        const pct = (Number.isFinite(cur) && Number.isFinite(prev) && prev > 0)
+          ? ((cur - prev) / prev) * 100
+          : null
+        const pctTone = pct == null ? 'text-subtle' : pct >= 0 ? 'text-green-400' : 'text-red-400'
+        return (
+          <div
+            className="lg:hidden fixed left-1/2 -translate-x-1/2 z-40
+                       bottom-[calc(5.5rem+env(safe-area-inset-bottom))]
+                       flex items-center gap-2 bg-card/95 backdrop-blur
+                       border border-border rounded-full px-3 py-1.5
+                       shadow-[0_4px_16px_rgba(0,0,0,0.4)] pointer-events-auto"
+          >
+            <span className="text-[9px] uppercase tracking-wider text-muted font-semibold">NOW</span>
+            <button
+              type="button"
+              onClick={() => setDrawerOpen(true)}
+              className="text-fg text-sm font-semibold tabular-nums leading-none hover:text-amber-400 transition-colors"
+              aria-label="Pick a different ticker"
+            >
+              {data.ticker}
+            </button>
+            <span className="text-fg font-mono-tab tabular-nums text-sm leading-none">
+              ${Number.isFinite(cur) ? Number(cur).toFixed(2) : '—'}
+            </span>
+            {pct != null && (
+              <span className={`${pctTone} text-xs tabular-nums leading-none`}>
+                {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
+              </span>
+            )}
+          </div>
+        )
+      })()}
 
       {/* Desktop-only bottom ticker bar — centered Skylit-style. Click
           the ticker name to open the full ticker drawer. Source badge
