@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, RefreshCw, Activity, Star, Lock, ChevronDown, Clock, BookOpen, Search, Sparkles } from 'lucide-react'
+import { ArrowLeft, RefreshCw, Activity, Star, Lock, ChevronDown, Clock, BookOpen, Search, Sparkles, Maximize2, Minimize2 } from 'lucide-react'
 import clsx from 'clsx'
 import { isWithinRth } from '../utils/marketHours'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
@@ -89,6 +89,22 @@ export default function Markets() {
     if (typeof window === 'undefined' || !ticker) return
     try { window.localStorage.setItem('pe_markets_ticker', ticker) } catch { /* */ }
   }, [ticker])
+
+  // Immersive expand mode for the heatmap card — overlay that hides
+  // site chrome so the matrix fills the viewport (and gets even wider
+  // in landscape now that the PWA manifest no longer locks portrait).
+  const [matrixExpanded, setMatrixExpanded] = useState(false)
+  useEffect(() => {
+    if (!matrixExpanded) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const onKey = (e) => { if (e.key === 'Escape') setMatrixExpanded(false) }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.body.style.overflow = prev
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [matrixExpanded])
 
   // Watch the URL ?ticker= for changes after mount — covers the case
   // where the user is already on /markets and the Tape pushes them
@@ -577,7 +593,11 @@ export default function Markets() {
           The min-h-[calc(100vh-13rem)] reserves vertical space for the
           top toolbar + bottom ticker bar so the matrix dominates the
           screen the way it does in Skylit. */}
-      <div className="bg-card border border-border rounded-xl p-4 min-h-[280px] lg:min-h-[calc(100vh-15rem)]">
+      <div className={clsx(
+        matrixExpanded
+          ? 'fixed inset-0 z-[100] bg-bg overflow-auto p-3 pt-safe pb-safe'
+          : 'bg-card border border-border rounded-xl p-4 min-h-[280px] lg:min-h-[calc(100vh-15rem)]',
+      )}>
         <div className="flex items-center gap-2 mb-3">
           <Activity size={14} className="text-brand" />
           <h2 className="text-sm font-semibold">{exposureLabel(view)} by strike</h2>
@@ -586,6 +606,15 @@ export default function Markets() {
               · last {data.velocity_window_minutes}m
             </span>
           )}
+          <button
+            type="button"
+            onClick={() => setMatrixExpanded((v) => !v)}
+            aria-label={matrixExpanded ? 'Collapse matrix' : 'Expand matrix to full screen'}
+            title={matrixExpanded ? 'Collapse (Esc)' : 'Expand matrix'}
+            className="ml-auto p-1.5 -mr-1 text-muted hover:text-fg rounded hover:bg-bg-elev/60 transition"
+          >
+            {matrixExpanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+          </button>
         </div>
 
         {/* Inference strip. The leftmost stat is per-tab — Net GEX on
