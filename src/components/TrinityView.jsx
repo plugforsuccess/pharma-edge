@@ -5,7 +5,7 @@ import { gexColor } from './GexMatrix'
 
 // 3-ticker side-by-side comparison view ("Trinity" mode). Renders the
 // three GEX matrices as parallel columns at the same time so the user
-// can read SPXW / SPY / QQQ dealer positioning in one glance — that's
+// can read SPY / QQQ / IWM dealer positioning in one glance — that's
 // the whole point of the mode.
 //
 // Each column is a compact strike → summed-GEX list (one row per
@@ -19,8 +19,17 @@ import { gexColor } from './GexMatrix'
 // ATM strike per column is auto-scrolled into view on mount so all
 // three land on a useful row instead of pinned to the top of each
 // chain.
+//
+// TODO: restore SPXW as the lead column when the Polygon SPX path is
+// fixed (currently /v3/snapshot/options/SPX fails — either plan-tier
+// or endpoint-format issue, diagnostic pending). The honest substitute
+// is IWM (small-cap completes the SPY/QQQ index-ETF trio) — SPY × 10
+// as an SPX proxy was rejected because their option books are
+// structurally different (institutional cash-settled 0DTE vs retail
+// AM-settled equity), so the proxy would give the wrong signal
+// exactly when it matters.
 
-const DEFAULT_TRIO = ['SPXW', 'SPY', 'QQQ']
+const DEFAULT_TRIO = ['SPY', 'QQQ', 'IWM']
 
 export default function TrinityView({ initialTickers }) {
   const [tickers] = useState(initialTickers ?? DEFAULT_TRIO)
@@ -29,8 +38,8 @@ export default function TrinityView({ initialTickers }) {
     <div className="space-y-2">
       <div className="text-[11px] text-subtle leading-relaxed px-1">
         <strong className="text-fg">Trinity:</strong> three matrices
-        side-by-side. The default trio (SPXW / SPY / QQQ) is the
-        index dealer-positioning headline.
+        side-by-side. The default trio (SPY / QQQ / IWM) is the
+        index-ETF dealer-positioning headline.
       </div>
 
       {/* Three columns, equal width. -mx-2 lets the cards bleed to

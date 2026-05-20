@@ -560,7 +560,7 @@ export default function Glossary() {
 
       <Term
         title="Trinity Mode"
-        short="Three matrices side-by-side (default SPXW / SPY / QQQ) for cross-index comparison."
+        short="Three matrices side-by-side (default SPY / QQQ / IWM) for cross-index comparison."
       >
         <p>
           Compact strike → summed-GEX list per ticker, ATM
