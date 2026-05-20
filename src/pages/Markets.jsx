@@ -311,9 +311,22 @@ export default function Markets() {
       // stepper to slide the display window forward without re-fetching.
       // 12 is the hard cap (matches the picker's highest option).
       const fetchMaxExpirations = Math.max(displayMaxExpirations, 12)
+      // When the user picks an explicit strike count, also widen
+      // strikeWindowPct so the COUNT becomes the binding constraint
+      // (otherwise the default 7% window silently clamps the picker
+      // — e.g. WMT @ $131 only has ~18 strikes inside ATM ± 7%, so
+      // asking for 50 returns 18). 0.30 = ATM ± 30% which covers
+      // up to ~60 $1-spaced strikes on a $100 underlying. For very
+      // low-priced names the chain may still be the bottleneck and
+      // we'll deliver fewer than requested — that's expected.
       const mopts = {
         ...baseMopts,
-        ...(userMaxStrikes != null ? { maxStrikes: userMaxStrikes } : {}),
+        ...(userMaxStrikes != null
+          ? {
+              maxStrikes: userMaxStrikes,
+              strikeWindowPct: Math.max(0.30, baseMopts.strikeWindowPct),
+            }
+          : {}),
         maxExpirations: fetchMaxExpirations,
       }
       const body = {
