@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, RefreshCw, Activity, Star, Lock, ChevronDown, Clock, BookOpen, Search, Sparkles, Maximize2, Minimize2 } from 'lucide-react'
 import clsx from 'clsx'
 import { isWithinRth } from '../utils/marketHours'
@@ -105,6 +105,48 @@ export default function Markets() {
       window.removeEventListener('keydown', onKey)
     }
   }, [matrixExpanded])
+
+  // User-controlled matrix density. null = "use the per-ticker default
+  // from MATRIX_OPTS / MATRIX_OPTS_BY_TICKER". When non-null, the
+  // values override the defaults for every ticker — that's what the
+  // strikes/expirations pickers in the heatmap toolbar drive. The
+  // walls-only toggle is a presentation filter only (doesn't re-fetch).
+  const [userMaxStrikes, setUserMaxStrikes] = useState(() => {
+    if (typeof window === 'undefined') return null
+    try {
+      const v = window.localStorage.getItem('pe_markets_max_strikes')
+      return v ? Number(v) : null
+    } catch { return null }
+  })
+  const [userMaxExpirations, setUserMaxExpirations] = useState(() => {
+    if (typeof window === 'undefined') return null
+    try {
+      const v = window.localStorage.getItem('pe_markets_max_expirations')
+      return v ? Number(v) : null
+    } catch { return null }
+  })
+  const [wallsOnly, setWallsOnly] = useState(() => {
+    if (typeof window === 'undefined') return false
+    try { return window.localStorage.getItem('pe_markets_walls_only') === '1' } catch { return false }
+  })
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      if (userMaxStrikes != null) window.localStorage.setItem('pe_markets_max_strikes', String(userMaxStrikes))
+      else window.localStorage.removeItem('pe_markets_max_strikes')
+    } catch { /* */ }
+  }, [userMaxStrikes])
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      if (userMaxExpirations != null) window.localStorage.setItem('pe_markets_max_expirations', String(userMaxExpirations))
+      else window.localStorage.removeItem('pe_markets_max_expirations')
+    } catch { /* */ }
+  }, [userMaxExpirations])
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try { window.localStorage.setItem('pe_markets_walls_only', wallsOnly ? '1' : '0') } catch { /* */ }
+  }, [wallsOnly])
 
   // Watch the URL ?ticker= for changes after mount — covers the case
   // where the user is already on /markets and the Tape pushes them
@@ -253,9 +295,16 @@ export default function Markets() {
     try {
       // matrix:true asks compute-gex for the strikes×expirations grid
       // (Skylit-style heatmap) instead of the single-expiration shape.
-      const mopts = {
+      const baseMopts = {
         ...MATRIX_OPTS,
         ...(MATRIX_OPTS_BY_TICKER[String(sym).toUpperCase()] || {}),
+      }
+      // User overrides from the heatmap toolbar pickers win over the
+      // per-ticker defaults. Null = use the default.
+      const mopts = {
+        ...baseMopts,
+        ...(userMaxStrikes != null ? { maxStrikes: userMaxStrikes } : {}),
+        ...(userMaxExpirations != null ? { maxExpirations: userMaxExpirations } : {}),
       }
       const body = {
         ticker: sym,
@@ -304,6 +353,17 @@ export default function Markets() {
     load(ticker)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ticker])
+
+  // Reload when the user changes strike/expiry density. The pickers
+  // mutate the request payload, so the server has to recompute.
+  // Skipped on initial mount via ref so we don't double-fetch alongside
+  // the ticker-effect above.
+  const densityMountRef = useRef(true)
+  useEffect(() => {
+    if (densityMountRef.current) { densityMountRef.current = false; return }
+    load(ticker)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userMaxStrikes, userMaxExpirations])
 
   // Switching to/from Velocity Mode requires a fetch that asks for
   // include_velocity. Don't reload between non-velocity tabs — the
@@ -672,34 +732,104 @@ export default function Markets() {
           const matrixData = replayActive && replaySnapshot ? replaySnapshot : data
           return (
             <div className="space-y-3">
-              {/* Summary / Raw toggle. Sits above whichever view is
-                  active so users don't lose context flipping back and
-                  forth. Persists in localStorage. */}
-              <div className="flex items-center gap-1 bg-card border border-border rounded-lg p-1 w-fit">
-                <button
-                  type="button"
-                  onClick={() => setViewMode('summary')}
-                  className={clsx(
-                    'px-3 py-1 text-[11px] font-medium rounded transition-colors',
-                    viewMode === 'summary'
-                      ? 'bg-bg text-white'
-                      : 'text-zinc-500 hover:text-zinc-300',
-                  )}
-                >
-                  Summary
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setViewMode('raw')}
-                  className={clsx(
-                    'px-3 py-1 text-[11px] font-medium rounded transition-colors',
-                    viewMode === 'raw'
-                      ? 'bg-bg text-white'
-                      : 'text-zinc-500 hover:text-zinc-300',
-                  )}
-                >
-                  Raw cells
-                </button>
+              {/* Matrix toolbar — Summary/Raw mode on the left, then
+                  the Skylit-style density + walls controls on the
+                  right. flex-wrap so the controls drop to a second
+                  line on narrow viewports rather than overflowing. */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-1 bg-card border border-border rounded-lg p-1 w-fit">
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('summary')}
+                    className={clsx(
+                      'px-3 py-1 text-[11px] font-medium rounded transition-colors',
+                      viewMode === 'summary'
+                        ? 'bg-bg text-white'
+                        : 'text-zinc-500 hover:text-zinc-300',
+                    )}
+                  >
+                    Summary
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('raw')}
+                    className={clsx(
+                      'px-3 py-1 text-[11px] font-medium rounded transition-colors',
+                      viewMode === 'raw'
+                        ? 'bg-bg text-white'
+                        : 'text-zinc-500 hover:text-zinc-300',
+                    )}
+                  >
+                    Raw cells
+                  </button>
+                </div>
+                {viewMode === 'raw' && (
+                  <div className="flex items-center gap-2 ml-auto">
+                    <label className="flex items-center gap-1 text-[10px] text-subtle">
+                      <span className="uppercase tracking-wider">Strikes</span>
+                      <select
+                        value={userMaxStrikes ?? ''}
+                        onChange={(e) => {
+                          const v = e.target.value
+                          setUserMaxStrikes(v === '' ? null : Number(v))
+                        }}
+                        className="bg-card border border-border rounded px-1.5 py-0.5 text-[11px] text-fg font-mono-tab focus:outline-none focus:ring-1 focus:ring-brand/40"
+                      >
+                        <option value="">auto</option>
+                        <option value="11">11</option>
+                        <option value="21">21</option>
+                        <option value="31">31</option>
+                        <option value="41">41</option>
+                        <option value="51">51</option>
+                      </select>
+                    </label>
+                    <label className="flex items-center gap-1 text-[10px] text-subtle">
+                      <span className="uppercase tracking-wider">Exp</span>
+                      <select
+                        value={userMaxExpirations ?? ''}
+                        onChange={(e) => {
+                          const v = e.target.value
+                          setUserMaxExpirations(v === '' ? null : Number(v))
+                        }}
+                        className="bg-card border border-border rounded px-1.5 py-0.5 text-[11px] text-fg font-mono-tab focus:outline-none focus:ring-1 focus:ring-brand/40"
+                      >
+                        <option value="">auto</option>
+                        <option value="2">2</option>
+                        <option value="4">4</option>
+                        <option value="6">6</option>
+                        <option value="8">8</option>
+                        <option value="10">10</option>
+                        <option value="12">12</option>
+                      </select>
+                    </label>
+                    <div className="flex items-center gap-1 bg-card border border-border rounded-lg p-1">
+                      <button
+                        type="button"
+                        onClick={() => setWallsOnly(false)}
+                        title="Show all strikes"
+                        aria-pressed={!wallsOnly}
+                        className={clsx(
+                          'px-2 py-0.5 text-[11px] rounded transition-colors',
+                          !wallsOnly ? 'bg-bg text-white' : 'text-zinc-500 hover:text-zinc-300',
+                        )}
+                      >
+                        All
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setWallsOnly(true)}
+                        title="Show walls only (top-3 per expiration)"
+                        aria-pressed={wallsOnly}
+                        className={clsx(
+                          'px-2 py-0.5 text-[11px] rounded transition-colors',
+                          wallsOnly ? 'bg-bg text-amber-300' : 'text-zinc-500 hover:text-zinc-300',
+                        )}
+                      >
+                        Walls
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
               {viewMode === 'summary' && matrixData ? (
                 <MatrixSummaryCard matrix={matrixData} variant="full" liveSpot={replayActive ? null : liveSpot} />
@@ -708,6 +838,7 @@ export default function Markets() {
                   data={matrixData}
                   liveSpot={replayActive ? null : liveSpot}
                   exposureType={view}
+                  wallsOnly={wallsOnly}
                 />
               )}
             </div>

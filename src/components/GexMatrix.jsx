@@ -67,11 +67,35 @@ const CELLS_FIELD = {
   velocity: 'velocity_cells',
 }
 
-export default function GexMatrix({ data, liveSpot = null, exposureType = 'gex' }) {
+export default function GexMatrix({ data, liveSpot = null, exposureType = 'gex', wallsOnly = false }) {
   const expirations = data?.expirations ?? []
   const strikes = data?.strikes ?? []
   const cellsField = CELLS_FIELD[exposureType] ?? 'cells'
   const cells = data?.[cellsField] ?? []
+
+  // Walls-only filter: per-expiration top-3 by abs value. Encoded as
+  // (i * 10000 + j) so we can use a flat Set instead of a 2D bitmap —
+  // strikes never exceed 5000 rows in practice. When wallsOnly is off
+  // the set is null and the predicate short-circuits to "show all".
+  const wallSet = useMemo(() => {
+    if (!wallsOnly || cells.length === 0) return null
+    const N = 3
+    const set = new Set()
+    for (let j = 0; j < expirations.length; j++) {
+      const colCells = []
+      for (let i = 0; i < strikes.length; i++) {
+        const v = cells[i]?.[j]
+        if (v != null && Number.isFinite(v)) {
+          colCells.push({ i, abs: Math.abs(v) })
+        }
+      }
+      colCells.sort((a, b) => b.abs - a.abs)
+      for (let k = 0; k < Math.min(N, colCells.length); k++) {
+        set.add(colCells[k].i * 10000 + j)
+      }
+    }
+    return set
+  }, [wallsOnly, cells, strikes.length, expirations.length])
   // The matrix snapshot's `spot` is from when compute-gex ran (cached
   // 5 min server-side). For the cursor row to actually look live the
   // way the LIVE badge implies, we accept an optional `liveSpot`
@@ -198,11 +222,15 @@ export default function GexMatrix({ data, liveSpot = null, exposureType = 'gex' 
                   largest &&
                   largest.strike_index === i &&
                   largest.expiration_index === j
+                const isWall = wallSet == null || wallSet.has(i * 10000 + j)
                 return (
                   <div
                     key={j}
-                    className="px-2 py-1.5 text-right tabular-nums text-fg flex items-center justify-end gap-1"
-                    style={{ backgroundColor: gexColor(v, maxAbs) }}
+                    className={
+                      'px-2 py-1.5 text-right tabular-nums flex items-center justify-end gap-1 ' +
+                      (isWall ? 'text-fg' : 'text-subtle opacity-20')
+                    }
+                    style={{ backgroundColor: isWall ? gexColor(v, maxAbs) : 'transparent' }}
                   >
                     {isLargest && <span className="text-[10px]">★</span>}
                     <span>{formatGex(v)}</span>
