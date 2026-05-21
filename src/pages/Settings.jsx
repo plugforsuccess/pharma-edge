@@ -99,21 +99,22 @@ export default function Settings() {
     setSaving(true)
 
     // Concat first + last back into the legacy display_name column.
-    // Risk-management fields (account_size, max_position_pct,
-    // max_sector_pct) are no longer surfaced — account size now syncs
-    // from Tastytrade NLV automatically, and the 2% / 20% sector caps
-    // are project-policy constants enforced in calculator + signal
-    // logic. Existing values on the profile row are preserved by
-    // omission from this update.
+    // account_size is user-editable as a manual override / fallback —
+    // the Tastytrade NLV auto-sync wasn't being written into this
+    // column reliably, so the wheel-picks page (which sizes max
+    // contracts off this number) ended up using 0 for users who
+    // hadn't connected the broker.
     const displayName =
       [form.first_name, form.last_name]
         .map((s) => (s || '').trim())
         .filter(Boolean)
         .join(' ') || null
+    const parsedAccountSize = Number(String(form.account_size).replace(/[^0-9.]/g, ''))
     const update = {
       display_name: displayName,
       public_slug: slugDraft || null,
       is_public: !!form.is_public,
+      account_size: Number.isFinite(parsedAccountSize) && parsedAccountSize > 0 ? parsedAccountSize : null,
     }
 
     const { error: updateError } = await supabase
@@ -320,11 +321,21 @@ export default function Settings() {
           <RuleRow rule="Hard stop at −50% of spread debit" />
           <RuleRow rule="Spreads only — no naked options" />
         </ul>
-        <p className="text-muted text-[10px] leading-relaxed">
-          Account size syncs live from your Tastytrade NLV (shown in the
-          Bot section) — the 2% / 20% caps are computed off that, not a
-          number you set here.
-        </p>
+        <div className="mt-3 border-t border-border pt-3">
+          <Input
+            label="Account Size (USD)"
+            value={form.account_size}
+            onChange={(v) => update('account_size', v.replace(/[^0-9.]/g, ''))}
+            placeholder="75000"
+            inputMode="numeric"
+          />
+          <p className="text-muted text-[10px] leading-relaxed mt-1">
+            Drives the 2% per-spread and 20% per-ticker caps, plus the
+            max-contracts sizing on the Wheel Picks page. Auto-syncs
+            from Tastytrade NLV when connected; this is your manual
+            fallback / override.
+          </p>
+        </div>
       </Section>
 
       <Section title="Appearance">
@@ -479,6 +490,7 @@ function initialForm(profile) {
     last_name: last,
     public_slug: profile?.public_slug ?? '',
     is_public: profile?.is_public ?? true,
+    account_size: profile?.account_size != null ? String(profile.account_size) : '',
   }
 }
 
