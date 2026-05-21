@@ -117,6 +117,7 @@ export const HOT_TICKERS = [
   { symbol: 'ARM',   label: 'Arm' },
   { symbol: 'BABA',  label: 'Alibaba' },
   { symbol: 'GME',   label: 'GameStop' },
+  { symbol: 'SOFI',  label: 'SoFi Technologies' },
   // ── Leopold Aschenbrenner portfolio (AI buildout: data-center
   //    operators, GPU cloud, power/oilfield infra, memory). INTC,
   //    SNDK, CRWV, BE already covered in groups above.

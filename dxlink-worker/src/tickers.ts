@@ -118,6 +118,9 @@ export const TRACKED_TICKERS: string[] = [
   'ARM',
   'BABA',
   'GME',
+  'SOFI',
+  // Bitcoin miners (also Aschenbrenner portfolio)
+  'RIOT',
 ]
 
 // How many expirations to subscribe to per ticker. 2 = front month +
