@@ -7,8 +7,10 @@
 #     rows for the prior N days. Use for first-run priming.
 #
 # earnings_calendar:
-#   - Pulls 30-day forward earnings calendar from Polygon for the
-#     universe daily so earnings_crush has fresh data.
+#   - Pulls 90-day forward earnings calendar from Finnhub for the
+#     universe daily. The legacy Polygon seeder
+#     (bot-seed-earnings-calendar) is retained but unused — Polygon's
+#     earnings endpoint isn't on this project's plan tier.
 
 name: Bot — seed iv_history + earnings_calendar
 
@@ -62,16 +64,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Invoke bot-seed-earnings-calendar
+      - name: Invoke bot-seed-earnings-finnhub
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           resp=$(curl -sS -w "\n%{http_code}" -X POST \
-            "${SUPABASE_URL}/functions/v1/bot-seed-earnings-calendar" \
+            "${SUPABASE_URL}/functions/v1/bot-seed-earnings-finnhub" \
             -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
             -H "Content-Type: application/json" \
-            -d '{"lookahead_days": 30}')
+            -d '{"lookahead_days": 90}')
           http=$(echo "$resp" | tail -n1)
           body=$(echo "$resp" | head -n -1)
           echo "earnings status=${http} body=${body}"
