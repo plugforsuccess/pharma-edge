@@ -699,32 +699,41 @@ export const SP500_TICKERS = [
 // Wheel-strategy candidate list. Curated by the owner for a ~$75K
 // account where a 500-share assignment is the bullet target.
 //
-// HARD criterion: every name pays a dividend. The wheel-on-divs
-// thesis is three income streams from one stock:
-//   1. Dividend yield while shares are held
-//   2. Short-put premium when waiting for entry
-//   3. Covered-call premium when assigned shares
+// TWO hard criteria — both must pass:
 //
-// Tiered per the wheel-strategy doc (May 2026):
-//   T1 — highest conviction (BAC / KO / CSCO / PFE)
-//   T2 — solid picks with caveats (WFC / KMI)
-//   T3 — higher premium / higher risk (F)
+//  (1) PAYS A DIVIDEND. The thesis is three income streams from one
+//      stock:
+//         a. Dividend yield while shares are held
+//         b. Short-put premium when waiting for entry
+//         c. Covered-call premium when assigned shares
+//
+//  (2) PRICE ≤ $30/share. With the 20%-per-ticker position-size cap
+//      ($75K × 0.20 = $15K max) and a 500-share full bullet
+//      ($15K / 500 = $30 max share price), anything above $30 can't
+//      take the full 5-contract bullet without breaking the
+//      concentration rule. A 1–2 contract "modified" wheel is
+//      possible on pricier names but isn't the strategy here.
+//
+// Tiered per the wheel-strategy doc (May 2026), restricted to the
+// names that survive both gates:
+//   T1 — PFE  (was: BAC, KO, CSCO, PFE — first three >$30, dropped)
+//   T2 — KMI  (was: WFC, KMI — WFC >$30, dropped)
+//   T3 — F
 //
 // Excluded by design:
-//   * TE, CLSK — no dividend (solar / BTC miner). Still tracked in
-//     HOT_TICKERS for GEX/flow, just not eligible for wheel income.
+//   * BAC, KO, CSCO, WFC — dividend payers but priced >$30, so the
+//     500-share bullet would exceed the 20% concentration cap.
+//     Still in HOT_TICKERS / dxlink / earnings for GEX-and-flow
+//     tracking; just not wheel-strategy eligible at this account size.
+//   * TE, CLSK — no dividend. Same "still tracked, not wheel" status.
 //   * MRO — Marathon Oil was acquired by ConocoPhillips in late 2024
-//     and delisted. COP is the closest oil-major proxy if needed.
+//     and delisted.
 //
 // Consumers: the Wheel page filter, the "Add wheel candidates to my
 // watchlist" SQL snippet, future scanner code that wants to gate on
 // "did this play come from the wheel-eligible universe?".
 export const WHEEL_CANDIDATES = [
-  { symbol: 'BAC',  tier: 1, label: 'Bank of America' },
-  { symbol: 'KO',   tier: 1, label: 'Coca-Cola' },
-  { symbol: 'CSCO', tier: 1, label: 'Cisco' },
   { symbol: 'PFE',  tier: 1, label: 'Pfizer' },
-  { symbol: 'WFC',  tier: 2, label: 'Wells Fargo' },
   { symbol: 'KMI',  tier: 2, label: 'Kinder Morgan' },
   { symbol: 'F',    tier: 3, label: 'Ford' },
 ]
