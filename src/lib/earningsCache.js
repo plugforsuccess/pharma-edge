@@ -76,6 +76,27 @@ export async function refreshEarnings() {
   return ensureFresh()
 }
 
+// Returns true if today is the print day AND the print has already
+// happened (past 9:30 ET for BMO, past 16:00 ET for AMC). Shared by
+// the badge + the dashboard "this week" strip so both hide stale
+// same-day warnings consistently. UNKNOWN announcement time stays
+// visible all day (we can't tell when it landed).
+export function isPastAnnouncement(announcementTime) {
+  if (announcementTime !== 'BMO' && announcementTime !== 'AMC') return false
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    hour: 'numeric',
+    minute: 'numeric',
+    hour12: false,
+  }).formatToParts(new Date())
+  const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? 0)
+  const minute = Number(parts.find((p) => p.type === 'minute')?.value ?? 0)
+  const etMinutes = hour * 60 + minute
+  if (announcementTime === 'BMO' && etMinutes >= 9 * 60 + 30) return true
+  if (announcementTime === 'AMC' && etMinutes >= 16 * 60) return true
+  return false
+}
+
 // React hook wrapper. Returns null while loading or when the ticker
 // has no upcoming earnings in the next HORIZON_DAYS window.
 export function useEarnings(ticker) {

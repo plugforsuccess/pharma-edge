@@ -10,6 +10,7 @@ import OpenPositions from '../components/OpenPositions'
 import OutcomeInbox from '../components/OutcomeInbox'
 import TodaysPlaysFeed from '../components/TodaysPlaysFeed'
 import TapeDigest from '../components/TapeDigest'
+import EarningsThisWeek from '../components/EarningsThisWeek'
 import OnboardingModal, { shouldShowOnboarding } from '../components/OnboardingModal'
 import PullToRefreshIndicator from '../components/PullToRefreshIndicator'
 import usePullToRefresh from '../hooks/usePullToRefresh'
@@ -155,6 +156,13 @@ export default function Dashboard() {
           clutter — only appears when there's something that changed
           while the user was gone. */}
       <TapeDigest />
+
+      {/* Earnings-this-week strip — hidden when nothing in the
+          user's positions/signals/watchlist reports in the next 7
+          days, so it's not chrome when there's nothing to act on.
+          Sits above Today's Plays because earnings-on-held-positions
+          is more urgent than discovering new trades. */}
+      <EarningsThisWeek />
 
       {/* Today's Plays is the primary hero of the Tape now. The
           per-ticker Suggested Plays card moved to /markets (Pulse)
