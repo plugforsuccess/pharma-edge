@@ -15,6 +15,7 @@ import StopLossCheck from '../components/StopLossCheck'
 import StrikePriceCalculator from '../components/StrikePriceCalculator'
 import PlaceOrderPanel from '../components/PlaceOrderPanel'
 import EarningsBadge from '../components/EarningsBadge'
+import EarningsCard from '../components/EarningsCard'
 import clsx from 'clsx'
 
 // Biotech-era SIGNAL_TYPES (enrollment_signal, fda_precedent_signal,
@@ -126,6 +127,14 @@ export default function SignalDetail() {
             label="Price at Signal"
             value={signal.stock_price_at_signal != null ? `$${signal.stock_price_at_signal}` : '—'}
           />
+        </div>
+        {/* Always-on earnings calendar slot for this ticker. The
+            badge in the header tells you ER is close; this card
+            tells you when even when it's not, so the answer to
+            "is there earnings risk on this trade?" never requires
+            leaving the page. */}
+        <div className="mt-3">
+          <EarningsCard ticker={signal.ticker} />
         </div>
       </div>
 

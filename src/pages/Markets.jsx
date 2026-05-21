@@ -9,6 +9,7 @@ import { useSubscription } from '../hooks/useSubscription'
 import { HOT_TICKERS, TICKER_UNIVERSE } from '../lib/tickerUniverse'
 import GexMatrix from '../components/GexMatrix'
 import EarningsBadge from '../components/EarningsBadge'
+import EarningsCard from '../components/EarningsCard'
 import MatrixSummaryCard from '../components/MatrixSummaryCard'
 import TickerDrawer from '../components/TickerDrawer'
 import ReplaySlider from '../components/ReplaySlider'
@@ -660,6 +661,12 @@ export default function Markets() {
               />
             </div>
           )}
+          {/* Earnings calendar slot — always visible per ticker. When
+              there's nothing scheduled in the next 60 days, the card
+              says so explicitly rather than hiding (which would leave
+              the user wondering whether the absence means 'safe' or
+              'unknown'). */}
+          <EarningsCard ticker={data.ticker} />
         </div>
       )}
 
