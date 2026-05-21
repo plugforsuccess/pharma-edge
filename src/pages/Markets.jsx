@@ -17,7 +17,6 @@ import SuggestedWheel from '../components/SuggestedWheel'
 import WheelAnalyze from '../components/WheelAnalyze'
 import TrinityView from '../components/TrinityView'
 import UpgradeNotice from '../components/UpgradeNotice'
-import LiveDataStatus from '../components/LiveDataStatus'
 import PullToRefreshIndicator from '../components/PullToRefreshIndicator'
 import usePullToRefresh from '../hooks/usePullToRefresh'
 import useLiveSpot from '../hooks/useLiveSpot'
@@ -496,7 +495,6 @@ export default function Markets() {
         </button>
       </div>
 
-      <LiveDataStatus />
 
       {/* View tabs — single-ticker matrix supports five exposure
           views (GEX, VEX, CEX, DEX, Velocity), plus Trinity for the

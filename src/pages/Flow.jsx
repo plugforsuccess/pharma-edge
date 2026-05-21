@@ -3,7 +3,6 @@ import { Activity, AlertTriangle, ArrowDownCircle, ArrowUpCircle, CheckCircle2, 
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { evaluateRisk } from '../utils/botRiskEval'
-import LiveDataStatus from '../components/LiveDataStatus'
 
 // Flow page — the bot's feed.
 //
@@ -155,7 +154,6 @@ export default function Flow() {
         killSwitchError={killSwitchError}
       />
 
-      <LiveDataStatus />
 
       <div className="flex items-center gap-2 overflow-x-auto pb-1">
         <Filter size={12} className="text-muted shrink-0" />
