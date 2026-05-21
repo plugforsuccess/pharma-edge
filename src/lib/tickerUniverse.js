@@ -697,18 +697,24 @@ export const SP500_TICKERS = [
 ]
 
 // Wheel-strategy candidate list. Curated by the owner for a ~$75K
-// account where a 500-share assignment is the bullet target. Tiered
-// per the wheel-strategy doc (May 2026):
+// account where a 500-share assignment is the bullet target.
 //
+// HARD criterion: every name pays a dividend. The wheel-on-divs
+// thesis is three income streams from one stock:
+//   1. Dividend yield while shares are held
+//   2. Short-put premium when waiting for entry
+//   3. Covered-call premium when assigned shares
+//
+// Tiered per the wheel-strategy doc (May 2026):
 //   T1 — highest conviction (BAC / KO / CSCO / PFE)
 //   T2 — solid picks with caveats (WFC / KMI)
 //   T3 — higher premium / higher risk (F)
-//   small-cap satellites — TE, CLSK (sub-$10, thin chains, position-
-//      size accordingly; not full bullet candidates)
 //
-// MRO was on the original list but Marathon Oil was acquired by
-// ConocoPhillips and delisted in late 2024 — COP is the closest
-// remaining proxy if oil-major exposure is wanted.
+// Excluded by design:
+//   * TE, CLSK — no dividend (solar / BTC miner). Still tracked in
+//     HOT_TICKERS for GEX/flow, just not eligible for wheel income.
+//   * MRO — Marathon Oil was acquired by ConocoPhillips in late 2024
+//     and delisted. COP is the closest oil-major proxy if needed.
 //
 // Consumers: the Wheel page filter, the "Add wheel candidates to my
 // watchlist" SQL snippet, future scanner code that wants to gate on
@@ -721,8 +727,6 @@ export const WHEEL_CANDIDATES = [
   { symbol: 'WFC',  tier: 2, label: 'Wells Fargo' },
   { symbol: 'KMI',  tier: 2, label: 'Kinder Morgan' },
   { symbol: 'F',    tier: 3, label: 'Ford' },
-  { symbol: 'TE',   tier: 3, label: 'T1 Energy' },
-  { symbol: 'CLSK', tier: 3, label: 'CleanSpark' },
 ]
 
 export const WHEEL_CANDIDATE_SYMBOLS = new Set(WHEEL_CANDIDATES.map((t) => t.symbol))
