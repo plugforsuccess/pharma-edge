@@ -42,6 +42,7 @@ export const HOT_TICKERS = [
   { symbol: 'ORCL',  label: 'Oracle' },
   { symbol: 'CRM',   label: 'Salesforce' },
   { symbol: 'CSCO',  label: 'Cisco' },
+  { symbol: 'HPE',   label: 'HP Enterprise' },
   { symbol: 'ADBE',  label: 'Adobe' },
   { symbol: 'NFLX',  label: 'Netflix' },
   { symbol: 'NOW',   label: 'ServiceNow' },
@@ -67,11 +68,13 @@ export const HOT_TICKERS = [
   { symbol: 'SMCI',  label: 'Super Micro' },
   { symbol: 'ANET',  label: 'Arista' },
   { symbol: 'NOK',   label: 'Nokia' },
-  // Banks
+  // Banks (incl. regional dividend payers used as wheel candidates)
   { symbol: 'JPM',   label: 'JPMorgan' },
   { symbol: 'GS',    label: 'Goldman Sachs' },
   { symbol: 'BAC',   label: 'Bank of America' },
   { symbol: 'WFC',   label: 'Wells Fargo' },
+  { symbol: 'HBAN',  label: 'Huntington Bancshares' },
+  { symbol: 'KEY',   label: 'KeyCorp' },
   // Healthcare / pharma
   { symbol: 'LLY',   label: 'Eli Lilly' },
   { symbol: 'NVO',   label: 'Novo Nordisk' },
@@ -88,6 +91,7 @@ export const HOT_TICKERS = [
   { symbol: 'NKE',   label: 'Nike' },
   { symbol: 'DIS',   label: 'Disney' },
   { symbol: 'KO',    label: 'Coca-Cola' },
+  { symbol: 'SIRI',  label: 'Sirius XM' },
   // Autos
   { symbol: 'F',     label: 'Ford' },
   // Energy (oil majors + midstream)
@@ -697,35 +701,35 @@ export const SP500_TICKERS = [
 ]
 
 // Wheel-strategy candidate list. Curated by the owner for a ~$75K
-// account where a 500-share assignment is the bullet target.
+// account where a 500-share assignment is the FULL bullet target.
 //
-// TWO hard criteria — both must pass:
+// HARD criterion: every name pays a dividend. The thesis is three
+// income streams from one stock:
+//   1. Dividend yield while shares are held
+//   2. Short-put premium when waiting for entry
+//   3. Covered-call premium when assigned shares
 //
-//  (1) PAYS A DIVIDEND. The thesis is three income streams from one
-//      stock:
-//         a. Dividend yield while shares are held
-//         b. Short-put premium when waiting for entry
-//         c. Covered-call premium when assigned shares
+// SOFT criterion: 20% per-ticker concentration cap on $75K = $15K
+// max position. At full price that determines the bullet size:
 //
-//  (2) PRICE ≤ $30/share. With the 20%-per-ticker position-size cap
-//      ($75K × 0.20 = $15K max) and a 500-share full bullet
-//      ($15K / 500 = $30 max share price), anything above $30 can't
-//      take the full 5-contract bullet without breaking the
-//      concentration rule. A 1–2 contract "modified" wheel is
-//      possible on pricier names but isn't the strategy here.
+//   max_contracts = floor( $15K / (share_price × 100) )
 //
-// Tiered per the wheel-strategy doc (May 2026), restricted to the
-// names that survive both gates:
-//   T1 — PFE  (was: BAC, KO, CSCO, PFE — first three >$30, dropped)
-//   T2 — KMI  (was: WFC, KMI — WFC >$30, dropped)
-//   T3 — F
+// Names ≤$30 can take the FULL 5-contract bullet ($15K). Pricier
+// names get a "modified" 1–3 contract bullet — same wheel mechanics,
+// smaller per-leg. Owner explicitly wants these in the list (rather
+// than drop them) per the strategy doc's "modified approach" for KO.
+// Concrete max_contracts here is computed from the snapshot price in
+// the doc (May 2026); refresh when names move materially.
+//
+// Tiered per the strategy doc:
+//   T1 — BAC / KO / CSCO / PFE (highest conviction)
+//   T2 — WFC / KMI (solid with caveats)
+//   T3 — F (higher premium / higher risk)
 //
 // Excluded by design:
-//   * BAC, KO, CSCO, WFC — dividend payers but priced >$30, so the
-//     500-share bullet would exceed the 20% concentration cap.
-//     Still in HOT_TICKERS / dxlink / earnings for GEX-and-flow
-//     tracking; just not wheel-strategy eligible at this account size.
-//   * TE, CLSK — no dividend. Same "still tracked, not wheel" status.
+//   * TE, CLSK — no dividend (solar / BTC miner). Still tracked in
+//     HOT_TICKERS / dxlink / earnings for GEX & flow, just not
+//     wheel-income eligible.
 //   * MRO — Marathon Oil was acquired by ConocoPhillips in late 2024
 //     and delisted.
 //
@@ -733,9 +737,22 @@ export const SP500_TICKERS = [
 // watchlist" SQL snippet, future scanner code that wants to gate on
 // "did this play come from the wheel-eligible universe?".
 export const WHEEL_CANDIDATES = [
-  { symbol: 'PFE',  tier: 1, label: 'Pfizer' },
-  { symbol: 'KMI',  tier: 2, label: 'Kinder Morgan' },
-  { symbol: 'F',    tier: 3, label: 'Ford' },
+  // T1 — highest conviction (strategy doc)
+  { symbol: 'BAC',  tier: 1, label: 'Bank of America', max_contracts: 3 },  // ~$45 → \$13.5K
+  { symbol: 'KO',   tier: 1, label: 'Coca-Cola',       max_contracts: 2 },  // ~$65 → \$13.0K
+  { symbol: 'CSCO', tier: 1, label: 'Cisco',           max_contracts: 3 },  // ~$50 → \$15.0K
+  { symbol: 'PFE',  tier: 1, label: 'Pfizer',          max_contracts: 5 },  // ~$25 → \$12.5K full bullet
+  // T2 — solid with caveats
+  { symbol: 'WFC',  tier: 2, label: 'Wells Fargo',     max_contracts: 3 },  // ~$50 → \$15.0K
+  { symbol: 'KMI',  tier: 2, label: 'Kinder Morgan',   max_contracts: 5 },  // ~$25 → \$12.5K full bullet
+  // T3 — higher premium / higher risk
+  { symbol: 'F',    tier: 3, label: 'Ford',            max_contracts: 5 },  // ~$12 → \$6.0K full bullet
+  // Backfill — dividend payers ≤$30, conviction TBD. All fit full
+  // 5-contract bullets at current prices (verify before deployment).
+  { symbol: 'HBAN', tier: 3, label: 'Huntington Bancshares', max_contracts: 5 },  // ~$15 → \$7.5K
+  { symbol: 'KEY',  tier: 3, label: 'KeyCorp',               max_contracts: 5 },  // ~$15 → \$7.5K
+  { symbol: 'HPE',  tier: 3, label: 'HP Enterprise',         max_contracts: 5 },  // ~$20 → \$10.0K
+  { symbol: 'SIRI', tier: 3, label: 'Sirius XM',             max_contracts: 5 },  // ~$25 → \$12.5K
 ]
 
 export const WHEEL_CANDIDATE_SYMBOLS = new Set(WHEEL_CANDIDATES.map((t) => t.symbol))

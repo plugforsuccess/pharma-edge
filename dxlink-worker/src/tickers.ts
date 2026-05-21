@@ -44,6 +44,7 @@ export const TRACKED_TICKERS: string[] = [
   'ORCL',
   'CRM',
   'CSCO',
+  'HPE',
   'ADBE',
   'NFLX',
   'NOW',
@@ -69,11 +70,13 @@ export const TRACKED_TICKERS: string[] = [
   'SMCI',
   'ANET',
   'NOK',
-  // Banks
+  // Banks (incl. regional dividend payers used as wheel candidates)
   'JPM',
   'GS',
   'BAC',
   'WFC',
+  'HBAN',
+  'KEY',
   // Healthcare / pharma
   'LLY',
   'NVO',
@@ -90,6 +93,7 @@ export const TRACKED_TICKERS: string[] = [
   'NKE',
   'DIS',
   'KO',
+  'SIRI',
   // Autos
   'F',
   // Energy (oil majors + midstream)

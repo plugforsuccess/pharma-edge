@@ -35,6 +35,8 @@ const UNIVERSE = [
   'BTMR','BE','NOW',
   // Wheel-strategy dividend / value candidates
   'KO','KMI','F',
+  // Wheel-strategy backfill (≤$30 dividend payers)
+  'HBAN','KEY','HPE','SIRI',
 ]
 
 // 1100ms between requests = ~54 calls/min, comfortably under the
