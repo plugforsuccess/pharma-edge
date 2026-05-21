@@ -43,6 +43,7 @@ export const TRACKED_TICKERS: string[] = [
   'INTC',
   'ORCL',
   'CRM',
+  'CSCO',
   'ADBE',
   'NFLX',
   'NOW',
@@ -88,10 +89,14 @@ export const TRACKED_TICKERS: string[] = [
   'MCD',
   'NKE',
   'DIS',
-  // Energy (oil majors)
+  'KO',
+  // Autos
+  'F',
+  // Energy (oil majors + midstream)
   'XOM',
   'CVX',
   'COP',
+  'KMI',
   // AI power / nuclear renaissance
   'VST',
   'CEG',

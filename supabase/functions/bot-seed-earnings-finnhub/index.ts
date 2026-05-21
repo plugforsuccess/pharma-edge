@@ -29,10 +29,12 @@ const FINNHUB_BASE = Deno.env.get('FINNHUB_BASE_URL') || 'https://finnhub.io/api
 // — workflow_dispatch already supports overrides via curl.
 const UNIVERSE = [
   'AAPL','MSFT','NVDA','GOOGL','META','AMZN','TSLA','AMD','AVGO',
-  'NFLX','COIN','CRM','ORCL','SNOW','PLTR','CRWD','ADBE',
+  'NFLX','COIN','CRM','CSCO','ORCL','SNOW','PLTR','CRWD','ADBE',
   'MSTR','HOOD','RBLX','SOFI','RIVN','LCID',
-  'LLY','NVO','MRNA','JPM','BAC','GS','WFC',
+  'LLY','NVO','MRNA','PFE','JPM','BAC','GS','WFC',
   'BTMR','BE','NOW',
+  // Wheel-strategy dividend / value candidates
+  'KO','KMI','F',
 ]
 
 // 1100ms between requests = ~54 calls/min, comfortably under the

@@ -41,6 +41,7 @@ export const HOT_TICKERS = [
   { symbol: 'INTC',  label: 'Intel' },
   { symbol: 'ORCL',  label: 'Oracle' },
   { symbol: 'CRM',   label: 'Salesforce' },
+  { symbol: 'CSCO',  label: 'Cisco' },
   { symbol: 'ADBE',  label: 'Adobe' },
   { symbol: 'NFLX',  label: 'Netflix' },
   { symbol: 'NOW',   label: 'ServiceNow' },
@@ -86,10 +87,14 @@ export const HOT_TICKERS = [
   { symbol: 'MCD',   label: "McDonald's" },
   { symbol: 'NKE',   label: 'Nike' },
   { symbol: 'DIS',   label: 'Disney' },
-  // Energy (oil majors)
+  { symbol: 'KO',    label: 'Coca-Cola' },
+  // Autos
+  { symbol: 'F',     label: 'Ford' },
+  // Energy (oil majors + midstream)
   { symbol: 'XOM',   label: 'ExxonMobil' },
   { symbol: 'CVX',   label: 'Chevron' },
   { symbol: 'COP',   label: 'ConocoPhillips' },
+  { symbol: 'KMI',   label: 'Kinder Morgan' },
   // AI power / nuclear renaissance — power demand is the AI buildout's
   // chokepoint, these names move on data-center contract announcements.
   { symbol: 'VST',   label: 'Vistra' },
