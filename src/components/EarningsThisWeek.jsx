@@ -66,10 +66,12 @@ export default function EarningsThisWeek() {
     for (const [ticker, row] of byTicker) {
       const days = daysUntil(row.earnings_date)
       if (days == null || days < 0 || days > WINDOW_DAYS) continue
-      // Hide same-day rows where the print has already landed —
-      // identical rule to EarningsBadge.
-      if (days === 0 && isPastAnnouncement(row.announcement_time)) continue
-      out.push({ ticker, ...row, days })
+      // Keep same-day rows even after the print — they explain the
+      // intraday move + IV crush, so removing them blanks the strip
+      // exactly when the user wants context. Mark them so the chip
+      // can render muted instead of red.
+      const reported = days === 0 && isPastAnnouncement(row.announcement_time)
+      out.push({ ticker, ...row, days, reported })
     }
     return out.sort((a, b) => a.days - b.days)
   }, [byTicker])
@@ -87,19 +89,25 @@ export default function EarningsThisWeek() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {upcoming.map((r) => {
-            const dayLabel = r.days === 0 ? 'today' : r.days === 1 ? 'tomorrow' : `${r.days}d`
-            const timeLabel = r.announcement_time === 'BMO' || r.announcement_time === 'AMC'
+            const dayLabel = r.reported
+              ? 'reported'
+              : r.days === 0 ? 'today' : r.days === 1 ? 'tomorrow' : `${r.days}d`
+            const timeLabel = !r.reported && (r.announcement_time === 'BMO' || r.announcement_time === 'AMC')
               ? ` ${r.announcement_time}`
               : ''
+            const stateColor = r.reported ? 'text-zinc-400' : 'text-rose-300'
+            const hoverBg = r.reported ? 'hover:bg-zinc-700/20' : 'hover:bg-rose-500/10'
             return (
               <Link
                 key={r.ticker}
                 to={`/markets?ticker=${r.ticker}`}
-                className="inline-flex items-center gap-1.5 text-xs font-mono-tab text-fg hover:text-amber-300 transition-colors whitespace-nowrap px-1.5 py-0.5 rounded hover:bg-rose-500/10"
-                title={`${r.ticker} earnings: ${r.earnings_date}${r.announcement_time && r.announcement_time !== 'UNKNOWN' ? ` (${r.announcement_time})` : ''}`}
+                className={`inline-flex items-center gap-1.5 text-xs font-mono-tab text-fg hover:text-amber-300 transition-colors whitespace-nowrap px-1.5 py-0.5 rounded ${hoverBg}`}
+                title={r.reported
+                  ? `${r.ticker} reported earnings this morning${r.announcement_time === 'BMO' || r.announcement_time === 'AMC' ? ` (${r.announcement_time})` : ''} — IV crush + post-print move in flight`
+                  : `${r.ticker} earnings: ${r.earnings_date}${r.announcement_time && r.announcement_time !== 'UNKNOWN' ? ` (${r.announcement_time})` : ''}`}
               >
                 <span className="font-semibold">{r.ticker}</span>
-                <span className="text-rose-300 text-[10px]">
+                <span className={`${stateColor} text-[10px]`}>
                   {dayLabel}{timeLabel}
                 </span>
               </Link>
