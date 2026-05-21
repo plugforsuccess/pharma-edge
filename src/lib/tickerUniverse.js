@@ -57,6 +57,7 @@ export const HOT_TICKERS = [
   { symbol: 'MU',    label: 'Micron' },
   { symbol: 'WDC',   label: 'Western Digital' },
   { symbol: 'SNDK',  label: 'SanDisk' },
+  { symbol: 'DRAM',  label: 'Roundhill Memory ETF' },
   // AI infrastructure (data center, GPU cloud, networking, servers)
   { symbol: 'VRT',   label: 'Vertiv' },
   { symbol: 'DLR',   label: 'Digital Realty' },

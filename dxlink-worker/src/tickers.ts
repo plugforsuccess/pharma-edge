@@ -59,6 +59,7 @@ export const TRACKED_TICKERS: string[] = [
   'MU',
   'WDC',
   'SNDK',
+  'DRAM',
   // AI infrastructure (data center, GPU cloud, networking, servers)
   'VRT',
   'DLR',
