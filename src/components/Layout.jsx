@@ -11,6 +11,7 @@ import {
   Settings,
   Sparkles,
   Shield,
+  Star,
   Trophy,
 } from 'lucide-react'
 import InstallPrompt from './InstallPrompt'
@@ -35,17 +36,22 @@ import clsx from 'clsx'
 // Mobile bottom nav: 4 tabs split 2/2 around a prominent center
 // button. The center is Pulse (HeatPulse — the most-opened analysis
 // surface); Wheel sits immediately left of center. Final shape:
-//   [Tape] [Wheel] (PULSE center) [Record] [Top]
+//   [Tape] [Wheel] (PULSE center) [Record] [Picks]
 // "Log a Move" is no longer a bottom-nav slot — it lives on the
 // desktop sidebar CTA; on mobile it is reached via /log directly.
 // Settings still lives on the desktop sidebar + tape header avatar.
+//
+// The 5th slot used to be /leaderboard (Trophy/Top). Per owner the
+// wheel watchlist (/picks — curated dividend payers from
+// WHEEL_CANDIDATES) is the higher-leverage daily-driver placement.
+// Leaderboard stays accessible via direct URL + desktop sidebar.
 const navLeft = [
   { to: '/', icon: Home, label: 'Tape' },
   { to: '/wheel', icon: RefreshCw, label: 'Wheel' },
 ]
 const navRight = [
   { to: '/record', icon: BarChart2, label: 'Record' },
-  { to: '/leaderboard', icon: Trophy, label: 'Top' },
+  { to: '/picks', icon: Star, label: 'Picks' },
 ]
 // Mobile center button (prominent, FAB-style): Pulse → /markets.
 const navCenter = { to: '/markets', icon: Activity, label: 'Pulse' }
