@@ -4,6 +4,7 @@ import { Plus, TrendingUp, TrendingDown, Clock, AlertTriangle, X } from 'lucide-
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import Spinner from './Spinner'
+import EarningsBadge from './EarningsBadge'
 
 // Open Positions card on the Home dashboard. Pulls from public.open_positions
 // (RLS-scoped to the current user), shows live P&L from the monitor-positions
@@ -118,11 +119,12 @@ function PositionRow({ p, onClick, onCloseShortcut }) {
         className="flex-1 text-left px-4 py-3 flex items-center gap-3 min-w-0"
       >
         <div className="flex-1 min-w-0">
-          <div className="flex items-baseline gap-2">
+          <div className="flex items-baseline gap-2 flex-wrap">
             <span className="text-sm font-semibold text-fg">{p.ticker}</span>
             <span className="text-[10px] uppercase tracking-wider text-muted">
               {p.strategy_type.replace(/_/g, ' ')}
             </span>
+            <EarningsBadge ticker={p.ticker} compact withTime />
           </div>
           <div className="text-[11px] font-mono-tab text-subtle">
             ${formatStrike(p.long_strike)} / ${formatStrike(p.short_strike)} · {p.contracts}c

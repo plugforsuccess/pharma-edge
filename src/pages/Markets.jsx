@@ -8,6 +8,7 @@ import { useAuth } from '../context/AuthContext'
 import { useSubscription } from '../hooks/useSubscription'
 import { HOT_TICKERS, TICKER_UNIVERSE } from '../lib/tickerUniverse'
 import GexMatrix from '../components/GexMatrix'
+import EarningsBadge from '../components/EarningsBadge'
 import MatrixSummaryCard from '../components/MatrixSummaryCard'
 import TickerDrawer from '../components/TickerDrawer'
 import ReplaySlider from '../components/ReplaySlider'
@@ -958,6 +959,7 @@ export default function Markets() {
                 {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
               </span>
             )}
+            <EarningsBadge ticker={data.ticker} compact withTime />
           </div>
         )
       })()}
@@ -989,6 +991,7 @@ export default function Markets() {
             ${formatNumber(liveSpot ?? data.spot)}
           </div>
           <SourceBadge source={data.source} eodAt={data.eod_snapshot_at} />
+          <EarningsBadge ticker={data.ticker} withTime />
           {data.largest && (
             <div className="text-xs text-subtle">
               <span className="text-muted uppercase tracking-wider mr-1">Wall</span>

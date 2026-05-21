@@ -14,6 +14,7 @@ import LogOutcomeModal from '../components/LogOutcomeModal'
 import StopLossCheck from '../components/StopLossCheck'
 import StrikePriceCalculator from '../components/StrikePriceCalculator'
 import PlaceOrderPanel from '../components/PlaceOrderPanel'
+import EarningsBadge from '../components/EarningsBadge'
 import clsx from 'clsx'
 
 // Biotech-era SIGNAL_TYPES (enrollment_signal, fda_precedent_signal,
@@ -82,6 +83,7 @@ export default function SignalDetail() {
             >
               {directionLabelLong(signal.direction)}
             </span>
+            <EarningsBadge ticker={signal.ticker} withTime />
           </div>
           <p className="text-subtle text-xs truncate">{signal.company_name}</p>
         </div>

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Search, X, Star, Lock } from 'lucide-react'
+import EarningsBadge from './EarningsBadge'
 
 // Bottom-sheet ticker picker for /markets. Opens on tap of the ticker
 // name in the stats card; closes on backdrop click, Escape, or any
@@ -275,11 +276,12 @@ function Row({ symbol, label, starred, locked, live, active, onClick }) {
       </div>
       <div className="flex-1 min-w-0">
         <div
-          className={`text-sm font-mono-tab font-medium ${
+          className={`text-sm font-mono-tab font-medium flex items-center gap-2 ${
             locked ? 'text-subtle' : 'text-fg'
           }`}
         >
-          {symbol}
+          <span>{symbol}</span>
+          {!locked && <EarningsBadge ticker={symbol} compact />}
         </div>
         <div className="text-xs text-muted truncate">{label}</div>
       </div>
