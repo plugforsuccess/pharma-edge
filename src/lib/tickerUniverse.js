@@ -104,12 +104,13 @@ export const HOT_TICKERS = [
   { symbol: 'OKLO',  label: 'Oklo' },
   { symbol: 'CCJ',   label: 'Cameco' },
   { symbol: 'BE',    label: 'Bloom Energy' },
-  // Rare earths / lithium — supply-chain plays (US strategic materials)
+  // Rare earths / lithium / solar — strategic-materials supply chain
   { symbol: 'MP',    label: 'MP Materials' },
   { symbol: 'LAC',   label: 'Lithium Americas' },
   { symbol: 'USAR',  label: 'USA Rare Earth' },
   { symbol: 'CRML',  label: 'Critical Metals' },
   { symbol: 'UUU',   label: 'Universal Stainless' },
+  { symbol: 'TE',    label: 'T1 Energy' },
   // Liquid retail / meme / fintech
   { symbol: 'COIN',  label: 'Coinbase' },
   { symbol: 'PLTR',  label: 'Palantir' },
@@ -694,6 +695,37 @@ export const SP500_TICKERS = [
   { symbol: 'BABA', label: 'Alibaba' },
   { symbol: 'GME',  label: 'GameStop' },
 ]
+
+// Wheel-strategy candidate list. Curated by the owner for a ~$75K
+// account where a 500-share assignment is the bullet target. Tiered
+// per the wheel-strategy doc (May 2026):
+//
+//   T1 — highest conviction (BAC / KO / CSCO / PFE)
+//   T2 — solid picks with caveats (WFC / KMI)
+//   T3 — higher premium / higher risk (F)
+//   small-cap satellites — TE, CLSK (sub-$10, thin chains, position-
+//      size accordingly; not full bullet candidates)
+//
+// MRO was on the original list but Marathon Oil was acquired by
+// ConocoPhillips and delisted in late 2024 — COP is the closest
+// remaining proxy if oil-major exposure is wanted.
+//
+// Consumers: the Wheel page filter, the "Add wheel candidates to my
+// watchlist" SQL snippet, future scanner code that wants to gate on
+// "did this play come from the wheel-eligible universe?".
+export const WHEEL_CANDIDATES = [
+  { symbol: 'BAC',  tier: 1, label: 'Bank of America' },
+  { symbol: 'KO',   tier: 1, label: 'Coca-Cola' },
+  { symbol: 'CSCO', tier: 1, label: 'Cisco' },
+  { symbol: 'PFE',  tier: 1, label: 'Pfizer' },
+  { symbol: 'WFC',  tier: 2, label: 'Wells Fargo' },
+  { symbol: 'KMI',  tier: 2, label: 'Kinder Morgan' },
+  { symbol: 'F',    tier: 3, label: 'Ford' },
+  { symbol: 'TE',   tier: 3, label: 'T1 Energy' },
+  { symbol: 'CLSK', tier: 3, label: 'CleanSpark' },
+]
+
+export const WHEEL_CANDIDATE_SYMBOLS = new Set(WHEEL_CANDIDATES.map((t) => t.symbol))
 
 // Set of hot-list symbols for quick `isHot` lookups in components.
 export const HOT_SYMBOLS = new Set(HOT_TICKERS.map((t) => t.symbol))

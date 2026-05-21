@@ -105,12 +105,13 @@ export const TRACKED_TICKERS: string[] = [
   'OKLO',
   'CCJ',
   'BE',
-  // Rare earths / lithium — supply-chain plays
+  // Rare earths / lithium / solar — strategic-materials supply chain
   'MP',
   'LAC',
   'USAR',
   'CRML',
   'UUU',
+  'TE',
   // Liquid retail / meme / fintech
   'COIN',
   'PLTR',
@@ -121,6 +122,7 @@ export const TRACKED_TICKERS: string[] = [
   'SOFI',
   // Bitcoin miners (also Aschenbrenner portfolio)
   'RIOT',
+  'CLSK',
 ]
 
 // How many expirations to subscribe to per ticker. 2 = front month +

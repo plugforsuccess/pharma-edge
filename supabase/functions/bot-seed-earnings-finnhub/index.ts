@@ -30,7 +30,7 @@ const FINNHUB_BASE = Deno.env.get('FINNHUB_BASE_URL') || 'https://finnhub.io/api
 const UNIVERSE = [
   'AAPL','MSFT','NVDA','GOOGL','META','AMZN','TSLA','AMD','AVGO',
   'NFLX','COIN','CRM','CSCO','ORCL','SNOW','PLTR','CRWD','ADBE',
-  'MSTR','HOOD','RBLX','SOFI','RIVN','LCID','RIOT',
+  'MSTR','HOOD','RBLX','SOFI','RIVN','LCID','RIOT','CLSK','TE',
   'LLY','NVO','MRNA','PFE','JPM','BAC','GS','WFC',
   'BTMR','BE','NOW',
   // Wheel-strategy dividend / value candidates
