@@ -107,6 +107,31 @@ export default function Markets() {
     }
   }, [matrixExpanded])
 
+  // Auto-engage the immersive overlay when the device rotates to
+  // landscape on a small viewport — phones in landscape have ~330px
+  // of vertical space after the bottom nav + page chrome, which
+  // squeezes the matrix to a few rows. The overlay hides ALL chrome
+  // (z-[100] fixed inset-0) so the matrix gets the full viewport.
+  // User can still tap Minimize2 / press Escape to exit.
+  //
+  // Triggers: orientation=landscape AND innerHeight <= 500 (phone in
+  // landscape — tablets have plenty of vertical space, so they stay
+  // in normal layout). We don't auto-collapse on portrait return —
+  // if the user explicitly expanded, that's a separate intent.
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return
+    const mq = window.matchMedia('(orientation: landscape) and (max-height: 500px)')
+    const sync = () => {
+      if (mq.matches) setMatrixExpanded(true)
+      // On rotation back to portrait we deliberately do NOT force
+      // collapse — if user explicitly tapped Maximize, they keep
+      // the overlay until they Minimize.
+    }
+    sync()
+    mq.addEventListener('change', sync)
+    return () => mq.removeEventListener('change', sync)
+  }, [])
+
   // User-controlled matrix density. null = "use the per-ticker default
   // from MATRIX_OPTS / MATRIX_OPTS_BY_TICKER". When non-null, the
   // values override the defaults for every ticker — that's what the
