@@ -1,17 +1,13 @@
--- Expand the snapshot-gex fanout universe with 20 high-conviction
--- options-trader ETFs (sector SPDRs, semis, themes, credit / EM).
+-- Add SMH (VanEck Semiconductor ETF) to the snapshot-gex fanout.
 --
--- Same names land in:
+-- Mirrors:
 --   * src/lib/tickerUniverse.js HOT_TICKERS          (UI picker)
 --   * dxlink-worker/src/tickers.ts TRACKED_TICKERS   (streamed Greeks)
 --   * .github/workflows/snapshot-gex.yml TICKERS     (GH-Actions backup)
 --
--- This migration replaces snapshot_gex_fanout() so the pg_cron jobs
--- (snapshot-gex-rth every 5 min RTH + snapshot-gex-eod at close) pull
--- the expanded set into gex_history. Same fanout pattern as the
--- original 20260514130000 migration — async net.http_post per ticker,
--- compute-gex archives each into gex_history. Function body is
--- otherwise unchanged.
+-- Replaces snapshot_gex_fanout() with the SPY/QQQ-tier list + SMH so
+-- the 5-min and EOD pg_cron jobs (snapshot-gex-rth / snapshot-gex-eod)
+-- archive SMH GEX into gex_history.
 
 CREATE OR REPLACE FUNCTION public.snapshot_gex_fanout()
 RETURNS void
@@ -23,9 +19,7 @@ DECLARE
   t text;
   tickers text[] := ARRAY[
     'SPY','QQQ','IWM','DIA',
-    'GLD','SLV','TLT','USO','HYG','EEM',
-    'XLK','XLF','XLE','XLV','XLY','XLP','XLU','XLI','XLB','XLC','XLRE',
-    'SMH','SOXX','KRE','XBI','KWEB','ARKK','IBIT',
+    'GLD','SLV','TLT','USO','SMH',
     'AAPL','MSFT','NVDA','GOOGL','AMZN','META','TSLA',
     'AMD','AVGO','INTC','ORCL','CRM','ADBE','NFLX',
     'TSM','ASML','AMAT','LRCX','QCOM','MRVL',

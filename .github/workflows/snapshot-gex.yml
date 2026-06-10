@@ -51,9 +51,7 @@ jobs:
           # (added Leopold Aschenbrenner portfolio group).
           TICKERS=(
             SPY QQQ IWM DIA
-            GLD SLV TLT USO HYG EEM
-            XLK XLF XLE XLV XLY XLP XLU XLI XLB XLC XLRE
-            SMH SOXX KRE XBI KWEB ARKK IBIT
+            GLD SLV TLT USO SMH
             AAPL MSFT NVDA GOOGL AMZN META TSLA
             AMD AVGO INTC ORCL CRM ADBE NFLX
             TSM ASML AMAT LRCX QCOM MRVL
