@@ -29,6 +29,7 @@ export const TRACKED_TICKERS: string[] = [
   'SLV',
   'TLT',
   'USO',
+  'SMH',
   // Mega-cap tech
   'AAPL',
   'MSFT',

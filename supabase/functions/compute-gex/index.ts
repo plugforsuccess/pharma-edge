@@ -995,14 +995,27 @@ function buildMatrix(
 
   // Pinning probability needs the largest |GEX| (we already track it),
   // total |GEX|, spot, the largest strike, and the expected move.
-  const pin = largest && em > 0
+  //
+  // The expected-move horizon must match the king node's own DTE — not
+  // the matrix front DTE — or proximity is judged in too-tight σ-units
+  // whenever the king node lives on a further-out expiration. SPY/QQQ
+  // monthly-OPEX strikes are the canonical case: 14 DTE away, scored
+  // against a 1-DTE em, the proximity score collapsed to ~0 even when
+  // spot had weeks to drift. Front-DTE em is still the right answer
+  // for the matrix-level `expected_move` field (that's "how much can
+  // spot move by Friday"); only the pin metric needs the king-DTE em.
+  const kingDte = largest
+    ? expirationInfos.find((e) => e.date === largest!.expiration)?.dte ?? frontDte
+    : frontDte
+  const emForPin = expectedMove(spot, ivForExpectedMove, kingDte)
+  const pin = largest && emForPin > 0
     ? pinningProbability(
         netGex,
         Math.abs(largest.gex_net),
         totalAbsGex || 1,
         spot,
         largest.strike,
-        em,
+        emForPin,
       )
     : 0
 

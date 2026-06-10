@@ -27,6 +27,7 @@ export const HOT_TICKERS = [
   { symbol: 'SLV',   label: 'Silver' },
   { symbol: 'TLT',   label: '20y Treasury' },
   { symbol: 'USO',   label: 'Crude Oil' },
+  { symbol: 'SMH',   label: 'VanEck Semis' },
   // Mega-cap tech
   { symbol: 'AAPL',  label: 'Apple' },
   { symbol: 'MSFT',  label: 'Microsoft' },
