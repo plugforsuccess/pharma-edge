@@ -49,10 +49,12 @@ export default function KingBoard() {
       const existing = byTicker.get(r.ticker) ?? {
         ticker: r.ticker,
         snapshot_at: r.snapshot_at,
+        spot: r.spot,
         exps: [null, null, null],
         max_abs_gex: 0,
       }
       existing.exps[r.exp_idx] = r
+      if (r.spot != null) existing.spot = r.spot
       const absG = Math.abs(Number(r.king_gex) || 0)
       if (absG > existing.max_abs_gex) existing.max_abs_gex = absG
       byTicker.set(r.ticker, existing)
@@ -62,6 +64,14 @@ export default function KingBoard() {
     else arr.sort((a, b) => a.ticker.localeCompare(b.ticker))
     return arr
   }, [rows, sortBy])
+
+  function distancePct(spot, strike) {
+    if (spot == null || strike == null) return null
+    const s = Number(spot)
+    const k = Number(strike)
+    if (!Number.isFinite(s) || !Number.isFinite(k) || s <= 0) return null
+    return ((k - s) / s) * 100
+  }
 
   return (
     <div className="px-4 py-6 max-w-5xl mx-auto">
@@ -109,6 +119,7 @@ export default function KingBoard() {
             <thead className="text-xs text-muted uppercase tracking-wide">
               <tr className="border-b border-border">
                 <th className="text-left py-2 pr-3">Ticker</th>
+                <th className="text-left py-2 pr-3">Spot</th>
                 <th className="text-left py-2 pr-3">Exp 0</th>
                 <th className="text-left py-2 pr-3">Exp 1</th>
                 <th className="text-left py-2 pr-3">Exp 2</th>
@@ -119,24 +130,35 @@ export default function KingBoard() {
               {tickers.map((t) => (
                 <tr key={t.ticker} className="border-b border-border/40 hover:bg-card/40">
                   <td className="py-2 pr-3 font-mono font-semibold text-fg">{t.ticker}</td>
-                  {t.exps.map((e, i) => (
-                    <td key={i} className="py-2 pr-3 font-mono">
-                      {e ? (
-                        <div>
-                          <div className={sideClasses(e.side)}>
-                            {Number(e.king_strike)}
-                            {e.side === 'call' ? 'C' : 'P'}{' '}
-                            <span className="text-muted">· {e.dte}d</span>
+                  <td className="py-2 pr-3 font-mono text-subtle">
+                    {t.spot != null ? Number(t.spot).toFixed(2) : '—'}
+                  </td>
+                  {t.exps.map((e, i) => {
+                    const pct = e ? distancePct(t.spot, e.king_strike) : null
+                    return (
+                      <td key={i} className="py-2 pr-3 font-mono">
+                        {e ? (
+                          <div>
+                            <div className={sideClasses(e.side)}>
+                              {Number(e.king_strike)}
+                              {e.side === 'call' ? 'C' : 'P'}{' '}
+                              <span className="text-muted">· {e.dte}d</span>
+                            </div>
+                            <div className="text-xs text-subtle">
+                              {formatGex(Number(e.king_gex))}
+                              {pct != null && (
+                                <span className="text-muted">
+                                  {' '}· {pct >= 0 ? '+' : ''}{pct.toFixed(1)}%
+                                </span>
+                              )}
+                            </div>
                           </div>
-                          <div className="text-xs text-subtle">
-                            {formatGex(Number(e.king_gex))}
-                          </div>
-                        </div>
-                      ) : (
-                        <span className="text-muted">—</span>
-                      )}
-                    </td>
-                  ))}
+                        ) : (
+                          <span className="text-muted">—</span>
+                        )}
+                      </td>
+                    )
+                  })}
                   <td className="py-2 pl-3 text-right">
                     <Link
                       to={`/markets?ticker=${encodeURIComponent(t.ticker)}`}
