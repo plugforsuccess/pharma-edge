@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, RefreshCw, Activity, Star, Lock, ChevronDown, ChevronLeft, ChevronRight, Clock, BookOpen, Search, Sparkles, Maximize2, Minimize2 } from 'lucide-react'
+import { ArrowLeft, RefreshCw, Activity, Star, Lock, ChevronDown, ChevronLeft, ChevronRight, Clock, BookOpen, Search, Sparkles, Maximize2, Minimize2, Crown } from 'lucide-react'
 import clsx from 'clsx'
 import { isWithinRth } from '../utils/marketHours'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
@@ -502,6 +502,14 @@ export default function Markets() {
           title="Open the live inference engine for this ticker"
         >
           <Sparkles size={18} />
+        </button>
+        <button
+          onClick={() => navigate('/markets/king-board')}
+          className="p-2 text-subtle hover:text-amber-400"
+          aria-label="Open King Board"
+          title="King nodes across all tickers and the front 3 expirations"
+        >
+          <Crown size={18} />
         </button>
         <button
           onClick={() => navigate('/learn/glossary')}
