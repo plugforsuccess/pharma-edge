@@ -28,6 +28,7 @@ const Admin = lazy(() => import('./pages/Admin'))
 const PlayDetail = lazy(() => import('./pages/PlayDetail'))
 const Wheel = lazy(() => import('./pages/Wheel'))
 const WheelWatchlist = lazy(() => import('./pages/WheelWatchlist'))
+const KingBoard = lazy(() => import('./pages/KingBoard'))
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -112,6 +113,7 @@ export default function App() {
             <Route path="record" element={<TrackRecord />} />
             <Route path="settings" element={<Settings />} />
             <Route path="markets" element={<Markets />} />
+            <Route path="markets/king-board" element={<KingBoard />} />
             <Route path="wheel" element={<Wheel />} />
             <Route path="picks" element={<WheelWatchlist />} />
             <Route path="flow" element={<AdminOnly><Flow /></AdminOnly>} />
