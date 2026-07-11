@@ -262,6 +262,9 @@ export default function StrikePriceCalculator({
   const [legQuotes, setLegQuotes] = useState(null)
   const [quoteLoading, setQuoteLoading] = useState(false)
   const [quoteError, setQuoteError] = useState(null)
+  // 'dxlink' = real-time stream; 'polygon' = 15-min delayed fallback
+  // when the dxlink-worker hasn't subscribed to this expiry/strike.
+  const [quoteSource, setQuoteSource] = useState(null)
 
   const config = STRUCTURE_CONFIG[structure]
   // Manual accountSize from props is the fallback. If we successfully
@@ -321,15 +324,18 @@ export default function StrikePriceCalculator({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Pulls live mid prices for each leg of the configured spread from
-  // dxlink_quotes, then computes the net premium and populates the
-  // Premium field. Skips when required inputs are missing. Returns
-  // early without writing if any leg is unsubscribed/stale so the
-  // user knows to type manually instead of trusting a partial fill.
+  // Pulls live mid prices for each leg of the configured spread and
+  // populates the Premium field. Tries dxlink_quotes first (real-time
+  // stream, ~5min wall-clock fresh) and falls back to refresh-play-quote
+  // (Polygon, 15-min delayed) when the dxlink-worker hasn't subscribed
+  // to the requested expiry/strike. Refresh-play-quote is the same
+  // pricer used by Suggested Plays / PlayMetricsCard, so the LIVE
+  // button works for arbitrary expiries — not just the front two.
   async function fetchLivePremium() {
     setQuoteLoading(true)
     setQuoteError(null)
     setLegQuotes(null)
+    setQuoteSource(null)
     try {
       if (!ticker) throw new Error('No ticker — open the calculator from a signal flow.')
       if (!expiry) throw new Error('Pick an expiry first.')
@@ -346,96 +352,163 @@ export default function StrikePriceCalculator({
           ]
       if (legs.some((l) => !(l.strike > 0))) throw new Error('Fill in all strikes first.')
 
-      // One round-trip: pull every option row for this underlying +
-      // expiration that matches any of our strikes/types, then fan out
-      // locally. Cheaper than N SELECTs and lets us use the upper bound
-      // of the strike set as a single IN clause.
-      const strikes = legs.map((l) => l.strike)
-      const types = Array.from(new Set(legs.map((l) => l.type)))
-      const { data, error } = await supabase
-        .from('dxlink_quotes')
-        .select('symbol, strike, option_type, expiration_date, bid, ask, mid, updated_at')
-        .eq('underlying', ticker.toUpperCase())
-        .eq('expiration_date', expiry)
-        .in('strike', strikes)
-        .in('option_type', types)
-      if (error) throw new Error(error.message || 'quote query failed')
-      const rows = data ?? []
-      if (rows.length === 0) {
-        throw new Error(
-          `No live quotes for ${ticker} ${expiry}. The dxlink-worker may not be streaming this expiry.`,
-        )
+      const dx = await tryDxlinkQuotes(legs)
+      if (dx.ok) {
+        setLegQuotes(dx.enriched)
+        setQuoteSource('dxlink')
+        setPremium(dx.net.toFixed(2))
+        setResult(null)
+        return
       }
 
-      const STALE_MS = 60_000
-      const now = Date.now()
-      const enriched = legs.map((leg) => {
-        const match = rows.find(
-          (r) =>
-            Number(r.strike) === leg.strike &&
-            r.option_type === leg.type,
-        )
-        if (!match) return { ...leg, missing: true }
-        const updated = new Date(match.updated_at).getTime()
-        const age = now - updated
-        const stale = age > STALE_MS
-        // Prefer the worker's mid; fall back to (bid+ask)/2 if mid
-        // is null but bid/ask are populated. Tastytrade's DXLink
-        // sometimes drops Quote.mid frames during low-liquidity
-        // intervals.
-        let mid = Number(match.mid)
-        if (!Number.isFinite(mid) && Number.isFinite(Number(match.bid)) && Number.isFinite(Number(match.ask))) {
-          mid = (Number(match.bid) + Number(match.ask)) / 2
-        }
-        return {
-          ...leg,
-          symbol: match.symbol,
-          bid: Number(match.bid),
-          ask: Number(match.ask),
-          mid: Number.isFinite(mid) ? mid : null,
-          age_ms: age,
-          stale,
-        }
-      })
-
-      const missing = enriched.filter((l) => l.missing)
-      if (missing.length > 0) {
-        throw new Error(
-          `Missing quotes for ${missing.length} leg(s). The strike(s) may not be in the dxlink subscription window.`,
-        )
-      }
-      const stale = enriched.filter((l) => l.stale)
-      if (stale.length === enriched.length) {
-        throw new Error(
-          'All quote rows are stale (> 60s). dxlink-worker may be down — check Markets page status.',
-        )
+      const poly = await tryPolygonQuotes(legs)
+      if (poly.ok) {
+        setLegQuotes(poly.enriched)
+        setQuoteSource('polygon')
+        setPremium(poly.net.toFixed(2))
+        setResult(null)
+        return
       }
 
-      // Net premium from per-leg mids:
-      //   debit  → buy mids − sell mids (we pay)
-      //   credit → sell mids − buy mids (we collect)
-      //   condor → (sell mids) − (buy mids), always credit
-      const buyMids = enriched
-        .filter((l) => l.action === 'BUY')
-        .reduce((acc, l) => acc + (l.mid ?? 0), 0)
-      const sellMids = enriched
-        .filter((l) => l.action === 'SELL')
-        .reduce((acc, l) => acc + (l.mid ?? 0), 0)
-      const net = config.isCondor || config.isCredit ? sellMids - buyMids : buyMids - sellMids
-      if (!(net > 0)) {
-        throw new Error(
-          `Computed net premium is non-positive (${net.toFixed(2)}). Check strike order or wait for fresh quotes.`,
-        )
-      }
-
-      setLegQuotes(enriched)
-      setPremium(net.toFixed(2))
-      setResult(null)
+      throw new Error(`${dx.reason} — Polygon fallback also failed: ${poly.error}`)
     } catch (e) {
       setQuoteError(e.message || 'live-quote pull failed')
     } finally {
       setQuoteLoading(false)
     }
+  }
+
+  // Step 1: try dxlink_quotes (real-time WebSocket cache). Soft-fails
+  // when rows are missing/all-stale so the caller can fall through to
+  // Polygon. Throws only on a true Supabase error.
+  async function tryDxlinkQuotes(legs) {
+    const strikes = legs.map((l) => l.strike)
+    const types = Array.from(new Set(legs.map((l) => l.type)))
+    const { data, error } = await supabase
+      .from('dxlink_quotes')
+      .select('symbol, strike, option_type, expiration_date, bid, ask, mid, updated_at')
+      .eq('underlying', ticker.toUpperCase())
+      .eq('expiration_date', expiry)
+      .in('strike', strikes)
+      .in('option_type', types)
+    if (error) return { ok: false, reason: `dxlink query failed: ${error.message}` }
+    const rows = data ?? []
+    if (rows.length === 0) {
+      return { ok: false, reason: `No live dxlink rows for ${ticker} ${expiry}` }
+    }
+
+    const STALE_MS = 60_000
+    const now = Date.now()
+    const enriched = legs.map((leg) => {
+      const match = rows.find(
+        (r) => Number(r.strike) === leg.strike && r.option_type === leg.type,
+      )
+      if (!match) return { ...leg, missing: true }
+      const updated = new Date(match.updated_at).getTime()
+      const age = now - updated
+      const stale = age > STALE_MS
+      // Prefer the worker's mid; fall back to (bid+ask)/2 if mid
+      // is null but bid/ask are populated. Tastytrade's DXLink
+      // sometimes drops Quote.mid frames during low-liquidity
+      // intervals.
+      let mid = Number(match.mid)
+      if (!Number.isFinite(mid) && Number.isFinite(Number(match.bid)) && Number.isFinite(Number(match.ask))) {
+        mid = (Number(match.bid) + Number(match.ask)) / 2
+      }
+      return {
+        ...leg,
+        symbol: match.symbol,
+        bid: Number(match.bid),
+        ask: Number(match.ask),
+        mid: Number.isFinite(mid) ? mid : null,
+        age_ms: age,
+        stale,
+      }
+    })
+
+    const missing = enriched.filter((l) => l.missing)
+    if (missing.length > 0) {
+      return { ok: false, reason: `dxlink missing ${missing.length} leg(s) for ${expiry}` }
+    }
+    const stale = enriched.filter((l) => l.stale)
+    if (stale.length === enriched.length) {
+      return { ok: false, reason: 'all dxlink rows stale (> 60s)' }
+    }
+
+    const net = computeNet(enriched)
+    if (!(net > 0)) {
+      return { ok: false, reason: `dxlink net non-positive ($${net.toFixed(2)})` }
+    }
+    return { ok: true, enriched, net }
+  }
+
+  // Step 2: call refresh-play-quote (Polygon, 15-min delayed). The
+  // shared pricer already validates strikes, freshness (<= 5min), and
+  // degenerate mids — we just unpack per-leg mids back into the
+  // legQuotes shape the UI renders.
+  async function tryPolygonQuotes(legs) {
+    const reqBody = config.isCondor
+      ? {
+          ticker,
+          structure: 'IRON_CONDOR',
+          long_put_strike: toNumOrNull(longPutStrike),
+          short_put_strike: toNumOrNull(shortPutStrike),
+          short_call_strike: toNumOrNull(shortCallStrike),
+          long_call_strike: toNumOrNull(longCallStrike),
+          expiration: expiry,
+        }
+      : {
+          ticker,
+          structure: config.popType,
+          long_strike: toNumOrNull(buyStrike),
+          short_strike: toNumOrNull(sellStrike),
+          expiration: expiry,
+        }
+    const { data, error } = await supabase.functions.invoke('refresh-play-quote', { body: reqBody })
+    if (error) return { ok: false, error: error.message || 'invoke failed' }
+    if (!data?.success) return { ok: false, error: data?.error || 'pricing failed' }
+    const priced = data.data
+    // Map per-leg mids from the edge response onto the leg shape the
+    // UI already renders. Iron condor exposes mids via call_wing /
+    // put_wing; regular spreads expose long_mid / short_mid directly.
+    const enriched = legs.map((leg) => {
+      let mid = null
+      if (config.isCondor) {
+        if (leg.side === 'longCall') mid = priced.call_wing?.long_mid
+        else if (leg.side === 'shortCall') mid = priced.call_wing?.short_mid
+        else if (leg.side === 'longPut') mid = priced.put_wing?.long_mid
+        else if (leg.side === 'shortPut') mid = priced.put_wing?.short_mid
+      } else {
+        mid = leg.side === 'long' ? priced.long_mid : priced.short_mid
+      }
+      return {
+        ...leg,
+        mid: Number.isFinite(Number(mid)) ? Number(mid) : null,
+        stale: false,
+      }
+    })
+    if (enriched.some((l) => !Number.isFinite(l.mid))) {
+      return { ok: false, error: 'polygon response missing one or more leg mids' }
+    }
+    const net = computeNet(enriched)
+    if (!(net > 0)) {
+      return { ok: false, error: `polygon net non-positive ($${net.toFixed(2)})` }
+    }
+    return { ok: true, enriched, net }
+  }
+
+  // Net premium from per-leg mids:
+  //   debit  → buy mids − sell mids (we pay)
+  //   credit → sell mids − buy mids (we collect)
+  //   condor → (sell mids) − (buy mids), always credit
+  function computeNet(enriched) {
+    const buyMids = enriched
+      .filter((l) => l.action === 'BUY')
+      .reduce((acc, l) => acc + (l.mid ?? 0), 0)
+    const sellMids = enriched
+      .filter((l) => l.action === 'SELL')
+      .reduce((acc, l) => acc + (l.mid ?? 0), 0)
+    return config.isCondor || config.isCredit ? sellMids - buyMids : buyMids - sellMids
   }
 
   // Auto-populate strikes + suggest expiry when stock price, structure, or
@@ -1041,13 +1114,19 @@ export default function StrikePriceCalculator({
                       quoteLoading
                         ? 'text-muted cursor-wait'
                         : legQuotes
-                          ? 'text-green-400 hover:text-green-300'
+                          ? quoteSource === 'polygon'
+                            ? 'text-yellow-400 hover:text-yellow-300'
+                            : 'text-green-400 hover:text-green-300'
                           : 'text-subtle hover:text-fg',
                     )}
-                    title="Pull live mid prices for each leg from dxlink_quotes"
+                    title="Pull mid prices for each leg — dxlink real-time first, Polygon (15-min delayed) fallback"
                   >
                     <RefreshCw size={9} className={quoteLoading ? 'animate-spin' : ''} />
-                    {legQuotes ? 'Live mid' : 'Live'}
+                    {legQuotes
+                      ? quoteSource === 'polygon'
+                        ? 'Delayed mid'
+                        : 'Live mid'
+                      : 'Live'}
                   </button>
                 )}
               </div>
@@ -1058,6 +1137,7 @@ export default function StrikePriceCalculator({
                   setPremium(v)
                   setResult(null)
                   setLegQuotes(null)
+                  setQuoteSource(null)
                 }}
                 prefix="$"
                 placeholder="0.50"
@@ -1065,9 +1145,9 @@ export default function StrikePriceCalculator({
                   quoteError
                     ? quoteError
                     : legQuotes
-                      ? legQuotes
+                      ? `${quoteSource === 'polygon' ? '15-min delayed (Polygon) · ' : ''}${legQuotes
                           .map((l) => `${l.action[0]}${l.type}${l.strike}: $${(l.mid ?? 0).toFixed(2)}${l.stale ? ' ⚠' : ''}`)
-                          .join('  ')
+                          .join('  ')}`
                       : config.premiumHelp
                 }
               />
@@ -1079,6 +1159,7 @@ export default function StrikePriceCalculator({
                 setExpiry(v)
                 setResult(null)
                 setLegQuotes(null)
+                setQuoteSource(null)
               }}
               type="date"
             />
