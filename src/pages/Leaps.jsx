@@ -1475,7 +1475,7 @@ function RealEstateCard({ pos, re, open, onToggle, onSave, onDelete }) {
       pos={pos} open={open} onToggle={onToggle} editing={editing} onEdit={() => setEditing(true)} onDelete={onDelete}
       form={<PositionForm initial={pos} onCancel={() => setEditing(false)}
         onSave={async (row) => { const err = await onSave(row); if (!err) setEditing(false); return err }} />}
-      title={`${pos.name} • ${rental ? 'Rental' : 'Primary home'}`}
+      title={open ? `${pos.name} • ${rental ? 'Rental' : 'Primary home'}` : pos.name}
       meta={[`Bought ${shortDate(pos.purchase_date)}`]}
       badge={re.is_long_term ? 'Long-term' : 'Short-term'}
       value={usd(re.after_tax_equity)} valueLabel={`${gainPct(reAfterTaxGain, re.basis)} after tax`} valueUp={reAfterTaxGain >= 0}
