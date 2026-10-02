@@ -561,11 +561,11 @@ function PlanSection({ tier }) {
           <Zap size={16} className="text-amber-400" />
         </div>
         <div className="flex-1">
-          <p className="text-fg text-sm font-semibold">{isElite ? 'Elite' : 'Cash Moves Pro'}</p>
+          <p className="text-fg text-sm font-semibold">{isElite ? 'Elite' : 'Pro'}</p>
           <p className="text-subtle text-xs">Your current plan</p>
         </div>
       </div>
-      <PlanCard name="Cash Moves Pro" price="$45/mo" current={!isElite}
+      <PlanCard name="Pro" price="$45/mo" current={!isElite}
         items={['LEAPS dashboard and positions', 'After-tax Exit Targets', 'Simulator', 'Research']} />
       <PlanCard name="Elite" price="Pricing soon" current={isElite}
         items={['Everything in Pro', 'HeatPulse™ and King Board', 'Bot-placed spread trades']}

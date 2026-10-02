@@ -17,7 +17,7 @@
 >   * Main dashboard → "The Tape"
 >   * Individual alert / signal → "A Move" (plural "Moves")
 >   * Watchlist → "Tracking"
->   * Premium tier → "Cash Moves Pro"
+>   * Premium tier → "Pro" (formerly "Cash Moves Pro")
 >   * Top tier → "Elite" (formerly "Inner Circle")
 >   * GEX dashboard → "HeatPulse™"
 >   * Zero-gamma level → "The Flip"
@@ -717,7 +717,7 @@ LEAPS drives growth. Tiers:
 
 | Tier | Includes |
 |---|---|
-| **Cash Moves Pro** ($45/mo) | LEAPS dashboard (home), Positions + Exit Targets (manual entry, later Tradier sync), Simulator, Research bot, later government alerts, LEAPS bot |
+| **Pro** ($45/mo) | LEAPS dashboard (home), Positions + Exit Targets (manual entry, later Tradier sync), Simulator, Research bot, later government alerts, LEAPS bot |
 | **Elite** (price TBD) | Everything in Pro + HeatPulse + King Board + the bot placing **spread** trades |
 
 Other revenue: Tradier referral fees; managed accounts (auto-trading)
