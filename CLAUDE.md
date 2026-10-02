@@ -677,7 +677,10 @@ professional before acting on them."
 per position and per notice). A dismissed time stop returns the next day;
 a roll-window warning stays dismissed until it escalates.
 **Holdings collapse:** each holding is a tap-to-expand card (summary:
-name, dates, tax badge, after-tax value, roll-window / time-stop flag).
+name, dates, tax badge, after-tax value with its gain on cost — "+17.8%
+after tax" — and the roll-window / time-stop flag; expanded cards show
+"+17.8% after tax · +25.0% before tax" under the hero value; cash has
+no gain line).
 Open state is remembered on the device (`cm:holdings-open`); new
 holdings open; "Expand all / Collapse all" sits by the Holdings title.
 **Exit Targets rows** keep the original card format: "100% gain • 2x" /
@@ -869,6 +872,26 @@ value, holding period) and must pass before any edit to that file lands.
   T-bills / CD at the user's after-tax rate — categories only, no named
   products (named partners wait on counsel); rates are user-entered,
   prefilled with example rates (`cm:cash-yield-apys`).
+- **Dividend income.** A `stock` holding can carry
+  `details.dividend_yield` (fraction) + `dividend_kind` (`INCOME_KINDS`:
+  qualified → LT rate; ordinary → ordinary rate; reit → ordinary
+  federal × 0.8 (§199A) + NIIT + state; muni → state only; treasury →
+  federal + NIIT, no state; roc → 0 now, `deferred_tax` at the LT rate
+  because return of capital lowers basis and is taxed at sale; a CPA
+  override uses the ordinary total, never for roc). ROC cards show
+  Payouts / Tax now / Tax at sale; the yield card ranks ROC on
+  `after_tax_yield_at_sale` so a deferral never reads as tax-free. The
+  kind is user-picked, never inferred from the ticker (an issuer's ROC
+  status depends on its earnings & profits each year). **No exit plan on
+  ROC holdings** (owner, 2026-10-02): STRC-style preferreds trade near
+  par, so the card hides Exit Targets / runner / tax-wait notices and
+  the form hides the Exit Targets section (saves `exit_targets` NULL).
+  `dividendAfterTax` / `incomeYieldComparison` in `afterTax.js`. The
+  card shows dividends / yr, after tax / yr and after-tax yield; the
+  Portfolio card adds an "Income after tax" row (cash interest +
+  dividends). The yield card lists income categories (dividend ETF,
+  REIT, covered-call, muni, Treasury fund, BTC preferred) under the cash rows, marked
+  "prices can move" — categories only, user-entered yields.
 - Per-position values are never netted; the portfolio card shows a
   netted figure labeled as an estimate.
 - Every tax figure in the UI is labeled an estimate with a

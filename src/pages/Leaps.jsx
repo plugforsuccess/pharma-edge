@@ -11,6 +11,7 @@ import {
   blended1256Rate, rateAtGainFor, EXIT_PLAYBOOK, playbookTargets, runnerPlan, timeStop,
   longTermFitsPlan, entryRunwayDays,
   CASH_KINDS, DEFAULT_SELLING_COST_PCT, cashAfterTax, cashYieldComparison, realEstateAfterTax,
+  INCOME_KINDS, dividendAfterTax, incomeYieldComparison,
   customExitTargets, validateCustomTargets, MAX_CUSTOM_TARGETS,
 } from '../utils/afterTax'
 import NumberInput from '../components/NumberInput'
@@ -47,8 +48,15 @@ const mult = (n) => (Number.isFinite(n) ? `${n.toFixed(2)}x` : '—')
 const pct = (n, dp = 1) => (Number.isFinite(n)
   ? `${(n * 100).toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp })}%`
   : '—')
+// Gain on cost with its sign: "+15.2%", "−8.0%".
+const gainPct = (gain, cost) => {
+  if (!(cost > 0) || !Number.isFinite(gain)) return '—'
+  const r = gain / cost
+  return `${r > 0.00005 ? '+' : r < -0.00005 ? '−' : ''}${pct(Math.abs(r))}`
+}
 // Rates like 0.2879 read best at 2dp ("28.79%"); trim trailing zeros.
 const ratePct = (n) => (Number.isFinite(n) ? `${+(n * 100).toFixed(2)}%` : '—')
+const yieldPct = (n) => (Number.isFinite(n) ? `${(n * 100).toFixed(2)}%` : '—')
 
 // Holding families. Quantity holdings (shares, crypto) split whole units
 // across targets like contracts; cash and real estate have their own math.
@@ -232,6 +240,10 @@ export default function Leaps() {
       const contracts = wholeUnits(isStock ? pos.shares : pos.contracts)
       const units = isStock ? Number(pos.shares) : contracts
       const own = Array.isArray(pos.exit_targets) && pos.exit_targets.length ? pos.exit_targets : null
+      const dy = Number(pos.details?.dividend_yield)
+      const dividend = pos.instrument_type === 'stock' && dy > 0
+        ? dividendAfterTax({ value: calc.current_value, yieldPct: dy, kind: pos.details?.dividend_kind ?? 'qualified', rateForGain })
+        : null
       if (own) {
         return {
           pos,
@@ -243,6 +255,7 @@ export default function Leaps() {
             ? customFor(calc.basis, calc.current_value, 'long_term', contracts, own)
             : null,
           runner: null,
+          dividend,
         }
       }
       return {
@@ -257,6 +270,7 @@ export default function Leaps() {
           : null,
         runner: runnerPlan({ fractions: plan.fractions, contracts, units, peakUnitValue: pos.peak_unit_value,
           currentValue: calc.current_value, trailPct: plan.runnerTrailPct }),
+        dividend,
       }
     }
   }, [positions, investments, rateForGain, asOf, selectedPct, ladderFor, customFor, plan])
@@ -333,6 +347,8 @@ export default function Leaps() {
   const allIds = [...results, ...cashResults, ...realEstateResults].map((r) => r.pos.id)
   const allOpen = allIds.length > 0 && allIds.every((id) => openIds.has(id))
   const others = {
+    income: cashResults.reduce((sum, r) => sum + r.cash.after_tax_interest, 0)
+      + results.reduce((sum, r) => sum + (r.dividend?.after_tax_income ?? 0), 0),
     cash: cashResults.reduce((sum, r) => sum + r.cash.after_tax_value, 0),
     realEstate: realEstateResults.reduce((sum, r) => sum + (r.re?.after_tax_equity ?? 0), 0),
     cashCount: cashResults.length,
@@ -377,7 +393,7 @@ export default function Leaps() {
             <Banner tone="amber">Pick your residency in Settings (or enter both CPA rates) to see after-tax figures.</Banner>
           )}
 
-          {ready && (summary || others.cashCount || others.realEstateCount) && (
+          {ready && (summary || others.cashCount > 0 || others.realEstateCount > 0) && (
             <PortfolioTotals summary={summary} count={results.length} others={others} />
           )}
 
@@ -427,7 +443,7 @@ export default function Leaps() {
                 </div>
               )}
 
-              {results.map(({ pos, calc, ladder, ladderLongTerm, custom, customLongTerm, runner }) => (
+              {results.map(({ pos, calc, ladder, ladderLongTerm, custom, customLongTerm, runner, dividend }) => (
                 <PositionCard
                   key={pos.id}
                   pos={pos}
@@ -437,6 +453,7 @@ export default function Leaps() {
                   custom={custom}
                   customLongTerm={customLongTerm}
                   runner={runner}
+                  dividend={dividend}
                   plan={plan}
                   open={openIds.has(pos.id)}
                   onToggle={() => toggleOpen(pos.id)}
@@ -651,6 +668,9 @@ function emptyForm(initial) {
       : t === 'real_estate' ? 'real_estate' : 'option',
     ticker: initial?.ticker ?? '',
     name: initial?.name ?? '',
+    // Dividends (shares)
+    div_yield: d.dividend_yield != null ? String(+(Number(d.dividend_yield) * 100).toFixed(4)) : '',
+    div_kind: d.dividend_kind ?? 'qualified',
     // Cash
     balance: t === 'cash' ? str(initial?.current_value) : '',
     apy: d.apy != null ? String(+(Number(d.apy) * 100).toFixed(4)) : '',
@@ -716,6 +736,9 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
   const isRE = f.asset === 'real_estate'
   // "Shares" below means any quantity holding (shares or coins).
   const isShares = f.asset === 'shares' || isCrypto
+  // Return-of-capital income holdings (STRC-style preferreds) sit near
+  // par, so the LEAPS exit plan doesn't apply to them.
+  const rocIncome = f.asset === 'shares' && f.div_kind === 'roc'
   const qtyWord = isCrypto ? 'coin' : 'share'
   // Index options (SPX, XSP, NDX, RUT, VIX …) are §1256 contracts —
   // detected from the ticker, never asked.
@@ -807,15 +830,21 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
     if (!(basis > 0)) return setError(f.price_mode === 'per_share' ? `Enter what you paid per ${isShares ? qtyWord : 'share'}.` : 'Total cost must be greater than $0.')
     if (value == null || value < 0) return setError(f.price_mode === 'per_share' ? `Enter the current price per ${isShares ? qtyWord : 'share'}.` : 'Enter the current value (0 or more).')
     let exitTargets = null
-    if (f.own_targets) {
+    if (f.own_targets && !rocIncome) {
       exitTargets = f.targets.map(rowToTarget)
       const bad = validateCustomTargets(exitTargets, basis)
       if (bad) return setError(bad)
     }
+    const divYield = num(f.div_yield)
+    if (f.asset === 'shares' && divYield != null && (divYield < 0 || divYield > 50)) {
+      return setError('Enter the dividend yield as a % between 0 and 50.')
+    }
     return finish({
       ticker: f.ticker,
       name: null,
-      details: null,
+      details: f.asset === 'shares' && (divYield > 0 || rocIncome)
+        ? { dividend_yield: exact((divYield ?? 0) / 100), dividend_kind: f.div_kind }
+        : null,
       instrument_type: instrumentType,
       option_type: isShares ? null : f.option_type,
       strike: isShares ? null : num(f.strike),
@@ -975,6 +1004,18 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
             <input type="date" value={f.purchase_date} max={todayYmd()} onChange={(e) => setV('purchase_date')(e.target.value)} className={dateCls} />
           </Field>
         </div>
+        {f.asset === 'shares' && (
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <Field label="Dividend yield" hint="optional">
+              <Affix suffix="%"><NumberInput decimals={4} value={f.div_yield} onChange={setV('div_yield')} placeholder="0" className={clsx(inputCls, 'pr-8')} /></Affix>
+            </Field>
+            <Field label="Dividend type">
+              <select value={f.div_kind} onChange={(e) => setV('div_kind')(e.target.value)} className={inputCls}>
+                {INCOME_KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
+              </select>
+            </Field>
+          </div>
+        )}
         {!isShares && shortRunway && (
           <div className="mt-4 rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2.5 text-xs text-amber-200">
             Only {Math.round(runwayDays / 30.4)} months to expiry at purchase. Buy with 18–24+ months so the
@@ -1029,6 +1070,7 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
         )}
       </FormSection>
 
+      {!rocIncome && (
       <FormSection title="Exit Targets">
         <TargetsEditor
           own={f.own_targets}
@@ -1041,6 +1083,7 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
         />
         {previewRows && previewRows.length > 0 && <CustomTargetsPreview rows={previewRows} isStock={isShares ? qtyWord : false} units={isShares ? num(f.shares) : num(f.contracts)} />}
       </FormSection>
+      )}
       </>)}
 
       {error && (
@@ -1144,10 +1187,12 @@ function positionMeta(pos) {
   return [contract.join(' • '), held.join(' · ')].filter(Boolean)
 }
 
-function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTerm, runner, plan, previewFor, selectedTargetPct, onSave, onDelete, onExercise, open, onToggle }) {
+function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTerm, runner, dividend, plan, previewFor, selectedTargetPct, onSave, onDelete, onExercise, open, onToggle }) {
   const [editing, setEditing] = useState(false)
   const [exercising, setExercising] = useState(false)
   const [showTaxDetail, setShowTaxDetail] = useState(false)
+  // Return-of-capital income (STRC-style preferreds): no exit plan.
+  const noExitPlan = pos.instrument_type === 'stock' && pos.details?.dividend_kind === 'roc'
   if (editing) {
     return (
       <PositionForm
@@ -1210,7 +1255,7 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
               <div className={clsx('text-base font-semibold font-mono-tab', up ? 'text-green-400' : 'text-rose-300')}>
                 {usd(calc.after_tax_value)}
               </div>
-              <div className="text-xs text-muted mt-0.5">after tax</div>
+              <div className="text-xs text-muted mt-0.5">{gainPct(calc.after_tax_gain, calc.basis)} after tax</div>
               {stop && stop.level !== 'ok' && (
                 <div className={clsx('text-xs mt-1 font-semibold', stop.level === 'act' ? 'text-rose-300' : 'text-amber-300')}>
                   {stop.level === 'act' ? 'Time stop' : 'Roll window'}
@@ -1241,6 +1286,10 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
           </span>
           <ChevronDown size={14} className={clsx('text-muted transition-transform', showTaxDetail && 'rotate-180')} />
         </button>
+        <div className="text-sm text-subtle">
+          <span className={up ? 'text-green-400' : 'text-rose-300'}>{gainPct(calc.after_tax_gain, calc.basis)}</span> after tax
+          {' · '}{gainPct(calc.gain, calc.basis)} before tax
+        </div>
         {showTaxDetail && (
           <div className="mt-1 text-xs text-muted font-mono-tab">
             {calc.gain > 0
@@ -1256,9 +1305,24 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
         <Stat label="Multiple" value={mult(calc.current_multiple)} />
       </div>
 
+      {dividend && dividend.kind === 'roc' && (
+        <div className="grid grid-cols-3 gap-3 mb-4 pb-3 border-b border-hairline">
+          <Stat label="Payouts / yr" value={usd(dividend.income)} />
+          <Stat label="Tax now" value={usd(0)} />
+          <Stat label="Tax at sale / yr" value={usd(dividend.deferred_tax)} />
+        </div>
+      )}
+      {dividend && dividend.kind !== 'roc' && (
+        <div className="grid grid-cols-3 gap-3 mb-4 pb-3 border-b border-hairline">
+          <Stat label="Dividends / yr" value={usd(dividend.income)} />
+          <Stat label="After tax / yr" value={usd(dividend.after_tax_income)} />
+          <Stat label="After-tax yield" value={yieldPct(dividend.after_tax_yield)} />
+        </div>
+      )}
+
       <TimeStopBanner stop={stop} positionId={pos.id} />
 
-      {calc.tax_saved_by_waiting != null && (ltFits ? (
+      {!noExitPlan && calc.tax_saved_by_waiting != null && (ltFits ? (
         <Notice id={`${pos.id}:tax-wait:${calc.long_term_date}`} tone="green"
           title={`Long-term on ${shortDate(calc.long_term_date)} saves about ${usd(calc.tax_saved_by_waiting)}`}>
           {calc.days_until_long_term} days away and before your roll window, so it's worth waiting for if a target hits close to it.
@@ -1270,11 +1334,13 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
         </Notice>
       ))}
 
-      <CustomExitTargets
-        rows={custom?.length > 0 ? custom : ladder}
-        runner={custom?.length > 0 ? null : runner}
-        isStock={unit}
-        units={isStock ? Number(pos.shares) : Number(pos.contracts)} />
+      {!noExitPlan && (
+        <CustomExitTargets
+          rows={custom?.length > 0 ? custom : ladder}
+          runner={custom?.length > 0 ? null : runner}
+          isStock={unit}
+          units={isStock ? Number(pos.shares) : Number(pos.contracts)} />
+      )}
 
       {calc.target_progress != null && (
         <div className="mb-4">
@@ -1322,7 +1388,7 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
 
 // Collapsible card frame shared by cash and real estate (same header as
 // PositionCard: title, meta lines, badge, and the value when collapsed).
-function HoldingShell({ pos, open, onToggle, title, meta, badge, value, valueLabel, editing, form, onEdit, onDelete, children }) {
+function HoldingShell({ pos, open, onToggle, title, meta, badge, value, valueLabel, valueUp = true, editing, form, onEdit, onDelete, children }) {
   if (editing) return form
   return (
     <div className="bg-card border border-border rounded-2xl mb-4">
@@ -1338,7 +1404,7 @@ function HoldingShell({ pos, open, onToggle, title, meta, badge, value, valueLab
         <div className="shrink-0 flex items-start gap-2">
           {!open && (
             <div className="text-right">
-              <div className="text-base font-semibold font-mono-tab text-green-400">{value}</div>
+              <div className={clsx('text-base font-semibold font-mono-tab', valueUp ? 'text-green-400' : 'text-rose-300')}>{value}</div>
               <div className="text-xs text-muted mt-0.5">{valueLabel}</div>
             </div>
           )}
@@ -1386,7 +1452,7 @@ function CashCard({ pos, cash, open, onToggle, onSave, onDelete }) {
       <div className="grid grid-cols-3 gap-3 py-3 border-y border-hairline">
         <Stat label="Interest / yr" value={usd(cash.interest)} />
         <Stat label="After tax / yr" value={usd(cash.after_tax_interest)} />
-        <Stat label="After-tax yield" value={ratePct(cash.after_tax_yield)} />
+        <Stat label="After-tax yield" value={yieldPct(cash.after_tax_yield)} />
       </div>
       <p className="mt-3 text-xs text-muted">
         Interest is taxed as ordinary income ({ratePct(cash.rate)}){kind === 't_bills' ? ' — T-bills skip state tax' : ''}.
@@ -1399,6 +1465,7 @@ function RealEstateCard({ pos, re, open, onToggle, onSave, onDelete }) {
   const [editing, setEditing] = useState(false)
   if (!re) return null
   const rental = pos.details?.kind === 'rental'
+  const reAfterTaxGain = re.amount_realized - re.estimated_tax - re.basis
   return (
     <HoldingShell
       pos={pos} open={open} onToggle={onToggle} editing={editing} onEdit={() => setEditing(true)} onDelete={onDelete}
@@ -1407,12 +1474,16 @@ function RealEstateCard({ pos, re, open, onToggle, onSave, onDelete }) {
       title={`${pos.name} • ${rental ? 'Rental' : 'Primary home'}`}
       meta={[`Bought ${shortDate(pos.purchase_date)}`]}
       badge={re.is_long_term ? 'Long-term' : 'Short-term'}
-      value={usd(re.after_tax_equity)} valueLabel="after tax"
+      value={usd(re.after_tax_equity)} valueLabel={`${gainPct(reAfterTaxGain, re.basis)} after tax`} valueUp={reAfterTaxGain >= 0}
     >
       <div className="mb-4">
         <div className="text-[10px] uppercase tracking-wider text-muted mb-1">After-tax equity if sold today</div>
         <div className={clsx('text-2xl font-semibold font-mono-tab', re.after_tax_equity >= 0 ? 'text-green-400' : 'text-rose-300')}>
           {usd(re.after_tax_equity)}
+        </div>
+        <div className="mt-1 text-sm text-subtle">
+          <span className={reAfterTaxGain >= 0 ? 'text-green-400' : 'text-rose-300'}>{gainPct(reAfterTaxGain, re.basis)}</span> after tax
+          {' · '}{gainPct(re.value - re.basis, re.basis)} before tax
         </div>
       </div>
       <div className="grid grid-cols-3 gap-3 py-3 border-y border-hairline">
@@ -1445,59 +1516,92 @@ function SaleRow({ label, value, strong }) {
 
 // Where idle cash earns the most AFTER TAX for this user. Categories only
 // (no named products). Rates are what the user types — prefilled with
-// example rates and remembered on this device.
+// example rates and remembered on this device. Cash keeps its principal;
+// income investments pay more but their prices can move.
 const YIELD_OPTIONS = [
   { kind: 'savings', label: 'High-yield savings', example: 4.0 },
   { kind: 'money_market', label: 'Money market', example: 4.1 },
   { kind: 't_bills', label: 'T-bills', example: 4.0 },
   { kind: 'cd', label: '1-year CD', example: 4.1 },
 ]
+const INCOME_OPTIONS = [
+  { key: 'div_qualified', kind: 'qualified', label: 'Dividend ETF', example: 3.0 },
+  { key: 'div_reit', kind: 'reit', label: 'REIT ETF', example: 4.0 },
+  { key: 'div_covered_call', kind: 'ordinary', label: 'Covered-call ETF', example: 9.0 },
+  { key: 'div_muni', kind: 'muni', label: 'Muni fund', example: 3.5 },
+  { key: 'div_treasury', kind: 'treasury', label: 'Treasury fund', example: 4.2 },
+  { key: 'div_btc_preferred', kind: 'roc', label: 'BTC preferred', example: 11.0 },
+]
 const YIELD_KEY = 'cm:cash-yield-apys'
+
+function exampleApys() {
+  return Object.fromEntries([
+    ...YIELD_OPTIONS.map((o) => [o.kind, String(o.example)]),
+    ...INCOME_OPTIONS.map((o) => [o.key, String(o.example)]),
+  ])
+}
+
+function YieldRows({ rows, apys, setApy, best }) {
+  return (
+    <ol className="space-y-2">
+      {rows.map((r) => (
+        <li key={r.key ?? r.kind} className="grid grid-cols-[minmax(0,1fr)_5.5rem_4.5rem] gap-x-3 items-center">
+          <div className="min-w-0">
+            <div className="text-sm text-fg truncate">{r.label}</div>
+            <div className="text-xs text-muted">{usd(r.after_tax_interest)}/yr{r.kind === 'roc' ? ' · after tax at sale' : ''}{r === best ? ' · best' : ''}</div>
+          </div>
+          <Affix suffix="%">
+            <NumberInput decimals={3} value={apys[r.key ?? r.kind]} onChange={(v) => setApy(r.key ?? r.kind, v)}
+              aria-label={`${r.label} rate`} className={clsx(inputCls, 'pr-7')} />
+          </Affix>
+          <div className={clsx('text-sm font-mono-tab text-right', r === best ? 'text-green-400 font-semibold' : 'text-fg')}>
+            {yieldPct(r.after_tax_yield)}
+          </div>
+        </li>
+      ))}
+    </ol>
+  )
+}
 
 function CashYieldCard({ cashResults, rateForGain }) {
   const balance = cashResults.reduce((sum, r) => sum + r.cash.balance, 0)
   const earningNow = cashResults.reduce((sum, r) => sum + r.cash.after_tax_interest, 0)
   const [apys, setApys] = useState(() => {
-    try { return { ...Object.fromEntries(YIELD_OPTIONS.map((o) => [o.kind, String(o.example)])), ...JSON.parse(localStorage.getItem(YIELD_KEY) ?? '{}') } }
-    catch { return Object.fromEntries(YIELD_OPTIONS.map((o) => [o.kind, String(o.example)])) }
+    try { return { ...exampleApys(), ...JSON.parse(localStorage.getItem(YIELD_KEY) ?? '{}') } }
+    catch { return exampleApys() }
   })
-  const setApy = (kind, v) => {
-    const next = { ...apys, [kind]: v }
+  const setApy = (key, v) => {
+    const next = { ...apys, [key]: v }
     setApys(next)
     try { localStorage.setItem(YIELD_KEY, JSON.stringify(next)) } catch { /* per-visit only */ }
   }
-  const rows = cashYieldComparison({
+  const cashRows = cashYieldComparison({
     balance, rateForGain,
     options: YIELD_OPTIONS.map((o) => ({ ...o, apy: (num(apys[o.kind]) ?? 0) / 100 })),
   })
-  const best = rows[0]
+  const incomeRows = incomeYieldComparison({
+    balance, rateForGain,
+    options: INCOME_OPTIONS.map((o) => ({ ...o, apy: (num(apys[o.key]) ?? 0) / 100 })),
+  })
   return (
     <section className="bg-card border border-border rounded-2xl p-5 mb-4">
-      <h2 className="text-sm font-semibold mb-1">Cash yield, after tax</h2>
+      <h2 className="text-sm font-semibold mb-1">Yield on your cash, after tax</h2>
       <p className="text-xs text-muted mb-4">
-        On your {usd(balance)} in cash. Your cash earns {usd(earningNow)}/yr after tax today.
+        On your {usd(balance)} in cash. It earns {usd(earningNow)}/yr after tax today.
       </p>
       <div className="grid grid-cols-[minmax(0,1fr)_5.5rem_4.5rem] gap-x-3 text-[10px] uppercase tracking-wider text-muted mb-2">
-        <span>Option</span><span>Rate</span><span className="text-right">After tax</span>
+        <span>Cash · principal stays put</span><span>Rate</span><span className="text-right">After tax</span>
       </div>
-      <ol className="space-y-2">
-        {rows.map((r) => (
-          <li key={r.kind} className="grid grid-cols-[minmax(0,1fr)_5.5rem_4.5rem] gap-x-3 items-center">
-            <div className="min-w-0">
-              <div className="text-sm text-fg truncate">{r.label}</div>
-              <div className="text-xs text-muted">{usd(r.after_tax_interest)}/yr{r === best ? ' · best' : ''}</div>
-            </div>
-            <Affix suffix="%">
-              <NumberInput decimals={3} value={apys[r.kind]} onChange={(v) => setApy(r.kind, v)}
-                aria-label={`${r.label} rate`} className={clsx(inputCls, 'pr-7')} />
-            </Affix>
-            <div className={clsx('text-sm font-mono-tab text-right', r === best ? 'text-green-400 font-semibold' : 'text-fg')}>
-              {ratePct(r.after_tax_yield)}
-            </div>
-          </li>
-        ))}
-      </ol>
-      <p className="mt-3 text-xs text-muted">Example rates — enter what you're offered. T-bills skip state tax.</p>
+      <YieldRows rows={cashRows} apys={apys} setApy={setApy} best={cashRows[0]} />
+      <div className="grid grid-cols-[minmax(0,1fr)_5.5rem_4.5rem] gap-x-3 text-[10px] uppercase tracking-wider text-muted mt-5 mb-2 pt-4 border-t border-hairline">
+        <span>Income investments · prices can move</span><span>Yield</span><span className="text-right">After tax</span>
+      </div>
+      <YieldRows rows={incomeRows} apys={apys} setApy={setApy} best={incomeRows[0]} />
+      <p className="mt-3 text-xs text-muted">
+        Example rates — enter what you're offered. T-bills and Treasury funds skip state tax; muni funds skip federal tax;
+        qualified dividends get long-term rates; return of capital (some preferreds) isn't taxed until you sell, because it
+        lowers your cost basis. Not a recommendation.
+      </p>
     </section>
   )
 }
@@ -1849,6 +1953,12 @@ function PortfolioTotals({ summary, count, others }) {
           <Stat label="Investments" value={usd(invested)} />
           <Stat label="Cash" value={usd(others.cash)} />
           <Stat label="Real estate" value={usd(others.realEstate)} />
+        </div>
+      )}
+      {others?.income > 0 && (
+        <div className="flex items-baseline gap-3 pt-4 border-t border-hairline mb-4">
+          <span className="flex-1 text-sm text-subtle">Income after tax</span>
+          <span className="text-sm font-mono-tab text-green-400 font-semibold">{usd(others.income)}/yr</span>
         </div>
       )}
       {summary && (

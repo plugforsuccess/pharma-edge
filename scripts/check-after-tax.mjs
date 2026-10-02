@@ -18,6 +18,7 @@ import {
   isValidTaxRate, isValidBasis, exerciseCall, blended1256Rate, suggestInstrumentType, bracketTax,
   exitLadder, allocateContracts, rateAtGainFor, customExitTargets, validateCustomTargets,
   cashAfterTax, cashYieldComparison, realEstateAfterTax, interestTaxRate,
+  dividendAfterTax, incomeTaxRate, incomeYieldComparison,
   EXIT_PLAYBOOK, allocateWithRunner, playbookTargets, runnerPlan, timeStop, longTermFitsPlan, entryRunwayDays,
 } from '../src/utils/afterTax.js'
 
@@ -402,6 +403,35 @@ const round2 = (x) => Math.round(x * 100) / 100
     options: [{ kind: 'savings', apy: 0.042 }, { kind: 't_bills', apy: 0.04 }] })
   eq('best after-tax first', cmp[0].kind, 't_bills')
   eq('override uses CPA rate', interestTaxRate({ short_term: { total: 0.3, state: 0.05, overridden: true } }, 't_bills'), 0.3)
+}
+
+// ── Dividend income ──────────────────────────────────────────────
+{
+  // Fixture GA single at $800k: LT 20% + 3.8% + 4.99%; ordinary 37% + 3.8% + 4.99%.
+  const ga = makeRateResolver({ federal, state: GA, filingStatus: 'single', income: 800000 })
+  const q = dividendAfterTax({ value: 100000, yieldPct: 0.03, kind: 'qualified', rateForGain: ga })
+  eq('qualified income', q.income, 3000)
+  eq('qualified rate = LT stack', q.rate, 0.20 + 0.038 + 0.0499, 1e-9)
+  eq('qualified after tax', q.after_tax_income, 3000 * (1 - 0.2879), 1e-6)
+  eq('ordinary rate', dividendAfterTax({ value: 1, yieldPct: 0.09, kind: 'ordinary', rateForGain: ga }).rate, 0.37 + 0.038 + 0.0499, 1e-9)
+  eq('REIT gets 20% off federal', dividendAfterTax({ value: 1, yieldPct: 0.04, kind: 'reit', rateForGain: ga }).rate, 0.37 * 0.8 + 0.038 + 0.0499, 1e-9)
+  eq('muni: state only', dividendAfterTax({ value: 1, yieldPct: 0.035, kind: 'muni', rateForGain: ga }).rate, 0.0499, 1e-9)
+  eq('treasury: no state', dividendAfterTax({ value: 1, yieldPct: 0.04, kind: 'treasury', rateForGain: ga }).rate, 0.37 + 0.038, 1e-9)
+  eq('override applies to non-qualified', incomeTaxRate({ long_term: { total: 0.2 }, short_term: { total: 0.3, overridden: true } }, 'muni'), 0.3)
+  // At a high bracket a 3.5% muni fund beats a 4.2% Treasury fund after tax.
+  const cmp = incomeYieldComparison({ balance: 100000, rateForGain: ga,
+    options: [{ kind: 'treasury', apy: 0.042 }, { kind: 'muni', apy: 0.035 }] })
+  eq('muni first at high bracket', cmp[0].kind, 'muni')
+  // Return of capital (e.g. some preferreds): no tax now, taxed at LT rates at sale.
+  const roc = dividendAfterTax({ value: 100000, yieldPct: 0.11, kind: 'roc', rateForGain: ga })
+  eq('ROC: no tax now', roc.rate, 0)
+  eq('ROC: full payout now', roc.after_tax_income, 11000, 1e-6)
+  eq('ROC: deferred tax at LT stack', roc.deferred_tax, 11000 * 0.2879, 1e-6)
+  eq('ROC: yield after tax at sale', roc.after_tax_yield_at_sale, 0.11 * (1 - 0.2879), 1e-9)
+  eq('ROC: override does not tax it now', incomeTaxRate({ long_term: { total: 0.2 }, short_term: { total: 0.3, overridden: true } }, 'roc'), 0)
+  eq('non-ROC: nothing deferred', q.deferred_tax, 0)
+  const rocCmp = incomeYieldComparison({ balance: 100000, rateForGain: ga, options: [{ kind: 'roc', apy: 0.11 }] })
+  eq('ROC compared after tax at sale', rocCmp[0].after_tax_yield, 0.11 * (1 - 0.2879), 1e-9)
 }
 
 // ── Real estate ──────────────────────────────────────────────────
