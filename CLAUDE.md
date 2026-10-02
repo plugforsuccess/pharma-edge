@@ -872,7 +872,10 @@ value, holding period) and must pass before any edit to that file lands.
   T-bills / CD at the user's after-tax rate — categories only, no named
   products (named partners wait on counsel); rates are user-entered,
   prefilled with example rates (`cm:cash-yield-apys`).
-- **Dividend income.** A `stock` holding can carry
+- **Dividend income.** The add form's 6th type, **Income** (Options ·
+  Shares · Income / Crypto · Cash · Real estate), is a `stock` row with
+  the income type and a required yield; a stock row with a yield or ROC
+  reopens as Income, and plain Shares no longer ask for a yield. It can carry
   `details.dividend_yield` (fraction) + `dividend_kind` (`INCOME_KINDS`:
   qualified → LT rate; ordinary → ordinary rate; reit → ordinary
   federal × 0.8 (§199A) + NIIT + state; muni → state only; treasury →
