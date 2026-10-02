@@ -18,7 +18,7 @@ import {
   isValidTaxRate, isValidBasis, exerciseCall, blended1256Rate, suggestInstrumentType, bracketTax,
   exitLadder, allocateContracts, rateAtGainFor, customExitTargets, validateCustomTargets,
   cashAfterTax, cashYieldComparison, realEstateAfterTax, interestTaxRate,
-  dividendAfterTax, incomeTaxRate, incomeYieldComparison, growthProjection,
+  dividendAfterTax, incomeTaxRate, incomeYieldComparison, growthProjection, runnerAfterTax,
   EXIT_PLAYBOOK, allocateWithRunner, playbookTargets, runnerPlan, timeStop, longTermFitsPlan, entryRunwayDays,
 } from '../src/utils/afterTax.js'
 
@@ -461,6 +461,16 @@ const round2 = (x) => Math.round(x * 100) / 100
   eq('ROC past zero basis is taxed then', floor.tax_paid, 20 * 0.2, 1e-6)
   eq('ROC basis floors at 0', floor.basis, 0)
   eq('rows: one per year', growthProjection({ monthly: 10, years: 3, rateForGain: flat }).length, 3)
+}
+
+// ── Runner after tax ─────────────────────────────────────────────
+{
+  const r = runnerAfterTax({ runner: { contracts: 7, share: 0.15, exit_value: 882 }, basis: 6000, units: 50, rateAtGain: () => 0.3 })
+  eq('runner cost slice', r.cost, 840, 1e-9)
+  eq('runner after-tax gain', r.after_tax_gain, 42 * 0.7, 1e-9)
+  const loss = runnerAfterTax({ runner: { contracts: null, share: 0.15, exit_value: 5370 }, basis: 38160, units: 372, rateAtGain: () => 0.3 })
+  eq('runner loss not taxed', loss.tax, 0)
+  eq('runner loss', loss.after_tax_gain, 5370 - 38160 * 0.15, 1e-6)
 }
 
 // ── Real estate ──────────────────────────────────────────────────
