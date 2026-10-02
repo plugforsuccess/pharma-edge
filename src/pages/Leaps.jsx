@@ -48,6 +48,12 @@ const mult = (n) => (Number.isFinite(n) ? `${n.toFixed(2)}x` : '—')
 const pct = (n, dp = 1) => (Number.isFinite(n)
   ? `${(n * 100).toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp })}%`
   : '—')
+// Gain on cost with its sign: "+15.2%", "−8.0%".
+const gainPct = (gain, cost) => {
+  if (!(cost > 0) || !Number.isFinite(gain)) return '—'
+  const r = gain / cost
+  return `${r > 0.00005 ? '+' : r < -0.00005 ? '−' : ''}${pct(Math.abs(r))}`
+}
 // Rates like 0.2879 read best at 2dp ("28.79%"); trim trailing zeros.
 const ratePct = (n) => (Number.isFinite(n) ? `${+(n * 100).toFixed(2)}%` : '—')
 const yieldPct = (n) => (Number.isFinite(n) ? `${(n * 100).toFixed(2)}%` : '—')
@@ -1242,7 +1248,7 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
               <div className={clsx('text-base font-semibold font-mono-tab', up ? 'text-green-400' : 'text-rose-300')}>
                 {usd(calc.after_tax_value)}
               </div>
-              <div className="text-xs text-muted mt-0.5">after tax</div>
+              <div className="text-xs text-muted mt-0.5">{gainPct(calc.after_tax_gain, calc.basis)} after tax</div>
               {stop && stop.level !== 'ok' && (
                 <div className={clsx('text-xs mt-1 font-semibold', stop.level === 'act' ? 'text-rose-300' : 'text-amber-300')}>
                   {stop.level === 'act' ? 'Time stop' : 'Roll window'}
@@ -1273,6 +1279,10 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
           </span>
           <ChevronDown size={14} className={clsx('text-muted transition-transform', showTaxDetail && 'rotate-180')} />
         </button>
+        <div className="text-sm text-subtle">
+          <span className={up ? 'text-green-400' : 'text-rose-300'}>{gainPct(calc.after_tax_gain, calc.basis)}</span> after tax
+          {' · '}{gainPct(calc.gain, calc.basis)} before tax
+        </div>
         {showTaxDetail && (
           <div className="mt-1 text-xs text-muted font-mono-tab">
             {calc.gain > 0
@@ -1369,7 +1379,7 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
 
 // Collapsible card frame shared by cash and real estate (same header as
 // PositionCard: title, meta lines, badge, and the value when collapsed).
-function HoldingShell({ pos, open, onToggle, title, meta, badge, value, valueLabel, editing, form, onEdit, onDelete, children }) {
+function HoldingShell({ pos, open, onToggle, title, meta, badge, value, valueLabel, valueUp = true, editing, form, onEdit, onDelete, children }) {
   if (editing) return form
   return (
     <div className="bg-card border border-border rounded-2xl mb-4">
@@ -1385,7 +1395,7 @@ function HoldingShell({ pos, open, onToggle, title, meta, badge, value, valueLab
         <div className="shrink-0 flex items-start gap-2">
           {!open && (
             <div className="text-right">
-              <div className="text-base font-semibold font-mono-tab text-green-400">{value}</div>
+              <div className={clsx('text-base font-semibold font-mono-tab', valueUp ? 'text-green-400' : 'text-rose-300')}>{value}</div>
               <div className="text-xs text-muted mt-0.5">{valueLabel}</div>
             </div>
           )}
@@ -1446,6 +1456,7 @@ function RealEstateCard({ pos, re, open, onToggle, onSave, onDelete }) {
   const [editing, setEditing] = useState(false)
   if (!re) return null
   const rental = pos.details?.kind === 'rental'
+  const reAfterTaxGain = re.amount_realized - re.estimated_tax - re.basis
   return (
     <HoldingShell
       pos={pos} open={open} onToggle={onToggle} editing={editing} onEdit={() => setEditing(true)} onDelete={onDelete}
@@ -1454,12 +1465,16 @@ function RealEstateCard({ pos, re, open, onToggle, onSave, onDelete }) {
       title={`${pos.name} • ${rental ? 'Rental' : 'Primary home'}`}
       meta={[`Bought ${shortDate(pos.purchase_date)}`]}
       badge={re.is_long_term ? 'Long-term' : 'Short-term'}
-      value={usd(re.after_tax_equity)} valueLabel="after tax"
+      value={usd(re.after_tax_equity)} valueLabel={`${gainPct(reAfterTaxGain, re.basis)} after tax`} valueUp={reAfterTaxGain >= 0}
     >
       <div className="mb-4">
         <div className="text-[10px] uppercase tracking-wider text-muted mb-1">After-tax equity if sold today</div>
         <div className={clsx('text-2xl font-semibold font-mono-tab', re.after_tax_equity >= 0 ? 'text-green-400' : 'text-rose-300')}>
           {usd(re.after_tax_equity)}
+        </div>
+        <div className="mt-1 text-sm text-subtle">
+          <span className={reAfterTaxGain >= 0 ? 'text-green-400' : 'text-rose-300'}>{gainPct(reAfterTaxGain, re.basis)}</span> after tax
+          {' · '}{gainPct(re.value - re.basis, re.basis)} before tax
         </div>
       </div>
       <div className="grid grid-cols-3 gap-3 py-3 border-y border-hairline">

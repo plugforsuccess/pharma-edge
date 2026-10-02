@@ -677,7 +677,10 @@ professional before acting on them."
 per position and per notice). A dismissed time stop returns the next day;
 a roll-window warning stays dismissed until it escalates.
 **Holdings collapse:** each holding is a tap-to-expand card (summary:
-name, dates, tax badge, after-tax value, roll-window / time-stop flag).
+name, dates, tax badge, after-tax value with its gain on cost — "+17.8%
+after tax" — and the roll-window / time-stop flag; expanded cards show
+"+17.8% after tax · +25.0% before tax" under the hero value; cash has
+no gain line).
 Open state is remembered on the device (`cm:holdings-open`); new
 holdings open; "Expand all / Collapse all" sits by the Holdings title.
 **Exit Targets rows** keep the original card format: "100% gain • 2x" /
