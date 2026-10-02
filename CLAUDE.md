@@ -677,7 +677,7 @@ professional before acting on them."
 per position and per notice). A dismissed time stop returns the next day;
 a roll-window warning stays dismissed until it escalates.
 **Holdings collapse:** each holding is a tap-to-expand card (summary:
-name, dates, tax badge, after-tax value with its gain on cost — "+17.8%
+name (real estate drops "• Primary home / Rental" until expanded), dates, tax badge, after-tax value with its gain on cost — "+17.8%
 after tax" — and the roll-window / time-stop flag; expanded cards show
 "+17.8% after tax · +25.0% before tax" under the hero value; cash has
 no gain line).
