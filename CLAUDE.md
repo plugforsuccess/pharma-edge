@@ -850,12 +850,17 @@ value, holding period) and must pass before any edit to that file lands.
   stored (`cost_basis`, `current_value`).
 - **No LEAPS basis / allocation.** Each position is independent; the
   portfolio is the sum of the open positions (total cost, value,
-  after-tax value). **No portfolio target table** (removed 2026-10-02):
-  the single after-tax return goal is set in Settings → Goals
-  (`selected_target_pct`; `target_pcts` holds just that value), and each
-  holding's goal bar solves it on its own cost — "50% after-tax goal ·
-  now 1.25x" / "Needs 1.62x long-term · 1.70x short-term" (§1256 shows
-  its 60/40 multiple). No goal bar on ROC holdings.
+  after-tax value). **No portfolio target table on the page**
+  (owner, 2026-10-02). Each holding has its own after-tax goal,
+  `leaps_positions.goal_pct` (fraction of cost; NULL = the default in
+  Settings → Goals, `leaps_tax_profiles.selected_target_pct`), set in the
+  holding editor's **After-tax goal** section: one % field, the line
+  "Keeps $X after tax · needs 1.37x long-term · 1.42x short-term", and a
+  "Show all targets" tap that expands the full 50%–20% table on that
+  holding's cost (tap a row to pick it; §1256 shows its 60/40 column).
+  The card's goal bar uses the holding's goal — "30% after-tax goal ·
+  now 1.25x" / "Needs 1.37x long-term · 1.42x short-term". No goal on
+  ROC holdings.
   `leaps_tax_profiles.leaps_allocation_pct` / `portfolio_size` are no
   longer read by `/leaps` (columns kept; Settings no longer shows the
   allocation field).

@@ -438,7 +438,7 @@ export default function Settings() {
       </Section>
 
       <Section title="Goals" id="goals">
-        <Input label="After-tax return goal (% of what you paid)" suffix="%" inputMode="decimal"
+        <Input label="Default after-tax return goal (% of what you paid)" suffix="%" inputMode="decimal"
           value={goals.goal} onChange={(v) => setG('goal', v)} placeholder="50" />
       </Section>
 
