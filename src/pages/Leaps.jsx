@@ -1051,26 +1051,18 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
         <Stat label="Multiple" value={mult(calc.current_multiple)} />
       </div>
 
-      <TimeStopBanner stop={stop} />
+      <TimeStopBanner stop={stop} positionId={pos.id} />
 
       {calc.tax_saved_by_waiting != null && (ltFits ? (
-        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 mb-4">
-          <div className="text-sm text-emerald-200">
-            Long-term on <span className="font-semibold">{shortDate(calc.long_term_date)}</span> would save about{' '}
-            <span className="font-semibold font-mono-tab">{usd(calc.tax_saved_by_waiting)}</span> in tax.
-          </div>
-          <div className="text-xs text-emerald-200/70 mt-1">
-            {calc.days_until_long_term} days away, before your roll window — worth waiting for if a target hits close to it.
-          </div>
-        </div>
+        <Notice id={`${pos.id}:tax-wait:${calc.long_term_date}`} tone="green"
+          title={`Long-term on ${shortDate(calc.long_term_date)} saves about ${usd(calc.tax_saved_by_waiting)}`}>
+          {calc.days_until_long_term} days away and before your roll window, so it's worth waiting for if a target hits close to it.
+        </Notice>
       ) : (
-        <div className="rounded-xl border border-border bg-bg/40 px-4 py-3 mb-4">
-          <div className="text-sm text-fg">Taxes come after the plan — take gains when a target hits.</div>
-          <div className="text-xs text-muted mt-1">
-            Long-term ({shortDate(calc.long_term_date)}) lands after your roll window opens
-            {stop ? ` on ${shortDate(stop.window_opens)}` : ''}, so waiting for it would collide with the time stop.
-          </div>
-        </div>
+        <Notice id={`${pos.id}:tax-take:${calc.long_term_date}`} tone="neutral" title="Take gains when a target hits">
+          Long-term ({shortDate(calc.long_term_date)}) lands after your roll window opens
+          {stop ? ` on ${shortDate(stop.window_opens)}` : ''}, so taxes come after the plan.
+        </Notice>
       ))}
 
       <CustomExitTargets
@@ -1141,21 +1133,57 @@ const sellLabel = (r, isStock) => {
   return `sell ${r.contracts} ${isStock ? 'lot' : 'contract'}${r.contracts === 1 ? '' : 's'}`
 }
 
-function TimeStopBanner({ stop }) {
+function TimeStopBanner({ stop, positionId }) {
   if (!stop || stop.level === 'ok') return null
   const months = Math.max(0, Math.floor(stop.dte / 30.4))
   const act = stop.level === 'act'
+  // A dismissed "act now" comes back the next day; the roll-window
+  // warning stays dismissed until it escalates.
+  const id = act ? `${positionId}:time-stop:${todayYmd()}` : `${positionId}:roll-window:${stop.act_by}`
+  return act ? (
+    <Notice id={id} tone="red" title="Time stop: exit or roll now">
+      {stop.dte} days left. Theta speeds up from here, so don't hold into the last months hoping for a move.
+      If the thesis is intact, roll to a new LEAPS.
+    </Notice>
+  ) : (
+    <Notice id={id} tone="amber" title={`Roll window · ${months} months left`}>
+      Plan to exit or roll by {shortDate(stop.act_by)}, 6 months before expiry.
+    </Notice>
+  )
+}
+
+// One style for every card notice: a bold title and body at the same
+// size, and an X that dismisses it (remembered on this device).
+const NOTICE_TONE = {
+  green: 'border-emerald-500/30 bg-emerald-500/5 text-emerald-100',
+  amber: 'border-amber-500/40 bg-amber-500/5 text-amber-100',
+  red: 'border-rose-500/40 bg-rose-500/5 text-rose-100',
+  neutral: 'border-border bg-bg/40 text-fg',
+}
+
+function dismissKey(id) {
+  return `cm:notice-dismissed:${id}`
+}
+
+function Notice({ id, tone = 'neutral', title, children }) {
+  const [hidden, setHidden] = useState(() => {
+    try { return localStorage.getItem(dismissKey(id)) === '1' } catch { return false }
+  })
+  if (hidden) return null
+  function dismiss() {
+    setHidden(true)
+    try { localStorage.setItem(dismissKey(id), '1') } catch { /* storage blocked — hide for this visit only */ }
+  }
   return (
-    <div className={clsx('rounded-xl border px-4 py-3 mb-4',
-      act ? 'border-rose-500/40 bg-rose-500/5' : 'border-amber-500/40 bg-amber-500/5')}>
-      <div className={clsx('text-sm font-semibold', act ? 'text-rose-200' : 'text-amber-200')}>
-        {act ? 'Time stop — exit or roll now' : 'Roll window — plan your exit or roll'}
+    <div role="status" className={clsx('rounded-xl border pl-4 pr-1 py-1 mb-4 flex items-start gap-1', NOTICE_TONE[tone])}>
+      <div className="flex-1 min-w-0 py-2.5 text-sm">
+        <div className="font-semibold">{title}</div>
+        <div className="mt-1 opacity-75">{children}</div>
       </div>
-      <div className={clsx('text-xs mt-1', act ? 'text-rose-200/80' : 'text-amber-200/80')}>
-        {act
-          ? `${stop.dte} days left. Theta speeds up from here — don't hold into the last months hoping for a move. If the thesis is intact, roll to a new LEAPS.`
-          : `About ${months} months left. Exit or roll by ${shortDate(stop.act_by)} (6 months before expiry).`}
-      </div>
+      <button type="button" onClick={dismiss} aria-label="Dismiss"
+        className="shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg opacity-70 hover:opacity-100 hover:bg-white/5 transition">
+        <X size={16} />
+      </button>
     </div>
   )
 }

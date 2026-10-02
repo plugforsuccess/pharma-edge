@@ -671,6 +671,11 @@ owner's request until the copy and the pop-up behavior are designed).
 paragraphs back under cards either. Tax screens keep one visible line:
 "All tax figures are estimates, not tax advice. Consult a tax
 professional before acting on them."
+**Card notices** (tax-wait, take-gains, roll window, time stop) use the
+`Notice` component in `Leaps.jsx`: bold title and body at the same size
+(text-sm), plus an X that dismisses it on this device (localStorage,
+per position and per notice). A dismissed time stop returns the next day;
+a roll-window warning stays dismissed until it escalates.
 
 **Mobile-first.** Max width 448px (max-w-md) centered. Bottom navigation
 on mobile, sidebar on desktop. All tap targets minimum 44px.
