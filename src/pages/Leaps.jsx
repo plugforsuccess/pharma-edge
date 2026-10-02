@@ -192,7 +192,8 @@ export default function Leaps() {
     function withLadder(pos, calc) {
       if (!calc) return { pos, calc, ladder: [], ladderLongTerm: null, custom: [], customLongTerm: null, runner: null }
       const isStock = pos.instrument_type === 'stock'
-      const contracts = isStock ? null : (Number(pos.contracts) || null)
+      // Targets split whole contracts — or whole shares for stock.
+      const contracts = wholeUnits(isStock ? pos.shares : pos.contracts)
       const units = isStock ? Number(pos.shares) : contracts
       const own = Array.isArray(pos.exit_targets) && pos.exit_targets.length ? pos.exit_targets : null
       if (own) {
@@ -829,7 +830,7 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
           onAdd={addRow}
           onRemove={removeRow}
         />
-        {previewRows && previewRows.length > 0 && <CustomTargetsPreview rows={previewRows} isStock={isShares} />}
+        {previewRows && previewRows.length > 0 && <CustomTargetsPreview rows={previewRows} isStock={isShares} units={isShares ? num(f.shares) : num(f.contracts)} />}
       </FormSection>
 
       {error && (
@@ -1061,7 +1062,8 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
         rowsLongTerm={custom?.length > 0 ? customLongTerm : ladderLongTerm}
         runner={custom?.length > 0 ? null : runner}
         character={calc.tax_character}
-        longTermDate={calc.long_term_date} isStock={isStock} />
+        longTermDate={calc.long_term_date} isStock={isStock}
+        units={isStock ? Number(pos.shares) : Number(pos.contracts)} />
 
       {calc.target_progress != null && (
         <div className="mb-4">
@@ -1113,17 +1115,6 @@ const CHARACTER_LABEL = {
   section_1256: '§1256 60/40 rate',
 }
 
-const fractionLabel = (f) => {
-  const known = { [1 / 2]: 'half', [1 / 3]: 'a third', [1 / 4]: 'a quarter' }
-  for (const [k, v] of Object.entries(known)) if (Math.abs(f - Number(k)) < 1e-6) return v
-  return pct(f, 0)
-}
-
-const sellLabel = (r, isStock) => {
-  if (r.contracts == null) return `sell ${fractionLabel(r.fraction)}`
-  if (r.contracts === 0) return 'nothing to sell (too few contracts)'
-  return `sell ${r.contracts} ${isStock ? 'lot' : 'contract'}${r.contracts === 1 ? '' : 's'}`
-}
 
 function TimeStopBanner({ stop, positionId }) {
   if (!stop || stop.level === 'ok') return null
@@ -1215,7 +1206,7 @@ function previewTargets(f, own, ladderFor, customFor) {
   const character = f.instrument_type === 'index_option_1256'
     ? 'section_1256'
     : (holdingPeriod(f.purchase_date, todayYmd())?.is_long_term ? 'long_term' : 'short_term')
-  const contracts = f.instrument_type === 'stock' ? null : (Number.parseInt(f.contracts, 10) || null)
+  const contracts = wholeUnits(f.instrument_type === 'stock' ? num(f.shares) : num(f.contracts))
   if (own) {
     const usable = own.filter((t) => Number.isFinite(t.value) && t.value > 0 && Number.isFinite(t.sell) && t.sell > 0)
     return customFor(basis, value, character, contracts, usable)
@@ -1296,13 +1287,25 @@ function TargetsEditor({ own, rows, contracts, onOwn, onRow, onAdd, onRemove }) 
 const targetLabel = (r) => (r.kind === 'pct' ? `+${pct(r.input, Number.isInteger(+(r.input * 100).toFixed(4)) ? 0 : 1)}` : usd(r.input))
 // The other half of the target: the $ value for a % target, the % for a $ one.
 const targetOther = (r) => (r.kind === 'pct' ? usd(r.exit_value) : `+${pct(r.gain_pct, 0)}`)
-const soldLabel = (r, isStock) => {
-  if (r.contracts == null) return `sell ${pct(r.fraction, 0)}`
-  if (r.contracts === 0) return 'nothing to sell (too few contracts)'
-  return `sell ${r.contracts} ${isStock ? 'lot' : 'contract'}${r.contracts === 1 ? '' : 's'}`
+// "sell 35 contracts" / "sell 1,050 shares" — always a count, never a
+// fraction. Fractional share holdings get a share count to 2 dp.
+const soldLabel = (r, isStock, units = null) => {
+  const unit = isStock ? 'share' : 'contract'
+  if (r.contracts == null) {
+    const n = units > 0 ? +(units * r.fraction).toFixed(2) : null
+    return n == null ? `sell ${pct(r.fraction, 0)}` : `sell ${n.toLocaleString('en-US')} ${unit}${n === 1 ? '' : 's'}`
+  }
+  if (r.contracts === 0) return `nothing to sell (too few ${unit}s)`
+  return `sell ${r.contracts.toLocaleString('en-US')} ${unit}${r.contracts === 1 ? '' : 's'}`
 }
 
-function CustomTargetsPreview({ rows, isStock }) {
+// Whole units (contracts or shares) to split across targets, or null.
+function wholeUnits(v) {
+  const n = Number(v)
+  return Number.isInteger(n) && n > 0 ? n : null
+}
+
+function CustomTargetsPreview({ rows, isStock, units }) {
   if (!rows?.length) return null
   const kept = rows.reduce((sum, r) => sum + r.after_tax_proceeds, 0)
   return (
@@ -1313,7 +1316,7 @@ function CustomTargetsPreview({ rows, isStock }) {
           <li key={r.index} className="flex items-baseline gap-3 text-sm">
             <div className="flex-1 min-w-0">
               <div className="text-fg">{targetLabel(r)} <span className="text-muted">· {targetOther(r)}</span></div>
-              <div className="text-xs text-muted mt-0.5">{soldLabel(r, isStock)}{r.estimated_tax > 0 ? ` · ${usd(r.estimated_tax)} tax` : ''}</div>
+              <div className="text-xs text-muted mt-0.5">{soldLabel(r, isStock, units)}{r.estimated_tax > 0 ? ` · ${usd(r.estimated_tax)} tax` : ''}</div>
             </div>
             <span className="font-mono-tab text-green-400 font-semibold shrink-0">{usd(r.after_tax_proceeds)}</span>
           </li>
@@ -1329,7 +1332,7 @@ function CustomTargetsPreview({ rows, isStock }) {
   )
 }
 
-function CustomExitTargets({ title = 'Exit Targets', rows, rowsLongTerm, runner, character, isStock }) {
+function CustomExitTargets({ title = 'Exit Targets', rows, rowsLongTerm, runner, character, isStock, units }) {
   if (!rows?.length) return null
   const kept = rows.reduce((sum, r) => sum + r.after_tax_proceeds, 0)
   const soldShare = rows.reduce((sum, r) => sum + r.fraction, 0)
@@ -1347,8 +1350,8 @@ function CustomExitTargets({ title = 'Exit Targets', rows, rowsLongTerm, runner,
                   <div className="text-sm text-fg">Runner <span className="text-muted">· {pct(runner.trail_pct, 0)} trail</span></div>
                   <div className="text-xs text-muted mt-0.5">
                     {runner.contracts != null
-                      ? `last ${runner.contracts} ${unit}${runner.contracts === 1 ? '' : 's'}`
-                      : `last ${pct(runner.share, 0)}`}
+                      ? `last ${runner.contracts.toLocaleString('en-US')} ${unit}${runner.contracts === 1 ? '' : 's'}`
+                      : units > 0 ? `last ${(+(units * runner.share).toFixed(2)).toLocaleString('en-US')} ${unit}s` : `last ${pct(runner.share, 0)}`}
                   </div>
                 </div>
                 <div className="text-right shrink-0">
@@ -1380,7 +1383,7 @@ function CustomExitTargets({ title = 'Exit Targets', rows, rowsLongTerm, runner,
           <div className="flex items-baseline gap-3">
             <div className="flex-1 min-w-0">
               <div className="text-sm text-fg">{targetLabel(r)} <span className="text-muted">· {targetOther(r)}</span></div>
-              <div className="text-xs text-muted mt-0.5">{soldLabel(r, isStock)}</div>
+              <div className="text-xs text-muted mt-0.5">{soldLabel(r, isStock, units)}</div>
             </div>
             <span className={clsx('text-sm font-mono-tab shrink-0 font-semibold', r.hit ? 'text-green-400' : 'text-fg')}>
               {usd(r.after_tax_proceeds)}
