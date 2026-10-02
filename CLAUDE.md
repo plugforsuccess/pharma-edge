@@ -681,7 +681,8 @@ per position and per notice). A dismissed time stop returns the next day;
 a roll-window warning stays dismissed until it escalates.
 **Badges:** green = long-term, amber = short-term, sky = §1256; type
 badges for holdings without a tax status on the card: **Cash** in
-mint-teal (`teal-*`, the $100-bill ink) and **Real Estate** in brick
+blue (`blue-*`, the $100-bill ribbon — bluer than the sky §1256 badge,
+away from the long-term green) and **Real Estate** in brick
 (`orange-*`) — real estate shows its type, not long/short-term (owner,
 2026-10-02). `BADGE_TONE` in `Leaps.jsx`.
 **Holdings collapse:** each holding is a tap-to-expand card (summary:

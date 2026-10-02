@@ -1496,10 +1496,10 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
 
 // Collapsible card frame shared by cash and real estate (same header as
 // PositionCard: title, meta lines, badge, and the value when collapsed).
-// Type badges: cash = mint-teal ($100-bill ink), real estate = brick.
+// Type badges: cash = blue (the $100-bill ribbon), real estate = brick.
 const BADGE_TONE = {
   neutral: 'bg-bg/40 text-subtle border-border',
-  cash: 'bg-teal-400/10 text-teal-300 border-teal-400/35',
+  cash: 'bg-blue-400/10 text-blue-300 border-blue-400/40',
   realEstate: 'bg-orange-400/10 text-orange-300 border-orange-400/35',
 }
 
