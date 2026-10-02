@@ -12,6 +12,7 @@ import {
   Shield,
 } from 'lucide-react'
 import InstallPrompt from './InstallPrompt'
+import OnboardingGate from './OnboardingGate'
 import Spinner from './Spinner'
 import { useAuth } from '../context/AuthContext'
 import clsx from 'clsx'
@@ -154,6 +155,7 @@ export default function Layout() {
       </div>
 
       <InstallPrompt />
+      <OnboardingGate />
 
       {/* Mobile-only bottom nav: 4 tabs split 2/2 around the
           Simulator center button. */}
