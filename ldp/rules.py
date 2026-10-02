@@ -168,7 +168,7 @@ def evaluate_position(
     trail = ex.runner_trail_pct if runner_trail_pct is None else runner_trail_pct
     if ladder_mod.all_targets_done(rungs, pos.rungs_filled) and pos.peak_mark:
         trail_price = pos.peak_mark * (1 - trail)
-        if pos.mark <= trail_price:
+        if pos.mark <= trail_price + 1e-9:   # float-safe: a mark exactly at the trail sells
             return decide("sell_all", 3, "runner_trail", pos.contracts_open,
                           f"mark {pos.mark:.2f} ≤ trail {trail_price:.2f} ({trail:.0%} off the {pos.peak_mark:.2f} peak)",
                           details={"peak_mark": pos.peak_mark, "trail_price": round(trail_price, 4)})

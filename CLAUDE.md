@@ -680,6 +680,13 @@ a roll-window warning stays dismissed until it escalates.
 name, dates, tax badge, after-tax value, roll-window / time-stop flag).
 Open state is remembered on the device (`cm:holdings-open`); new
 holdings open; "Expand all / Collapse all" sits by the Holdings title.
+**Exit Targets rows** keep the original card format: "100% gain • 2x" /
+"Target 1 · sell 35 contracts" on the left, the whole-position sell
+value on the right, a progress strip under each, the runner as a last
+row. No tax-math line and no Long-term line (option-price targets sell
+at the same price either way). The form toggle reads "Default" /
+"Set my own". Option titles read "RXRX · 50 contracts" with
+"$5 Call · Exp Jan 21, 2028" below.
 
 **Mobile-first.** Max width 448px (max-w-md) centered. Bottom navigation
 on mobile, sidebar on desktop. All tap targets minimum 44px.

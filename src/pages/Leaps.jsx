@@ -915,13 +915,17 @@ const shortDate = (ymd, withYear = true) => {
 }
 
 // Two lines under the position name:
-//   "Exp Jan 21, 2028"                  (options only)
+//   "$5 Call · Exp Jan 21, 2028"        (options only)
 //   "Bought Sep 28, 2026"               (+ "· value Sep 28" when the
 //                                         stored value isn't from today)
 function positionMeta(pos) {
   const contract = []
-  // The count lives in the title ("RXRX $5 Call · 50 contracts").
-  if (pos.instrument_type !== 'stock' && pos.expiration) contract.push(`Exp ${shortDate(pos.expiration)}`)
+  // Title is "RXRX · 50 contracts"; this line is "$5 Call · Exp Jan 21, 2028".
+  if (pos.instrument_type !== 'stock') {
+    contract.push([pos.strike && `$${Number(pos.strike).toLocaleString('en-US', { maximumFractionDigits: 2 })}`,
+      pos.option_type === 'P' ? 'Put' : 'Call'].filter(Boolean).join(' '))
+    if (pos.expiration) contract.push(`Exp ${shortDate(pos.expiration)}`)
+  }
   const held = [`${pos.exercised_from_id ? 'Exercised' : 'Bought'} ${shortDate(pos.purchase_date)}`]
   if (pos.value_as_of) {
     const asOf = todayYmd(new Date(pos.value_as_of))
@@ -953,9 +957,7 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
   const isStock = pos.instrument_type === 'stock'
   const label = isStock
     ? `${pos.ticker} · ${Number(pos.shares).toLocaleString()} shares`
-    : [
-      [pos.ticker, pos.strike && `$${Number(pos.strike).toLocaleString('en-US', { maximumFractionDigits: 2 })}`, pos.option_type === 'P' ? 'Put' : 'Call']
-        .filter(Boolean).join(' '),
+    : [pos.ticker,
       Number(pos.contracts) > 0 && `${Number(pos.contracts).toLocaleString('en-US')} contract${Number(pos.contracts) === 1 ? '' : 's'}`,
     ].filter(Boolean).join(' · ')
   const canExercise = exerciseCall({ option: pos, exerciseDate: todayYmd() }) != null
@@ -1057,12 +1059,9 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
       ))}
 
       <CustomExitTargets
-        title={custom?.length > 0 ? 'Exit Targets' : 'Exit plan'}
         rows={custom?.length > 0 ? custom : ladder}
-        rowsLongTerm={custom?.length > 0 ? customLongTerm : ladderLongTerm}
         runner={custom?.length > 0 ? null : runner}
-        character={calc.tax_character}
-        longTermDate={calc.long_term_date} isStock={isStock}
+        isStock={isStock}
         units={isStock ? Number(pos.shares) : Number(pos.contracts)} />
 
       {calc.target_progress != null && (
@@ -1222,7 +1221,7 @@ function TargetsEditor({ own, rows, contracts, onOwn, onRow, onAdd, onRemove }) 
   return (
     <div>
       <Segmented value={own ? 'own' : 'default'} onChange={(v) => onOwn(v === 'own')}
-        options={[{ value: 'default', label: 'My plan' }, { value: 'own', label: 'Set my own' }]} />
+        options={[{ value: 'default', label: 'Default' }, { value: 'own', label: 'Set my own' }]} />
       {!own ? (
         <p className="mt-3 text-xs text-muted">
           Uses your exit plan from <Link to="/settings#exit-targets" className="text-amber-300 underline underline-offset-2">Settings</Link>.
@@ -1284,9 +1283,6 @@ function TargetsEditor({ own, rows, contracts, onOwn, onRow, onAdd, onRemove }) 
   )
 }
 
-const targetLabel = (r) => (r.kind === 'pct' ? `+${pct(r.input, Number.isInteger(+(r.input * 100).toFixed(4)) ? 0 : 1)}` : usd(r.input))
-// The other half of the target: the $ value for a % target, the % for a $ one.
-const targetOther = (r) => (r.kind === 'pct' ? usd(r.exit_value) : `+${pct(r.gain_pct, 0)}`)
 // "sell 35 contracts" / "sell 1,050 shares" — always a count, never a
 // fraction. Fractional share holdings get a share count to 2 dp.
 const soldLabel = (r, isStock, units = null) => {
@@ -1305,96 +1301,75 @@ function wholeUnits(v) {
   return Number.isInteger(n) && n > 0 ? n : null
 }
 
+// Exit Targets in the original card format:
+//   100% gain • 2x                          $12,000
+//   Target 1 · sell 35 contracts
+//   [progress strip]
+// The right value is what the whole position must be worth for that
+// target to sell. Targets are gains on the option (the playbook), so the
+// price is the same short- or long-term.
+const multShort = (n) => (!Number.isFinite(n) ? '—' : Number.isInteger(+n.toFixed(2)) ? `${+n.toFixed(2)}x` : `${n.toFixed(2)}x`)
+const gainLabel = (r) => (r.kind === 'usd'
+  ? `${usd(r.input)} • ${multShort(r.exit_multiple)}`
+  : `${pct(r.gain_pct, Number.isInteger(+(r.gain_pct * 100).toFixed(4)) ? 0 : 1)} gain • ${multShort(r.exit_multiple)}`)
+
 function CustomTargetsPreview({ rows, isStock, units }) {
   if (!rows?.length) return null
-  const kept = rows.reduce((sum, r) => sum + r.after_tax_proceeds, 0)
   return (
     <div className="mt-4 rounded-xl border border-border bg-bg/40 p-4">
-      <div className="text-[10px] uppercase tracking-wider text-muted mb-3">You keep, after tax</div>
+      <div className="text-[10px] uppercase tracking-wider text-muted mb-3">Sell when the position is worth</div>
       <ol className="space-y-3">
-        {rows.map((r) => (
-          <li key={r.index} className="flex items-baseline gap-3 text-sm">
+        {rows.map((r, i) => (
+          <li key={r.index} className="flex items-baseline gap-3">
             <div className="flex-1 min-w-0">
-              <div className="text-fg">{targetLabel(r)} <span className="text-muted">· {targetOther(r)}</span></div>
-              <div className="text-xs text-muted mt-0.5">{soldLabel(r, isStock, units)}{r.estimated_tax > 0 ? ` · ${usd(r.estimated_tax)} tax` : ''}</div>
+              <div className="text-sm text-fg">{gainLabel(r)}</div>
+              <div className="text-xs text-muted mt-0.5">Target {i + 1} · {soldLabel(r, isStock, units)}</div>
             </div>
-            <span className="font-mono-tab text-green-400 font-semibold shrink-0">{usd(r.after_tax_proceeds)}</span>
+            <div className="text-sm font-mono-tab text-fg font-semibold shrink-0">{usd(r.exit_value)}</div>
           </li>
         ))}
       </ol>
-      {rows.length > 1 && (
-        <div className="mt-4 pt-3 border-t border-hairline flex items-baseline text-sm">
-          <span className="flex-1 text-subtle">Total if every target hits</span>
-          <span className="font-mono-tab text-green-400 font-semibold">{usd(kept)}</span>
-        </div>
-      )}
     </div>
   )
 }
 
-function CustomExitTargets({ title = 'Exit Targets', rows, rowsLongTerm, runner, character, isStock, units }) {
+function CustomExitTargets({ title = 'Exit Targets', rows, runner, isStock, units }) {
   if (!rows?.length) return null
-  const kept = rows.reduce((sum, r) => sum + r.after_tax_proceeds, 0)
-  const soldShare = rows.reduce((sum, r) => sum + r.fraction, 0)
   const unit = isStock ? 'share' : 'contract'
   return (
     <TargetsPanel
       title={title}
-      subtitle={`What you keep after tax · ${CHARACTER_LABEL[character]}`}
-      footer={
-        <>
-          {runner && runner.contracts !== 0 && (
-            <div className="mt-4 pt-4 border-t border-hairline">
-              <div className="flex items-baseline gap-3">
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm text-fg">Runner <span className="text-muted">· {pct(runner.trail_pct, 0)} trail</span></div>
-                  <div className="text-xs text-muted mt-0.5">
-                    {runner.contracts != null
-                      ? `last ${runner.contracts.toLocaleString('en-US')} ${unit}${runner.contracts === 1 ? '' : 's'}`
-                      : units > 0 ? `last ${(+(units * runner.share).toFixed(2)).toLocaleString('en-US')} ${unit}s` : `last ${pct(runner.share, 0)}`}
-                  </div>
-                </div>
-                <div className="text-right shrink-0">
-                  <div className="text-sm font-mono-tab font-semibold text-fg">{usd(runner.exit_value)}</div>
-                  <div className="text-xs text-muted mt-0.5">if the trail hits</div>
-                </div>
-              </div>
-              <div className="mt-1 text-xs text-muted font-mono-tab">
-                Peak {usdUnit(runner.peak_unit_value)} → trail {usdUnit(runner.trail_unit_value)} per {unit}
+      subtitle="Sell when the position is worth"
+      footer={runner && runner.contracts !== 0 ? (
+        <div className="mt-4 pt-4 border-t border-hairline">
+          <div className="flex items-baseline gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="text-sm text-fg">Runner · {pct(runner.trail_pct, 0)} trail</div>
+              <div className="text-xs text-muted mt-0.5">
+                {runner.contracts != null
+                  ? `last ${runner.contracts.toLocaleString('en-US')} ${unit}${runner.contracts === 1 ? '' : 's'}`
+                  : units > 0 ? `last ${(+(units * runner.share).toFixed(2)).toLocaleString('en-US')} ${unit}s` : `last ${pct(runner.share, 0)}`}
               </div>
             </div>
-          )}
-          <div className="mt-4 pt-3 border-t border-hairline flex items-baseline gap-3">
-            <span className="flex-1 text-sm text-subtle">
-              Kept if every target hits
-              {soldShare < 0.9999 && (
-                <span className="block text-xs text-muted mt-0.5">
-                  {runner ? `plus the runner (${pct(1 - soldShare, 0)})` : `${pct(1 - soldShare, 0)} still held`}
-                </span>
-              )}
-            </span>
-            <span className="text-base font-mono-tab text-green-400 font-semibold">{usd(kept)}</span>
+            <div className="text-right shrink-0">
+              <div className="text-sm font-mono-tab font-semibold text-fg">{usd(runner.exit_value)}</div>
+              <div className="text-xs text-muted mt-0.5">sells if it falls to this</div>
+            </div>
           </div>
-        </>
-      }
+        </div>
+      ) : null}
     >
       {rows.map((r, i) => (
         <li key={r.index}>
           <div className="flex items-baseline gap-3">
             <div className="flex-1 min-w-0">
-              <div className="text-sm text-fg">{targetLabel(r)} <span className="text-muted">· {targetOther(r)}</span></div>
-              <div className="text-xs text-muted mt-0.5">{soldLabel(r, isStock, units)}</div>
+              <div className="text-sm text-fg">{gainLabel(r)}</div>
+              <div className="text-xs text-muted mt-0.5">Target {i + 1} · {soldLabel(r, isStock, units)}</div>
             </div>
-            <div className="text-right shrink-0">
-              <div className={clsx('text-sm font-mono-tab font-semibold', r.hit ? 'text-green-400' : 'text-fg')}>
-                {usd(r.after_tax_proceeds)}
-              </div>
-              <div className="text-xs text-muted font-mono-tab mt-0.5">{mult(r.exit_multiple)}</div>
+            <div className={clsx('text-sm font-mono-tab font-semibold shrink-0', r.hit ? 'text-green-400' : 'text-fg')}>
+              {usd(r.exit_value)}
             </div>
           </div>
-          {rowsLongTerm?.[i] && (
-            <div className="mt-1 text-xs text-muted text-right">Long-term: <span className="font-mono-tab">{usd(rowsLongTerm[i].after_tax_proceeds)}</span></div>
-          )}
           <div className="mt-2"><RungProgress hit={r.hit} progress={r.progress} /></div>
         </li>
       ))}
