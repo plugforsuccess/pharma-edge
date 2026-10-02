@@ -823,6 +823,7 @@ export const INCOME_KINDS = [
   { value: 'reit', label: 'REIT', long: 'REIT dividends (20% deduction)' },
   { value: 'muni', label: 'Muni', long: 'Muni bond fund (no federal tax)' },
   { value: 'treasury', label: 'Treasury', long: 'Treasury bond fund (no state tax)' },
+  { value: 'roc', label: 'Return of capital', long: 'Return of capital (tax deferred, lowers your basis)' },
 ]
 export const REIT_199A_DEDUCTION = 0.2
 
@@ -830,6 +831,9 @@ export function incomeTaxRate(rates, kind) {
   const lt = rates.long_term
   const st = rates.short_term
   if (kind === 'qualified') return lt.total
+  // Return of capital isn't taxed when paid: it lowers the cost basis, so
+  // the tax lands at sale as a capital gain (see dividendAfterTax).
+  if (kind === 'roc') return 0
   if (st.overridden) return st.total
   if (kind === 'reit') return st.federal * (1 - REIT_199A_DEDUCTION) + st.niit + st.state
   if (kind === 'muni') return st.state
@@ -841,7 +845,11 @@ export function dividendAfterTax({ value, yieldPct, kind = 'qualified', rateForG
   const v = Math.max(0, Number(value) || 0)
   const y = Math.max(0, Number(yieldPct) || 0)
   const income = v * y
-  const rate = incomeTaxRate(rateForGain(income), kind)
+  const rates = rateForGain(income)
+  const rate = incomeTaxRate(rates, kind)
+  // ROC: each $1 paid lowers basis by $1, so it comes back as $1 more
+  // long-term gain at sale. Estimated at today's long-term rate.
+  const deferredRate = kind === 'roc' ? rates.long_term.total : 0
   return {
     value: v,
     yield: y,
@@ -850,6 +858,8 @@ export function dividendAfterTax({ value, yieldPct, kind = 'qualified', rateForG
     rate,
     after_tax_income: income * (1 - rate),
     after_tax_yield: y * (1 - rate),
+    deferred_tax: income * deferredRate,
+    after_tax_yield_at_sale: y * (1 - rate - deferredRate),
   }
 }
 
@@ -859,7 +869,10 @@ export function incomeYieldComparison({ balance, options, rateForGain }) {
   return options
     .map((o) => {
       const d = dividendAfterTax({ value: balance, yieldPct: o.apy, kind: o.kind, rateForGain })
-      return { ...o, rate: d.rate, after_tax_yield: d.after_tax_yield, after_tax_interest: d.after_tax_income }
+      // Rank ROC on what it keeps after the tax due at sale, so a deferral
+      // never reads as tax-free next to income taxed today.
+      const y = d.after_tax_yield_at_sale
+      return { ...o, rate: d.rate, after_tax_yield: y, after_tax_interest: d.value * y }
     })
     .sort((a, b) => b.after_tax_yield - a.after_tax_yield)
 }

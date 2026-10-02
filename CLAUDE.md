@@ -873,12 +873,18 @@ value, holding period) and must pass before any edit to that file lands.
   `details.dividend_yield` (fraction) + `dividend_kind` (`INCOME_KINDS`:
   qualified → LT rate; ordinary → ordinary rate; reit → ordinary
   federal × 0.8 (§199A) + NIIT + state; muni → state only; treasury →
-  federal + NIIT, no state; a CPA override uses the ordinary total).
+  federal + NIIT, no state; roc → 0 now, `deferred_tax` at the LT rate
+  because return of capital lowers basis and is taxed at sale; a CPA
+  override uses the ordinary total, never for roc). ROC cards show
+  Payouts / Tax now / Tax at sale; the yield card ranks ROC on
+  `after_tax_yield_at_sale` so a deferral never reads as tax-free. The
+  kind is user-picked, never inferred from the ticker (an issuer's ROC
+  status depends on its earnings & profits each year).
   `dividendAfterTax` / `incomeYieldComparison` in `afterTax.js`. The
   card shows dividends / yr, after tax / yr and after-tax yield; the
   Portfolio card adds an "Income after tax" row (cash interest +
   dividends). The yield card lists income categories (dividend ETF,
-  REIT, covered-call, muni, Treasury fund) under the cash rows, marked
+  REIT, covered-call, muni, Treasury fund, BTC preferred) under the cash rows, marked
   "prices can move" — categories only, user-entered yields.
 - Per-position values are never netted; the portfolio card shows a
   netted figure labeled as an estimate.

@@ -1288,7 +1288,14 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
         <Stat label="Multiple" value={mult(calc.current_multiple)} />
       </div>
 
-      {dividend && (
+      {dividend && dividend.kind === 'roc' && (
+        <div className="grid grid-cols-3 gap-3 mb-4 pb-3 border-b border-hairline">
+          <Stat label="Payouts / yr" value={usd(dividend.income)} />
+          <Stat label="Tax now" value={usd(0)} />
+          <Stat label="Tax at sale / yr" value={usd(dividend.deferred_tax)} />
+        </div>
+      )}
+      {dividend && dividend.kind !== 'roc' && (
         <div className="grid grid-cols-3 gap-3 mb-4 pb-3 border-b border-hairline">
           <Stat label="Dividends / yr" value={usd(dividend.income)} />
           <Stat label="After tax / yr" value={usd(dividend.after_tax_income)} />
@@ -1499,6 +1506,7 @@ const INCOME_OPTIONS = [
   { key: 'div_covered_call', kind: 'ordinary', label: 'Covered-call ETF', example: 9.0 },
   { key: 'div_muni', kind: 'muni', label: 'Muni fund', example: 3.5 },
   { key: 'div_treasury', kind: 'treasury', label: 'Treasury fund', example: 4.2 },
+  { key: 'div_btc_preferred', kind: 'roc', label: 'BTC preferred', example: 11.0 },
 ]
 const YIELD_KEY = 'cm:cash-yield-apys'
 
@@ -1516,7 +1524,7 @@ function YieldRows({ rows, apys, setApy, best }) {
         <li key={r.key ?? r.kind} className="grid grid-cols-[minmax(0,1fr)_5.5rem_4.5rem] gap-x-3 items-center">
           <div className="min-w-0">
             <div className="text-sm text-fg truncate">{r.label}</div>
-            <div className="text-xs text-muted">{usd(r.after_tax_interest)}/yr{r === best ? ' · best' : ''}</div>
+            <div className="text-xs text-muted">{usd(r.after_tax_interest)}/yr{r.kind === 'roc' ? ' · after tax at sale' : ''}{r === best ? ' · best' : ''}</div>
           </div>
           <Affix suffix="%">
             <NumberInput decimals={3} value={apys[r.key ?? r.kind]} onChange={(v) => setApy(r.key ?? r.kind, v)}
@@ -1567,7 +1575,8 @@ function CashYieldCard({ cashResults, rateForGain }) {
       <YieldRows rows={incomeRows} apys={apys} setApy={setApy} best={incomeRows[0]} />
       <p className="mt-3 text-xs text-muted">
         Example rates — enter what you're offered. T-bills and Treasury funds skip state tax; muni funds skip federal tax;
-        qualified dividends get long-term rates. Not a recommendation.
+        qualified dividends get long-term rates; return of capital (some preferreds) isn't taxed until you sell, because it
+        lowers your cost basis. Not a recommendation.
       </p>
     </section>
   )

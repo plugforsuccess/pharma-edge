@@ -422,6 +422,16 @@ const round2 = (x) => Math.round(x * 100) / 100
   const cmp = incomeYieldComparison({ balance: 100000, rateForGain: ga,
     options: [{ kind: 'treasury', apy: 0.042 }, { kind: 'muni', apy: 0.035 }] })
   eq('muni first at high bracket', cmp[0].kind, 'muni')
+  // Return of capital (e.g. some preferreds): no tax now, taxed at LT rates at sale.
+  const roc = dividendAfterTax({ value: 100000, yieldPct: 0.11, kind: 'roc', rateForGain: ga })
+  eq('ROC: no tax now', roc.rate, 0)
+  eq('ROC: full payout now', roc.after_tax_income, 11000, 1e-6)
+  eq('ROC: deferred tax at LT stack', roc.deferred_tax, 11000 * 0.2879, 1e-6)
+  eq('ROC: yield after tax at sale', roc.after_tax_yield_at_sale, 0.11 * (1 - 0.2879), 1e-9)
+  eq('ROC: override does not tax it now', incomeTaxRate({ long_term: { total: 0.2 }, short_term: { total: 0.3, overridden: true } }, 'roc'), 0)
+  eq('non-ROC: nothing deferred', q.deferred_tax, 0)
+  const rocCmp = incomeYieldComparison({ balance: 100000, rateForGain: ga, options: [{ kind: 'roc', apy: 0.11 }] })
+  eq('ROC compared after tax at sale', rocCmp[0].after_tax_yield, 0.11 * (1 - 0.2879), 1e-9)
 }
 
 // ── Real estate ──────────────────────────────────────────────────
