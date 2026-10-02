@@ -676,7 +676,7 @@ slot, "Estimated tax rate", is a "View rates" link that opens the
 breakdown (long / short-term, §1256 blend) in a `Modal`.
 **Card notices** (tax-wait, take-gains, roll window, time stop) use the
 `Notice` component in `Leaps.jsx`: bold title and body at the same size
-(text-sm), plus an X that dismisses it on this device (localStorage,
+(text-sm), plus a small X on its own row in the top-right corner (so the text runs full width) that dismisses it on this device (localStorage,
 per position and per notice). A dismissed time stop returns the next day;
 a roll-window warning stays dismissed until it escalates.
 **Holdings collapse:** each holding is a tap-to-expand card (summary:
@@ -691,7 +691,7 @@ holdings open; "Expand all / Collapse all" sits by the Holdings title.
 value on the right, a progress strip under each, the runner as a last
 row. No tax-math line and no Long-term line (option-price targets sell
 at the same price either way). The form toggle reads "Default" /
-"Set my own". Titles read "RXRX • 50 contracts" / "NAUT • 3,500 shares";
+"Custom". Titles read "RXRX • 50 contracts" / "NAUT • 3,500 shares" / "BTC • 0.5 $BTC" (crypto counts in `$TICKER`, never "coins": "sell 0.35 $BTC");
 options show "$5 Call • Exp Jan 21, 2028" below, then "Bought …".
 
 **Mobile-first.** Max width 448px (max-w-md) centered. Bottom navigation
