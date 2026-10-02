@@ -17,6 +17,7 @@ import {
   positionAfterTax, holdingPeriod, portfolioSummary, marginalRate,
   isValidTaxRate, isValidBasis, exerciseCall, blended1256Rate, suggestInstrumentType, bracketTax,
   exitLadder, allocateContracts, rateAtGainFor, customExitTargets, validateCustomTargets,
+  EXIT_PLAYBOOK, allocateWithRunner, playbookTargets, runnerPlan, timeStop, longTermFitsPlan, entryRunwayDays,
 } from '../src/utils/afterTax.js'
 
 const federal = {
@@ -345,6 +346,43 @@ const round2 = (x) => Math.round(x * 100) / 100
   eq('validate sum > 100%', typeof validateCustomTargets([{ kind: 'pct', value: 1, sell: 0.6 }, { kind: 'pct', value: 2, sell: 0.6 }]), 'string')
   eq('validate usd below basis', typeof validateCustomTargets([{ kind: 'usd', value: 5000, sell: 1 }], 10000), 'string')
   eq('validate bad kind', typeof validateCustomTargets([{ kind: 'x', value: 1, sell: 1 }]), 'string')
+}
+
+// ── Exit playbook (mirrors ldp/tests/test_ladder.py + test_rules.py) ──
+{
+  const fr = EXIT_PLAYBOOK.fractions
+  // Same contract split as the engine, ties to selling.
+  for (const [n, a, r] of [[3, '2,1', 0], [7, '5,1', 1], [10, '7,2', 1], [20, '14,3', 3], [50, '35,8', 7]]) {
+    const got = allocateWithRunner(n, fr)
+    eq(`playbook split ${n}`, `${got.alloc.join(',')}|${got.runner}`, `${a}|${r}`)
+  }
+  // 20 contracts, $20,000 cost: +100% sells 14 → $28,000; +200% sells 3 → $9,000.
+  const flat = () => 0.238
+  const [t1, t2] = customExitTargets({ basis: 20000, currentValue: 20000, contracts: 20, targets: playbookTargets(), rateAtGain: flat })
+  eq('T1 exit value', t1.exit_value, 40000)
+  eq('T1 contracts', t1.contracts, 14)
+  eq('T1 proceeds = cost back + profit', t1.proceeds, 28000)
+  eq('T1 after-tax', t1.after_tax_proceeds, 28000 - 14000 * 0.238, 1e-6)
+  eq('T2 exit value', t2.exit_value, 60000)
+  eq('T2 contracts', t2.contracts, 3)
+  // Runner: 3 contracts, peak $3,000/contract → trail stop $2,100/contract.
+  const run = runnerPlan({ fractions: fr, contracts: 20, units: 20, peakUnitValue: 3000, currentValue: 20000, trailPct: 0.3 })
+  eq('runner contracts', run.contracts, 3)
+  eq('runner trail unit', run.trail_unit_value, 2100, 1e-9)
+  eq('runner exit value', run.exit_value, 6300, 1e-9)
+  const fresh = runnerPlan({ fractions: fr, contracts: 20, units: 20, currentValue: 50000, trailPct: 0.3 })
+  eq('runner peak defaults to today', fresh.peak_unit_value, 2500)
+  eq('no runner on 3 contracts', runnerPlan({ fractions: fr, contracts: 3, units: 3, currentValue: 1, trailPct: 0.3 }).contracts, 0)
+  // Time stop: warn under 270 days, act under 180.
+  eq('time stop ok', timeStop('2028-01-21', '2026-10-02').level, 'ok')
+  eq('time stop warn', timeStop('2027-06-01', '2026-10-02').level, 'warn')
+  eq('time stop act', timeStop('2027-03-01', '2026-10-02').level, 'act')
+  eq('time stop act-by date', timeStop('2028-01-21', '2026-10-02').act_by, '2027-07-25')
+  // RXRX: long-term Sep 29 2027 lands after the roll window opens (Apr 26 2027).
+  eq('LT in roll window → take the gain', longTermFitsPlan('2027-09-29', '2028-01-21'), false)
+  eq('LT before roll window → can wait', longTermFitsPlan('2027-03-01', '2028-06-30'), true)
+  eq('stock has no time stop', longTermFitsPlan('2027-03-01', null), true)
+  eq('entry runway RXRX', entryRunwayDays('2026-09-28', '2028-01-21'), 480)
 }
 
 // ── Validation ───────────────────────────────────────────────────

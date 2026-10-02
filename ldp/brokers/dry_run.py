@@ -39,7 +39,7 @@ class DryRunBroker:
         self.orders[oid] = _Working(order, order.limit_price)
         self.log.append({"op": "place", "order_id": oid, "account_id": account_id, "type": "limit",
                          "price": order.limit_price, "side": order.side, "quantity": order.quantity,
-                         "symbol": order.option_symbol})
+                         "symbol": order.option_symbol, "duration": order.duration})
         self._maybe_fill(oid)
         return oid
 

@@ -86,19 +86,37 @@ class OrderConfig:
     poll_interval_seconds: float = 5.0
     tick_size: float = 0.05
     duration: str = "day"
+    # Playbook: automate the first sell. When a buy fills, rest a
+    # good-'til-cancelled limit sell for Target 1's contracts at Target 1.
+    place_target_order_on_entry: bool = True
+    target_order_duration: str = "gtc"
 
 
 @dataclass(frozen=True)
 class ExitConfig:
-    # After-tax gain targets as multiples of basis (1.0 = double after tax).
-    ladder: tuple[float, ...] = (1.0, 2.0, 3.0)
-    # Fraction of the original position sold at each rung. None → equal.
-    rung_fractions: tuple[float, ...] | None = None
+    """LEAPS exit playbook (owner, 2026-10-02). Size every LEAPS as risk
+    capital that can go to zero: no hard price stop — cut only when the
+    thesis breaks. Targets are gains on the OPTION before tax; taxes come
+    after the plan."""
+    # Profit targets as pre-tax gain multiples of basis (1.0 = +100%).
+    ladder: tuple[float, ...] = (1.0, 2.0)
+    # Share of the ORIGINAL position sold at each target. May total < 1;
+    # the rest is the runner. Default: 70% at +100% (cost back plus some
+    # profit, so the rest is free), then half of what's left at +200%.
+    rung_fractions: tuple[float, ...] | None = (0.70, 0.15)
+    # The runner trails: exit when the mark gives back this much from
+    # its peak (active once every target has filled).
+    runner_trail_pct: float = 0.30
+    # Time stop: exit or roll with 6 months left (theta speeds up into
+    # the last months); flag the roll window from 9 months.
     roll_dte_days: int = 180
+    roll_warn_dte_days: int = 270
+    # Wait for long-term only when it's this close AND lands before the
+    # roll window opens; otherwise take the gain when a target hits.
     ltcg_wait_days: int = 60
-    # Price stop: sell when the mark is down this fraction from entry.
-    stop_loss_pct: float = 0.50
-
+    # Optional hard price stop (fraction below entry). None = no price
+    # stop — the playbook cuts only on a broken thesis.
+    stop_loss_pct: float | None = None
 
 @dataclass(frozen=True)
 class CoreConfig:
@@ -147,12 +165,16 @@ def validate(cfg: LDPConfig) -> None:
     _check(0 < c.satellite_delta_min <= c.satellite_delta_max < 1, "contracts: satellite delta band")
     _check(0 < c.max_spread_pct < 1, "contracts: max_spread_pct in (0, 1)")
     _check(len(e.ladder) > 0 and all(t > 0 for t in e.ladder), "exits: ladder targets must be > 0")
+    _check(all(b > a for a, b in zip(e.ladder, e.ladder[1:])), "exits: ladder targets must increase")
     if e.rung_fractions is not None:
         _check(len(e.rung_fractions) == len(e.ladder), "exits: one rung fraction per ladder target")
-        _check(abs(sum(e.rung_fractions) - 1) < 1e-9 and all(f > 0 for f in e.rung_fractions),
-               "exits: rung fractions must be > 0 and sum to 1")
-    _check(0 < e.stop_loss_pct < 1, "exits: stop_loss_pct in (0, 1)")
+        _check(sum(e.rung_fractions) <= 1 + 1e-9 and all(f > 0 for f in e.rung_fractions),
+               "exits: rung fractions must be > 0 and total at most 1 (the rest is the runner)")
+    _check(0 < e.runner_trail_pct < 1, "exits: runner_trail_pct in (0, 1)")
+    _check(e.stop_loss_pct is None or 0 < e.stop_loss_pct < 1, "exits: stop_loss_pct in (0, 1) or unset")
     _check(e.roll_dte_days < c.min_dte_days, "exits: roll_dte_days must be below contracts.min_dte_days")
+    _check(e.roll_dte_days <= e.roll_warn_dte_days < c.min_dte_days,
+           "exits: roll_dte_days ≤ roll_warn_dte_days < contracts.min_dte_days")
     _check(o.max_steps >= 1 and 0 < o.step_pct_of_spread <= 1 and o.tick_size > 0, "orders: ladder settings")
     _check(0 < cfg.core.allocation_pct <= 1 and cfg.core.top_n_sectors >= 1, "core: allocation")
 
@@ -163,7 +185,9 @@ def _check(ok: bool, msg: str) -> None:
 
 
 def rung_fractions(cfg: ExitConfig) -> tuple[float, ...]:
-    if cfg.rung_fractions is not None:
+    """Share of the original position per target (may total < 1 — the
+    rest is the runner). None → equal split with no runner."""
+    if cfg.rung_fractions is not None and len(cfg.rung_fractions) == len(cfg.ladder):
         return tuple(cfg.rung_fractions)
     n = len(cfg.ladder)
     return tuple(1.0 / n for _ in range(n))

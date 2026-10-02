@@ -27,14 +27,17 @@ def quote(
 def position(
     *, held_days=100, dte=500, basis_per_contract=1000.0, mark=12.0, contracts=3, sleeve="core",
     thesis="intact", instrument="equity_option", sector="XLK", ticker="XLK", entry_price=10.0,
-    rungs_filled=frozenset(), today=TODAY, position_id="p1",
+    rungs_filled=frozenset(), today=TODAY, position_id="p1", contracts_open=None, peak_mark=None,
+    rungs_resting=frozenset(),
 ) -> Position:
     return Position(
         position_id=position_id, user_id="u1", ticker=ticker, sleeve=sleeve, instrument_type=instrument,
         contract_symbol=f"{ticker}TEST", expiration=today + timedelta(days=dte),
-        original_contracts=contracts, contracts_open=contracts, basis_per_contract=basis_per_contract,
+        original_contracts=contracts, contracts_open=contracts if contracts_open is None else contracts_open,
+        basis_per_contract=basis_per_contract,
         entry_price=entry_price, mark=mark, acquired=today - timedelta(days=held_days),
-        thesis_status=thesis, sector=sector, rungs_filled=rungs_filled,
+        thesis_status=thesis, sector=sector, rungs_filled=rungs_filled, rungs_resting=rungs_resting,
+        peak_mark=peak_mark,
     )
 
 

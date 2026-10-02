@@ -1,6 +1,10 @@
 from datetime import date, timedelta
 
+import pytest
+
 from ldp.audit import MemoryAuditSink
+from ldp.config import config_from_dict
+from ldp.ladder import allocate_with_runner
 from ldp.brokers import DryRunBroker
 from ldp.engine import Engine, UserContext
 from ldp.orders import LimitOrderExecutor
@@ -79,7 +83,7 @@ def test_audit_record_has_required_fields(cfg):
         assert k in j
     assert j["thesis"] == "Readouts in 2027" and j["sources"] == ["https://src"]
     assert j["filter_values"]["delta"] == 0.65 and j["sizing"]["allowed_dollars"] == 5_000
-    assert j["order"]["status"] == "filled"
+    assert j["order"]["open"]["status"] == "filled" and j["order"]["target_order"]["status"] == "resting"
 
 
 def test_daily_thesis_break_sells_on_managed(cfg):
@@ -104,7 +108,7 @@ def test_daily_sell_is_suggestion_on_self_directed(cfg):
 
 def test_hold_for_long_term_is_audited_with_tax_figures(cfg):
     eng, user, broker, sink = make(cfg)
-    [(_, d, o)] = eng.run_daily(user, [position(held_days=330, today=BUY_DAY)], today=BUY_DAY)
+    [(_, d, o)] = eng.run_daily(user, [position(held_days=330, mark=20.0, today=BUY_DAY)], today=BUY_DAY)
     assert o.kind == "hold" and o.detail["days_until_long_term"] == 36
     rec = sink.records[-1]
     assert rec.sell_rule == "hold_for_long_term" and "estimates" in rec.tax_rates["note"]
@@ -114,3 +118,37 @@ def test_plain_hold_not_audited(cfg):
     eng, user, broker, sink = make(cfg)
     [(_, d, o)] = eng.run_daily(user, [position(today=BUY_DAY)], today=BUY_DAY)
     assert o is None and sink.records == []
+
+
+# ── Playbook: GTC Target 1 order at entry ─────────────────────────
+
+def test_buy_rests_gtc_target_1_sell(cfg):
+    eng, user, broker, sink = make(cfg)
+    _, outcomes = buys(cfg, eng, user)
+    buys_ = {e["symbol"]: e for e in broker.log if e["op"] == "place" and e["side"] == "buy_to_open"}
+    sells = [e for e in broker.log if e["op"] == "place" and e["side"] == "sell_to_close"]
+    assert {e["symbol"] for e in sells} == {"XLKC", "RXRXC"}
+    for s in sells:
+        filled = next(o for o in outcomes if o.ticker == ("XLK" if s["symbol"] == "XLKC" else "RXRX")).detail
+        assert s["duration"] == "gtc"
+        assert s["quantity"] == allocate_with_runner(filled["filled"], [0.70, 0.15])[0][0]
+        ask = 20.5 if s["symbol"] == "XLKC" else 4.0
+        assert s["price"] == pytest.approx(2 * ask)             # +100% on the fill
+        assert filled["target_order"]["status"] == "resting"
+    rec = next(r for r in sink.records if r.ticker == "XLK")
+    assert rec.order["target_order"]["duration"] == "gtc" and rec.order["open"]["status"] == "filled"
+
+
+def test_target_order_can_be_turned_off():
+    cfg = config_from_dict({"orders": {"place_target_order_on_entry": False}})
+    eng, user, broker, sink = make(cfg)
+    buys(cfg, eng, user)
+    assert [e for e in broker.log if e["op"] == "place" and e["side"] == "sell_to_close"] == []
+
+
+def test_target_price_rounds_up_to_the_tick(cfg):
+    eng, user, broker, sink = make(cfg)
+    class Filled:
+        filled, avg_fill_price = 10, 3.33          # 2 × 3.33 = 6.66 → 6.70
+    t = eng._place_target_order(user, "RXRX", "RXRXC", Filled())
+    assert (t["limit_price"], t["quantity"]) == (6.70, 7)

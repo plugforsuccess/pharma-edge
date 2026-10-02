@@ -391,7 +391,25 @@ export function positionAfterTax({
 // its own (incremental) tax math, so figures here can differ slightly
 // for gains that straddle a bracket.
 
+// Legacy after-tax ladder default (exitLadder below). The app's default
+// exit plan is now EXIT_PLAYBOOK.
 export const DEFAULT_EXIT_LADDER = [1, 2, 3]
+
+// LEAPS exit playbook (owner, 2026-10-02) — mirrors ldp/config.py
+// ExitConfig. Targets are PRE-TAX gains on the option (1.0 = +100%);
+// fractions are shares of the ORIGINAL position sold at each target;
+// the rest is the runner, which exits on a runnerTrailPct give-back from
+// its peak. Time stop: roll window opens at 9 months left, exit or roll
+// at 6. Taxes come after the plan.
+export const EXIT_PLAYBOOK = Object.freeze({
+  targets: [1, 2],
+  fractions: [0.7, 0.15],
+  runnerTrailPct: 0.3,
+  rollWarnDays: 270,
+  rollDays: 180,
+  ltcgWaitDays: 60,
+  minEntryDays: 540,
+})
 
 export function equalFractions(n) {
   return Array.from({ length: n }, () => 1 / n)
@@ -401,13 +419,88 @@ export function allocateContracts(total, fractions) {
   const raw = fractions.map((f) => total * f)
   const base = raw.map((x) => Math.floor(x + 1e-9))
   let left = total - base.reduce((a, b) => a + b, 0)
-  const order = raw.map((x, i) => [x - base[i], i]).sort((a, b) => b[0] - a[0] || a[1] - b[1])
+  // Ties go to the earlier entry; remainders are rounded so float noise
+  // never decides a tie (same as ldp/ladder.py).
+  const order = raw.map((x, i) => [+(x - base[i]).toFixed(9), i]).sort((a, b) => b[0] - a[0] || a[1] - b[1])
   for (const [, i] of order) {
     if (left <= 0) break
     base[i] += 1
     left -= 1
   }
   return base
+}
+
+// Whole contracts per target plus the runner's (the rest), by largest
+// remainder with the runner last — a tie sells rather than holds.
+// Mirrors allocate_with_runner() in ldp/ladder.py.
+export function allocateWithRunner(total, fractions) {
+  const runner = Math.max(0, 1 - fractions.reduce((a, b) => a + b, 0))
+  if (runner <= 1e-9) return { alloc: allocateContracts(total, fractions), runner: 0 }
+  const all = allocateContracts(total, [...fractions, runner])
+  return { alloc: all.slice(0, -1), runner: all[all.length - 1] }
+}
+
+// Playbook targets in the shape customExitTargets() takes.
+export function playbookTargets(plan = EXIT_PLAYBOOK) {
+  return plan.targets.map((t, i) => ({ kind: 'pct', value: t, sell: plan.fractions[i] }))
+}
+
+// The runner: what's left after every target, trailing its peak.
+//   trail_unit_value = peak value per unit × (1 − trail)
+//   exit_value       = trail_unit_value × runner units
+// `units` = contracts for options, shares for stock. With no recorded
+// peak, today's value is the peak.
+export function runnerPlan({ fractions, contracts = null, units, peakUnitValue = null, currentValue, trailPct }) {
+  const share = Math.max(0, 1 - fractions.reduce((a, b) => a + b, 0))
+  if (share <= 1e-9 || !(units > 0)) return null
+  const runnerContracts = Number.isInteger(contracts) && contracts > 0
+    ? allocateWithRunner(contracts, fractions).runner
+    : null
+  if (runnerContracts === 0) return { share, contracts: 0, trail_pct: trailPct }
+  const unitNow = (Number(currentValue) || 0) / units
+  const peak = Math.max(Number(peakUnitValue) || 0, unitNow)
+  const trailUnit = peak * (1 - trailPct)
+  const runnerUnits = runnerContracts ?? units * share
+  return {
+    share,
+    contracts: runnerContracts,
+    trail_pct: trailPct,
+    peak_unit_value: peak,
+    trail_unit_value: trailUnit,
+    exit_value: trailUnit * runnerUnits,
+  }
+}
+
+// Time stop on an option: roll window from rollWarnDays to expiry, act
+// at rollDays. Returns null when there's no expiration.
+export function timeStop(expiration, asOf, plan = EXIT_PLAYBOOK) {
+  const exp = parseYmd(expiration)
+  const today = parseYmd(asOf)
+  if (exp == null || today == null) return null
+  const dte = Math.round((exp - today) / DAY_MS)
+  const actBy = fmtYmd(exp - plan.rollDays * DAY_MS)
+  const windowOpens = fmtYmd(exp - plan.rollWarnDays * DAY_MS)
+  const level = dte < plan.rollDays ? 'act' : dte < plan.rollWarnDays ? 'warn' : 'ok'
+  return { dte, level, act_by: actBy, window_opens: windowOpens }
+}
+
+// Taxes come after the plan: waiting for long-term only makes sense when
+// it lands before the roll window opens (and, for the engine's hold, is
+// close). Stock has no time stop.
+export function longTermFitsPlan(longTermDate, expiration, plan = EXIT_PLAYBOOK) {
+  if (!longTermDate) return false
+  if (!expiration) return true
+  const lt = parseYmd(longTermDate)
+  const opens = parseYmd(expiration) - plan.rollWarnDays * DAY_MS
+  return lt != null && lt < opens
+}
+
+// Entry check: 18+ months to expiry at purchase so the 1-year tax date
+// and the 6-month time stop don't collide.
+export function entryRunwayDays(purchaseDate, expiration) {
+  const a = parseYmd(purchaseDate)
+  const b = parseYmd(expiration)
+  return a == null || b == null ? null : Math.round((b - a) / DAY_MS)
 }
 
 // The rate function for a position's tax character if sold today.
@@ -497,9 +590,7 @@ export function customExitTargets({ basis, currentValue, contracts = null, targe
 
   let alloc = null
   if (Number.isInteger(contracts) && contracts > 0) {
-    const sum = rows.reduce((s, r) => s + r.sell, 0)
-    const toSell = Math.min(contracts, Math.round(contracts * Math.min(1, sum) + 1e-9))
-    alloc = sum > 0 ? allocateContracts(toSell, rows.map((r) => r.sell / sum)) : rows.map(() => 0)
+    alloc = allocateWithRunner(contracts, rows.map((r) => r.sell)).alloc
   }
 
   return rows.map((r, i) => {
