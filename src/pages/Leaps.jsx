@@ -313,9 +313,10 @@ export default function Leaps() {
                   <button
                     type="button"
                     onClick={() => setAdding(true)}
-                    className="min-h-[44px] px-3 rounded bg-amber-400/10 border border-amber-400/40 text-amber-300 text-sm font-semibold hover:bg-amber-400/20 transition"
+                    aria-label="Add a position"
+                    className="min-h-[44px] px-4 inline-flex items-center gap-1.5 rounded-lg bg-amber-400/10 border border-amber-400/40 text-amber-300 text-sm font-semibold hover:bg-amber-400/20 transition"
                   >
-                    <Plus size={14} className="inline -mt-0.5" /> Add position
+                    Add <Plus size={15} strokeWidth={2.5} />
                   </button>
                 )}
               </div>
@@ -335,7 +336,7 @@ export default function Leaps() {
 
               {results.length === 0 && !adding && (
                 <div className="text-xs text-muted py-6 px-4 text-center border border-dashed border-border rounded-xl">
-                  No LEAPS tracked yet. Add a position to generate its exit targets.
+                  No positions yet. Tap Add + to enter one and generate its Exit Targets.
                 </div>
               )}
 
