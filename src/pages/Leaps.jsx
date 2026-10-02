@@ -1867,10 +1867,13 @@ function TargetsEditor({ own, rows, contracts, onOwn, onRow, onAdd, onRemove }) 
 // "−35 contracts" / "−1,050 shares" (what the sale takes off) — always a count, never a
 // fraction. Fractional share holdings get a share count to 2 dp.
 // `isStock` is true for shares, or the unit itself ('$BTC' for crypto).
+// Fractional shares to 2 dp; crypto keeps up to 8 (0.1625 $BTC, not 0.16).
+const roundUnits = (n, unit) => +Number(n).toFixed(unit.startsWith('$') ? 8 : 2)
+
 const soldLabel = (r, isStock, units = null) => {
   const unit = typeof isStock === 'string' ? isStock : isStock ? 'share' : 'contract'
   if (r.contracts == null) {
-    const n = units > 0 ? +(units * r.fraction).toFixed(2) : null
+    const n = units > 0 ? roundUnits(units * r.fraction, unit) : null
     return n == null ? `−${pct(r.fraction, 0)}` : `−${qtyText(n, unit)}`
   }
   if (r.contracts === 0) return `nothing to sell (too few ${unit.startsWith('$') ? unit : `${unit}s`})`
@@ -1891,9 +1894,9 @@ function wholeUnits(v) {
 // target to sell. Targets are gains on the option (the playbook), so the
 // price is the same short- or long-term.
 const multShort = (n) => (!Number.isFinite(n) ? '—' : Number.isInteger(+n.toFixed(2)) ? `${+n.toFixed(2)}x` : `${n.toFixed(2)}x`)
-const gainLabel = (r) => (r.kind === 'usd'
-  ? `${usd(r.input)} • ${multShort(r.exit_multiple)}`
-  : `${pct(r.gain_pct, Number.isInteger(+(r.gain_pct * 100).toFixed(4)) ? 0 : 1)} gain • ${multShort(r.exit_multiple)}`)
+// Every target reads "N% gain • Nx"; the position value sits on the right
+// (a $ target's value is what the user typed).
+const gainLabel = (r) => `${pct(r.gain_pct, Number.isInteger(+(r.gain_pct * 100).toFixed(4)) ? 0 : 1)} gain • ${multShort(r.exit_multiple)}`
 
 function CustomTargetsPreview({ rows, isStock, units }) {
   if (!rows?.length) return null
@@ -1918,11 +1921,23 @@ function CustomTargetsPreview({ rows, isStock, units }) {
 function CustomExitTargets({ title = 'Exit Targets', rows, runner, isStock, units }) {
   if (!rows?.length) return null
   const unit = typeof isStock === 'string' ? isStock : isStock ? 'share' : 'contract'
+  // Custom targets may sell less than all of it: show what's kept.
+  const soldShare = rows.reduce((a, r) => a + (r.fraction || 0), 0)
+  const heldShare = !runner && soldShare < 1 - 1e-9 ? 1 - soldShare : 0
+  const heldLabel = units > 0 ? qtyText(roundUnits(units * heldShare, unit), unit) : pct(heldShare, 0)
   return (
     <TargetsPanel
       title={title}
       subtitle="Sell when the position is worth"
-      footer={runner && runner.contracts !== 0 ? (
+      footer={heldShare > 0 ? (
+        <div className="mt-4 pt-4 border-t border-hairline flex items-baseline gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="text-sm text-fg">Kept</div>
+            <div className="text-xs mt-0.5 text-subtle">{heldLabel} not in a target</div>
+          </div>
+          <div className="text-xs text-muted shrink-0">{pct(heldShare, 0)} of position</div>
+        </div>
+      ) : runner && runner.contracts !== 0 ? (
         <div className="mt-4 pt-4 border-t border-hairline">
           <div className="flex items-baseline gap-3">
             <div className="flex-1 min-w-0">
@@ -1930,7 +1945,7 @@ function CustomExitTargets({ title = 'Exit Targets', rows, runner, isStock, unit
               <div className="text-xs mt-0.5 text-amber-300">
                 {runner.contracts != null
                   ? `−${qtyText(runner.contracts, unit)}`
-                  : units > 0 ? `−${qtyText(+(units * runner.share).toFixed(2), unit)}` : `−${pct(runner.share, 0)}`}
+                  : units > 0 ? `−${qtyText(roundUnits(units * runner.share, unit), unit)}` : `−${pct(runner.share, 0)}`}
               </div>
               {runner.after_tax_gain != null && (
                 <div className="text-xs text-muted mt-0.5">
