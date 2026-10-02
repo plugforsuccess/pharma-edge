@@ -754,6 +754,27 @@ function PositionForm({ initial, onSave, onCancel, preview }) {
   )
 }
 
+// "3 contracts · Bought Jun 2, 2025" — plus "· value Sep 28" only when
+// the stored value isn't from today (manual entries go stale).
+const shortDate = (ymd, withYear = true) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(ymd ?? ''))
+  if (!m) return ''
+  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]))
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', ...(withYear && { year: 'numeric' }), timeZone: 'UTC' })
+}
+
+function positionMeta(pos) {
+  const parts = []
+  const n = Number(pos.contracts)
+  if (pos.instrument_type !== 'stock' && n > 0) parts.push(`${n} contract${n === 1 ? '' : 's'}`)
+  parts.push(`${pos.exercised_from_id ? 'Exercised' : 'Bought'} ${shortDate(pos.purchase_date)}`)
+  if (pos.value_as_of) {
+    const asOf = todayYmd(new Date(pos.value_as_of))
+    if (asOf !== todayYmd()) parts.push(`value ${shortDate(asOf, asOf.slice(0, 4) !== todayYmd().slice(0, 4))}`)
+  }
+  return parts.join(' · ')
+}
+
 function PositionCard({ pos, calc, ladder, ladderLongTerm, previewFor, selectedTargetPct, onSave, onDelete, onExercise }) {
   const [editing, setEditing] = useState(false)
   const [exercising, setExercising] = useState(false)
@@ -786,10 +807,7 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, previewFor, selectedT
       <div className="flex items-start gap-2 mb-3">
         <div className="flex-1 min-w-0">
           <div className="text-sm font-semibold break-words">{label}</div>
-          <div className="text-[10px] text-muted">
-            {pos.exercised_from_id ? 'Acquired by exercise' : 'Bought'} {pos.purchase_date}{pos.contracts ? ` · ${pos.contracts} contract${Number(pos.contracts) === 1 ? '' : 's'}` : ''}
-            {' · '}value as of {new Date(pos.value_as_of).toLocaleDateString()}
-          </div>
+          <div className="text-[10px] text-muted truncate">{positionMeta(pos)}</div>
         </div>
         <span
           className={clsx(
