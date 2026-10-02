@@ -975,3 +975,26 @@ export function annualizedReturn({ gain, cost, purchaseDate, asOf }) {
   const annualized = days >= 365 && 1 + total > 0 ? Math.pow(1 + total, 365.25 / days) - 1 : null
   return { days, total, annualized }
 }
+
+// ── Portfolio projection (Simulator → All holdings) ──────────────
+//
+// Each sleeve (a holding, a cash account) runs through growthProjection
+// on its own — its own yield and income type — and new monthly money
+// goes into a separate sleeve at `priceGrowth` with no yield. Year rows
+// are the sums. Sale tax is figured per sleeve (not stacked into one
+// year's bracket), so a sell-everything year reads a little low.
+export function portfolioProjection({ sleeves = [], monthly = 0, years, priceGrowth = 0, reinvest = true, rateForGain }) {
+  const runs = sleeves.map((s) => growthProjection({
+    startValue: s.startValue, startBasis: s.startBasis ?? s.startValue, years,
+    priceGrowth: s.priceGrowth ?? priceGrowth, yieldPct: s.yieldPct ?? 0, kind: s.kind ?? 'qualified',
+    reinvest, rateForGain,
+  }))
+  if (Number(monthly) > 0) runs.push(growthProjection({ monthly, years, priceGrowth, rateForGain }))
+  const n = Math.max(0, ...runs.map((r) => r.length))
+  const keys = ['contributed', 'invested', 'value', 'basis', 'payouts', 'tax_paid', 'income_kept', 'sale_tax', 'after_tax_value', 'total_after_tax']
+  return Array.from({ length: n }, (_, i) => {
+    const row = { year: i + 1 }
+    for (const k of keys) row[k] = runs.reduce((sum, r) => sum + (r[i]?.[k] ?? 0), 0)
+    return row
+  })
+}

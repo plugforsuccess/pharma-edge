@@ -4,7 +4,7 @@ import clsx from 'clsx'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import {
-  FILING_STATUSES, INCOME_KINDS, makeRateResolver, growthProjection, positionAfterTax,
+  FILING_STATUSES, INCOME_KINDS, makeRateResolver, growthProjection, portfolioProjection, positionAfterTax,
 } from '../utils/afterTax'
 import NumberInput from '../components/NumberInput'
 
@@ -65,7 +65,7 @@ export default function Simulator() {
         if (cancelled) return
         setFederal(fed.data ?? null)
         setProfile(prof.data ?? null)
-        setPositions((pos.data ?? []).filter((x) => INVESTMENTS.has(x.instrument_type)))
+        setPositions(pos.data ?? [])
         if (fed.data) {
           const st = await supabase.from('state_tax_rates').select('*').eq('tax_year', fed.data.tax_year).order('state_name')
           if (!cancelled) setStates(st.data ?? [])
@@ -115,9 +115,10 @@ export default function Simulator() {
       ) : !myRates ? (
         <div className={CARD}><p className="text-sm text-subtle">Pick your residency in Settings to run the simulator.</p></div>
       ) : tab === 'grow' ? (
-        <GrowSim positions={positions.filter((x) => GROWABLE.has(x.instrument_type))} rateForGain={myRates} />
+        <GrowSim positions={positions.filter((x) => GROWABLE.has(x.instrument_type))}
+          cash={positions.filter((x) => x.instrument_type === 'cash')} rateForGain={myRates} />
       ) : (
-        <SellSim positions={positions} setup={setup} states={states} resolverFor={resolverFor} />
+        <SellSim positions={positions.filter((x) => INVESTMENTS.has(x.instrument_type))} setup={setup} states={states} resolverFor={resolverFor} />
       )}
 
       <p className="text-xs text-muted">
@@ -129,41 +130,82 @@ export default function Simulator() {
 
 // ── Grow: contributions over time ─────────────────────────────────
 
-function GrowSim({ positions, rateForGain }) {
-  const [from, setFrom] = useState('new')
-  const [f, setF] = useState({ start: '10000', cost: '10000', monthly: '500', years: '10', growth: '7', yield: '0', kind: 'qualified', reinvest: true })
+// One holding's numbers into the Grow form.
+function fromHolding(pos, x) {
+  const d = pos.details ?? {}
+  return {
+    ...x,
+    start: String(Number(pos.current_value) || 0),
+    cost: String(Number(pos.cost_basis) || 0),
+    yield: d.dividend_yield != null ? String(+(Number(d.dividend_yield) * 100).toFixed(4)) : '0',
+    kind: d.dividend_kind ?? 'qualified',
+    // Income holdings (preferreds, dividend funds) start with flat prices.
+    growth: Number(d.dividend_yield) > 0 ? '0' : x.growth,
+  }
+}
+const largest = (list) => [...list].sort((a, b) => (Number(b.current_value) || 0) - (Number(a.current_value) || 0))[0] ?? null
+
+// Each holding keeps its own yield and income type; cash grows at its
+// APY (taxed as interest; T-bills skip state tax). Return-of-capital
+// preferreds hold their price. Real estate and options aren't included.
+function sleevesFor(positions, cash) {
+  return [
+    ...positions.map((pos) => {
+      const d = pos.details ?? {}
+      return {
+        startValue: Number(pos.current_value) || 0,
+        startBasis: Number(pos.cost_basis) || 0,
+        yieldPct: Number(d.dividend_yield) || 0,
+        kind: d.dividend_kind ?? 'qualified',
+        ...(d.dividend_kind === 'roc' ? { priceGrowth: 0 } : {}),
+      }
+    }),
+    ...cash.map((c) => ({
+      startValue: Number(c.current_value) || 0,
+      startBasis: Number(c.current_value) || 0,
+      yieldPct: Number(c.details?.apy) || 0,
+      kind: c.details?.account_kind === 't_bills' ? 'treasury' : 'ordinary',
+      priceGrowth: 0,
+    })),
+  ]
+}
+
+function GrowSim({ positions, cash = [], rateForGain }) {
+  const base = { start: '10000', cost: '10000', monthly: '500', years: '10', growth: '7', yield: '0', kind: 'qualified', reinvest: true }
+  // Opens on your largest holding; "All holdings" and "New" are in the list.
+  const first = largest(positions)
+  const [from, setFrom] = useState(first ? first.id : 'new')
+  const [f, setF] = useState(() => (first ? fromHolding(first, base) : base))
   const set = (k) => (v) => setF((x) => ({ ...x, [k]: v }))
+  const all = from === 'all'
+  const sleeves = useMemo(() => sleevesFor(positions, cash), [positions, cash])
+  const allValue = sleeves.reduce((sum, x) => sum + x.startValue, 0)
+  const holdingsCount = positions.length + cash.length
 
   function pick(id) {
     setFrom(id)
     const pos = positions.find((x) => x.id === id)
-    if (!pos) return
-    const d = pos.details ?? {}
-    setF((x) => ({
-      ...x,
-      start: String(Number(pos.current_value) || 0),
-      cost: String(Number(pos.cost_basis) || 0),
-      yield: d.dividend_yield != null ? String(+(Number(d.dividend_yield) * 100).toFixed(4)) : '0',
-      kind: d.dividend_kind ?? 'qualified',
-      // Income holdings (preferreds, dividend funds) start with flat prices.
-      growth: Number(d.dividend_yield) > 0 ? '0' : x.growth,
-    }))
+    if (pos) setF((x) => fromHolding(pos, x))
   }
 
   const years = Math.min(50, Math.max(0, Math.round(num(f.years) ?? 0)))
-  const rows = useMemo(() => growthProjection({
-    startValue: num(f.start) ?? 0,
-    startBasis: num(f.cost) ?? num(f.start) ?? 0,
-    monthly: num(f.monthly) ?? 0,
-    years,
-    priceGrowth: (num(f.growth) ?? 0) / 100,
-    yieldPct: (num(f.yield) ?? 0) / 100,
-    kind: f.kind,
-    reinvest: f.reinvest,
-    rateForGain,
-  }), [f, years, rateForGain])
+  const rows = useMemo(() => (all
+    ? portfolioProjection({
+      sleeves, monthly: num(f.monthly) ?? 0, years, priceGrowth: (num(f.growth) ?? 0) / 100, reinvest: f.reinvest, rateForGain,
+    })
+    : growthProjection({
+      startValue: num(f.start) ?? 0,
+      startBasis: num(f.cost) ?? num(f.start) ?? 0,
+      monthly: num(f.monthly) ?? 0,
+      years,
+      priceGrowth: (num(f.growth) ?? 0) / 100,
+      yieldPct: (num(f.yield) ?? 0) / 100,
+      kind: f.kind,
+      reinvest: f.reinvest,
+      rateForGain,
+    })), [all, sleeves, f, years, rateForGain])
   const end = rows[rows.length - 1]
-  const hasYield = (num(f.yield) ?? 0) > 0
+  const hasYield = all ? sleeves.some((x) => x.yieldPct > 0) : (num(f.yield) ?? 0) > 0
   // Year 1–5, then every 5th year, and always the last.
   const shown = rows.filter((r) => r.year <= 5 || r.year % 5 === 0 || r === end)
 
@@ -173,17 +215,25 @@ function GrowSim({ positions, rateForGain }) {
         <h2 className="text-sm font-semibold mb-4">Add money over time</h2>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Start from" wide>
-            <select value={from} onChange={(e) => (e.target.value === 'new' ? setFrom('new') : pick(e.target.value))} className={inputCls}>
-              <option value="new">New investment</option>
+            <select value={from} onChange={(e) => (['new', 'all'].includes(e.target.value) ? setFrom(e.target.value) : pick(e.target.value))} className={inputCls}>
+              {holdingsCount > 1 && <option value="all">All holdings ({holdingsCount})</option>}
               {positions.map((pos) => <option key={pos.id} value={pos.id}>{holdingLabel(pos)}</option>)}
+              <option value="new">New investment</option>
             </select>
+            {all && (
+              <span className="block mt-1.5 text-xs text-muted">
+                Starts from <span className="font-mono-tab text-fg">{usd(allValue)}</span>, each holding at its own yield; cash at its APY. Real estate and options aren't included.
+              </span>
+            )}
           </Field>
+          {!all && (<>
           <Field label="Starting value">
             <Affix prefix="$"><NumberInput value={f.start} onChange={set('start')} placeholder="0" className={clsx(inputCls, 'pl-7')} /></Affix>
           </Field>
           <Field label="Cost so far">
             <Affix prefix="$"><NumberInput value={f.cost} onChange={set('cost')} placeholder="0" className={clsx(inputCls, 'pl-7')} /></Affix>
           </Field>
+          </>)}
           <Field label="Add each month">
             <Affix prefix="$"><NumberInput value={f.monthly} onChange={set('monthly')} placeholder="500" className={clsx(inputCls, 'pl-7')} /></Affix>
           </Field>
@@ -193,16 +243,20 @@ function GrowSim({ positions, rateForGain }) {
           <Field label="Price growth / yr">
             <Affix suffix="%"><NumberInput decimals={2} value={f.growth} onChange={set('growth')} placeholder="7" className={clsx(inputCls, 'pr-8')} /></Affix>
           </Field>
-          <Field label="Yield / yr">
-            <Affix suffix="%"><NumberInput decimals={4} value={f.yield} onChange={set('yield')} placeholder="0" className={clsx(inputCls, 'pr-8')} /></Affix>
-          </Field>
+          {!all && (
+            <Field label="Yield / yr">
+              <Affix suffix="%"><NumberInput decimals={4} value={f.yield} onChange={set('yield')} placeholder="0" className={clsx(inputCls, 'pr-8')} /></Affix>
+            </Field>
+          )}
           {hasYield && (
             <>
-              <Field label="Income type" wide>
-                <select value={f.kind} onChange={(e) => set('kind')(e.target.value)} className={inputCls}>
-                  {INCOME_KINDS.map((k) => <option key={k.value} value={k.value}>{k.long}</option>)}
-                </select>
-              </Field>
+              {!all && (
+                <Field label="Income type" wide>
+                  <select value={f.kind} onChange={(e) => set('kind')(e.target.value)} className={inputCls}>
+                    {INCOME_KINDS.map((k) => <option key={k.value} value={k.value}>{k.long}</option>)}
+                  </select>
+                </Field>
+              )}
               <Field label="Payouts" wide>
                 <Segmented compact value={f.reinvest ? 'reinvest' : 'cash'} onChange={(v) => set('reinvest')(v === 'reinvest')}
                   options={[{ value: 'reinvest', label: 'Reinvest' }, { value: 'cash', label: 'Take as cash' }]} />
@@ -254,9 +308,17 @@ function GrowSim({ positions, rateForGain }) {
 
 // ── Sell: one sale, two tax setups ────────────────────────────────
 
+const sellFrom = (pos, x) => ({ ...x, cost: String(Number(pos.cost_basis) || 0), value: String(Number(pos.current_value) || 0),
+  bought: pos.purchase_date ?? '', type: pos.instrument_type })
+
 function SellSim({ positions, setup, states, resolverFor }) {
-  const [from, setFrom] = useState('new')
-  const [f, setF] = useState({ cost: '10000', value: '20000', bought: '', sell: todayYmd(), type: 'equity_option' })
+  // Opens on your largest investment; "New trade" is in the list.
+  const first = largest(positions)
+  const [from, setFrom] = useState(first ? first.id : 'new')
+  const [f, setF] = useState(() => {
+    const base = { cost: '10000', value: '20000', bought: '', sell: todayYmd(), type: 'equity_option' }
+    return first ? sellFrom(first, base) : base
+  })
   const [alt, setAlt] = useState({ state_code: setup.state_code ?? '', filing_status: setup.filing_status, income: String(setup.annual_income) })
   const set = (k) => (v) => setF((x) => ({ ...x, [k]: v }))
   const setA = (k) => (v) => setAlt((x) => ({ ...x, [k]: v }))
@@ -264,9 +326,7 @@ function SellSim({ positions, setup, states, resolverFor }) {
   function pick(id) {
     setFrom(id)
     const pos = positions.find((x) => x.id === id)
-    if (!pos) return
-    setF((x) => ({ ...x, cost: String(Number(pos.cost_basis) || 0), value: String(Number(pos.current_value) || 0),
-      bought: pos.purchase_date ?? '', type: pos.instrument_type }))
+    if (pos) setF((x) => sellFrom(pos, x))
   }
 
   // Your CPA rates (if any) only carry over while the what-if matches your setup.
@@ -294,8 +354,8 @@ function SellSim({ positions, setup, states, resolverFor }) {
         <div className="grid grid-cols-2 gap-3">
           <Field label="Start from" wide>
             <select value={from} onChange={(e) => (e.target.value === 'new' ? setFrom('new') : pick(e.target.value))} className={inputCls}>
-              <option value="new">New trade</option>
               {positions.map((pos) => <option key={pos.id} value={pos.id}>{holdingLabel(pos)}</option>)}
+              <option value="new">New trade</option>
             </select>
           </Field>
           <Field label="Cost">
