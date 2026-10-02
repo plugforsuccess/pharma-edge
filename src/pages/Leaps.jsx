@@ -395,9 +395,6 @@ function RiskProfileCard({ userId }) {
         <p className="text-[10px] text-muted flex-1">
           {d.account_text ?? (row.account_tier === 'managed' ? 'Managed account.' : 'Self-directed account — suggestions only.')}
         </p>
-        <Link to="/settings#risk" className="shrink-0 min-h-[44px] inline-flex items-center text-[11px] text-subtle hover:text-fg underline">
-          Edit
-        </Link>
       </div>
     </div>
   )
@@ -434,10 +431,6 @@ function TaxSummaryCard({ profile, hasProfile, states }) {
           <Stat label="Income before LEAPS" value={usd(Number(profile.annual_income))} />
           <Stat label="State" value={stateName} />
         </div>
-        <Link to="/settings#tax" aria-label="Edit tax profile in Settings"
-          className="min-h-[44px] px-3 inline-flex items-center gap-1.5 rounded border border-border text-xs text-subtle hover:text-fg hover:border-amber-400/40 transition">
-          <Pencil size={13} /> Edit
-        </Link>
       </div>
     </div>
   )
