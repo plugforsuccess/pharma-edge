@@ -18,7 +18,7 @@ import {
   isValidTaxRate, isValidBasis, exerciseCall, blended1256Rate, suggestInstrumentType, bracketTax,
   exitLadder, allocateContracts, rateAtGainFor, customExitTargets, validateCustomTargets,
   cashAfterTax, cashYieldComparison, realEstateAfterTax, interestTaxRate,
-  dividendAfterTax, incomeTaxRate, incomeYieldComparison, growthProjection, runnerAfterTax, annualizedReturn,
+  dividendAfterTax, incomeTaxRate, incomeYieldComparison, growthProjection, runnerAfterTax, annualizedReturn, portfolioProjection,
   EXIT_PLAYBOOK, allocateWithRunner, playbookTargets, runnerPlan, timeStop, longTermFitsPlan, entryRunwayDays,
 } from '../src/utils/afterTax.js'
 
@@ -481,6 +481,21 @@ const round2 = (x) => Math.round(x * 100) / 100
   eq('under a year: not annualized', annualizedReturn({ gain: 10, cost: 100, purchaseDate: '2026-06-10', asOf: '2026-10-02' }).annualized, null)
   eq('total-loss guard', annualizedReturn({ gain: -100, cost: 100, purchaseDate: '2020-01-01', asOf: '2026-01-01' }).annualized, null)
   eq('loss annualizes negative', annualizedReturn({ gain: -19, cost: 100, purchaseDate: '2024-10-02', asOf: '2026-10-02' }).annualized < 0, true)
+}
+
+// ── Portfolio projection ─────────────────────────────────────────
+{
+  const flat = () => ({ long_term: { total: 0.2 }, short_term: { total: 0.3, federal: 0.24, niit: 0, state: 0.06 } })
+  const a = { startValue: 10000, startBasis: 8000, yieldPct: 0.03, kind: 'qualified' }
+  const b = { startValue: 5000, priceGrowth: 0, yieldPct: 0.04, kind: 'ordinary' }
+  const all = portfolioProjection({ sleeves: [a, b], monthly: 100, years: 3, priceGrowth: 0.07, rateForGain: flat })
+  const ra = growthProjection({ ...a, years: 3, priceGrowth: 0.07, reinvest: true, rateForGain: flat })
+  const rb = growthProjection({ ...b, startBasis: 5000, years: 3, reinvest: true, rateForGain: flat })
+  const rc = growthProjection({ monthly: 100, years: 3, priceGrowth: 0.07, rateForGain: flat })
+  eq('portfolio: 3 rows', all.length, 3)
+  eq('portfolio: value = sum of sleeves', all[2].value, ra[2].value + rb[2].value + rc[2].value, 1e-6)
+  eq('portfolio: after tax = sum', all[2].total_after_tax, ra[2].total_after_tax + rb[2].total_after_tax + rc[2].total_after_tax, 1e-6)
+  eq('portfolio: invested = cost + contributions', all[2].invested, 8000 + 5000 + 3600, 1e-6)
 }
 
 // ── Real estate ──────────────────────────────────────────────────

@@ -794,6 +794,27 @@ dxLink keeps feeding HeatPulse for now.
 
 ---
 
+## Home (`/`) — the LEAPS dashboard
+
+Built 2026-10-02; the old GEX "The Tape" (`Dashboard.jsx`) moved to
+`/tape` behind `FEATURES.tape` (off). Home reads the same numbers as
+Positions through **`src/hooks/useHoldings.js`** (load + every after-tax
+figure; `Leaps.jsx` uses it too — change the math there, not in a page).
+Top to bottom: net worth after tax / before tax (links to Positions,
+investments' after-tax return under it); **Needs action**, most urgent
+first — time stop (act), targets the current value has reached ("PLTR
+hit 100% gain · Sell 7 contracts · +$4,971 after taxes"), runner trail
+hit (only once every target has hit), roll window open, long-term within
+60 days and worth waiting for, prices older than 7 days; **Next exit
+targets** (closest unhit target per holding, top 3, "Needs +36% from
+here"); after-tax goals reached + income after tax; quick actions (Add
+holding, Update prices, Simulator). ROC holdings have no targets/goals
+here either. Nothing on Home edits; every row links to Positions. Hits
+come from the last entered price until Tradier sync lands. With no
+holdings, Home shows a welcome card with "Add your first holding".
+
+---
+
 ## Settings (`/settings`) — where users edit their LEAPS setup
 
 Settings is the single place to edit: account name, risk profile
@@ -956,15 +977,20 @@ value, holding period) and must pass before any edit to that file lands.
 ## Simulator (`/simulator`)
 
 After-tax what-if sandbox; nothing is saved. Same math as `/leaps`.
-- **Grow** — add money over time: start from a share / income / crypto
-  holding (prefilled; income holdings start at 0% price growth) or a new
-  investment; monthly contribution, years, price growth, yield, income
+- **Grow** — add money over time. Opens on the user's largest share /
+  income / crypto holding (prefilled; income holdings start at 0% price
+  growth); the list also has **All holdings** (every share / income /
+  crypto holding at its own yield and income type, cash at its APY —
+  T-bills as Treasury, the rest as ordinary interest — ROC preferreds
+  flat, new monthly money in its own sleeve; real estate and options
+  left out; `portfolioProjection()` sums per-sleeve `growthProjection`
+  runs, sale tax per sleeve) and a new investment; monthly contribution, years, price growth, yield, income
   type, reinvest or take payouts as cash. `growthProjection()` in
   `afterTax.js` runs month by month (payouts taxed as paid via
   `incomeTaxRate`, reinvested after tax into basis; ROC lowers basis and
   is taxed past zero) and shows the after-tax value if sold at each year
   end at long-term rates.
-- **Sell** — one sale (from a holding or new: cost, sell price, bought /
+- **Sell** — opens on the largest investment. One sale (from a holding or new: cost, sell price, bought /
   sell dates) under your setup vs a what-if residency, filing status and
   income, side by side, plus what waiting for long-term would keep. CPA
   rate overrides carry over only while the what-if matches your setup.

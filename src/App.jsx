@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
+import Home from './pages/Home'
 import SignalDetail from './pages/SignalDetail'
 import LogSignal from './pages/LogSignal'
 import Layout from './components/Layout'
@@ -62,7 +63,7 @@ function ProtectedLayout() {
   return <Layout />
 }
 
-// A route switched off in FEATURES redirects (to the Tape by default).
+// A route switched off in FEATURES redirects (to Home by default).
 function hidden(enabled, element, fallback = '/') {
   return enabled ? element : <Navigate to={fallback} replace />
 }
@@ -95,7 +96,10 @@ export default function App() {
               </ProtectedRoute>
             }
           >
-            <Route index element={<Dashboard />} />
+            {/* Home = the LEAPS dashboard. The old GEX Tape lives on at
+                /tape behind FEATURES.tape. */}
+            <Route index element={<Home />} />
+            <Route path="tape" element={hidden(FEATURES.tape, <Dashboard />)} />
             {/* Hidden from the MVP via src/lib/features.js — old links
                 redirect instead of 404ing. */}
             <Route path="signal/:id" element={hidden(FEATURES.signalDetail, <SignalDetail />)} />
