@@ -463,6 +463,10 @@ tastytrade_sessions ← singleton id=1, OAuth access_token cache
 gex_snapshots       ← compute-gex 5-min response cache
 dxlink_quotes       ← live per-symbol price + greeks cache
 admin_cost_daily    ← VIEW — daily cost rollup for /admin (security_invoker)
+tax_year_config     ← federal brackets / LTCG thresholds / NIIT per tax year (is_current = one row)
+state_tax_rates     ← per (tax_year, state) ordinary + LTCG brackets, confidence flag
+leaps_tax_profiles  ← per-user after-tax inputs (portfolio, allocation, filing status, income, state, targets, CPA override)
+leaps_positions     ← per-user LEAPS positions (basis, current value, purchase date) — manual today
 ```
 
 ### RLS Policy
@@ -680,6 +684,29 @@ on mobile, sidebar on desktop. All tap targets minimum 44px.
 - Position sizing rule (max 2% per spread / max 20% per ticker)
 - The R/R ≥ 1:1.5 + EV-edge ≥ 0 server filter in suggest-plays — these
   are the two gates that keep broken-math plays from reaching the user
+
+---
+
+## After-Tax LEAPS (`/leaps`)
+
+Shows what LEAPS positions are worth **after tax** and the multiple
+needed to hit each after-tax return goal. Math is pure and lives in
+`src/utils/afterTax.js`; `npm run aftertax:check` runs the spec's
+required cases (rate derivation, 7-row target table, live after-tax
+value, holding period) and must pass before any edit to that file lands.
+
+- Tax figures are **data, not code**: `tax_year_config` (federal) and
+  `state_tax_rates` (state). Each January, add a new year's rows from
+  the IRS inflation-adjustment Rev. Proc. and state revenue
+  departments, then flip `is_current`. NIIT thresholds ($200k single /
+  HoH, $250k MFJ, $125k MFS) are statutory and do not inflate.
+- Rates are combined marginal: federal LTCG or ordinary + NIIT + state,
+  with brackets picked at income **plus** the projected gain.
+- Long-term = sold after the 1-year anniversary of purchase.
+- Per-position values are never netted; the portfolio card shows a
+  netted figure labeled as an estimate.
+- Every tax figure in the UI is labeled an estimate with a
+  consult-a-professional note. Keep it that way.
 
 ---
 

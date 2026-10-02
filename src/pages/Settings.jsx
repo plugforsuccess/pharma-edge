@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Bell, BellOff, Check, Copy, Download, ExternalLink, Link2, LogOut, Share2, Zap } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
@@ -336,6 +337,19 @@ export default function Settings() {
             fallback / override.
           </p>
         </div>
+      </Section>
+
+      <Section title="LEAPS After-Tax">
+        <p className="text-subtle text-xs">
+          Your filing status, income, state, and after-tax return goals
+          live on the LEAPS page alongside your positions.
+        </p>
+        <Link
+          to="/leaps"
+          className="mt-1 min-h-[44px] w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl border border-border text-sm font-semibold hover:border-amber-400/50 transition"
+        >
+          Open LEAPS · After-Tax <ExternalLink size={14} />
+        </Link>
       </Section>
 
       <Section title="Appearance">
