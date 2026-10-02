@@ -5,6 +5,7 @@ import clsx from 'clsx'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { FILING_STATUSES } from '../utils/afterTax'
+import { LDP_DISCLOSURES_VERSION, DISCLOSURES, TOLERANCES, EXPERIENCE } from '../lib/ldpDisclosures'
 
 // LEAPS bot onboarding — suitability answers + tax profile.
 //
@@ -13,38 +14,11 @@ import { FILING_STATUSES } from '../utils/afterTax'
 // themselves a higher tier). This page collects answers, shows the
 // disclosures, submits, and renders the tier the server returns.
 //
-// Keep LDP_DISCLOSURES_VERSION in sync with the edge function; bump it
-// whenever the disclosure text below changes so users re-accept.
-const LDP_DISCLOSURES_VERSION = 'ldp-2026-10-02'
 
-const TOLERANCES = [
-  { value: 'conservative', label: 'Conservative', body: 'Protect what I have. Steady, diversified exposure only.' },
-  { value: 'moderate', label: 'Moderate', body: 'Some swings are fine for better long-run growth.' },
-  { value: 'aggressive', label: 'Aggressive', body: 'I accept large drawdowns, including on small-cap names, for higher upside.' },
-]
 
-const EXPERIENCE = [
-  { value: 'none', label: 'None', body: "I haven't traded options before." },
-  { value: 'some', label: 'Some', body: "I've placed a few options trades." },
-  { value: 'experienced', label: 'Experienced', body: 'I trade options regularly and understand the Greeks.' },
-]
 
 const HORIZON_CHIPS = [1, 3, 5, 10]
 
-const DISCLOSURES = [
-  {
-    id: 'loss',
-    text: 'LEAPS are options. I can lose the entire premium I pay on any position, and small-cap satellites can move sharply in either direction.',
-  },
-  {
-    id: 'tax',
-    text: 'Tax figures shown are estimates. Actual taxes depend on my full tax situation, and I should consult a tax professional.',
-  },
-  {
-    id: 'accuracy',
-    text: 'My answers decide what the bot is allowed to buy. They are accurate, and I can retake this questionnaire any time.',
-  },
-]
 
 const STEPS = ['Experience', 'Account', 'Taxes', 'Review']
 

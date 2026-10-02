@@ -11,6 +11,10 @@
 //   playDetail   — /play/:id (Claude play detail)
 //   flow         — /flow (old whale-tail bot feed, admin only)
 //   leaderboard  — /leaderboard (ranks spread trades logged via /log)
+//                  + the username / visibility fields in Settings
+//   legacyBot    — the old whale-tail bot's settings card in Settings
+//   tastytradeBroker — the Tastytrade "test connection" card in Settings
+//                  (LEAPS execution moves to Tradier)
 export const FEATURES = Object.freeze({
   wheel: false,
   logMove: false,
@@ -18,4 +22,6 @@ export const FEATURES = Object.freeze({
   playDetail: false,
   flow: false,
   leaderboard: false,
+  legacyBot: false,
+  tastytradeBroker: false,
 })

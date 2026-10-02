@@ -168,8 +168,12 @@ variable to its full name; set `VITE_PUBLIC_RECORD_REPO` in Vercel env.
   callers (`archive=true`) await the write; user calls fire-and-forget
   via `EdgeRuntime.waitUntil` so the time-series stays populated even
   when the GitHub Actions snapshot cron is broken.
-- `ldp-onboarding` v1 (`verify_jwt=true`). Takes the LEAPS bot
-  onboarding answers from `/leaps/onboarding`, computes the risk tier
+- `ldp-onboarding` v2 (`verify_jwt=true`). The only write path into
+  `ldp_risk_profiles`. Used by `/leaps/onboarding` (first run) and
+  `/settings` (partial updates: risk answers, catalyst plays, Exit
+  Target ladder, tax — each optional). Changing risk answers needs the
+  current disclosures accepted in the request or already on file. Takes
+  the LEAPS bot answers, computes the risk tier
   (`_shared/ldpRiskTier.ts`, a mirror of `ldp/risk.py` kept in parity
   by `ldp/tests/fixtures/risk_tier_cases.json` + `npm run ldp:risk:check`),
   and writes `ldp_risk_profiles` (service role) + `leaps_tax_profiles`.
@@ -729,6 +733,20 @@ signal / play detail, Flow, Leaderboard. Hidden routes redirect, never
 Learn stays for SEO, out of nav. Data: Tradier (orders, quotes,
 chains) + Massive/Polygon (IV history, bars, backtests); Tastytrade
 dxLink keeps feeding HeatPulse for now.
+
+---
+
+## Settings (`/settings`) — where users edit their LEAPS setup
+
+Settings is the single place to edit: account name, risk profile
+(answers → server recomputes the tier), tax profile, goals (LEAPS
+allocation + target returns), and the Exit Target ladder (1–5 rungs,
+after-tax gain target + share sold per rung). One **Save** button
+persists every changed section. `/leaps` shows these read-only with
+"Edit" links to `/settings#tax` / `#risk`. Managed vs self-directed is
+read-only for users (set by the owner after a signed managed-account
+agreement; admin control not built yet). Disclosure text + version
+live in `src/lib/ldpDisclosures.js` and must match the edge function.
 
 ---
 

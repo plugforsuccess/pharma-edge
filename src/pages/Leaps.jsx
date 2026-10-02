@@ -7,7 +7,7 @@ import { useAuth } from '../context/AuthContext'
 import {
   FILING_STATUSES, DEFAULT_TARGET_PCTS, makeRateResolver, deriveRates,
   applyRateOverride, targetTable, positionAfterTax, portfolioSummary,
-  isValidTaxRate, todayYmd, holdingPeriod, INSTRUMENT_TYPES, suggestInstrumentType, exerciseCall,
+  todayYmd, holdingPeriod, INSTRUMENT_TYPES, suggestInstrumentType, exerciseCall,
   blended1256Rate, exitLadder, rateAtGainFor, DEFAULT_EXIT_LADDER,
 } from '../utils/afterTax'
 
@@ -52,7 +52,6 @@ export default function Leaps() {
   const [profile, setProfile] = useState(null)
   const [positions, setPositions] = useState(null)
   const [loadError, setLoadError] = useState('')
-  const [editingProfile, setEditingProfile] = useState(false)
   const [searchParams, setSearchParams] = useSearchParams()
   const [adding, setAdding] = useState(searchParams.get('add') === '1')
   // Exit-ladder settings live on the engine's risk profile (service-role
@@ -89,7 +88,6 @@ export default function Leaps() {
             .eq('tax_year', fed.data.tax_year).order('state_name')
           if (!cancelled) setStates(st.data ?? [])
         }
-        if (!prof.error && !prof.data) setEditingProfile(true)
       } catch (err) {
         console.error('[leaps] load threw', err)
         if (!cancelled) {
@@ -261,23 +259,12 @@ export default function Leaps() {
         <div className="text-xs text-muted py-8 text-center">Loading…</div>
       ) : (
         <>
-          <ProfileCard
-            profile={p}
-            states={states}
-            editing={editingProfile}
-            onEdit={() => setEditingProfile(true)}
-            onCancel={profile ? () => setEditingProfile(false) : null}
-            onSave={async (next) => {
-              const err = await saveProfile(next)
-              if (!err) setEditingProfile(false)
-              return err
-            }}
-          />
+          <TaxSummaryCard profile={p} hasProfile={!!profile} states={states} />
 
-          {breakdown && ready && !editingProfile && <RateBreakdown rates={breakdown} state={state} taxYear={federal.tax_year} show1256={has1256} />}
+          {breakdown && ready && <RateBreakdown rates={breakdown} state={state} taxYear={federal.tax_year} show1256={has1256} />}
 
-          {!ready && !editingProfile && (
-            <Banner tone="amber">Pick your state (or enter both CPA rates) to see after-tax figures.</Banner>
+          {!ready && profile && (
+            <Banner tone="amber">Pick your state in Settings (or enter both CPA rates) to see after-tax figures.</Banner>
           )}
 
           {ready && table && (
@@ -408,8 +395,8 @@ function RiskProfileCard({ userId }) {
         <p className="text-[10px] text-muted flex-1">
           {d.account_text ?? (row.account_tier === 'managed' ? 'Managed account.' : 'Self-directed account — suggestions only.')}
         </p>
-        <Link to="/leaps/onboarding" className="shrink-0 min-h-[44px] inline-flex items-center text-[11px] text-subtle hover:text-fg underline">
-          Retake
+        <Link to="/settings#risk" className="shrink-0 min-h-[44px] inline-flex items-center text-[11px] text-subtle hover:text-fg underline">
+          Edit
         </Link>
       </div>
     </div>
@@ -418,138 +405,42 @@ function RiskProfileCard({ userId }) {
 
 // ── Profile ───────────────────────────────────────────────────────
 
-function ProfileCard({ profile, states, editing, onEdit, onCancel, onSave }) {
-  const [form, setForm] = useState(() => toForm(profile))
-  const [error, setError] = useState('')
-  const [saving, setSaving] = useState(false)
-  useEffect(() => { if (editing) setForm(toForm(profile)) }, [editing, profile])
-
-  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
-
-  async function submit() {
-    const portfolio = num(form.portfolio_size)
-    const alloc = num(form.leaps_allocation_pct)
-    const income = num(form.annual_income) ?? 0
-    const targets = form.target_pcts.split(',').map((s) => num(s)).filter((n) => n != null && n > 0)
-    const lt = num(form.lt_rate_override)
-    const st = num(form.st_rate_override)
-    if (!(portfolio > 0)) return setError('Portfolio size must be greater than $0.')
-    if (!(alloc > 0 && alloc <= 100)) return setError('LEAPS allocation must be between 0% and 100%.')
-    if (income < 0) return setError('Income cannot be negative.')
-    if (targets.length === 0) return setError('Enter at least one target return %.')
-    if (lt != null && !isValidTaxRate(lt / 100)) return setError('Long-term override must be between 0% and 99%.')
-    if (st != null && !isValidTaxRate(st / 100)) return setError('Short-term override must be between 0% and 99%.')
-    const targetPcts = [...new Set(targets.map((t) => t / 100))].sort((a, b) => b - a)
-    const prevSel = Number(profile.selected_target_pct)
-    setSaving(true)
-    const err = await onSave({
-      portfolio_size: portfolio,
-      leaps_allocation_pct: alloc / 100,
-      filing_status: form.filing_status,
-      annual_income: income,
-      state_code: form.state_code || null,
-      target_pcts: targetPcts,
-      selected_target_pct: targetPcts.includes(prevSel) ? prevSel : targetPcts[0],
-      lt_rate_override: lt == null ? null : lt / 100,
-      st_rate_override: st == null ? null : st / 100,
-    })
-    setSaving(false)
-    setError(err ?? '')
-  }
-
-  if (!editing) {
-    const basis = Number(profile.portfolio_size) * Number(profile.leaps_allocation_pct)
-    const status = FILING_STATUSES.find((s) => s.value === profile.filing_status)?.label
-    const stateName = states.find((s) => s.state_code === profile.state_code)?.state_name ?? profile.state_code ?? '—'
+// Read-only: the tax profile and goals are edited in /settings.
+function TaxSummaryCard({ profile, hasProfile, states }) {
+  if (!hasProfile) {
     return (
-      <div className="bg-card border border-border rounded-xl p-4 mb-4">
-        <div className="flex items-start gap-2">
-          <div className="flex-1 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-            <Stat label="Portfolio" value={usd(Number(profile.portfolio_size))} />
-            <Stat label={`LEAPS basis (${pct(Number(profile.leaps_allocation_pct), 0)})`} value={usd(basis)} />
-            <Stat label="Filing status" value={status} />
-            <Stat label="Income before LEAPS" value={usd(Number(profile.annual_income))} />
-            <Stat label="State" value={stateName} />
-          </div>
-          <button
-            type="button"
-            onClick={onEdit}
-            aria-label="Edit tax profile"
-            className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded border border-border text-subtle hover:text-fg hover:border-amber-400/40 transition"
-          >
-            <Pencil size={14} />
-          </button>
+      <div className="bg-card border border-amber-500/40 rounded-xl p-4 mb-4 flex items-start gap-3">
+        <AlertTriangle size={14} className="text-amber-400 shrink-0 mt-0.5" />
+        <div className="flex-1 text-xs text-subtle leading-relaxed">
+          Add your tax details in Settings so after-tax values and Exit Targets reflect your situation.
         </div>
+        <Link to="/settings#tax"
+          className="shrink-0 min-h-[44px] px-3 inline-flex items-center rounded bg-amber-400/10 border border-amber-400/40 text-amber-300 text-xs font-semibold hover:bg-amber-400/20 transition">
+          Add tax details
+        </Link>
       </div>
     )
   }
-
+  const basis = Number(profile.portfolio_size) * Number(profile.leaps_allocation_pct)
+  const status = FILING_STATUSES.find((x) => x.value === profile.filing_status)?.label
+  const stateName = states.find((x) => x.state_code === profile.state_code)?.state_name ?? profile.state_code ?? '—'
   return (
-    <div className="bg-card border border-amber-400/40 rounded-xl p-4 mb-4">
-      <h2 className="text-sm font-semibold mb-3">Your tax profile</h2>
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Portfolio size ($)">
-          <input inputMode="decimal" value={form.portfolio_size} onChange={set('portfolio_size')} className={inputCls} />
-        </Field>
-        <Field label="LEAPS allocation (%)">
-          <input inputMode="decimal" value={form.leaps_allocation_pct} onChange={set('leaps_allocation_pct')} className={inputCls} />
-        </Field>
-        <Field label="Filing status">
-          <select value={form.filing_status} onChange={set('filing_status')} className={inputCls}>
-            {FILING_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-          </select>
-        </Field>
-        <Field label="State of residence">
-          <select value={form.state_code} onChange={set('state_code')} className={inputCls}>
-            <option value="">Select…</option>
-            {states.map((s) => <option key={s.state_code} value={s.state_code}>{s.state_name}</option>)}
-          </select>
-        </Field>
-        <Field label="Annual taxable income before LEAPS gains ($)" wide>
-          <input inputMode="decimal" value={form.annual_income} onChange={set('annual_income')} className={inputCls} />
-        </Field>
-        <Field label="Target after-tax returns (% of portfolio, comma-separated)" wide>
-          <input value={form.target_pcts} onChange={set('target_pcts')} className={inputCls} />
-        </Field>
-        <Field label="CPA long-term rate (%, optional)">
-          <input inputMode="decimal" value={form.lt_rate_override} onChange={set('lt_rate_override')} placeholder="Derived" className={inputCls} />
-        </Field>
-        <Field label="CPA short-term rate (%, optional)">
-          <input inputMode="decimal" value={form.st_rate_override} onChange={set('st_rate_override')} placeholder="Derived" className={inputCls} />
-        </Field>
-      </div>
-      {error && <div className="mt-3 text-xs text-rose-300">{error}</div>}
-      <div className="mt-4 flex gap-2 justify-end">
-        {onCancel && (
-          <button type="button" onClick={onCancel} className="min-h-[44px] px-4 rounded border border-border text-sm text-subtle hover:text-fg">
-            Cancel
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={submit}
-          disabled={saving}
-          className="min-h-[44px] px-4 rounded bg-amber-400/10 border border-amber-400/40 text-amber-300 text-sm font-semibold hover:bg-amber-400/20 transition disabled:opacity-40"
-        >
-          {saving ? 'Saving…' : 'Save'}
-        </button>
+    <div className="bg-card border border-border rounded-xl p-4 mb-4">
+      <div className="flex items-start gap-2">
+        <div className="flex-1 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+          <Stat label="Portfolio" value={usd(Number(profile.portfolio_size))} />
+          <Stat label={`LEAPS basis (${pct(Number(profile.leaps_allocation_pct), 0)})`} value={usd(basis)} />
+          <Stat label="Filing status" value={status} />
+          <Stat label="Income before LEAPS" value={usd(Number(profile.annual_income))} />
+          <Stat label="State" value={stateName} />
+        </div>
+        <Link to="/settings#tax" aria-label="Edit tax profile in Settings"
+          className="min-h-[44px] px-3 inline-flex items-center gap-1.5 rounded border border-border text-xs text-subtle hover:text-fg hover:border-amber-400/40 transition">
+          <Pencil size={13} /> Edit
+        </Link>
       </div>
     </div>
   )
-}
-
-function toForm(p) {
-  const pctStr = (x) => (x == null ? '' : String(+(Number(x) * 100).toFixed(4)))
-  return {
-    portfolio_size: String(p.portfolio_size ?? ''),
-    leaps_allocation_pct: pctStr(p.leaps_allocation_pct),
-    filing_status: p.filing_status ?? 'single',
-    annual_income: String(p.annual_income ?? 0),
-    state_code: p.state_code ?? '',
-    target_pcts: (p.target_pcts ?? DEFAULT_TARGET_PCTS).map((t) => pctStr(t)).join(', '),
-    lt_rate_override: pctStr(p.lt_rate_override),
-    st_rate_override: pctStr(p.st_rate_override),
-  }
 }
 
 // ── Rate breakdown ────────────────────────────────────────────────
