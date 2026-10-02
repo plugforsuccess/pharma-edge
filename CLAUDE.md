@@ -671,6 +671,9 @@ owner's request until the copy and the pop-up behavior are designed).
 paragraphs back under cards either. Tax screens keep one visible line:
 "All tax figures are estimates, not tax advice. Consult a tax
 professional before acting on them."
+**Tax rates** on `/leaps` aren't a card: the Tax profile card's 4th
+slot, "Estimated tax rate", is a "View rates" link that opens the
+breakdown (long / short-term, §1256 blend) in a `Modal`.
 **Card notices** (tax-wait, take-gains, roll window, time stop) use the
 `Notice` component in `Leaps.jsx`: bold title and body at the same size
 (text-sm), plus an X that dismisses it on this device (localStorage,

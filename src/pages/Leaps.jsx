@@ -15,6 +15,7 @@ import {
   customExitTargets, validateCustomTargets, MAX_CUSTOM_TARGETS,
 } from '../utils/afterTax'
 import NumberInput from '../components/NumberInput'
+import Modal from '../components/Modal'
 
 // LEAPS — after-tax targets + live after-tax value.
 //
@@ -385,9 +386,8 @@ export default function Leaps() {
         <div className="text-xs text-muted py-8 text-center">Loading…</div>
       ) : (
         <>
-          <TaxSummaryCard profile={p} hasProfile={!!profile} states={states} />
-
-          {breakdown && ready && <RateBreakdown rates={breakdown} state={state} taxYear={federal.tax_year} show1256={has1256} />}
+          <TaxSummaryCard profile={p} hasProfile={!!profile} states={states}
+            rates={breakdown && ready ? { rates: breakdown, state, taxYear: federal.tax_year, show1256: has1256 } : null} />
 
           {!ready && profile && (
             <Banner tone="amber">Pick your residency in Settings (or enter both CPA rates) to see after-tax figures.</Banner>
@@ -503,7 +503,8 @@ const CARD = 'bg-card border border-border rounded-2xl p-5 mb-5'
 // ── Profile ───────────────────────────────────────────────────────
 
 // Read-only: the tax profile and goals are edited in /settings.
-function TaxSummaryCard({ profile, hasProfile, states }) {
+function TaxSummaryCard({ profile, hasProfile, states, rates }) {
+  const [ratesOpen, setRatesOpen] = useState(false)
   if (!hasProfile) {
     return (
       <div className="bg-card border border-amber-500/40 rounded-xl p-4 mb-4 flex items-start gap-3">
@@ -527,25 +528,43 @@ function TaxSummaryCard({ profile, hasProfile, states }) {
         <Stat label="Filing status" value={status} text />
         <Stat label="Income before gains" value={usd(Number(profile.annual_income))} />
         <Stat label="Residency" value={stateName} text />
+        {rates && (
+          <div className="min-w-0">
+            <div className="text-xs text-muted truncate mb-1">Estimated tax rate</div>
+            <button type="button" onClick={() => setRatesOpen(true)}
+              className="-my-3 min-h-[44px] text-sm text-amber-300 underline underline-offset-4 decoration-amber-400/50 hover:text-amber-200">
+              View rates
+            </button>
+          </div>
+        )}
       </div>
+      {rates && (
+        <Modal open={ratesOpen} onClose={() => setRatesOpen(false)} ariaLabel="Estimated tax rate" size="lg">
+          <RateBreakdown {...rates} onClose={() => setRatesOpen(false)} />
+        </Modal>
+      )}
     </div>
   )
 }
 
 // ── Rate breakdown ────────────────────────────────────────────────
 
-function RateBreakdown({ rates, state, taxYear, show1256 }) {
+function RateBreakdown({ rates, state, taxYear, show1256, onClose }) {
   const rows = [
     ['Long-term (held > 1 yr)', rates.long_term],
     ['Short-term', rates.short_term],
   ]
   const blend = blended1256Rate(rates)
   return (
-    <div className={CARD}>
+    <div>
       <div className="flex items-center gap-2 mb-4">
-        <h2 className="text-sm font-semibold">Your estimated tax rates</h2>
+        <h2 className="text-base font-semibold">Estimated tax rate</h2>
         <span className="flex-1" />
         <span className="text-xs text-muted">{taxYear}</span>
+        <button type="button" onClick={onClose} aria-label="Close"
+          className="-mr-2 min-h-[44px] min-w-[44px] flex items-center justify-center rounded text-subtle hover:text-fg">
+          <X size={16} />
+        </button>
       </div>
       <div className="space-y-4">
         {rows.map(([label, r]) => (
