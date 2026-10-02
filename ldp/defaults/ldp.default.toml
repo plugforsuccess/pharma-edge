@@ -40,13 +40,18 @@ step_wait_seconds = 60
 poll_interval_seconds = 5
 tick_size = 0.05
 duration = "day"
+place_target_order_on_entry = true
+target_order_duration = "gtc"
 
 [exits]
-ladder = [1.0, 2.0, 3.0]     # after-tax gain multiples of basis
-# rung_fractions = [0.34, 0.33, 0.33]   # default: equal
-roll_dte_days = 180
-ltcg_wait_days = 60
-stop_loss_pct = 0.50
+# Playbook: targets are pre-tax gains on the option (1.0 = +100%).
+ladder = [1.0, 2.0]
+rung_fractions = [0.70, 0.15]  # share of the original position; the rest (15%) is the runner
+runner_trail_pct = 0.30        # runner exits on a 30% give-back from its peak
+roll_dte_days = 180            # time stop: exit or roll with 6 months left
+roll_warn_dte_days = 270       # roll window opens at 9 months left
+ltcg_wait_days = 60            # wait for long-term only if this close and before the roll window
+# stop_loss_pct = 0.50         # unset = no hard price stop (cut only on a broken thesis)
 
 [core]
 top_n_sectors = 3

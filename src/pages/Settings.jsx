@@ -12,7 +12,7 @@ import clsx from 'clsx'
 import NumberInput from '../components/NumberInput'
 import BotSettingsSection from '../components/BotSettingsSection'
 import { FEATURES } from '../lib/features'
-import { FILING_STATUSES, DEFAULT_TARGET_PCTS, DEFAULT_EXIT_LADDER, isValidTaxRate } from '../utils/afterTax'
+import { FILING_STATUSES, DEFAULT_TARGET_PCTS, EXIT_PLAYBOOK, isValidTaxRate } from '../utils/afterTax'
 import { LDP_DISCLOSURES_VERSION, DISCLOSURES, TOLERANCES, EXPERIENCE } from '../lib/ldpDisclosures'
 
 // Settings — the one place users edit their account, LEAPS risk profile,
@@ -104,13 +104,19 @@ function goalsFrom(t) {
   }
 }
 
+// Exit plan (LEAPS playbook): pre-tax gain targets on the option, the
+// share of the original position sold at each, and the runner's trail.
 function ladderFrom(r) {
-  const targets = (r?.exit_ladder?.length ? r.exit_ladder : DEFAULT_EXIT_LADDER).map(Number)
-  const fr = r?.rung_fractions?.length === targets.length ? r.rung_fractions.map(Number) : null
-  return targets.map((t, i) => ({
-    target: pctStr(t, 2),
-    share: pctStr(fr ? fr[i] : 1 / targets.length, 2),
-  }))
+  const stored = r?.exit_ladder?.length ? r.exit_ladder.map(Number) : null
+  const targets = stored ?? EXIT_PLAYBOOK.targets
+  const fr = stored
+    ? (r?.rung_fractions?.length === targets.length ? r.rung_fractions.map(Number) : targets.map(() => 1 / targets.length))
+    : EXIT_PLAYBOOK.fractions
+  const trail = Number(r?.runner_trail_pct)
+  return {
+    rows: targets.map((t, i) => ({ target: pctStr(t, 2), share: pctStr(fr[i], 2) })),
+    trail: pctStr(trail > 0 && trail < 1 ? trail : EXIT_PLAYBOOK.runnerTrailPct, 2),
+  }
 }
 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
@@ -240,13 +246,15 @@ export default function Settings() {
       if (!(num(risk.account_size) > 0) && !taxRow) errs.push('Risk profile: enter your account size (used as your portfolio size).')
     }
     if (dirty.ladder) {
-      const t = ladder.map((r) => num(r.target))
-      const s = ladder.map((r) => num(r.share))
-      if (ladder.length < 1 || ladder.length > LADDER_MAX_RUNGS) errs.push(`Exit Targets: 1 to ${LADDER_MAX_RUNGS} rungs.`)
-      if (t.some((x) => !(x > 0 && x <= 1000))) errs.push('Exit Targets: each target must be above 0% and at most 1000% after tax.')
-      if (t.some((x, i) => i > 0 && !(x > t[i - 1]))) errs.push('Exit Targets: targets must increase from rung to rung.')
-      if (s.some((x) => !(x > 0))) errs.push('Exit Targets: each rung must sell more than 0%.')
-      if (Math.abs(s.reduce((a, b) => a + (b || 0), 0) - 100) > 0.1) errs.push('Exit Targets: sell shares must add up to 100%.')
+      const t = ladder.rows.map((r) => num(r.target))
+      const s = ladder.rows.map((r) => num(r.share))
+      const trail = num(ladder.trail)
+      if (ladder.rows.length < 1 || ladder.rows.length > LADDER_MAX_RUNGS) errs.push(`Exit Targets: 1 to ${LADDER_MAX_RUNGS} targets.`)
+      if (t.some((x) => !(x > 0 && x <= 1000))) errs.push('Exit Targets: each target must be above 0% and at most 1000%.')
+      if (t.some((x, i) => i > 0 && !(x > t[i - 1]))) errs.push('Exit Targets: targets must increase from one to the next.')
+      if (s.some((x) => !(x > 0))) errs.push('Exit Targets: each target must sell more than 0%.')
+      if (s.reduce((a, b) => a + (b || 0), 0) > 100.1) errs.push('Exit Targets: the targets sell more than 100% of the position.')
+      if (!(trail >= 5 && trail <= 90)) errs.push('Exit Targets: the runner trail must be between 5% and 90%.')
     }
     if (FEATURES.leaderboard && dirty.names && (slugStatus === 'taken' || slugStatus === 'reserved')) {
       errs.push('Profile: pick a different username.')
@@ -279,10 +287,11 @@ export default function Settings() {
       }
       if (dirty.catalyst) body.allow_catalyst_plays = risk.allow_catalyst_plays
       if (dirty.ladder) {
-        const targets = ladder.map((r) => num(r.target) / 100)
-        const shares = ladder.map((r) => num(r.share) / 100)
-        const even = shares.every((x) => Math.abs(x - 1 / shares.length) < 0.001)
-        body.exit_ladder = { targets, fractions: even ? null : normalise(shares) }
+        body.exit_ladder = {
+          targets: ladder.rows.map((r) => num(r.target) / 100),
+          fractions: ladder.rows.map((r) => num(r.share) / 100),
+          runner_trail_pct: num(ladder.trail) / 100,
+        }
       }
       const { data, error } = await supabase.functions.invoke('ldp-onboarding', { body })
       if (error || !data?.success) {
@@ -433,7 +442,7 @@ export default function Settings() {
       </Section>
 
       <Section title="Exit Targets" id="exit-targets">
-        <LadderEditor rows={ladder} onChange={setLadder} />
+        <LadderEditor plan={ladder} onChange={setLadder} />
       </Section>
 
       <PushSection userId={user?.id} />
@@ -489,11 +498,6 @@ export default function Settings() {
       </div>
     </div>
   )
-}
-
-function normalise(xs) {
-  const s = xs.reduce((a, b) => a + b, 0)
-  return xs.map((x) => x / s)
 }
 
 const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s)
@@ -593,50 +597,65 @@ function PlanCard({ name, price, items, current, cta }) {
   )
 }
 
-function LadderEditor({ rows, onChange }) {
-  const set = (i, k, v) => onChange(rows.map((r, j) => (j === i ? { ...r, [k]: v } : r)))
-  const evenly = (rs) => rs.map((r) => ({ ...r, share: String(+(100 / rs.length).toFixed(2)) }))
-  const total = rows.reduce((a, r) => a + (num(r.share) || 0), 0)
+function LadderEditor({ plan, onChange }) {
+  const rows = plan.rows
+  const setRows = (next) => onChange({ ...plan, rows: next })
+  const set = (i, k, v) => setRows(rows.map((r, j) => (j === i ? { ...r, [k]: v } : r)))
+  const sold = rows.reduce((a, r) => a + (num(r.share) || 0), 0)
+  const runner = Math.max(0, 100 - sold)
+  const isPlaybook = JSON.stringify(plan) === JSON.stringify(ladderFrom(null))
   return (
-    <div className="space-y-2">
-      <p className="text-subtle text-xs leading-relaxed">
-        Each rung sells part of a position once its <span className="text-fg">after-tax</span> gain reaches the target.
-        100% means the position has doubled after tax.
+    <div className="space-y-3">
+      <p className="text-subtle text-xs">
+        Each target sells part of the position once the option is up that much (before tax). Whatever isn't
+        sold is the runner, which exits if it falls the trail % from its peak.
       </p>
-      <div className="grid grid-cols-[3.5rem_1fr_1fr_2.75rem] gap-2 text-[10px] uppercase tracking-wider text-muted px-1">
+      <div className="grid grid-cols-[4.25rem_1fr_1fr_2.75rem] gap-2 text-[10px] uppercase tracking-wider text-muted px-1">
         <span />
-        <span>After-tax gain</span>
+        <span>Option up</span>
         <span>Sell</span>
         <span />
       </div>
       {rows.map((r, i) => (
-        <div key={i} className="grid grid-cols-[3.5rem_1fr_1fr_2.75rem] gap-2 items-center">
-          <span className="text-xs text-subtle">Rung {i + 1}</span>
-          <AffixInput value={r.target} onChange={(v) => set(i, 'target', v)} prefix="+" suffix="%" label={`Rung ${i + 1} after-tax gain target`} />
-          <AffixInput value={r.share} onChange={(v) => set(i, 'share', v)} suffix="%" label={`Rung ${i + 1} share to sell`} />
-          <button type="button" aria-label={`Remove rung ${i + 1}`} disabled={rows.length <= 1}
-            onClick={() => onChange(evenly(rows.filter((_, j) => j !== i)))}
+        <div key={i} className="grid grid-cols-[4.25rem_1fr_1fr_2.75rem] gap-2 items-center">
+          <span className="text-xs text-subtle">Target {i + 1}</span>
+          <AffixInput value={r.target} onChange={(v) => set(i, 'target', v)} prefix="+" suffix="%" label={`Target ${i + 1} gain on the option`} />
+          <AffixInput value={r.share} onChange={(v) => set(i, 'share', v)} suffix="%" label={`Target ${i + 1} share of the position to sell`} />
+          <button type="button" aria-label={`Remove target ${i + 1}`} disabled={rows.length <= 1}
+            onClick={() => setRows(rows.filter((_, j) => j !== i))}
             className="min-h-[44px] flex items-center justify-center rounded-lg border border-border text-subtle hover:text-red-300 disabled:opacity-30">
             <Trash2 size={14} />
           </button>
         </div>
       ))}
-      <div className="flex items-center gap-2 pt-1">
+      <div className="grid grid-cols-[4.25rem_1fr_1fr_2.75rem] gap-2 items-center">
+        <span className="text-xs text-subtle">Runner</span>
+        <AffixInput value={plan.trail} onChange={(v) => onChange({ ...plan, trail: v })} suffix="%" label="Runner trail from its peak" />
+        <span className={clsx('text-xs font-mono-tab px-1', sold > 100.1 ? 'text-red-300' : 'text-muted')}>
+          {sold > 100.1 ? 'over 100%' : `${+runner.toFixed(2)}% left`}
+        </span>
+        <span />
+      </div>
+      <p className="text-[10px] text-muted px-1">Runner: exit if it gives back this % from its peak.</p>
+      <div className="flex flex-wrap items-center gap-2 pt-1">
         <button type="button" disabled={rows.length >= LADDER_MAX_RUNGS}
           onClick={() => {
             const last = num(rows[rows.length - 1]?.target) || 0
-            onChange(evenly([...rows, { target: String(last + 100), share: '0' }]))
+            setRows([...rows, { target: String(last + 100), share: String(Math.max(0, +(runner / 2).toFixed(2)) || '') }])
           }}
           className="min-h-[44px] px-3 inline-flex items-center gap-1.5 rounded-lg border border-border text-xs text-subtle hover:text-fg disabled:opacity-30">
-          <Plus size={13} /> Add rung
+          <Plus size={13} /> Add target
         </button>
-        <button type="button" onClick={() => onChange(evenly(rows))}
-          className="min-h-[44px] px-3 rounded-lg border border-border text-xs text-subtle hover:text-fg">
-          Split evenly
+        <button type="button" disabled={isPlaybook} onClick={() => onChange(ladderFrom(null))}
+          className="min-h-[44px] px-3 rounded-lg border border-border text-xs text-subtle hover:text-fg disabled:opacity-30">
+          Reset to playbook
         </button>
-        <span className={clsx('ml-auto text-xs font-mono-tab', Math.abs(total - 100) > 0.1 ? 'text-red-300' : 'text-muted')}>
-          {Math.abs(total - 100) <= 0.1 ? 100 : +total.toFixed(2)}% sold
-        </span>
+      </div>
+      <div className="rounded-lg border border-hairline bg-bg/40 px-3 py-2.5 text-xs text-muted space-y-1">
+        <div className="text-subtle font-semibold">Also part of the plan</div>
+        <div>No hard price stop — cut only if the thesis breaks.</div>
+        <div>Roll window at 9 months left; exit or roll at 6.</div>
+        <div>Wait for long-term only if it lands before the roll window.</div>
       </div>
     </div>
   )

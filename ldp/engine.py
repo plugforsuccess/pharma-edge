@@ -13,6 +13,7 @@ Every trade, suggestion, skip and hold-for-long-term is audited.
 from __future__ import annotations
 
 import dataclasses
+import math
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Callable, Mapping, Sequence
@@ -24,7 +25,9 @@ from .config import LDPConfig
 from .models import Account, OptionQuote, Position
 from .orders import ExecutionResult, LimitOrderExecutor
 from .risk import Permission, RiskProfile, permission
-from .rules import RateSource, SellDecision, evaluate_position
+from . import ladder as ladder_mod
+from .brokers.base import LimitOrder
+from .rules import RateSource, SellDecision, evaluate_position, resolve_ladder
 from .satellite import SatelliteCandidate, SatelliteEvaluation
 from .scoring import SectorScore
 from .sizing import size_core, size_satellite
@@ -44,6 +47,7 @@ class UserContext:
     last_annual_buy: date | None = None
     ladder_targets: tuple[float, ...] | None = None
     ladder_fractions: tuple[float, ...] | None = None
+    runner_trail_pct: float | None = None
 
 
 @dataclass
@@ -119,7 +123,8 @@ class Engine:
             ticker=t.ticker, sleeve=t.sleeve, contract=q.symbol, filter_values=t.contract.values,
             score=t.score, score_components=t.score_components, thesis=t.thesis, sources=list(t.sources),
             sizing=t.sizing.to_record(),
-            exit_ladder=[{"target": x} for x in (user.ladder_targets or self.cfg.exits.ladder)],
+            exit_ladder=[{"target": t, "fraction": f} for t, f in zip(*resolve_ladder(
+                self.cfg, user.ladder_targets, user.ladder_fractions))],
             tax_rates={"note": TAX_DISCLAIMER},
         )
         if t.permission.mode != "auto":
@@ -128,8 +133,37 @@ class Engine:
         res = self.executor.execute(account_id=user.account.account_id, underlying=t.ticker, option_symbol=q.symbol,
                                     side="buy_to_open", quantity=t.sizing.contracts, bid=q.bid, ask=q.ask,
                                     tag=f"ldp-{t.sleeve}")
-        self._record(user, t.permission, kind="trade", action="buy", order=res.to_record(), **common)
-        return Outcome("trade", "buy", t.ticker, {"status": res.status, "filled": res.filled})
+        order: dict = res.to_record()
+        target = self._place_target_order(user, t.ticker, q.symbol, res)
+        if target is not None:
+            order = {"open": order, "target_order": target}
+        self._record(user, t.permission, kind="trade", action="buy", order=order, **common)
+        return Outcome("trade", "buy", t.ticker, {"status": res.status, "filled": res.filled,
+                                                   "target_order": target})
+
+    def _place_target_order(self, user: UserContext, underlying: str, symbol: str, opened) -> dict | None:
+        """Playbook: automate the first sell. Right after a buy fills, rest a
+        GTC limit sell for Target 1's share of the filled contracts at
+        Target 1's price (rounded UP to the tick, so it never sells short
+        of the target). The daily check then leaves rung 0 to the broker."""
+        o = self.cfg.orders
+        if not o.place_target_order_on_entry or opened.filled < 1 or not opened.avg_fill_price:
+            return None
+        targets, fractions = resolve_ladder(self.cfg, user.ladder_targets, user.ladder_fractions)
+        alloc, _runner = ladder_mod.allocate_with_runner(opened.filled, fractions)
+        qty = alloc[0]
+        if qty < 1:
+            return None
+        raw = opened.avg_fill_price * (1 + targets[0])
+        price = round(math.ceil(round(raw / o.tick_size, 9)) * o.tick_size, 2)
+        order = LimitOrder(underlying=underlying, option_symbol=symbol, side="sell_to_close", quantity=qty,
+                           limit_price=price, duration=o.target_order_duration, tag="ldp-target1")
+        try:
+            order_id = self.broker.place_limit_order(user.account.account_id, order)
+        except Exception as exc:   # the position is still open — the daily check sells at target instead
+            return {"status": "rejected", "quantity": qty, "limit_price": price, "error": str(exc)}
+        return {"status": "resting", "order_id": order_id, "quantity": qty, "limit_price": price,
+                "duration": o.target_order_duration, "rung": 0}
 
     # ── Daily sell checks ───────────────────────────────────────────
     def run_daily(
@@ -150,6 +184,7 @@ class Engine:
                 satellite=(satellites or {}).get(pos.ticker), allow_catalyst_plays=user.allow_catalyst_plays,
                 roll_chain=roll_chain, annual_review=annual_review, top_tier_sectors=top_tier_sectors,
                 ladder_targets=user.ladder_targets, ladder_fractions=user.ladder_fractions,
+                runner_trail_pct=user.runner_trail_pct,
             )
             out.append((pos, d, self._act(user, pos, d, today, positions)))
         return out
@@ -199,8 +234,12 @@ class Engine:
                            available_cash=user.account.cash + proceeds)
         if sz.skipped:
             return ExecutionResult(None, "unfilled", 0, 0, None, events=[{"event": "skipped", "reason": sz.reason}])
-        return self.executor.execute(account_id=user.account.account_id, underlying=pos.ticker, option_symbol=q.symbol,
-                                     side="buy_to_open", quantity=sz.contracts, bid=q.bid, ask=q.ask, tag="ldp-roll")
+        opened = self.executor.execute(account_id=user.account.account_id, underlying=pos.ticker, option_symbol=q.symbol,
+                                       side="buy_to_open", quantity=sz.contracts, bid=q.bid, ask=q.ask, tag="ldp-roll")
+        target = self._place_target_order(user, pos.ticker, q.symbol, opened)
+        if target is not None:
+            opened.events.append({"event": "target_order", **target})
+        return opened
 
     def _quote_for(self, pos: Position, today: date) -> OptionQuote | None:
         if pos.expiration is None or pos.contract_symbol is None:

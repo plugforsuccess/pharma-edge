@@ -72,7 +72,8 @@ def run(position: Position, days: Sequence[Day], *, rate_source: RateSource, cfg
     for day in days:
         if pos.contracts_open <= 0:
             break
-        pos = dataclasses.replace(pos, mark=day.mark, thesis_status=day.thesis_status)
+        pos = dataclasses.replace(pos, mark=day.mark, thesis_status=day.thesis_status,
+                                  peak_mark=max(pos.peak_mark or day.mark, day.mark))
         d = evaluate_position(pos, today=day.on, rate_source=rate_source, cfg=cfg, satellite=day.satellite,
                               allow_catalyst_plays=allow_catalyst_plays, roll_chain=day.roll_chain,
                               annual_review=day.annual_review, top_tier_sectors=day.top_tier_sectors)
@@ -93,7 +94,7 @@ def run(position: Position, days: Sequence[Day], *, rate_source: RateSource, cfg
                 pos = dataclasses.replace(
                     pos, contract_symbol=q.symbol, expiration=q.expiration, original_contracts=new_n,
                     contracts_open=new_n, basis_per_contract=cost, entry_price=q.ask, mark=q.ask,
-                    acquired=day.on, rungs_filled=frozenset(),
+                    acquired=day.on, rungs_filled=frozenset(), rungs_resting=frozenset(), peak_mark=q.ask,
                 )
                 continue
             remaining = 0

@@ -8,7 +8,8 @@ import {
   FILING_STATUSES, DEFAULT_TARGET_PCTS, makeRateResolver, deriveRates,
   applyRateOverride, targetTable, targetRow, positionAfterTax, portfolioSummary,
   todayYmd, holdingPeriod, suggestInstrumentType, exerciseCall,
-  blended1256Rate, exitLadder, rateAtGainFor, DEFAULT_EXIT_LADDER,
+  blended1256Rate, rateAtGainFor, EXIT_PLAYBOOK, playbookTargets, runnerPlan, timeStop,
+  longTermFitsPlan, entryRunwayDays,
   customExitTargets, validateCustomTargets, MAX_CUSTOM_TARGETS,
 } from '../utils/afterTax'
 import NumberInput from '../components/NumberInput'
@@ -37,6 +38,10 @@ const DEFAULT_PROFILE = {
 
 const usd = (n) =>
   Number.isFinite(n) ? `${n < 0 ? '−' : ''}$${Math.round(Math.abs(n)).toLocaleString()}` : '—'
+// Per-contract / per-share prices: cents only when they matter (< $100).
+const usdUnit = (n) => (!Number.isFinite(n) ? '—'
+  : n >= 100 ? usd(n)
+    : `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)
 const mult = (n) => (Number.isFinite(n) ? `${n.toFixed(2)}x` : '—')
 const pct = (n, dp = 1) => (Number.isFinite(n)
   ? `${(n * 100).toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp })}%`
@@ -59,9 +64,9 @@ export default function Leaps() {
   const [loadError, setLoadError] = useState('')
   const [searchParams, setSearchParams] = useSearchParams()
   const [adding, setAdding] = useState(searchParams.get('add') === '1')
-  // Exit-ladder settings live on the engine's risk profile (service-role
-  // written); fall back to the default 1x/2x/3x after-tax ladder.
-  const [ladderCfg, setLadderCfg] = useState({ targets: DEFAULT_EXIT_LADDER, fractions: null })
+  // The exit plan lives on the engine's risk profile (service-role
+  // written, edited in Settings); default is the LEAPS playbook.
+  const [plan, setPlan] = useState(EXIT_PLAYBOOK)
 
   useEffect(() => {
     if (!user?.id) return
@@ -73,7 +78,7 @@ export default function Leaps() {
           supabase.from('leaps_tax_profiles').select('*').eq('user_id', user.id).maybeSingle(),
           supabase.from('leaps_positions').select('*').eq('user_id', user.id)
             .is('closed_at', null).order('purchase_date', { ascending: true }),
-          supabase.from('ldp_risk_profiles').select('exit_ladder, rung_fractions').eq('user_id', user.id).maybeSingle(),
+          supabase.from('ldp_risk_profiles').select('exit_ladder, rung_fractions, runner_trail_pct').eq('user_id', user.id).maybeSingle(),
         ])
         if (cancelled) return
         if (fed.error || prof.error || pos.error) {
@@ -83,10 +88,16 @@ export default function Leaps() {
         setFederal(fed.data ?? null)
         setProfile(prof.data ?? null)
         setPositions(pos.data ?? [])
-        const ladder = (risk.data?.exit_ladder ?? []).map(Number).filter((t) => t > 0)
-        if (ladder.length) {
+        const targets = (risk.data?.exit_ladder ?? []).map(Number).filter((t) => t > 0)
+        if (targets.length) {
           const fr = risk.data?.rung_fractions?.map(Number)
-          setLadderCfg({ targets: ladder, fractions: fr?.length === ladder.length ? fr : null })
+          const trail = Number(risk.data?.runner_trail_pct)
+          setPlan({
+            ...EXIT_PLAYBOOK,
+            targets,
+            fractions: fr?.length === targets.length ? fr : targets.map(() => 1 / targets.length),
+            runnerTrailPct: trail > 0 && trail < 1 ? trail : EXIT_PLAYBOOK.runnerTrailPct,
+          })
         }
         if (fed.data) {
           const st = await supabase.from('state_tax_rates').select('*')
@@ -131,13 +142,13 @@ export default function Leaps() {
   }, [rateForGain, totalCost, targetPcts])
   const asOf = todayYmd()
 
+  // The exit plan (playbook by default) on one position: pre-tax targets
+  // with the after-tax dollars each sale keeps.
   const ladderFor = useCallback((basis, currentValue, character, contracts) => {
     if (!rateForGain) return []
-    return exitLadder({
-      basis, currentValue, contracts, targets: ladderCfg.targets, fractions: ladderCfg.fractions,
-      rateAtGain: rateAtGainFor(character, rateForGain),
-    })
-  }, [rateForGain, ladderCfg])
+    return customExitTargets({ basis, currentValue, contracts, targets: playbookTargets(plan),
+      rateAtGain: rateAtGainFor(character, rateForGain) })
+  }, [rateForGain, plan])
 
   // User-set % / $ targets on a single position (leaps_positions.exit_targets).
   const customFor = useCallback((basis, currentValue, character, contracts, targets) => {
@@ -166,8 +177,10 @@ export default function Leaps() {
     }
 
     function withLadder(pos, calc) {
-      if (!calc) return { pos, calc, ladder: [], ladderLongTerm: null, custom: [], customLongTerm: null }
-      const contracts = pos.instrument_type === 'stock' ? null : (Number(pos.contracts) || null)
+      if (!calc) return { pos, calc, ladder: [], ladderLongTerm: null, custom: [], customLongTerm: null, runner: null }
+      const isStock = pos.instrument_type === 'stock'
+      const contracts = isStock ? null : (Number(pos.contracts) || null)
+      const units = isStock ? Number(pos.shares) : contracts
       const own = Array.isArray(pos.exit_targets) && pos.exit_targets.length ? pos.exit_targets : null
       if (own) {
         return {
@@ -179,6 +192,7 @@ export default function Leaps() {
           customLongTerm: calc.tax_character === 'short_term'
             ? customFor(calc.basis, calc.current_value, 'long_term', contracts, own)
             : null,
+          runner: null,
         }
       }
       return {
@@ -191,9 +205,11 @@ export default function Leaps() {
         ladderLongTerm: calc.tax_character === 'short_term'
           ? ladderFor(calc.basis, calc.current_value, 'long_term', contracts)
           : null,
+        runner: runnerPlan({ fractions: plan.fractions, contracts, units, peakUnitValue: pos.peak_unit_value,
+          currentValue: calc.current_value, trailPct: plan.runnerTrailPct }),
       }
     }
-  }, [positions, rateForGain, asOf, selectedPct, ladderFor, customFor])
+  }, [positions, rateForGain, asOf, selectedPct, ladderFor, customFor, plan])
 
   const summary = useMemo(() => {
     if (!rateForGain || results.length === 0) return null
@@ -225,6 +241,13 @@ export default function Leaps() {
   }
 
   async function savePosition(row, id) {
+    // Track the highest value per contract (or share) — the runner's
+    // trail is measured from it.
+    const units = row.instrument_type === 'stock' ? Number(row.shares) : Number(row.contracts)
+    if (units > 0) {
+      const prev = id ? Number(positions.find((x) => x.id === id)?.peak_unit_value) || 0 : 0
+      row = { ...row, peak_unit_value: Math.max(prev, Number(row.current_value) / units) }
+    }
     const q = id
       ? supabase.from('leaps_positions').update(row).eq('id', id).eq('user_id', user.id)
       : supabase.from('leaps_positions').insert({ ...row, user_id: user.id })
@@ -337,7 +360,7 @@ export default function Leaps() {
                 </div>
               )}
 
-              {results.map(({ pos, calc, ladder, ladderLongTerm, custom, customLongTerm }) => (
+              {results.map(({ pos, calc, ladder, ladderLongTerm, custom, customLongTerm, runner }) => (
                 <PositionCard
                   key={pos.id}
                   pos={pos}
@@ -346,6 +369,8 @@ export default function Leaps() {
                   ladderLongTerm={ladderLongTerm}
                   custom={custom}
                   customLongTerm={customLongTerm}
+                  runner={runner}
+                  plan={plan}
                   previewFor={(f, own) => previewTargets(f, own, ladderFor, customFor)}
                   selectedTargetPct={Number(p.selected_target_pct)}
                   onSave={(row) => savePosition(row, pos.id)}
@@ -648,6 +673,8 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
   // detected from the ticker, never asked.
   const instrumentType = isShares ? 'stock' : suggestInstrumentType(f.ticker)
   const is1256 = instrumentType === 'index_option_1256'
+  const runwayDays = entryRunwayDays(f.purchase_date, f.expiration)
+  const shortRunway = runwayDays != null && runwayDays > 0 && runwayDays < EXIT_PLAYBOOK.minEntryDays
   const { basis, value } = totalsOf(f)
 
   // Switching price entry carries the numbers across so nothing is lost.
@@ -774,6 +801,12 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
             <input type="date" value={f.purchase_date} max={todayYmd()} onChange={(e) => setV('purchase_date')(e.target.value)} className={dateCls} />
           </Field>
         </div>
+        {!isShares && shortRunway && (
+          <div className="mt-4 rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2.5 text-xs text-amber-200">
+            Only {Math.round(runwayDays / 30.4)} months to expiry at purchase. Buy with 18–24+ months so the
+            1-year tax date and your 6-month time stop don't land on top of each other.
+          </div>
+        )}
         {!isShares && (
           is1256 && (
             <div className="mt-4 flex items-center gap-2 rounded-lg border border-sky-500/30 bg-sky-500/5 px-3 py-2.5">
@@ -832,9 +865,7 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
           onAdd={addRow}
           onRemove={removeRow}
         />
-        {previewRows && previewRows.length > 0 && (f.own_targets
-          ? <CustomTargetsPreview rows={previewRows} isStock={isShares} />
-          : <LadderPreview rungs={previewRows} />)}
+        {previewRows && previewRows.length > 0 && <CustomTargetsPreview rows={previewRows} isStock={isShares} />}
       </FormSection>
 
       {error && (
@@ -937,7 +968,7 @@ function positionMeta(pos) {
   return [contract.join(' · '), held.join(' · ')].filter(Boolean)
 }
 
-function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTerm, previewFor, selectedTargetPct, onSave, onDelete, onExercise }) {
+function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTerm, runner, plan, previewFor, selectedTargetPct, onSave, onDelete, onExercise }) {
   const [editing, setEditing] = useState(false)
   const [exercising, setExercising] = useState(false)
   const [showTaxDetail, setShowTaxDetail] = useState(false)
@@ -963,6 +994,8 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
     : [pos.ticker, pos.strike && `$${Number(pos.strike).toLocaleString('en-US', { maximumFractionDigits: 2 })}`, pos.option_type === 'P' ? 'Put' : 'Call']
       .filter(Boolean).join(' ')
   const canExercise = exerciseCall({ option: pos, exerciseDate: todayYmd() }) != null
+  const stop = isStock ? null : timeStop(pos.expiration, todayYmd(), plan)
+  const ltFits = longTermFitsPlan(calc.long_term_date, isStock ? null : pos.expiration, plan)
   const up = calc.gain >= 0
   return (
     <div className="bg-card border border-border rounded-2xl p-5 mb-4">
@@ -1018,23 +1051,35 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
         <Stat label="Multiple" value={mult(calc.current_multiple)} />
       </div>
 
-      {calc.tax_saved_by_waiting != null && (
-        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 mb-4 flex items-start gap-3">
-          <div className="flex-1 text-sm text-emerald-200">
-            Hold until <span className="font-semibold">{shortDate(calc.long_term_date)}</span> to save about{' '}
+      <TimeStopBanner stop={stop} />
+
+      {calc.tax_saved_by_waiting != null && (ltFits ? (
+        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 mb-4">
+          <div className="text-sm text-emerald-200">
+            Long-term on <span className="font-semibold">{shortDate(calc.long_term_date)}</span> would save about{' '}
             <span className="font-semibold font-mono-tab">{usd(calc.tax_saved_by_waiting)}</span> in tax.
-            <div className="text-xs text-emerald-200/70 mt-1">{calc.days_until_long_term} days until it's long-term</div>
+          </div>
+          <div className="text-xs text-emerald-200/70 mt-1">
+            {calc.days_until_long_term} days away, before your roll window — worth waiting for if a target hits close to it.
           </div>
         </div>
-      )}
-
-      {custom?.length > 0 ? (
-        <CustomExitTargets rows={custom} rowsLongTerm={customLongTerm} character={calc.tax_character}
-          longTermDate={calc.long_term_date} isStock={isStock} />
       ) : (
-        <ExitLadder ladder={ladder} ladderLongTerm={ladderLongTerm} character={calc.tax_character}
-          longTermDate={calc.long_term_date} isStock={isStock} />
-      )}
+        <div className="rounded-xl border border-border bg-bg/40 px-4 py-3 mb-4">
+          <div className="text-sm text-fg">Taxes come after the plan — take gains when a target hits.</div>
+          <div className="text-xs text-muted mt-1">
+            Long-term ({shortDate(calc.long_term_date)}) lands after your roll window opens
+            {stop ? ` on ${shortDate(stop.window_opens)}` : ''}, so waiting for it would collide with the time stop.
+          </div>
+        </div>
+      ))}
+
+      <CustomExitTargets
+        title={custom?.length > 0 ? 'Exit Targets' : 'Exit plan'}
+        rows={custom?.length > 0 ? custom : ladder}
+        rowsLongTerm={custom?.length > 0 ? customLongTerm : ladderLongTerm}
+        runner={custom?.length > 0 ? null : runner}
+        character={calc.tax_character}
+        longTermDate={calc.long_term_date} isStock={isStock} />
 
       {calc.target_progress != null && (
         <div className="mb-4">
@@ -1096,6 +1141,25 @@ const sellLabel = (r, isStock) => {
   return `sell ${r.contracts} ${isStock ? 'lot' : 'contract'}${r.contracts === 1 ? '' : 's'}`
 }
 
+function TimeStopBanner({ stop }) {
+  if (!stop || stop.level === 'ok') return null
+  const months = Math.max(0, Math.floor(stop.dte / 30.4))
+  const act = stop.level === 'act'
+  return (
+    <div className={clsx('rounded-xl border px-4 py-3 mb-4',
+      act ? 'border-rose-500/40 bg-rose-500/5' : 'border-amber-500/40 bg-amber-500/5')}>
+      <div className={clsx('text-sm font-semibold', act ? 'text-rose-200' : 'text-amber-200')}>
+        {act ? 'Time stop — exit or roll now' : 'Roll window — plan your exit or roll'}
+      </div>
+      <div className={clsx('text-xs mt-1', act ? 'text-rose-200/80' : 'text-amber-200/80')}>
+        {act
+          ? `${stop.dte} days left. Theta speeds up from here — don't hold into the last months hoping for a move. If the thesis is intact, roll to a new LEAPS.`
+          : `About ${months} months left. Exit or roll by ${shortDate(stop.act_by)} (6 months before expiry).`}
+      </div>
+    </div>
+  )
+}
+
 function TargetsPanel({ title, subtitle, info, children, footer }) {
   return (
     <div className="mb-4 rounded-xl border border-border bg-bg/40 p-4">
@@ -1120,59 +1184,7 @@ function RungProgress({ hit, progress }) {
   )
 }
 
-function ExitLadder({ ladder, ladderLongTerm, character, longTermDate, isStock }) {
-  if (!ladder?.length) return null
-  return (
-    <TargetsPanel
-      title="Exit Targets"
-      subtitle={`At the ${CHARACTER_LABEL[character]} if sold today`}
-    >
-      {ladder.map((r, i) => (
-        <li key={r.index}>
-          <div className="flex items-baseline gap-3">
-            <div className="flex-1 min-w-0">
-              <div className="text-sm text-fg">+{pct(r.target, 0)} after tax</div>
-              <div className="text-xs text-muted mt-0.5">Target {i + 1} · {sellLabel(r, isStock)}</div>
-            </div>
-            <div className="text-right shrink-0">
-              <div className={clsx('text-sm font-mono-tab font-semibold', r.hit ? 'text-green-400' : 'text-fg')}>{usd(r.exit_value)}</div>
-              <div className="text-xs text-muted font-mono-tab mt-0.5">
-                {mult(r.exit_multiple)}
-              </div>
-            </div>
-          </div>
-          {ladderLongTerm?.[i] && (
-            <div className="mt-1 text-xs text-muted text-right">Long-term: <span className="font-mono-tab">{usd(ladderLongTerm[i].exit_value)}</span></div>
-          )}
-          <div className="mt-2"><RungProgress hit={r.hit} progress={r.progress} /></div>
-        </li>
-      ))}
-    </TargetsPanel>
-  )
-}
 
-function LadderPreview({ rungs }) {
-  if (!rungs?.length) return null
-  return (
-    <div className="mt-4 rounded-xl border border-border bg-bg/40 p-4">
-      <div className="text-[10px] uppercase tracking-wider text-muted mb-3">Sell when the position is worth</div>
-      <ol className="space-y-3">
-        {rungs.map((r, i) => (
-          <li key={r.index} className="flex items-baseline gap-3">
-            <div className="flex-1 min-w-0">
-              <div className="text-sm text-fg">+{pct(r.target, 0)} after tax</div>
-              <div className="text-xs text-muted mt-0.5">Target {i + 1}</div>
-            </div>
-            <div className="text-right shrink-0">
-              <div className="text-sm font-mono-tab text-fg font-semibold">{usd(r.exit_value)}</div>
-              <div className="text-xs font-mono-tab text-muted mt-0.5">{mult(r.exit_multiple)}</div>
-            </div>
-          </li>
-        ))}
-      </ol>
-    </div>
-  )
-}
 
 // Live preview while the user is typing a position in the form:
 // the account ladder, or the user's own % / $ targets when set.
@@ -1199,10 +1211,10 @@ function TargetsEditor({ own, rows, contracts, onOwn, onRow, onAdd, onRemove }) 
   return (
     <div>
       <Segmented value={own ? 'own' : 'default'} onChange={(v) => onOwn(v === 'own')}
-        options={[{ value: 'default', label: 'My default' }, { value: 'own', label: 'Set my own' }]} />
+        options={[{ value: 'default', label: 'My plan' }, { value: 'own', label: 'Set my own' }]} />
       {!own ? (
         <p className="mt-3 text-xs text-muted">
-          Uses your after-tax Exit Targets from <Link to="/settings#exit-targets" className="text-amber-300 underline underline-offset-2">Settings</Link>.
+          Uses your exit plan from <Link to="/settings#exit-targets" className="text-amber-300 underline underline-offset-2">Settings</Link> — by default +100% sell 70%, +200% sell 15%, and the last 15% trails 30% from its peak.
         </p>
       ) : (
         <>
@@ -1297,22 +1309,50 @@ function CustomTargetsPreview({ rows, isStock }) {
   )
 }
 
-function CustomExitTargets({ rows, rowsLongTerm, character, longTermDate, isStock }) {
+function CustomExitTargets({ title = 'Exit Targets', rows, rowsLongTerm, runner, character, isStock }) {
   if (!rows?.length) return null
   const kept = rows.reduce((sum, r) => sum + r.after_tax_proceeds, 0)
   const soldShare = rows.reduce((sum, r) => sum + r.fraction, 0)
+  const unit = isStock ? 'share' : 'contract'
   return (
     <TargetsPanel
-      title="Exit Targets"
+      title={title}
       subtitle={`What you keep after tax · ${CHARACTER_LABEL[character]}`}
       footer={
-        <div className="mt-4 pt-3 border-t border-hairline flex items-baseline gap-3">
-          <span className="flex-1 text-sm text-subtle">
-            Kept if every target hits
-            {soldShare < 0.9999 && <span className="block text-xs text-muted mt-0.5">{pct(1 - soldShare, 0)} still held</span>}
-          </span>
-          <span className="text-base font-mono-tab text-green-400 font-semibold">{usd(kept)}</span>
-        </div>
+        <>
+          {runner && runner.contracts !== 0 && (
+            <div className="mt-4 pt-4 border-t border-hairline">
+              <div className="flex items-baseline gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm text-fg">Runner <span className="text-muted">· {pct(runner.trail_pct, 0)} trail</span></div>
+                  <div className="text-xs text-muted mt-0.5">
+                    {runner.contracts != null
+                      ? `last ${runner.contracts} ${unit}${runner.contracts === 1 ? '' : 's'}`
+                      : `last ${pct(runner.share, 0)}`}
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="text-sm font-mono-tab font-semibold text-fg">{usd(runner.exit_value)}</div>
+                  <div className="text-xs text-muted mt-0.5">if the trail hits</div>
+                </div>
+              </div>
+              <div className="mt-1 text-xs text-muted font-mono-tab">
+                Peak {usdUnit(runner.peak_unit_value)} → trail {usdUnit(runner.trail_unit_value)} per {unit}
+              </div>
+            </div>
+          )}
+          <div className="mt-4 pt-3 border-t border-hairline flex items-baseline gap-3">
+            <span className="flex-1 text-sm text-subtle">
+              Kept if every target hits
+              {soldShare < 0.9999 && (
+                <span className="block text-xs text-muted mt-0.5">
+                  {runner ? `plus the runner (${pct(1 - soldShare, 0)})` : `${pct(1 - soldShare, 0)} still held`}
+                </span>
+              )}
+            </span>
+            <span className="text-base font-mono-tab text-green-400 font-semibold">{usd(kept)}</span>
+          </div>
+        </>
       }
     >
       {rows.map((r, i) => (

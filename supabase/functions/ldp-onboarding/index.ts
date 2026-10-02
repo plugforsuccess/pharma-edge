@@ -8,11 +8,12 @@
 //     answers?:  { stated_tolerance, account_size, options_experience, horizon_years },
 //     tax?:      { filing_status, annual_income, state_code },
 //     allow_catalyst_plays?: boolean,
-//     exit_ladder?: { targets: number[], fractions: number[] | null },
+//     exit_ladder?: { targets: number[], fractions: number[] | null, runner_trail_pct?: number },
 //     disclosures?: { version, accepted: true },
 //   }
 //   → { success, profile: { tier, capped_by, rule_results, display, account_tier,
-//                           allow_catalyst_plays, exit_ladder, rung_fractions } }
+//                           allow_catalyst_plays, exit_ladder, rung_fractions,
+//                           runner_trail_pct } }
 //
 // * user_id comes from the verified JWT, never the body.
 // * Changing the risk answers recomputes the tier (_shared/ldpRiskTier.ts,
@@ -30,8 +31,10 @@ import { computeRiskProfile, describe, validateAnswers } from '../_shared/ldpRis
 // Bump when the disclosure text in src/lib/ldpDisclosures.js changes.
 export const LDP_DISCLOSURES_VERSION = 'ldp-2026-10-02'
 
-// Exit Target ladder bounds: 1–5 rungs, each an after-tax gain multiple
-// of basis in (0, 10], strictly ascending; sell shares > 0 summing to 1.
+// Exit playbook bounds: 1–5 targets, each a PRE-TAX gain on the option as
+// a multiple of basis in (0, 10], strictly ascending; sell shares (of the
+// original position) > 0 totalling at most 1 — the rest is the runner,
+// which trails by runner_trail_pct (0.05–0.90) from its peak.
 const LADDER_MAX_RUNGS = 5
 const LADDER_MAX_TARGET = 10
 
@@ -54,14 +57,14 @@ function json(body: unknown, status = 200): Response {
 
 const FILING = new Set(['single', 'mfj', 'mfs', 'hoh'])
 
-function validateLadder(raw: unknown): { targets: number[]; fractions: number[] | null } | string {
+function validateLadder(raw: unknown): { targets: number[]; fractions: number[] | null; trail: number | null } | string {
   if (!raw || typeof raw !== 'object') return 'exit_ladder must be an object'
   const o = raw as Record<string, unknown>
   if (!Array.isArray(o.targets)) return 'exit_ladder.targets must be a list'
   const targets = o.targets.map(Number)
   if (targets.length < 1 || targets.length > LADDER_MAX_RUNGS) return `exit targets: 1 to ${LADDER_MAX_RUNGS} rungs`
   if (targets.some((t) => !Number.isFinite(t) || t <= 0 || t > LADDER_MAX_TARGET)) {
-    return `each exit target must be above 0% and at most ${LADDER_MAX_TARGET * 100}% after tax`
+    return `each exit target must be above 0% and at most ${LADDER_MAX_TARGET * 100}%`
   }
   for (let i = 1; i < targets.length; i++) {
     if (targets[i] <= targets[i - 1]) return 'exit targets must increase from rung to rung'
@@ -74,9 +77,14 @@ function validateLadder(raw: unknown): { targets: number[]; fractions: number[] 
     fractions = o.fractions.map(Number)
     if (fractions.some((f) => !Number.isFinite(f) || f <= 0)) return 'each sell share must be above 0%'
     const sum = fractions.reduce((a, b) => a + b, 0)
-    if (Math.abs(sum - 1) > 0.001) return 'sell shares must add up to 100%'
+    if (sum > 1.001) return 'sell shares add up to more than 100%'
   }
-  return { targets, fractions }
+  let trail: number | null = null
+  if (o.runner_trail_pct != null) {
+    trail = Number(o.runner_trail_pct)
+    if (!Number.isFinite(trail) || trail < 0.05 || trail > 0.9) return 'runner trail must be between 5% and 90%'
+  }
+  return { targets, fractions, trail }
 }
 
 serve(async (req) => {
@@ -189,6 +197,7 @@ serve(async (req) => {
   if (ladder) {
     riskPatch.exit_ladder = ladder.targets
     riskPatch.rung_fractions = ladder.fractions
+    if (ladder.trail != null) riskPatch.runner_trail_pct = ladder.trail
   }
 
   if (Object.keys(riskPatch).length > 0) {
@@ -212,7 +221,7 @@ serve(async (req) => {
   }
 
   const { data: saved } = await admin.from('ldp_risk_profiles')
-    .select('tier, capped_by, rule_results, display, account_tier, allow_catalyst_plays, exit_ladder, rung_fractions, disclosures_version')
+    .select('tier, capped_by, rule_results, display, account_tier, allow_catalyst_plays, exit_ladder, rung_fractions, runner_trail_pct, disclosures_version')
     .eq('user_id', user.id).maybeSingle()
 
   return json({ success: true, profile: saved ? { ...saved, rule_results: saved.rule_results } : null })

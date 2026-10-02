@@ -748,8 +748,9 @@ dxLink keeps feeding HeatPulse for now.
 
 Settings is the single place to edit: account name, risk profile
 (answers → server recomputes the tier), tax profile, goals (LEAPS
-allocation + target returns), and the Exit Target ladder (1–5 rungs,
-after-tax gain target + share sold per rung). One **Save** button
+allocation + target returns), and the exit plan (1–5 pre-tax targets
+on the option + share of the position sold at each, and the runner's
+trail %; "Reset to playbook" restores the defaults). One **Save** button
 persists every changed section. `/leaps` shows these read-only (no
 edit links; an "Add tax details" link appears only when none exist).
 
@@ -858,8 +859,28 @@ with `ldp/README.md`. Tests: `python -m pytest -q ldp` (CI:
   `managed`; self-directed accounts get suggestions, whatever the risk
   tier. `ldp_audit_log` has a CHECK that rejects a `trade` row unless
   it is `auto` on a managed account. Do not remove it.
-- **Risk beats tax.** Sell rules 1–2 (stop / thesis / satellite hard
-  reject / roll) run before any tax-motivated hold. Keep that order.
+- **Exit playbook (owner, 2026-10-02) — the default everywhere.** Every
+  LEAPS is risk capital that can go to zero: **no hard price stop**, cut
+  only when the thesis breaks (failed trial, dilution, broken business).
+  Target 1 **+100% on the option → sell 70%** (cost back plus profit);
+  Target 2 **+200% → sell 15%** (half of what's left); the last 15% is
+  the **runner, exiting on a 30% give-back from its peak**. Time stop:
+  roll window at **9 months** left, **exit or roll at 6**. Taxes come
+  after the plan: wait for long-term only if it lands before the roll
+  window opens. Buy with **18–24+ months** to expiry. When a buy fills
+  the engine rests a **GTC limit sell for Target 1**. Targets are
+  pre-tax; every sale still shows its after-tax dollars. Stored in
+  `ldp_risk_profiles.exit_ladder` / `rung_fractions` (total ≤ 1, rest =
+  runner) / `runner_trail_pct`; position peaks in
+  `leaps_positions.peak_unit_value`. Engine: `ldp/config.py` ExitConfig,
+  `ldp/ladder.py`, `ldp/rules.py`; app mirror: `EXIT_PLAYBOOK`,
+  `allocateWithRunner`, `runnerPlan`, `timeStop`, `longTermFitsPlan` in
+  `afterTax.js` (same contract split, ties go to selling). Change the
+  rules only with the owner. This playbook is separate from the spread
+  rules above (−50% stop etc.), which still govern GEX spreads.
+- **Risk beats tax.** Sell rules 1–3 (thesis / satellite hard reject /
+  time stop / runner trail) run before any tax-motivated hold. Keep that
+  order.
 - `ldp_risk_profiles` and `ldp_audit_log` are service-role write only.
   Users read their own rows. Users must never be able to edit their own
   tier or account tier.

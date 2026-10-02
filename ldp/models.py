@@ -70,12 +70,18 @@ class Position:
     original_contracts: int
     contracts_open: int
     basis_per_contract: float      # dollars paid per contract (premium × 100 + fees)
-    entry_price: float             # per-share option price paid (for the price stop)
+    entry_price: float             # per-share option price paid
     mark: float                    # current per-share option price
     acquired: date                 # holding period starts the day after this date
     thesis_status: ThesisStatus = "intact"
     sector: str | None = None      # core: the sector ETF ticker
     rungs_filled: frozenset[int] = field(default_factory=frozenset)
+    # Rungs with a working broker order (the GTC Target 1 sell placed at
+    # entry). The daily check leaves those to the broker.
+    rungs_resting: frozenset[int] = field(default_factory=frozenset)
+    # Highest per-share mark seen since entry — the runner's trail is
+    # measured from here.
+    peak_mark: float | None = None
 
     @property
     def basis(self) -> float:
