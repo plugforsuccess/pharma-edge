@@ -855,7 +855,8 @@ value, holding period) and must pass before any edit to that file lands.
   `leaps_positions.goal_pct` (fraction of cost; NULL = the default in
   Settings → Goals, `leaps_tax_profiles.selected_target_pct`), set in the
   holding editor's **After-tax goal** section: one % field, the line
-  "Keeps $X after tax · needs 1.37x long-term · 1.42x short-term", and a
+  "Keeps $X after tax" / "Needs 1.37x long-term" / "Needs 1.42x
+  short-term" (one per row), and a
   "Show all targets" tap that expands the full 50%–20% table on that
   holding's cost (tap a row to pick it; §1256 shows its 60/40 column).
   The card's goal bar uses the holding's goal — "30% after-tax goal ·
