@@ -687,7 +687,8 @@ no gain line).
 Open state is remembered on the device (`cm:holdings-open`); new
 holdings open; "Expand all / Collapse all" sits by the Holdings title.
 **Exit Targets rows** keep the original card format: "100% gain • 2x" /
-"Target 1 · sell 35 contracts" on the left, the whole-position sell
+"−35 contracts" (gold, no "Target 1" label; the runner reads "−7
+contracts" too) on the left, the whole-position sell
 value on the right, that sale's after-tax gain on its own row under
 the sell line ("+$1,999 after taxes", green; the value itself never
 gets a "+", it's a price trigger), a progress strip under each, the runner as a last row with
