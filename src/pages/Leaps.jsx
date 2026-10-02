@@ -8,7 +8,7 @@ import {
   FILING_STATUSES, DEFAULT_TARGET_PCTS, makeRateResolver, deriveRates,
   applyRateOverride, targetTable, targetRow, positionAfterTax, portfolioSummary,
   todayYmd, holdingPeriod, suggestInstrumentType, exerciseCall,
-  blended1256Rate, rateAtGainFor, EXIT_PLAYBOOK, playbookTargets, runnerPlan, runnerAfterTax, timeStop,
+  blended1256Rate, rateAtGainFor, EXIT_PLAYBOOK, playbookTargets, runnerPlan, runnerAfterTax, annualizedReturn, timeStop,
   longTermFitsPlan, entryRunwayDays,
   CASH_KINDS, DEFAULT_SELLING_COST_PCT, cashAfterTax, cashYieldComparison, realEstateAfterTax,
   INCOME_KINDS, dividendAfterTax, incomeYieldComparison,
@@ -49,6 +49,54 @@ const mult = (n) => (Number.isFinite(n) ? `${n.toFixed(2)}x` : '—')
 const pct = (n, dp = 1) => (Number.isFinite(n)
   ? `${(n * 100).toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp })}%`
   : '—')
+// Total ⇄ annualized gain line on expanded cards. Tap to flip; the
+// choice is remembered on the device and every card follows it.
+const GAIN_MODE_KEY = 'cm:gain-mode'
+function useGainMode() {
+  const [mode, setMode] = useState(() => {
+    try { return localStorage.getItem(GAIN_MODE_KEY) === 'annual' ? 'annual' : 'total' } catch { return 'total' }
+  })
+  useEffect(() => {
+    const on = (e) => setMode(e.detail)
+    window.addEventListener(GAIN_MODE_KEY, on)
+    return () => window.removeEventListener(GAIN_MODE_KEY, on)
+  }, [])
+  const flip = () => {
+    const next = mode === 'annual' ? 'total' : 'annual'
+    try { localStorage.setItem(GAIN_MODE_KEY, next) } catch { /* this visit only */ }
+    window.dispatchEvent(new CustomEvent(GAIN_MODE_KEY, { detail: next }))
+  }
+  return [mode, flip]
+}
+
+function GainLine({ afterGain, beforeGain, cost, purchaseDate }) {
+  const [mode, flip] = useGainMode()
+  const asOf = todayYmd()
+  const a = annualizedReturn({ gain: afterGain, cost, purchaseDate, asOf })
+  const b = annualizedReturn({ gain: beforeGain, cost, purchaseDate, asOf })
+  const annual = mode === 'annual'
+  const months = a ? Math.max(1, Math.round(a.days / 30.44)) : null
+  const tone = (n, gainTone) => (n < 0 ? 'text-rose-300' : gainTone)
+  let after = gainPct(afterGain, cost)
+  let before = gainPct(beforeGain, cost)
+  let tail = null
+  if (annual && a?.annualized != null && b?.annualized != null) {
+    after = `${gainPct(a.annualized, 1)}/yr`
+    before = `${gainPct(b.annualized, 1)}/yr`
+  } else if (annual && months != null) {
+    tail = ` · ${months} mo, not annualized`
+  }
+  return (
+    <button type="button" onClick={flip}
+      aria-label={annual ? 'Show total return' : 'Show annualized return'}
+      className="block text-left -my-[11px] py-[11px] text-sm text-subtle">
+      <span className={tone(afterGain, 'text-green-400')}>{after}</span> after tax
+      {' · '}<span className={tone(beforeGain, 'text-amber-300')}>{before}</span> before tax
+      {tail && <span className="text-muted">{tail}</span>}
+    </button>
+  )
+}
+
 // Gain on cost with its sign: "+15.2%", "−8.0%".
 const gainPct = (gain, cost) => {
   if (!(cost > 0) || !Number.isFinite(gain)) return '—'
@@ -1346,10 +1394,7 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
           </span>
           <ChevronDown size={14} className={clsx('text-muted transition-transform', showTaxDetail && 'rotate-180')} />
         </button>
-        <div className="text-sm text-subtle">
-          <span className={calc.after_tax_gain < 0 ? 'text-rose-300' : 'text-green-400'}>{gainPct(calc.after_tax_gain, calc.basis)}</span> after tax
-          {' · '}<span className={calc.gain < 0 ? 'text-rose-300' : 'text-amber-300'}>{gainPct(calc.gain, calc.basis)}</span> before tax
-        </div>
+        <GainLine afterGain={calc.after_tax_gain} beforeGain={calc.gain} cost={calc.basis} purchaseDate={pos.purchase_date} />
         {showTaxDetail && (
           <div className="mt-1 text-xs text-muted font-mono-tab">
             {calc.gain > 0
@@ -1545,9 +1590,8 @@ function RealEstateCard({ pos, re, open, onToggle, onSave, onDelete }) {
         <div className={clsx('text-2xl font-semibold font-mono-tab', re.after_tax_equity >= 0 ? 'text-green-400' : 'text-rose-300')}>
           {usd(re.after_tax_equity)}
         </div>
-        <div className="mt-1 text-sm text-subtle">
-          <span className={reAfterTaxGain >= 0 ? 'text-green-400' : 'text-rose-300'}>{gainPct(reAfterTaxGain, re.basis)}</span> after tax
-          {' · '}<span className={re.value < re.basis ? 'text-rose-300' : 'text-amber-300'}>{gainPct(re.value - re.basis, re.basis)}</span> before tax
+        <div className="mt-1">
+          <GainLine afterGain={reAfterTaxGain} beforeGain={re.value - re.basis} cost={re.basis} purchaseDate={pos.purchase_date} />
         </div>
       </div>
       <div className="grid grid-cols-3 gap-3 py-3 border-y border-hairline">

@@ -18,7 +18,7 @@ import {
   isValidTaxRate, isValidBasis, exerciseCall, blended1256Rate, suggestInstrumentType, bracketTax,
   exitLadder, allocateContracts, rateAtGainFor, customExitTargets, validateCustomTargets,
   cashAfterTax, cashYieldComparison, realEstateAfterTax, interestTaxRate,
-  dividendAfterTax, incomeTaxRate, incomeYieldComparison, growthProjection, runnerAfterTax,
+  dividendAfterTax, incomeTaxRate, incomeYieldComparison, growthProjection, runnerAfterTax, annualizedReturn,
   EXIT_PLAYBOOK, allocateWithRunner, playbookTargets, runnerPlan, timeStop, longTermFitsPlan, entryRunwayDays,
 } from '../src/utils/afterTax.js'
 
@@ -471,6 +471,16 @@ const round2 = (x) => Math.round(x * 100) / 100
   const loss = runnerAfterTax({ runner: { contracts: null, share: 0.15, exit_value: 5370 }, basis: 38160, units: 372, rateAtGain: () => 0.3 })
   eq('runner loss not taxed', loss.tax, 0)
   eq('runner loss', loss.after_tax_gain, 5370 - 38160 * 0.15, 1e-6)
+}
+
+// ── Annualized return ────────────────────────────────────────────
+{
+  const two = annualizedReturn({ gain: 21, cost: 100, purchaseDate: '2024-10-02', asOf: '2026-10-02' })
+  eq('2 years: 21% total ≈ 10%/yr', two.annualized, Math.pow(1.21, 365.25 / 730) - 1, 1e-12)
+  eq('2 years: days', two.days, 730)
+  eq('under a year: not annualized', annualizedReturn({ gain: 10, cost: 100, purchaseDate: '2026-06-10', asOf: '2026-10-02' }).annualized, null)
+  eq('total-loss guard', annualizedReturn({ gain: -100, cost: 100, purchaseDate: '2020-01-01', asOf: '2026-01-01' }).annualized, null)
+  eq('loss annualizes negative', annualizedReturn({ gain: -19, cost: 100, purchaseDate: '2024-10-02', asOf: '2026-10-02' }).annualized < 0, true)
 }
 
 // ── Real estate ──────────────────────────────────────────────────
