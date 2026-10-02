@@ -1353,7 +1353,7 @@ function CustomExitTargets({ title = 'Exit Targets', rows, runner, isStock, unit
             </div>
             <div className="text-right shrink-0">
               <div className="text-sm font-mono-tab font-semibold text-fg">{usd(runner.exit_value)}</div>
-              <div className="text-xs text-muted mt-0.5">sells if it falls to this</div>
+              <div className="text-xs text-muted mt-0.5">sell if trigger fires</div>
             </div>
           </div>
         </div>
