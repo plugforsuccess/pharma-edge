@@ -8,7 +8,7 @@ import {
   FILING_STATUSES, DEFAULT_TARGET_PCTS, makeRateResolver, deriveRates,
   applyRateOverride, targetTable, targetRow, positionAfterTax, portfolioSummary,
   todayYmd, holdingPeriod, suggestInstrumentType, exerciseCall,
-  blended1256Rate, rateAtGainFor, EXIT_PLAYBOOK, playbookTargets, runnerPlan, timeStop,
+  blended1256Rate, rateAtGainFor, EXIT_PLAYBOOK, playbookTargets, runnerPlan, runnerAfterTax, timeStop,
   longTermFitsPlan, entryRunwayDays,
   CASH_KINDS, DEFAULT_SELLING_COST_PCT, cashAfterTax, cashYieldComparison, realEstateAfterTax,
   INCOME_KINDS, dividendAfterTax, incomeYieldComparison,
@@ -238,6 +238,13 @@ export default function Leaps() {
       return withLadder(pos, calc)
     })
 
+    // The runner's after-tax gain (or loss) if its trail fired today.
+    function withRunnerTax(runner, calc, units) {
+      if (!runner || runner.exit_value == null) return runner
+      const after = runnerAfterTax({ runner, basis: calc.basis, units, rateAtGain: rateAtGainFor(calc.tax_character, rateForGain) })
+      return after ? { ...runner, after_tax_gain: after.after_tax_gain } : runner
+    }
+
     // The after-tax return goal (Settings), solved on this position's own cost.
     function goalRow(basis, goalPct) {
       if (!(goalPct > 0)) return null
@@ -279,8 +286,8 @@ export default function Leaps() {
         ladderLongTerm: calc.tax_character === 'short_term'
           ? ladderFor(calc.basis, calc.current_value, 'long_term', contracts)
           : null,
-        runner: runnerPlan({ fractions: plan.fractions, contracts, units, peakUnitValue: pos.peak_unit_value,
-          currentValue: calc.current_value, trailPct: plan.runnerTrailPct }),
+        runner: withRunnerTax(runnerPlan({ fractions: plan.fractions, contracts, units, peakUnitValue: pos.peak_unit_value,
+          currentValue: calc.current_value, trailPct: plan.runnerTrailPct }), calc, units),
         dividend,
       }
     }
@@ -1730,18 +1737,16 @@ function Notice({ id, tone = 'neutral', title, children }) {
     try { localStorage.setItem(dismissKey(id), '1') } catch { /* storage blocked — hide for this visit only */ }
   }
   return (
-    <div role="status" className={clsx('rounded-xl border pl-4 pr-1 pt-1 pb-3.5 mb-4', NOTICE_TONE[tone])}>
-      {/* The X sits on its own row, top right, so the text runs full width. */}
-      <div className="flex justify-end -mb-3">
+    <div role="status" className={clsx('rounded-xl border pl-4 pr-1.5 pt-1.5 pb-3.5 mb-4', NOTICE_TONE[tone])}>
+      {/* Small X on the title row, top right; the body runs full width. */}
+      <div className="flex items-start gap-2">
+        <div className="flex-1 min-w-0 pt-2 text-sm font-semibold">{title}</div>
         <button type="button" onClick={dismiss} aria-label="Dismiss"
-          className="min-h-[44px] min-w-[44px] -mt-1 flex items-start justify-end pt-2.5 pr-2.5 rounded-lg opacity-60 hover:opacity-100 transition">
+          className="shrink-0 min-h-[44px] min-w-[44px] -mb-2 flex items-start justify-end pt-3 pr-2 rounded-lg opacity-60 hover:opacity-100 transition">
           <X size={12} />
         </button>
       </div>
-      <div className="pr-3 text-sm">
-        <div className="font-semibold">{title}</div>
-        <div className="mt-1 opacity-75">{children}</div>
-      </div>
+      <div className="pr-3 text-sm mt-1 opacity-75">{children}</div>
     </div>
   )
 }
@@ -1859,17 +1864,17 @@ function TargetsEditor({ own, rows, contracts, onOwn, onRow, onAdd, onRemove }) 
   )
 }
 
-// "sell 35 contracts" / "sell 1,050 shares" — always a count, never a
+// "−35 contracts" / "−1,050 shares" (what the sale takes off) — always a count, never a
 // fraction. Fractional share holdings get a share count to 2 dp.
 // `isStock` is true for shares, or the unit itself ('$BTC' for crypto).
 const soldLabel = (r, isStock, units = null) => {
   const unit = typeof isStock === 'string' ? isStock : isStock ? 'share' : 'contract'
   if (r.contracts == null) {
     const n = units > 0 ? +(units * r.fraction).toFixed(2) : null
-    return n == null ? `sell ${pct(r.fraction, 0)}` : `sell ${qtyText(n, unit)}`
+    return n == null ? `−${pct(r.fraction, 0)}` : `−${qtyText(n, unit)}`
   }
   if (r.contracts === 0) return `nothing to sell (too few ${unit.startsWith('$') ? unit : `${unit}s`})`
-  return `sell ${qtyText(r.contracts, unit)}`
+  return `−${qtyText(r.contracts, unit)}`
 }
 
 // Whole units (contracts or shares) to split across targets, or null.
@@ -1900,7 +1905,7 @@ function CustomTargetsPreview({ rows, isStock, units }) {
           <li key={r.index} className="flex items-baseline gap-3">
             <div className="flex-1 min-w-0">
               <div className="text-sm text-fg">{gainLabel(r)}</div>
-              <div className="text-xs text-muted mt-0.5">Target {i + 1} · {soldLabel(r, isStock, units)}</div>
+              <div className={clsx('text-xs mt-0.5', r.contracts === 0 ? 'text-muted' : 'text-amber-300')}>{soldLabel(r, isStock, units)}</div>
             </div>
             <div className="text-sm font-mono-tab text-fg font-semibold shrink-0">{usd(r.exit_value)}</div>
           </li>
@@ -1922,11 +1927,18 @@ function CustomExitTargets({ title = 'Exit Targets', rows, runner, isStock, unit
           <div className="flex items-baseline gap-3">
             <div className="flex-1 min-w-0">
               <div className="text-sm text-fg">Runner · {pct(runner.trail_pct, 0)} trail</div>
-              <div className="text-xs text-muted mt-0.5">
+              <div className="text-xs mt-0.5 text-amber-300">
                 {runner.contracts != null
-                  ? `last ${qtyText(runner.contracts, unit)}`
-                  : units > 0 ? `last ${qtyText(+(units * runner.share).toFixed(2), unit)}` : `last ${pct(runner.share, 0)}`}
+                  ? `−${qtyText(runner.contracts, unit)}`
+                  : units > 0 ? `−${qtyText(+(units * runner.share).toFixed(2), unit)}` : `−${pct(runner.share, 0)}`}
               </div>
+              {runner.after_tax_gain != null && (
+                <div className="text-xs text-muted mt-0.5">
+                  {runner.after_tax_gain >= 0
+                    ? <><span className="font-mono-tab text-green-400">+{usd(runner.after_tax_gain)}</span> after taxes</>
+                    : <><span className="font-mono-tab text-rose-300">−{usd(Math.abs(runner.after_tax_gain))}</span> loss at today's trail</>}
+                </div>
+              )}
             </div>
             <div className="text-right shrink-0">
               <div className="text-sm font-mono-tab font-semibold text-fg">{usd(runner.exit_value)}</div>
@@ -1941,7 +1953,7 @@ function CustomExitTargets({ title = 'Exit Targets', rows, runner, isStock, unit
           <div className="flex items-baseline gap-3">
             <div className="flex-1 min-w-0">
               <div className="text-sm text-fg">{gainLabel(r)}</div>
-              <div className="text-xs text-muted mt-0.5">Target {i + 1} · {soldLabel(r, isStock, units)}</div>
+              <div className={clsx('text-xs mt-0.5', r.contracts === 0 ? 'text-muted' : 'text-amber-300')}>{soldLabel(r, isStock, units)}</div>
               {r.after_tax_gain > 0 && (
                 <div className="text-xs text-muted mt-0.5"><span className="font-mono-tab text-green-400">+{usd(r.after_tax_gain)}</span> after taxes</div>
               )}

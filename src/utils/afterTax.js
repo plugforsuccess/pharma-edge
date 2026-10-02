@@ -948,3 +948,15 @@ export function growthProjection({
   }
   return rows
 }
+
+// What the runner keeps if its trail fires at today's trail level: its
+// slice of cost vs its exit value, the gain taxed at that sale's rate
+// (a loss isn't taxed here). `units` = whole position (contracts/shares).
+export function runnerAfterTax({ runner, basis, units, rateAtGain }) {
+  if (!runner || !(runner.exit_value >= 0) || !(units > 0) || !isValidBasis(basis)) return null
+  const runnerUnits = runner.contracts ?? units * runner.share
+  const cost = basis * (runnerUnits / units)
+  const gain = runner.exit_value - cost
+  const tax = gain > 0 ? gain * rateAtGain(gain) : 0
+  return { cost, gain, tax, after_tax_gain: gain - tax }
+}
