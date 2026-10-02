@@ -1311,7 +1311,7 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
         </button>
         <div className="text-sm text-subtle">
           <span className={up ? 'text-green-400' : 'text-rose-300'}>{gainPct(calc.after_tax_gain, calc.basis)}</span> after tax
-          {' · '}{gainPct(calc.gain, calc.basis)} before tax
+          {' · '}<span className="text-amber-300">{gainPct(calc.gain, calc.basis)}</span> before tax
         </div>
         {showTaxDetail && (
           <div className="mt-1 text-xs text-muted font-mono-tab">
@@ -1506,7 +1506,7 @@ function RealEstateCard({ pos, re, open, onToggle, onSave, onDelete }) {
         </div>
         <div className="mt-1 text-sm text-subtle">
           <span className={reAfterTaxGain >= 0 ? 'text-green-400' : 'text-rose-300'}>{gainPct(reAfterTaxGain, re.basis)}</span> after tax
-          {' · '}{gainPct(re.value - re.basis, re.basis)} before tax
+          {' · '}<span className="text-amber-300">{gainPct(re.value - re.basis, re.basis)}</span> before tax
         </div>
       </div>
       <div className="grid grid-cols-3 gap-3 py-3 border-y border-hairline">
