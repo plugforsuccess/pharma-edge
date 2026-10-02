@@ -9,7 +9,9 @@ import {
   applyRateOverride, targetTable, positionAfterTax, portfolioSummary,
   todayYmd, holdingPeriod, INSTRUMENT_TYPES, suggestInstrumentType, exerciseCall,
   blended1256Rate, exitLadder, rateAtGainFor, DEFAULT_EXIT_LADDER,
+  customExitTargets, validateCustomTargets, MAX_CUSTOM_TARGETS,
 } from '../utils/afterTax'
+import NumberInput from '../components/NumberInput'
 
 // LEAPS — after-tax targets + live after-tax value.
 //
@@ -136,6 +138,12 @@ export default function Leaps() {
     })
   }, [rateForGain, ladderCfg])
 
+  // User-set % / $ targets on a single position (leaps_positions.exit_targets).
+  const customFor = useCallback((basis, currentValue, character, contracts, targets) => {
+    if (!rateForGain || !targets?.length) return []
+    return customExitTargets({ basis, currentValue, contracts, targets, rateAtGain: rateAtGainFor(character, rateForGain) })
+  }, [rateForGain])
+
   const results = useMemo(() => {
     if (!rateForGain || !positions) return []
     return positions.map((pos) => withLadder(pos, positionAfterTax({
@@ -151,11 +159,26 @@ export default function Leaps() {
       })))
 
     function withLadder(pos, calc) {
-      if (!calc) return { pos, calc, ladder: [], ladderLongTerm: null }
+      if (!calc) return { pos, calc, ladder: [], ladderLongTerm: null, custom: [], customLongTerm: null }
       const contracts = pos.instrument_type === 'stock' ? null : (Number(pos.contracts) || null)
+      const own = Array.isArray(pos.exit_targets) && pos.exit_targets.length ? pos.exit_targets : null
+      if (own) {
+        return {
+          pos,
+          calc,
+          ladder: [],
+          ladderLongTerm: null,
+          custom: customFor(calc.basis, calc.current_value, calc.tax_character, contracts, own),
+          customLongTerm: calc.tax_character === 'short_term'
+            ? customFor(calc.basis, calc.current_value, 'long_term', contracts, own)
+            : null,
+        }
+      }
       return {
         pos,
         calc,
+        custom: [],
+        customLongTerm: null,
         ladder: ladderFor(calc.basis, calc.current_value, calc.tax_character, contracts),
         // While short-term, show where each rung sits once it goes long-term.
         ladderLongTerm: calc.tax_character === 'short_term'
@@ -163,7 +186,7 @@ export default function Leaps() {
           : null,
       }
     }
-  }, [positions, rateForGain, asOf, selectedRow, ladderFor])
+  }, [positions, rateForGain, asOf, selectedRow, ladderFor, customFor])
 
   const summary = useMemo(() => {
     if (!rateForGain || results.length === 0) return null
@@ -290,11 +313,12 @@ export default function Leaps() {
 
               {adding && (
                 <PositionForm
-                  preview={(f) => previewLadder(f, ladderFor)}
+                  preview={(f, own) => previewTargets(f, own, ladderFor, customFor)}
                   onCancel={() => { setAdding(false); dropAddParam() }}
-                  onSave={async (row) => {
+                  allowAddAnother
+                  onSave={async (row, { keepOpen } = {}) => {
                     const err = await savePosition(row)
-                    if (!err) { setAdding(false); dropAddParam() }
+                    if (!err && !keepOpen) { setAdding(false); dropAddParam() }
                     return err
                   }}
                 />
@@ -306,14 +330,16 @@ export default function Leaps() {
                 </div>
               )}
 
-              {results.map(({ pos, calc, ladder, ladderLongTerm }) => (
+              {results.map(({ pos, calc, ladder, ladderLongTerm, custom, customLongTerm }) => (
                 <PositionCard
                   key={pos.id}
                   pos={pos}
                   calc={calc}
                   ladder={ladder}
                   ladderLongTerm={ladderLongTerm}
-                  previewFor={(f) => previewLadder(f, ladderFor)}
+                  custom={custom}
+                  customLongTerm={customLongTerm}
+                  previewFor={(f, own) => previewTargets(f, own, ladderFor, customFor)}
                   selectedTargetPct={Number(p.selected_target_pct)}
                   onSave={(row) => savePosition(row, pos.id)}
                   onExercise={(args) => exercisePosition(pos, args)}
@@ -538,8 +564,26 @@ function TargetTable({ table, selected, onSelect, show1256 }) {
 
 const inputCls = 'w-full min-h-[44px] bg-bg border border-border rounded px-3 py-2 text-sm font-mono-tab focus:outline-none focus:ring-1 focus:ring-amber-400/40'
 
-function PositionForm({ initial, onSave, onCancel, preview }) {
-  const [f, setF] = useState(() => ({
+// Form rows hold what the user typed: % values and sell shares as
+// percents ("100" = +100%), $ values as dollars.
+const targetToRow = (t) => ({
+  kind: t.kind,
+  value: t.kind === 'pct' ? String(+(Number(t.value) * 100).toFixed(2)) : String(t.value),
+  sell: String(+(Number(t.sell) * 100).toFixed(2)),
+})
+const rowToTarget = (r) => ({
+  kind: r.kind,
+  value: r.kind === 'pct' ? (num(r.value) ?? NaN) / 100 : (num(r.value) ?? NaN),
+  sell: (num(r.sell) ?? NaN) / 100,
+})
+const DEFAULT_OWN_ROWS = [
+  { kind: 'pct', value: '100', sell: '50' },
+  { kind: 'pct', value: '200', sell: '50' },
+]
+
+function emptyForm(initial) {
+  const own = Array.isArray(initial?.exit_targets) && initial.exit_targets.length > 0
+  return {
     ticker: initial?.ticker ?? '',
     instrument_type: initial?.instrument_type ?? 'equity_option',
     shares: initial?.shares ?? '',
@@ -550,8 +594,16 @@ function PositionForm({ initial, onSave, onCancel, preview }) {
     cost_basis: initial?.cost_basis ?? '',
     current_value: initial?.current_value ?? '',
     purchase_date: initial?.purchase_date ?? '',
-  }))
+    own_targets: own,
+    targets: own ? initial.exit_targets.map(targetToRow) : DEFAULT_OWN_ROWS,
+  }
+}
+
+function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
+  const [f, setF] = useState(() => emptyForm(initial))
   const [error, setError] = useState('')
+  const [savedNote, setSavedNote] = useState('')
+  const [saving, setSaving] = useState(false)
   // Pre-select §1256 for index roots (SPX, XSP, NDX …) until the user
   // picks a type themselves.
   const [typeTouched, setTypeTouched] = useState(!!initial)
@@ -561,9 +613,10 @@ function PositionForm({ initial, onSave, onCancel, preview }) {
     if (k === 'ticker' && !typeTouched && x.instrument_type !== 'stock') next.instrument_type = suggestInstrumentType(v)
     return next
   })
+  const setV = (k) => (v) => setF((x) => ({ ...x, [k]: v }))
   const isStock = f.instrument_type === 'stock'
 
-  async function submit() {
+  async function submit({ keepOpen = false } = {}) {
     const basis = num(f.cost_basis)
     const value = num(f.current_value)
     if (!/^[A-Z.]{1,10}$/.test(f.ticker)) return setError('Enter a ticker.')
@@ -572,6 +625,13 @@ function PositionForm({ initial, onSave, onCancel, preview }) {
     if (!f.purchase_date) return setError('Enter the purchase date.')
     if (f.purchase_date > todayYmd()) return setError('Purchase date can’t be in the future.')
     if (isStock && !(num(f.shares) > 0)) return setError('Enter the number of shares.')
+    let exitTargets = null
+    if (f.own_targets) {
+      exitTargets = f.targets.map(rowToTarget)
+      const bad = validateCustomTargets(exitTargets, basis)
+      if (bad) return setError(bad)
+    }
+    setSaving(true)
     const err = await onSave({
       ticker: f.ticker,
       instrument_type: f.instrument_type,
@@ -584,9 +644,29 @@ function PositionForm({ initial, onSave, onCancel, preview }) {
       current_value: value,
       value_as_of: new Date().toISOString(),
       purchase_date: f.purchase_date,
-    })
+      exit_targets: exitTargets,
+    }, { keepOpen })
+    setSaving(false)
     setError(err ?? '')
+    if (!err && keepOpen) {
+      setSavedNote(`${f.ticker} saved. Add the next one.`)
+      setF(emptyForm(null))
+      setTypeTouched(false)
+    }
   }
+
+  const setRow = (i, k, v) => setF((x) => ({ ...x, targets: x.targets.map((r, j) => (j === i ? { ...r, [k]: v } : r)) }))
+  const addRow = () => setF((x) => {
+    const used = x.targets.reduce((sum, r) => sum + (num(r.sell) ?? 0), 0)
+    const last = x.targets[x.targets.length - 1]
+    const next = last?.kind === 'usd'
+      ? { kind: 'usd', value: '', sell: '' }
+      : { kind: 'pct', value: last ? String((num(last.value) ?? 0) + 100) : '100', sell: '' }
+    next.sell = String(Math.max(0, +(100 - used).toFixed(2)) || '')
+    return { ...x, targets: [...x.targets, next] }
+  })
+  const removeRow = (i) => setF((x) => ({ ...x, targets: x.targets.filter((_, j) => j !== i) }))
+  const previewRows = preview ? preview(f, f.own_targets ? f.targets.map(rowToTarget) : null) : null
 
   return (
     <div className="bg-card border border-amber-400/40 rounded-xl p-4 mb-3">
@@ -602,7 +682,7 @@ function PositionForm({ initial, onSave, onCancel, preview }) {
           </select>
         </Field>
         {isStock ? (
-          <Field label="Shares"><input inputMode="decimal" value={f.shares} onChange={set('shares')} className={inputCls} /></Field>
+          <Field label="Shares"><NumberInput decimals={4} value={f.shares} onChange={setV('shares')} className={inputCls} /></Field>
         ) : (
           <>
             <Field label="Call / put">
@@ -611,16 +691,26 @@ function PositionForm({ initial, onSave, onCancel, preview }) {
                 <option value="P">Put</option>
               </select>
             </Field>
-            <Field label="Strike (needed to exercise)"><input inputMode="decimal" value={f.strike} onChange={set('strike')} className={inputCls} /></Field>
+            <Field label="Strike (needed to exercise)"><NumberInput value={f.strike} onChange={setV('strike')} className={inputCls} /></Field>
             <Field label="Expiration (optional)"><input type="date" value={f.expiration} onChange={set('expiration')} className={inputCls} /></Field>
-            <Field label="Contracts (needed to exercise)"><input inputMode="numeric" value={f.contracts} onChange={set('contracts')} className={inputCls} /></Field>
+            <Field label="Contracts (needed to exercise)"><NumberInput decimals={0} value={f.contracts} onChange={setV('contracts')} className={inputCls} /></Field>
           </>
         )}
         <Field label="Purchase date"><input type="date" value={f.purchase_date} onChange={set('purchase_date')} className={inputCls} /></Field>
-        <Field label="Total cost basis ($)"><input inputMode="decimal" value={f.cost_basis} onChange={set('cost_basis')} className={inputCls} /></Field>
-        <Field label="Current value ($)"><input inputMode="decimal" value={f.current_value} onChange={set('current_value')} className={inputCls} /></Field>
+        <Field label="Total cost basis ($)"><NumberInput value={f.cost_basis} onChange={setV('cost_basis')} className={inputCls} /></Field>
+        <Field label="Current value ($)"><NumberInput value={f.current_value} onChange={setV('current_value')} className={inputCls} /></Field>
       </div>
-      {preview && <LadderPreview rungs={preview(f)} />}
+      <TargetsEditor
+        own={f.own_targets}
+        rows={f.targets}
+        onOwn={(v) => setF((x) => ({ ...x, own_targets: v }))}
+        onRow={setRow}
+        onAdd={addRow}
+        onRemove={removeRow}
+      />
+      {previewRows && (f.own_targets
+        ? <CustomTargetsPreview rows={previewRows} />
+        : <LadderPreview rungs={previewRows} />)}
       {f.instrument_type === 'index_option_1256' && (
         <p className="mt-3 text-[10px] text-muted leading-relaxed">
           §1256 contracts are taxed 60% long-term / 40% short-term however long
@@ -629,11 +719,18 @@ function PositionForm({ initial, onSave, onCancel, preview }) {
         </p>
       )}
       {error && <div className="mt-3 text-xs text-rose-300">{error}</div>}
-      <div className="mt-4 flex gap-2 justify-end">
+      {!error && savedNote && <div className="mt-3 text-xs text-green-400">{savedNote}</div>}
+      <div className="mt-4 flex flex-wrap gap-2 justify-end">
         <button type="button" onClick={onCancel} className="min-h-[44px] px-4 rounded border border-border text-sm text-subtle hover:text-fg">
-          <X size={14} className="inline -mt-0.5" /> Cancel
+          <X size={14} className="inline -mt-0.5" /> {savedNote ? 'Done' : 'Cancel'}
         </button>
-        <button type="button" onClick={submit} className="min-h-[44px] px-4 rounded bg-amber-400/10 border border-amber-400/40 text-amber-300 text-sm font-semibold hover:bg-amber-400/20 transition">
+        {allowAddAnother && (
+          <button type="button" disabled={saving} onClick={() => submit({ keepOpen: true })}
+            className="min-h-[44px] px-4 rounded border border-amber-400/40 text-amber-300 text-sm font-semibold hover:bg-amber-400/10 transition disabled:opacity-50">
+            Save &amp; add another
+          </button>
+        )}
+        <button type="button" disabled={saving} onClick={() => submit()} className="min-h-[44px] px-4 rounded bg-amber-400/10 border border-amber-400/40 text-amber-300 text-sm font-semibold hover:bg-amber-400/20 transition disabled:opacity-50">
           <Check size={14} className="inline -mt-0.5" /> Save
         </button>
       </div>
@@ -662,7 +759,7 @@ function positionMeta(pos) {
   return parts.join(' · ')
 }
 
-function PositionCard({ pos, calc, ladder, ladderLongTerm, previewFor, selectedTargetPct, onSave, onDelete, onExercise }) {
+function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTerm, previewFor, selectedTargetPct, onSave, onDelete, onExercise }) {
   const [editing, setEditing] = useState(false)
   const [exercising, setExercising] = useState(false)
   const [showTaxDetail, setShowTaxDetail] = useState(false)
@@ -685,7 +782,7 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, previewFor, selectedT
   const isStock = pos.instrument_type === 'stock'
   const label = isStock
     ? `${pos.ticker} · ${Number(pos.shares).toLocaleString()} shares`
-    : [pos.ticker, pos.strike && `$${Number(pos.strike)}`, pos.option_type === 'P' ? 'Put' : 'Call', pos.expiration]
+    : [pos.ticker, pos.strike && `$${Number(pos.strike).toLocaleString('en-US', { maximumFractionDigits: 2 })}`, pos.option_type === 'P' ? 'Put' : 'Call', pos.expiration]
       .filter(Boolean).join(' ')
   const canExercise = exerciseCall({ option: pos, exerciseDate: todayYmd() }) != null
   const up = calc.gain >= 0
@@ -748,8 +845,13 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, previewFor, selectedT
         </div>
       )}
 
-      <ExitLadder ladder={ladder} ladderLongTerm={ladderLongTerm} character={calc.tax_character}
-        longTermDate={calc.long_term_date} isStock={isStock} />
+      {custom?.length > 0 ? (
+        <CustomExitTargets rows={custom} rowsLongTerm={customLongTerm} character={calc.tax_character}
+          longTermDate={calc.long_term_date} isStock={isStock} />
+      ) : (
+        <ExitLadder ladder={ladder} ladderLongTerm={ladderLongTerm} character={calc.tax_character}
+          longTermDate={calc.long_term_date} isStock={isStock} />
+      )}
 
       {calc.target_progress != null && (
         <div className="mb-3">
@@ -876,8 +978,9 @@ function LadderPreview({ rungs }) {
   )
 }
 
-// Live preview while the user is typing a position in the form.
-function previewLadder(f, ladderFor) {
+// Live preview while the user is typing a position in the form:
+// the account ladder, or the user's own % / $ targets when set.
+function previewTargets(f, own, ladderFor, customFor) {
   const basis = num(f.cost_basis)
   if (!(basis > 0) || !f.purchase_date) return []
   const value = num(f.current_value) ?? basis
@@ -885,7 +988,182 @@ function previewLadder(f, ladderFor) {
     ? 'section_1256'
     : (holdingPeriod(f.purchase_date, todayYmd())?.is_long_term ? 'long_term' : 'short_term')
   const contracts = f.instrument_type === 'stock' ? null : (Number.parseInt(f.contracts, 10) || null)
+  if (own) {
+    const usable = own.filter((t) => Number.isFinite(t.value) && t.value > 0 && Number.isFinite(t.sell) && t.sell > 0)
+    return customFor(basis, value, character, contracts, usable)
+  }
   return ladderFor(basis, value, character, contracts)
+}
+
+// ── User-set Exit Targets (% or $) ───────────────────────────────
+
+function TargetsEditor({ own, rows, onOwn, onRow, onAdd, onRemove }) {
+  const sold = rows.reduce((sum, r) => sum + (num(r.sell) ?? 0), 0)
+  return (
+    <div className="mt-4">
+      <div className="text-[10px] uppercase tracking-wider text-muted mb-1.5">Exit Targets</div>
+      <div className="grid grid-cols-2 gap-2 mb-3" role="radiogroup" aria-label="Exit Targets">
+        <SegButton active={!own} onClick={() => onOwn(false)}>My default</SegButton>
+        <SegButton active={own} onClick={() => onOwn(true)}>Set my own</SegButton>
+      </div>
+      {!own ? (
+        <p className="text-[10px] text-muted leading-relaxed">
+          Uses your after-tax Exit Targets from <Link to="/settings#exit-targets" className="text-amber-300 underline">Settings</Link>.
+        </p>
+      ) : (
+        <>
+          <div className="grid grid-cols-[auto_1fr_4.5rem_2.25rem] gap-2 text-[10px] text-muted mb-1">
+            <span className="col-span-2">Sell when</span>
+            <span>Sell</span>
+          </div>
+          <ol className="space-y-2">
+            {rows.map((r, i) => (
+              <li key={i} className="grid grid-cols-[auto_1fr_4.5rem_2.25rem] gap-2 items-center">
+                <div className="flex rounded border border-border overflow-hidden" role="radiogroup" aria-label={`Target ${i + 1} type`}>
+                  {['pct', 'usd'].map((k) => (
+                    <button key={k} type="button" role="radio" aria-checked={r.kind === k}
+                      onClick={() => onRow(i, 'kind', k)}
+                      className={clsx('min-h-[44px] w-9 text-sm font-semibold',
+                        r.kind === k ? 'bg-amber-400/15 text-amber-300' : 'text-subtle hover:text-fg')}>
+                      {k === 'pct' ? '%' : '$'}
+                    </button>
+                  ))}
+                </div>
+                <div className="relative">
+                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted text-xs">{r.kind === 'pct' ? '+' : '$'}</span>
+                  <NumberInput value={r.value} onChange={(v) => onRow(i, 'value', v)}
+                    aria-label={r.kind === 'pct' ? `Target ${i + 1} gain percent` : `Target ${i + 1} position value`}
+                    placeholder={r.kind === 'pct' ? '100' : '60,000'}
+                    className={clsx(inputCls, 'pl-6', r.kind === 'pct' && 'pr-7')} />
+                  {r.kind === 'pct' && <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted text-xs">%</span>}
+                </div>
+                <div className="relative">
+                  <NumberInput value={r.sell} onChange={(v) => onRow(i, 'sell', v)}
+                    aria-label={`Target ${i + 1} share to sell`} placeholder="50"
+                    className={clsx(inputCls, 'pr-6')} />
+                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted text-xs">%</span>
+                </div>
+                <button type="button" onClick={() => onRemove(i)} disabled={rows.length <= 1}
+                  aria-label={`Remove target ${i + 1}`}
+                  className="min-h-[44px] w-9 flex items-center justify-center text-subtle hover:text-rose-300 disabled:opacity-30">
+                  <X size={14} />
+                </button>
+              </li>
+            ))}
+          </ol>
+          <div className="flex items-center gap-2 mt-2">
+            <span className={clsx('flex-1 text-[10px]', sold > 100.0001 ? 'text-rose-300' : 'text-muted')}>
+              {+sold.toFixed(2)}% of the position sold{sold < 99.9999 ? ` · ${+(100 - sold).toFixed(2)}% held` : ''}
+            </span>
+            {rows.length < MAX_CUSTOM_TARGETS && (
+              <button type="button" onClick={onAdd}
+                className="min-h-[44px] px-3 rounded border border-border text-xs text-subtle hover:text-fg hover:border-amber-400/40">
+                <Plus size={12} className="inline -mt-0.5" /> Add target
+              </button>
+            )}
+          </div>
+          <p className="mt-1 text-[10px] text-muted leading-relaxed">
+            % = gain on what you paid (+100% = double). $ = what the whole position is worth.
+          </p>
+        </>
+      )}
+    </div>
+  )
+}
+
+function SegButton({ active, onClick, children }) {
+  return (
+    <button type="button" role="radio" aria-checked={active} onClick={onClick}
+      className={clsx('min-h-[44px] rounded border text-sm font-semibold transition',
+        active ? 'border-amber-400/60 bg-amber-400/10 text-amber-300' : 'border-border text-subtle hover:text-fg')}>
+      {children}
+    </button>
+  )
+}
+
+const targetLabel = (r) => (r.kind === 'pct' ? `+${pct(r.input, Number.isInteger(+(r.input * 100).toFixed(4)) ? 0 : 1)}` : usd(r.input))
+// The other half of the target: the $ value for a % target, the % for a $ one.
+const targetOther = (r) => (r.kind === 'pct' ? usd(r.exit_value) : `+${pct(r.gain_pct, 0)}`)
+const soldLabel = (r, isStock) => {
+  if (r.contracts == null) return `sell ${pct(r.fraction, 0)}`
+  if (r.contracts === 0) return 'nothing to sell (too few contracts)'
+  return `sell ${r.contracts} ${isStock ? 'lot' : 'contract'}${r.contracts === 1 ? '' : 's'}`
+}
+
+function CustomTargetsPreview({ rows }) {
+  if (!rows?.length) return null
+  return (
+    <div className="mt-3 rounded-lg border border-border bg-bg/40 p-3">
+      <div className="text-[10px] uppercase tracking-wider text-muted mb-1.5">You keep, after tax</div>
+      <ol className="space-y-1.5">
+        {rows.map((r) => (
+          <li key={r.index} className="flex items-baseline gap-2 text-xs">
+            <span className="text-subtle flex-1 min-w-0 truncate">
+              {targetLabel(r)} · {targetOther(r)} · {soldLabel(r)}
+            </span>
+            <span className="font-mono-tab text-green-400 shrink-0">{usd(r.after_tax_proceeds)}</span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  )
+}
+
+function CustomExitTargets({ rows, rowsLongTerm, character, longTermDate, isStock }) {
+  if (!rows?.length) return null
+  const kept = rows.reduce((sum, r) => sum + r.after_tax_proceeds, 0)
+  const soldShare = rows.reduce((sum, r) => sum + r.fraction, 0)
+  return (
+    <div className="mb-3 rounded-lg border border-border bg-bg/40 p-3">
+      <div className="flex items-baseline gap-2 mb-2">
+        <div className="text-xs font-semibold flex-1">Exit Targets</div>
+        <div className="text-[10px] text-muted">at {CHARACTER_LABEL[character]} if sold today</div>
+      </div>
+      <ol className="space-y-3">
+        {rows.map((r, i) => (
+          <li key={r.index} className="text-xs">
+            <div className="flex items-baseline gap-2">
+              <span className="flex-1 min-w-0">
+                <span className="text-fg">{targetLabel(r)}</span>
+                <span className="text-muted"> · {targetOther(r)} · {soldLabel(r, isStock)}</span>
+              </span>
+              <span className={clsx('font-mono-tab shrink-0 font-semibold', r.hit ? 'text-green-400' : 'text-fg')}>
+                {usd(r.after_tax_proceeds)}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 mt-0.5 text-[10px] text-muted font-mono-tab">
+              <span className="flex-1">
+                {r.realized_gain > 0
+                  ? `${usd(r.proceeds)} sale − ${usd(r.estimated_tax)} tax (${ratePct(r.rate)}) · ${usd(r.after_tax_gain)} gain kept`
+                  : `${usd(r.proceeds)} sale · no gain, no tax`}
+              </span>
+              {rowsLongTerm?.[i] && <span className="shrink-0">LT {usd(rowsLongTerm[i].after_tax_proceeds)}</span>}
+            </div>
+            <div className="mt-1">
+              {r.hit ? (
+                <span className="text-[10px] text-green-400 font-semibold">Target reached</span>
+              ) : r.progress != null && (
+                <div className="h-1 rounded bg-faint overflow-hidden" aria-label={`${Math.round(r.progress * 100)}% of the way`}>
+                  <div className="h-full bg-amber-400" style={{ width: `${r.progress * 100}%` }} />
+                </div>
+              )}
+            </div>
+          </li>
+        ))}
+      </ol>
+      <div className="mt-3 pt-2 border-t border-hairline flex items-baseline text-xs">
+        <span className="flex-1 text-subtle">
+          Kept after tax if every target hits{soldShare < 0.9999 ? ` (${pct(1 - soldShare, 0)} still held)` : ''}
+        </span>
+        <span className="font-mono-tab text-green-400 font-semibold">{usd(kept)}</span>
+      </div>
+      <p className="mt-2 text-[10px] text-muted leading-relaxed">
+        Dollars are what you'd keep from each sale after estimated tax.
+        {rowsLongTerm && longTermDate && ` "LT" is the same sale once this goes long-term on ${longTermDate}.`}
+        {' '}Each sale is taxed on its own; selling several in one year can push the rate higher. Estimates.
+      </p>
+    </div>
+  )
 }
 
 function ExerciseForm({ pos, onExercise, onCancel }) {
@@ -914,8 +1192,8 @@ function ExerciseForm({ pos, onExercise, onCancel }) {
       </p>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Exercise date"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} /></Field>
-        <Field label="Shares received"><input inputMode="decimal" value={shares} onChange={(e) => setShares(e.target.value)} className={inputCls} /></Field>
-        <Field label="Current value of shares ($)" wide><input inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value)} className={inputCls} /></Field>
+        <Field label="Shares received"><NumberInput decimals={4} value={shares} onChange={setShares} className={inputCls} /></Field>
+        <Field label="Current value of shares ($)" wide><NumberInput value={value} onChange={setValue} className={inputCls} /></Field>
       </div>
       {preview && (
         <div className="mt-3 text-[10px] text-subtle font-mono-tab">

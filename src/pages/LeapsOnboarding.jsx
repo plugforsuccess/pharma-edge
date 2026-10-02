@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { ShieldCheck, ChevronLeft, ChevronRight, Check, AlertTriangle } from 'lucide-react'
 import clsx from 'clsx'
+import NumberInput from '../components/NumberInput'
+import { markPrompted } from '../components/OnboardingGate'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { FILING_STATUSES } from '../utils/afterTax'
@@ -31,6 +33,11 @@ function num(v) {
 export default function LeapsOnboarding() {
   const { user, profile } = useAuth()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  // Arrived here from the sign-in prompt (components/OnboardingGate).
+  const prompted = searchParams.get('prompt') === '1'
+  const rawNext = searchParams.get('next') ?? ''
+  const nextPath = rawNext.startsWith('/') && !rawNext.startsWith('//') && !rawNext.startsWith('/leaps/onboarding') ? rawNext : '/leaps'
   const [step, setStep] = useState(0)
   const [states, setStates] = useState([])
   const [form, setForm] = useState({
@@ -146,19 +153,34 @@ export default function LeapsOnboarding() {
       }
       return setError(msg || 'Could not save your answers. Please try again.')
     }
+    markPrompted(user)
     setResult(data.profile)
   }
 
+  function skip() {
+    markPrompted(user)
+    navigate(nextPath, { replace: true })
+  }
+
   if (result) {
-    return <ResultCard result={result} onDone={() => navigate('/leaps')} onAdd={() => navigate('/leaps?add=1')} />
+    return <ResultCard result={result} onDone={() => navigate(nextPath)} onAdd={() => navigate('/leaps?add=1')} />
   }
 
   return (
     <div className="px-4 py-4 pb-24 max-w-md mx-auto">
       <header className="mb-4">
-        <Link to="/leaps" className="text-xs text-subtle hover:text-fg inline-flex items-center gap-1 mb-2 min-h-[44px]">
-          <ChevronLeft size={14} /> LEAPS
-        </Link>
+        {prompted ? (
+          <div className="flex justify-end mb-2">
+            <button type="button" onClick={skip}
+              className="text-xs text-subtle hover:text-fg inline-flex items-center gap-1 min-h-[44px] px-2">
+              Skip for now <ChevronRight size={14} />
+            </button>
+          </div>
+        ) : (
+          <Link to="/leaps" className="text-xs text-subtle hover:text-fg inline-flex items-center gap-1 mb-2 min-h-[44px]">
+            <ChevronLeft size={14} /> LEAPS
+          </Link>
+        )}
         <div className="flex items-center gap-2 mb-1">
           <ShieldCheck size={16} className="text-amber-400" />
           <h1 className="text-lg font-semibold">Set up the LEAPS bot</h1>
@@ -166,6 +188,11 @@ export default function LeapsOnboarding() {
         <p className="text-xs text-subtle leading-relaxed">
           A few questions decide what the bot is allowed to buy for you, and your tax details decide when it sells.
         </p>
+        {prompted && (
+          <p className="mt-2 text-[10px] text-muted leading-relaxed">
+            Your account isn't set up yet. It takes about a minute — if you skip, we'll ask again next time you sign in.
+          </p>
+        )}
       </header>
 
       <ol className="flex gap-1 mb-5" aria-label="Progress">
@@ -197,11 +224,11 @@ export default function LeapsOnboarding() {
       {step === 1 && (
         <section className="space-y-4">
           <Field label="Account size ($)" hint="The value of the account the bot will manage or suggest trades for.">
-            <input inputMode="decimal" value={form.account_size} onChange={(e) => set('account_size', e.target.value)}
-              placeholder="100000" className={inputCls} />
+            <NumberInput value={form.account_size} onChange={(v) => set('account_size', v)}
+              placeholder="100,000" className={inputCls} />
           </Field>
           <Field label="Years until you need this money">
-            <input inputMode="decimal" value={form.horizon_years} onChange={(e) => set('horizon_years', e.target.value)}
+            <NumberInput value={form.horizon_years} onChange={(v) => set('horizon_years', v)}
               placeholder="5" className={inputCls} />
             <div className="flex gap-2 mt-2">
               {HORIZON_CHIPS.map((y) => (
@@ -225,8 +252,8 @@ export default function LeapsOnboarding() {
           </Field>
           <Field label="Expected taxable income this year, before LEAPS gains ($)"
             hint="Used to estimate which tax bracket your gains land in, and whether the 3.8% NIIT applies.">
-            <input inputMode="decimal" value={form.annual_income} onChange={(e) => set('annual_income', e.target.value)}
-              placeholder="150000" className={inputCls} />
+            <NumberInput value={form.annual_income} onChange={(v) => set('annual_income', v)}
+              placeholder="150,000" className={inputCls} />
           </Field>
           <Field label="Residency">
             <select value={form.state_code} onChange={(e) => set('state_code', e.target.value)} className={inputCls}>

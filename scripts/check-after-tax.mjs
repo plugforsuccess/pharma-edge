@@ -16,7 +16,7 @@ import {
   deriveRates, applyRateOverride, makeRateResolver, targetTable,
   positionAfterTax, holdingPeriod, portfolioSummary, marginalRate,
   isValidTaxRate, isValidBasis, exerciseCall, blended1256Rate, suggestInstrumentType, bracketTax,
-  exitLadder, allocateContracts, rateAtGainFor,
+  exitLadder, allocateContracts, rateAtGainFor, customExitTargets, validateCustomTargets,
 } from '../src/utils/afterTax.js'
 
 const federal = {
@@ -300,6 +300,42 @@ const round2 = (x) => Math.round(x * 100) / 100
   const live = positionAfterTax({ basis: 30000, currentValue: 60000, purchaseDate: '2025-01-15', asOf: '2026-10-02',
     rateForGain: makeRateResolver({ federal, state: PR, filingStatus: 'single', income: 800000 }) })
   eq('PR after-tax value', Math.round(live.after_tax_value), 55500)
+}
+
+// ── User-set Exit Targets (% / $) ────────────────────────────────
+{
+  const flat = (r) => () => r
+  // $30k basis, +100% target, sell half at 20% → $30,000 proceeds,
+  // $15,000 gain, $3,000 tax, $27,000 kept.
+  const [a] = customExitTargets({ basis: 30000, currentValue: 30000, targets: [{ kind: 'pct', value: 1, sell: 0.5 }], rateAtGain: flat(0.2) })
+  eq('pct exit value', a.exit_value, 60000)
+  eq('pct proceeds', a.proceeds, 30000)
+  eq('pct tax', a.estimated_tax, 3000)
+  eq('pct after-tax proceeds', a.after_tax_proceeds, 27000)
+  eq('pct after-tax gain %', a.after_tax_gain_pct, 0.8, 1e-9)
+  eq('pct progress at basis', a.progress, 0)
+  // $ target, whole position, sorted ascending regardless of input order.
+  const rows = customExitTargets({ basis: 10000, currentValue: 25000, contracts: 4,
+    targets: [{ kind: 'usd', value: 40000, sell: 0.5 }, { kind: 'usd', value: 20000, sell: 0.5 }], rateAtGain: flat(0.25) })
+  eq('usd sorted', rows.map((r) => r.exit_value).join(','), '20000,40000')
+  eq('usd contracts split', rows.map((r) => r.contracts).join(','), '2,2')
+  eq('usd first hit', rows[0].hit, true)
+  eq('usd second not hit', rows[1].hit, false)
+  eq('usd second progress', rows[1].progress, 0.5, 1e-9)
+  eq('usd after-tax proceeds', rows[1].after_tax_proceeds, 20000 - 15000 * 0.25)
+  // Partial sells hold the rest: 3 contracts, sell 1/3 → 1 contract.
+  const [p] = customExitTargets({ basis: 9000, currentValue: 9000, contracts: 3,
+    targets: [{ kind: 'pct', value: 0.5, sell: 1 / 3 }], rateAtGain: flat(0.2) })
+  eq('partial contracts', p.contracts, 1)
+  eq('partial fraction', p.fraction, 1 / 3, 1e-9)
+  // Rate is looked up at the realized gain, not the whole-position gain.
+  let seen = null
+  customExitTargets({ basis: 10000, currentValue: 0, targets: [{ kind: 'pct', value: 1, sell: 0.25 }], rateAtGain: (g) => { seen = g; return 0.2 } })
+  eq('rate at realized gain', seen, 2500)
+  eq('validate ok', validateCustomTargets([{ kind: 'pct', value: 1, sell: 0.5 }]), null)
+  eq('validate sum > 100%', typeof validateCustomTargets([{ kind: 'pct', value: 1, sell: 0.6 }, { kind: 'pct', value: 2, sell: 0.6 }]), 'string')
+  eq('validate usd below basis', typeof validateCustomTargets([{ kind: 'usd', value: 5000, sell: 1 }], 10000), 'string')
+  eq('validate bad kind', typeof validateCustomTargets([{ kind: 'x', value: 1, sell: 1 }]), 'string')
 }
 
 // ── Validation ───────────────────────────────────────────────────

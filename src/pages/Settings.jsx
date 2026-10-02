@@ -9,6 +9,7 @@ import {
   pushPermissionStatus,
 } from '../utils/pwa'
 import clsx from 'clsx'
+import NumberInput from '../components/NumberInput'
 import BotSettingsSection from '../components/BotSettingsSection'
 import { FEATURES } from '../lib/features'
 import { FILING_STATUSES, DEFAULT_TARGET_PCTS, DEFAULT_EXIT_LADDER, isValidTaxRate } from '../utils/afterTax'
@@ -373,7 +374,7 @@ export default function Settings() {
           value={risk.options_experience} onChange={(v) => setR('options_experience', v)} />
         <div className="grid grid-cols-2 gap-2">
           <Input label="Account size" prefix="$" inputMode="decimal" value={risk.account_size}
-            onChange={(v) => setR('account_size', v)} placeholder="100000" />
+            onChange={(v) => setR('account_size', v)} placeholder="100,000" />
           <Input label="Years until you need it" inputMode="decimal" value={risk.horizon_years}
             onChange={(v) => setR('horizon_years', v)} placeholder="5" />
         </div>
@@ -418,7 +419,7 @@ export default function Settings() {
           </>
         )}
         <Input label="Taxable income this year, before LEAPS gains" prefix="$" inputMode="decimal"
-          value={tax.annual_income} onChange={(v) => setT('annual_income', v)} placeholder="150000" />
+          value={tax.annual_income} onChange={(v) => setT('annual_income', v)} placeholder="150,000" />
         <div className="grid grid-cols-2 gap-2">
           <Input label="CPA long-term rate (optional)" suffix="%" inputMode="decimal"
             value={tax.lt_rate_override} onChange={(v) => setT('lt_rate_override', v)} placeholder="Derived" />
@@ -733,7 +734,7 @@ function AffixInput({ value, onChange, prefix, suffix, label }) {
   return (
     <div className="relative">
       {prefix && <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted text-xs">{prefix}</span>}
-      <input inputMode="decimal" value={value} aria-label={label} onChange={(e) => onChange(e.target.value)}
+      <NumberInput value={value} aria-label={label} onChange={onChange}
         className={clsx('w-full min-h-[44px] bg-bg border border-border text-fg rounded-lg text-sm font-mono-tab focus:outline-none focus:border-amber-400/60',
           prefix ? 'pl-6' : 'pl-3', suffix ? 'pr-7' : 'pr-3')} />
       {suffix && <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted text-xs">{suffix}</span>}
@@ -822,6 +823,11 @@ function ExportDataButton({ userId, email }) {
   )
 }
 
+const inputClass = (prefix, suffix) => clsx(
+  'w-full bg-bg border border-border text-white rounded-xl py-2.5 text-sm focus:outline-none focus:border-amber-400/60 transition-colors',
+  prefix ? 'pl-8 pr-4' : suffix ? 'pl-4 pr-8' : 'px-4',
+)
+
 function Input({ label, value, onChange, placeholder, type = 'text', prefix, suffix, step, min, inputMode }) {
   return (
     <div>
@@ -832,19 +838,26 @@ function Input({ label, value, onChange, placeholder, type = 'text', prefix, suf
             {prefix}
           </span>
         )}
-        <input
-          type={type}
-          step={step}
-          min={min}
-          inputMode={inputMode || (type === 'number' ? 'decimal' : undefined)}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder}
-          className={clsx(
-            'w-full bg-bg border border-border text-white rounded-xl py-2.5 text-sm focus:outline-none focus:border-amber-400/60 transition-colors',
-            prefix ? 'pl-8 pr-4' : suffix ? 'pl-4 pr-8' : 'px-4',
-          )}
-        />
+        {inputMode === 'decimal' || inputMode === 'numeric' || type === 'number' ? (
+          <NumberInput
+            decimals={inputMode === 'numeric' ? 0 : 2}
+            value={value}
+            onChange={onChange}
+            placeholder={placeholder}
+            className={inputClass(prefix, suffix)}
+          />
+        ) : (
+          <input
+            type={type}
+            step={step}
+            min={min}
+            inputMode={inputMode}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder={placeholder}
+            className={inputClass(prefix, suffix)}
+          />
+        )}
         {suffix && (
           <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted text-xs">
             {suffix}

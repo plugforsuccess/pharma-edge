@@ -439,6 +439,91 @@ export function exitLadder({
   })
 }
 
+// ── User-set Exit Targets (% or $) ───────────────────────────────
+//
+// The reverse of the ladder above: the user names the exit, and we
+// show what they'd keep. Each target is
+//   { kind: 'pct', value: 1.0 }    → position up 100% on basis
+//   { kind: 'usd', value: 60000 }  → whole position worth $60,000
+// plus `sell`, the share of the position sold there (0–1; the shares
+// may add up to less than 1 — the rest is held). Per target:
+//   exit_value         = basis × (1 + pct)   or   the dollar value
+//   sold share f       = whole contracts ÷ total when contracts are
+//                        known (largest remainder), else `sell`
+//   realized_gain      = f × (exit_value − basis)
+//   tax                = realized_gain × rate at that realized gain
+//   after_tax_proceeds = f × exit_value − tax
+// Rates use the position's tax character if sold today. Each sale is
+// taxed on its own (no stacking with the other targets) — an estimate.
+
+export const MAX_CUSTOM_TARGETS = 5
+
+export function validateCustomTargets(targets, basis = null) {
+  if (!Array.isArray(targets) || targets.length < 1) return 'Add at least one exit target.'
+  if (targets.length > MAX_CUSTOM_TARGETS) return `At most ${MAX_CUSTOM_TARGETS} exit targets.`
+  let sum = 0
+  for (const t of targets) {
+    const v = Number(t?.value)
+    const s = Number(t?.sell)
+    if (t?.kind !== 'pct' && t?.kind !== 'usd') return 'Each exit target must be a % or a $ amount.'
+    if (!Number.isFinite(v) || v <= 0) return 'Each exit target must be above 0.'
+    if (t.kind === 'pct' && v > 100) return 'A % target can be at most +10,000%.'
+    if (t.kind === 'usd' && basis != null && v <= basis) return 'A $ target must be above your cost basis.'
+    if (!Number.isFinite(s) || s <= 0 || s > 1) return 'Each target must sell more than 0% and at most 100%.'
+    sum += s
+  }
+  if (sum > 1 + 1e-6) return 'The shares sold add up to more than 100%.'
+  return null
+}
+
+export function customExitTargets({ basis, currentValue, contracts = null, targets, rateAtGain }) {
+  if (!isValidBasis(basis) || !Array.isArray(targets) || !targets.length) return []
+  const value = Number(currentValue) || 0
+  const rows = targets
+    .map((t, i) => ({
+      index: i,
+      kind: t.kind,
+      input: Number(t.value),
+      sell: Number(t.sell),
+      exit_value: t.kind === 'pct' ? basis * (1 + Number(t.value)) : Number(t.value),
+    }))
+    .filter((r) => Number.isFinite(r.exit_value) && r.exit_value > 0 && r.sell > 0)
+    .sort((a, b) => a.exit_value - b.exit_value || a.index - b.index)
+
+  let alloc = null
+  if (Number.isInteger(contracts) && contracts > 0) {
+    const sum = rows.reduce((s, r) => s + r.sell, 0)
+    const toSell = Math.min(contracts, Math.round(contracts * Math.min(1, sum) + 1e-9))
+    alloc = sum > 0 ? allocateContracts(toSell, rows.map((r) => r.sell / sum)) : rows.map(() => 0)
+  }
+
+  return rows.map((r, i) => {
+    const fraction = alloc ? alloc[i] / contracts : r.sell
+    const gain = r.exit_value - basis
+    const realizedGain = fraction * gain
+    const rate = realizedGain > 0 ? rateAtGain(realizedGain) : 0
+    const tax = realizedGain > 0 ? realizedGain * rate : 0
+    const proceeds = fraction * r.exit_value
+    const soldBasis = fraction * basis
+    return {
+      ...r,
+      fraction,
+      contracts: alloc ? alloc[i] : null,
+      exit_multiple: r.exit_value / basis,
+      gain_pct: gain / basis,
+      proceeds,
+      realized_gain: realizedGain,
+      rate,
+      estimated_tax: tax,
+      after_tax_proceeds: proceeds - tax,
+      after_tax_gain: realizedGain - tax,
+      after_tax_gain_pct: soldBasis > 0 ? (realizedGain - tax) / soldBasis : null,
+      hit: value >= r.exit_value - 0.005,
+      progress: gain > 0 ? Math.max(0, Math.min(1, (value - basis) / gain)) : null,
+    }
+  })
+}
+
 // Exercising a long call: the premium paid rolls into the stock's cost
 // basis, and the stock gets its own holding clock starting the day after
 // exercise (the option's purchase date does NOT carry forward). The

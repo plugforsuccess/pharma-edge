@@ -742,8 +742,19 @@ Settings is the single place to edit: account name, risk profile
 (answers → server recomputes the tier), tax profile, goals (LEAPS
 allocation + target returns), and the Exit Target ladder (1–5 rungs,
 after-tax gain target + share sold per rung). One **Save** button
-persists every changed section. `/leaps` shows these read-only with
-"Edit" links to `/settings#tax` / `#risk`. Managed vs self-directed is
+persists every changed section. `/leaps` shows these read-only (no
+edit links; an "Add tax details" link appears only when none exist).
+
+**Sign-in prompt:** `components/OnboardingGate.jsx` (mounted in
+Layout) sends a user with no `ldp_risk_profiles` or no
+`leaps_tax_profiles` row to `/leaps/onboarding?prompt=1&next=…` once
+per sign-in (keyed on `user.last_sign_in_at` in localStorage, so
+reloads don't re-prompt). "Skip for now" lets them in; the next
+sign-in prompts again until both rows exist.
+
+**Number fields:** use `components/NumberInput.jsx` for every money /
+count input — it shows `1,000,000` while handing the parent the plain
+string `"1000000"`, so parsers stay unchanged. Managed vs self-directed is
 read-only for users (set by the owner after a signed managed-account
 agreement; admin control not built yet). Disclosure text + version
 live in `src/lib/ldpDisclosures.js` and must match the edge function.
@@ -792,6 +803,14 @@ value, holding period) and must pass before any edit to that file lands.
   upper thresholds not re-verified); pre-move appreciation staying
   federally taxable is shown as a caveat, not modeled. UI says
   "Residency", not "State".
+- **Per-position Exit Targets** (`leaps_positions.exit_targets`, jsonb,
+  NULL = use the account ladder from Settings): up to 5 user-set
+  targets `{kind: 'pct'|'usd', value, sell}` — `pct` = gain on basis
+  (1.0 = +100%), `usd` = whole-position value, `sell` = share sold
+  (0–1, may total < 1; the rest is held). `customExitTargets()` in
+  `afterTax.js` shows proceeds, tax and after-tax dollars per sale
+  (rate at that sale's realized gain, each sale taxed on its own).
+  The add form has "Save & add another" for entering many positions.
 - Per-position values are never netted; the portfolio card shows a
   netted figure labeled as an estimate.
 - Every tax figure in the UI is labeled an estimate with a
