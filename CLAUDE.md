@@ -688,8 +688,9 @@ Open state is remembered on the device (`cm:holdings-open`); new
 holdings open; "Expand all / Collapse all" sits by the Holdings title.
 **Exit Targets rows** keep the original card format: "100% gain • 2x" /
 "Target 1 · sell 35 contracts" on the left, the whole-position sell
-value on the right, a progress strip under each, the runner as a last
-row. No tax-math line and no Long-term line (option-price targets sell
+value on the right, that sale's after-tax gain on its own row under
+the sell line ("+$1,999 after taxes", green; the value itself never
+gets a "+", it's a price trigger), a progress strip under each, the runner as a last row. No tax-math line and no Long-term line (option-price targets sell
 at the same price either way). The form toggle reads "Default" /
 "Custom". Titles read "RXRX • 50 contracts" / "NAUT • 3,500 shares" / "BTC • 0.5 $BTC" (crypto counts in `$TICKER`, never "coins": "sell 0.35 $BTC");
 options show "$5 Call • Exp Jan 21, 2028" below, then "Bought …".
@@ -850,12 +851,21 @@ value, holding period) and must pass before any edit to that file lands.
   stored (`cost_basis`, `current_value`).
 - **No LEAPS basis / allocation.** Each position is independent; the
   portfolio is the sum of the open positions (total cost, value,
-  after-tax value). **No portfolio target table** (removed 2026-10-02):
-  the single after-tax return goal is set in Settings → Goals
-  (`selected_target_pct`; `target_pcts` holds just that value), and each
-  holding's goal bar solves it on its own cost — "50% after-tax goal ·
-  now 1.25x" / "Needs 1.62x long-term · 1.70x short-term" (§1256 shows
-  its 60/40 multiple). No goal bar on ROC holdings.
+  after-tax value). **No portfolio target table on the page**
+  (owner, 2026-10-02). Each holding has its own after-tax goal,
+  `leaps_positions.goal_pct` (fraction of cost; NULL = the default in
+  Settings → Goals, `leaps_tax_profiles.selected_target_pct`), set in the
+  holding editor's **After-tax goal** section: one % field (no hint; an
+  empty field fills with the default when the editor opens or on blur,
+  and saving the untouched default stores NULL so it keeps following
+  Settings), the line
+  "+$1,800 after taxes" (amount in green) / "Needs 1.37x long-term" / "Needs 1.42x
+  short-term" (one per row), and a
+  "Show all targets" tap that expands the full 50%–20% table on that
+  holding's cost (tap a row to pick it; §1256 shows its 60/40 column).
+  The card's goal bar uses the holding's goal — "30% after-tax goal ·
+  now 1.25x" / "Needs 1.37x long-term · 1.42x short-term". No goal on
+  ROC holdings.
   `leaps_tax_profiles.leaps_allocation_pct` / `portfolio_size` are no
   longer read by `/leaps` (columns kept; Settings no longer shows the
   allocation field).

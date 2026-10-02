@@ -6,7 +6,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import {
   FILING_STATUSES, DEFAULT_TARGET_PCTS, makeRateResolver, deriveRates,
-  applyRateOverride, targetRow, positionAfterTax, portfolioSummary,
+  applyRateOverride, targetTable, targetRow, positionAfterTax, portfolioSummary,
   todayYmd, holdingPeriod, suggestInstrumentType, exerciseCall,
   blended1256Rate, rateAtGainFor, EXIT_PLAYBOOK, playbookTargets, runnerPlan, timeStop,
   longTermFitsPlan, entryRunwayDays,
@@ -218,7 +218,8 @@ export default function Leaps() {
   const results = useMemo(() => {
     if (!rateForGain || !positions) return []
     return investments.map((pos) => {
-      const goal = goalRow(Number(pos.cost_basis))
+      const goalPct = Number(pos.goal_pct) > 0 ? Number(pos.goal_pct) : selectedPct
+      const goal = goalRow(Number(pos.cost_basis), goalPct)
       const is1256 = pos.instrument_type === 'index_option_1256'
       const calc = positionAfterTax({
         basis: Number(pos.cost_basis),
@@ -230,14 +231,17 @@ export default function Leaps() {
         targetMultiple: goal ? (is1256 ? goal.section_1256.required_multiple : goal.long_term.required_multiple) : null,
       })
       // The goal bar shows both multiples: long-term and short-term.
-      if (calc && goal) calc.goal_st_multiple = goal.short_term.required_multiple
+      if (calc && goal) {
+        calc.goal_st_multiple = goal.short_term.required_multiple
+        calc.goal_pct = goalPct
+      }
       return withLadder(pos, calc)
     })
 
     // The after-tax return goal (Settings), solved on this position's own cost.
-    function goalRow(basis) {
-      if (!(selectedPct > 0)) return null
-      return targetRow({ portfolio: basis, basis, targetPct: selectedPct, rateForGain })
+    function goalRow(basis, goalPct) {
+      if (!(goalPct > 0)) return null
+      return targetRow({ portfolio: basis, basis, targetPct: goalPct, rateForGain })
     }
 
     function withLadder(pos, calc) {
@@ -364,7 +368,7 @@ export default function Leaps() {
   }
 
   return (
-    <RatesContext.Provider value={rateForGain}>
+    <RatesContext.Provider value={{ rateForGain, defaultGoal: selectedPct > 0 ? selectedPct : null }}>
     <div className="px-4 py-4 pb-24 max-w-2xl mx-auto">
       <header className="mb-5">
         <div className="flex items-center gap-2 mb-1">
@@ -490,9 +494,9 @@ export default function Leaps() {
   )
 }
 
-// The user's rate resolver, for the yield comparisons inside the
-// holding editor (cash / income).
-const RatesContext = createContext(null)
+// The user's rate resolver and default after-tax goal, for the holding
+// editor (yield comparisons, the goal + its targets table).
+const RatesContext = createContext({ rateForGain: null, defaultGoal: null })
 
 const OPEN_KEY = 'cm:holdings-open'
 function readOpenIds() {
@@ -650,6 +654,8 @@ function emptyForm(initial) {
     // Income (shares with a yield)
     div_yield: d.dividend_yield != null ? String(+(Number(d.dividend_yield) * 100).toFixed(4)) : '',
     div_kind: d.dividend_kind ?? 'qualified',
+    // After-tax goal for this holding ('' = account default)
+    goal: initial?.goal_pct != null ? String(+(Number(initial.goal_pct) * 100).toFixed(2)) : '',
     // Cash
     balance: t === 'cash' ? str(initial?.current_value) : '',
     apy: d.apy != null ? String(+(Number(d.apy) * 100).toFixed(4)) : '',
@@ -700,6 +706,7 @@ function totalsOf(f) {
 }
 
 function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
+  const { defaultGoal } = useContext(RatesContext)
   const [f, setF] = useState(() => emptyForm(initial))
   const [error, setError] = useState('')
   const [savedNote, setSavedNote] = useState('')
@@ -821,12 +828,17 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
     if (isIncome && !(divYield > 0 && divYield <= 50)) {
       return setError('Enter the yield as a % between 0 and 50.')
     }
+    const goal = num(f.goal)
+    if (goal != null && !(goal > 0 && goal <= 1000)) return setError('Enter the after-tax goal as a % above 0 (or leave it blank).')
     return finish({
       ticker: f.ticker,
       name: null,
       details: isIncome
         ? { dividend_yield: exact(divYield / 100), dividend_kind: f.div_kind }
         : null,
+      // Left at the default (and never set) → NULL, so it keeps following Settings.
+      goal_pct: rocIncome || !(goal > 0) || (initial?.goal_pct == null && defaultGoal != null && Math.abs(goal / 100 - defaultGoal) < 1e-9)
+        ? null : exact(goal / 100),
       instrument_type: instrumentType,
       option_type: isShares ? null : f.option_type,
       strike: isShares ? null : num(f.strike),
@@ -1053,6 +1065,8 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
           </div>
         )}
       </FormSection>
+
+      {!rocIncome && <GoalSection goal={f.goal} onGoal={setV('goal')} basis={basis} is1256={is1256} />}
 
       {isIncome && <YieldCompare group="income" amount={value} />}
 
@@ -1331,7 +1345,7 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
       {!noExitPlan && calc.target_progress != null && (
         <div className="mb-4">
           <div className="flex text-xs text-muted mb-1.5">
-            <span className="flex-1">{pct(selectedTargetPct, 0)} after-tax goal</span>
+            <span className="flex-1">{pct(calc.goal_pct ?? selectedTargetPct, 0)} after-tax goal</span>
             <span className="font-mono-tab">now {mult(calc.current_multiple)}</span>
           </div>
           <div className="h-1.5 rounded bg-faint overflow-hidden">
@@ -1553,10 +1567,85 @@ function YieldRows({ rows, apys, setApy, best }) {
   )
 }
 
+// This holding's after-tax return goal, with the full targets table a tap
+// away (solved on the cost entered above). Blank = the Settings default.
+function GoalSection({ goal, onGoal, basis, is1256 }) {
+  const { rateForGain, defaultGoal } = useContext(RatesContext)
+  const [showAll, setShowAll] = useState(false)
+  // An empty field shows the default goal (Settings), so there's always a number.
+  const defaultStr = defaultGoal ? String(+(defaultGoal * 100).toFixed(2)) : ''
+  // Fill once when the editor opens (and on blur, below) — not while typing,
+  // so the field can be cleared to type a new number.
+  useEffect(() => {
+    if (goal === '' && defaultStr) onGoal(defaultStr)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultStr])
+  const g = num(goal)
+  const active = g > 0 ? g / 100 : defaultGoal
+  const table = rateForGain && basis > 0
+    ? targetTable({ basis, targetPcts: [...new Set([...DEFAULT_TARGET_PCTS, ...(active ? [active] : [])])], rateForGain })
+    : null
+  const row = table?.rows.find((r) => Math.abs(r.target_pct - active) < 1e-9)
+  return (
+    <FormSection title="After-tax goal">
+      <Field wide label="Goal for this holding">
+        <Affix suffix="%"><NumberInput decimals={2} value={goal} onChange={onGoal}
+          onBlur={() => { if (goal === '' && defaultStr) onGoal(defaultStr) }}
+          placeholder={defaultGoal ? String(+(defaultGoal * 100).toFixed(2)) : '50'} className={clsx(inputCls, 'pr-8')} /></Affix>
+      </Field>
+      {row && (
+        <div className="mt-2 text-xs text-muted space-y-0.5">
+          <div><span className="font-mono-tab text-green-400">+{usd(row.after_tax_target)}</span> after taxes</div>
+          <div>Needs <span className="font-mono-tab text-fg">{mult(is1256 ? row.section_1256.required_multiple : row.long_term.required_multiple)}</span> {is1256 ? '(§1256 60/40)' : 'long-term'}</div>
+          {!is1256 && <div>Needs <span className="font-mono-tab text-fg">{mult(row.short_term.required_multiple)}</span> short-term</div>}
+        </div>
+      )}
+      {table && (
+        <>
+          <button type="button" onClick={() => setShowAll((v) => !v)} aria-expanded={showAll}
+            className="mt-2 min-h-[44px] inline-flex items-center gap-1 text-sm text-amber-300 hover:text-amber-200">
+            {showAll ? 'Hide targets' : 'Show all targets'}
+            <ChevronDown size={14} className={clsx('transition-transform', showAll && 'rotate-180')} />
+          </button>
+          {showAll && (
+            <table className="w-full text-sm mt-1">
+              <thead>
+                <tr className="text-[10px] uppercase tracking-wider text-muted">
+                  <th className="text-left font-medium pb-2">Target</th>
+                  <th className="text-right font-medium pb-2">After tax</th>
+                  {is1256
+                    ? <th className="text-right font-medium pb-2">§1256</th>
+                    : <><th className="text-right font-medium pb-2">Long-term</th><th className="text-right font-medium pb-2">Short-term</th></>}
+                </tr>
+              </thead>
+              <tbody>
+                {table.rows.map((r) => (
+                  <tr key={r.target_pct} onClick={() => onGoal(String(+(r.target_pct * 100).toFixed(2)))}
+                    className={clsx('cursor-pointer border-t border-hairline',
+                      Math.abs(r.target_pct - active) < 1e-9 ? 'text-amber-300 bg-amber-400/5' : 'hover:bg-card-hover')}>
+                    <td className="py-3 font-mono-tab">{pct(r.target_pct, 0)}</td>
+                    <td className="py-3 text-right font-mono-tab">{usd(r.after_tax_target)}</td>
+                    {is1256
+                      ? <td className="py-3 text-right font-mono-tab font-semibold">{mult(r.section_1256.required_multiple)}</td>
+                      : <>
+                          <td className="py-3 text-right font-mono-tab font-semibold">{mult(r.long_term.required_multiple)}</td>
+                          <td className="py-3 text-right font-mono-tab">{mult(r.short_term.required_multiple)}</td>
+                        </>}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </>
+      )}
+    </FormSection>
+  )
+}
+
 // Inside the cash / income editor: what this amount would keep after
 // tax in each category, at rates the user enters (saved on the device).
 function YieldCompare({ group, amount }) {
-  const rateForGain = useContext(RatesContext)
+  const { rateForGain } = useContext(RatesContext)
   const [apys, setApys] = useState(() => {
     try { return { ...exampleApys(), ...JSON.parse(localStorage.getItem(YIELD_KEY) ?? '{}') } }
     catch { return exampleApys() }
@@ -1853,6 +1942,9 @@ function CustomExitTargets({ title = 'Exit Targets', rows, runner, isStock, unit
             <div className="flex-1 min-w-0">
               <div className="text-sm text-fg">{gainLabel(r)}</div>
               <div className="text-xs text-muted mt-0.5">Target {i + 1} · {soldLabel(r, isStock, units)}</div>
+              {r.after_tax_gain > 0 && (
+                <div className="text-xs text-muted mt-0.5"><span className="font-mono-tab text-green-400">+{usd(r.after_tax_gain)}</span> after taxes</div>
+              )}
             </div>
             <div className={clsx('text-sm font-mono-tab font-semibold shrink-0', r.hit ? 'text-green-400' : 'text-fg')}>
               {usd(r.exit_value)}
