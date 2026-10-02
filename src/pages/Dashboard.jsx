@@ -242,7 +242,7 @@ export default function Dashboard() {
                 stats.realizedPnl > 0
                   ? 'text-green-400'
                   : stats.realizedPnl < 0
-                    ? 'text-[#f25068]'
+                    ? 'text-[#f0646a]'
                     : 'text-fg',
               )}
             >
@@ -308,7 +308,7 @@ function OnboardingCard({ navigate }) {
   return (
     <div className="surface rounded-2xl p-4 mb-5 space-y-3 border border-amber-400/20">
       <div className="flex items-center gap-2">
-        <span className="eyebrow text-[#f4cf8e]">Start Here</span>
+        <span className="eyebrow text-[#f6cc7e]">Start Here</span>
       </div>
       <p className="text-fg text-sm font-display">
         Welcome. Here's the loop.
@@ -345,8 +345,8 @@ function Stat({ label, value, tone = 'neutral', divider }) {
   const toneClass = {
     neutral: 'text-fg',
     green: 'text-green-400',
-    red: 'text-[#f25068]',
-    amber: 'text-[#f4cf8e]',
+    red: 'text-[#f0646a]',
+    amber: 'text-[#f6cc7e]',
   }[tone]
 
   return (
@@ -378,14 +378,14 @@ function SignalCard({ signal, onClick }) {
   const isSoon = daysTo > 7 && daysTo <= 14
 
   const accent = isUrgent
-    ? { color: '#f25068', glow: 'rgba(224,52,76,0.18)' }
+    ? { color: '#f0646a', glow: 'rgba(229, 72, 77,0.18)' }
     : isSoon
-      ? { color: '#f4cf8e', glow: 'rgba(232,181,88,0.14)' }
-      : { color: '#8b8ba6', glow: 'transparent' }
+      ? { color: '#f6cc7e', glow: 'rgba(240, 180, 76,0.14)' }
+      : { color: '#9a9aa1', glow: 'transparent' }
 
   const isPut = signal.direction === 'long_put'
   const dirPill = isPut
-    ? 'text-[#f25068] bg-[#e0344c]/10 border-[#e0344c]/35'
+    ? 'text-[#f0646a] bg-[#e5484d]/10 border-[#e5484d]/35'
     : signal.direction === 'long_call'
       ? 'text-green-400 bg-green-500/10 border-green-500/35'
       : 'text-subtle bg-white/[0.03] border-border'
@@ -483,10 +483,10 @@ function ConfidenceMeter({ level }) {
             style={{
               background: filled
                 ? i < 4
-                  ? '#b88830'
+                  ? '#c08a2c'
                   : i < 7
-                    ? '#e8b558'
-                    : '#f4cf8e'
+                    ? '#f0b44c'
+                    : '#f6cc7e'
                 : 'rgba(255,255,255,0.06)',
             }}
           />

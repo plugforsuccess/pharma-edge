@@ -1,0 +1,42 @@
+# LDP engine tests: risk tiers, satellite caps, contract filters, tax
+# math, exit ladder, sell-rule priority, Tradier adapter, and the
+# tax-snapshot drift guard against the Supabase migration seed.
+
+name: LDP engine tests
+
+on:
+  pull_request:
+    paths:
+      - 'ldp/**'
+      - 'supabase/migrations/20261002000000_after_tax_leaps.sql'
+      - 'supabase/functions/_shared/ldpRiskTier.ts'
+      - 'supabase/functions/_shared/ldpConfig.generated.ts'
+      - 'scripts/check-ldp-risk-tier.ts'
+      - '.github/workflows/ldp-tests.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'ldp/**'
+      - 'supabase/migrations/20261002000000_after_tax_leaps.sql'
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r ldp/requirements-dev.txt
+      - run: python -m pytest -q ldp
+  risk-tier-parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --experimental-strip-types --no-warnings scripts/check-ldp-risk-tier.ts

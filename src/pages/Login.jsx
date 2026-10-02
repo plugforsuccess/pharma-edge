@@ -55,7 +55,7 @@ export default function Login() {
               setPassword('')
             }}
             className="text-sm font-medium tracking-wide hover:text-fg transition-colors"
-            style={{ color: '#e8b558' }}
+            style={{ color: '#f0b44c' }}
           >
             ← Back to sign in
           </button>
@@ -110,9 +110,9 @@ export default function Login() {
             <div
               className="text-sm rounded-lg px-3 py-2 border"
               style={{
-                color: '#f25068',
-                background: 'rgba(224,52,76,0.08)',
-                borderColor: 'rgba(224,52,76,0.25)',
+                color: '#f0646a',
+                background: 'rgba(229, 72, 77,0.08)',
+                borderColor: 'rgba(229, 72, 77,0.25)',
               }}
               role="alert"
             >
@@ -163,7 +163,7 @@ function Shell({ children }) {
         className="pointer-events-none absolute -top-40 left-1/2 -translate-x-1/2 w-[520px] h-[520px] rounded-full opacity-50 blur-3xl"
         style={{
           background:
-            'radial-gradient(closest-side, rgba(232,181,88,0.18), transparent)',
+            'radial-gradient(closest-side, rgba(240, 180, 76,0.18), transparent)',
         }}
       />
       <div
@@ -171,7 +171,7 @@ function Shell({ children }) {
         className="pointer-events-none absolute -bottom-40 left-1/2 -translate-x-1/2 w-[520px] h-[520px] rounded-full opacity-40 blur-3xl"
         style={{
           background:
-            'radial-gradient(closest-side, rgba(224,52,76,0.14), transparent)',
+            'radial-gradient(closest-side, rgba(229, 72, 77,0.14), transparent)',
         }}
       />
       {children}

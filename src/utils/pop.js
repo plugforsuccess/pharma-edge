@@ -6,7 +6,7 @@
 // We don't model early-exit dynamics (touch probability, theta decay
 // path), only the terminal distribution at expiration. That's enough
 // for a "did this trade have at least a coin-flip chance of working"
-// number; bucketed calibration tracking on the TrackRecord page validates
+// number; bucketed calibration tracking (formerly on the TrackRecord page) validates
 // whether the model is well-calibrated for THIS account's signal mix.
 //
 // Output convention: returns an integer in basis points (0–10000)

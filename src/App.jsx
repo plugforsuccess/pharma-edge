@@ -1,16 +1,15 @@
 import { Suspense, lazy } from 'react'
-import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import SignalDetail from './pages/SignalDetail'
 import LogSignal from './pages/LogSignal'
 import Layout from './components/Layout'
+import { FEATURES } from './lib/features'
 
 // Non-critical screens can pay their bytes lazily.
-const TrackRecord = lazy(() => import('./pages/TrackRecord'))
 const Settings = lazy(() => import('./pages/Settings'))
-const PublicProfile = lazy(() => import('./pages/PublicProfile'))
 const Leaderboard = lazy(() => import('./pages/Leaderboard'))
 const Markets = lazy(() => import('./pages/Markets'))
 const PositionDetail = lazy(() => import('./pages/PositionDetail'))
@@ -29,6 +28,9 @@ const PlayDetail = lazy(() => import('./pages/PlayDetail'))
 const Wheel = lazy(() => import('./pages/Wheel'))
 const WheelWatchlist = lazy(() => import('./pages/WheelWatchlist'))
 const KingBoard = lazy(() => import('./pages/KingBoard'))
+const Leaps = lazy(() => import('./pages/Leaps'))
+const LeapsOnboarding = lazy(() => import('./pages/LeapsOnboarding'))
+const Simulator = lazy(() => import('./pages/Simulator'))
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -39,12 +41,12 @@ function ProtectedRoute({ children }) {
 
 // Admin-only route gate. Used for /flow (bot UI demoted to admin-only
 // per the leaderboard focus audit 2026-05-12) and /admin. Falls back
-// to /record for non-admins so the URL-typed visit goes somewhere
+// to the Tape for non-admins so the URL-typed visit goes somewhere
 // sensible.
 function AdminOnly({ children }) {
   const { profile, loading } = useAuth()
   if (loading) return <LoadingScreen />
-  if (!profile?.is_admin) return <Navigate to="/record" replace />
+  if (!profile?.is_admin) return <Navigate to="/" replace />
   return children
 }
 
@@ -60,12 +62,9 @@ function ProtectedLayout() {
   return <Layout />
 }
 
-// Legacy /r/:slug → /u/:slug. Per the leaderboard focus-audit spec,
-// public profiles are at /u/:slug going forward; the old /r/:slug
-// route 301-redirects so existing share links don't break.
-function LegacyRecordRedirect() {
-  const { slug } = useParams()
-  return <Navigate to={`/u/${slug}`} replace />
+// A route switched off in FEATURES redirects (to the Tape by default).
+function hidden(enabled, element, fallback = '/') {
+  return enabled ? element : <Navigate to={fallback} replace />
 }
 
 export default function App() {
@@ -75,22 +74,19 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route
-            path="/u/:slug"
-            element={
-              <Suspense fallback={<LoadingScreen />}>
-                <PublicProfile />
-              </Suspense>
-            }
-          />
-          <Route
             path="/leaderboard"
             element={
-              <Suspense fallback={<LoadingScreen />}>
-                <Leaderboard />
-              </Suspense>
+              FEATURES.leaderboard ? (
+                <Suspense fallback={<LoadingScreen />}>
+                  <Leaderboard />
+                </Suspense>
+              ) : <Navigate to="/" replace />
             }
           />
-          <Route path="/r/:slug" element={<LegacyRecordRedirect />} />
+          {/* Public track-record profiles were cut from the MVP (2026-10-02).
+              Old share links land on the app instead of a 404. */}
+          <Route path="/u/:slug" element={<Navigate to="/" replace />} />
+          <Route path="/r/:slug" element={<Navigate to="/" replace />} />
           <Route
             path="/"
             element={
@@ -100,23 +96,28 @@ export default function App() {
             }
           >
             <Route index element={<Dashboard />} />
-            <Route path="signal/:id" element={<SignalDetail />} />
+            {/* Hidden from the MVP via src/lib/features.js — old links
+                redirect instead of 404ing. */}
+            <Route path="signal/:id" element={hidden(FEATURES.signalDetail, <SignalDetail />)} />
             <Route
               path="play/:claude_call_id"
-              element={
+              element={hidden(FEATURES.playDetail, (
                 <Suspense fallback={<LoadingScreen />}>
                   <PlayDetail />
                 </Suspense>
-              }
+              ))}
             />
-            <Route path="log" element={<LogSignal />} />
-            <Route path="record" element={<TrackRecord />} />
+            <Route path="log" element={hidden(FEATURES.logMove, <LogSignal />, '/leaps?add=1')} />
+            <Route path="record" element={<Navigate to="/leaps" replace />} />
             <Route path="settings" element={<Settings />} />
             <Route path="markets" element={<Markets />} />
             <Route path="markets/king-board" element={<KingBoard />} />
-            <Route path="wheel" element={<Wheel />} />
-            <Route path="picks" element={<WheelWatchlist />} />
-            <Route path="flow" element={<AdminOnly><Flow /></AdminOnly>} />
+            <Route path="wheel" element={hidden(FEATURES.wheel, <Wheel />)} />
+            <Route path="picks" element={hidden(FEATURES.wheel, <WheelWatchlist />)} />
+            <Route path="leaps" element={<Leaps />} />
+            <Route path="leaps/onboarding" element={<LeapsOnboarding />} />
+            <Route path="simulator" element={<Simulator />} />
+            <Route path="flow" element={hidden(FEATURES.flow, <AdminOnly><Flow /></AdminOnly>)} />
             <Route path="reasoning" element={<Reasoning />} />
             <Route path="learn" element={<LearnIndex />} />
             <Route path="learn/dealer-positioning-guide" element={<DealerPositioningGuide />} />

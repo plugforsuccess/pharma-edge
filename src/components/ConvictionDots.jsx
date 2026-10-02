@@ -16,7 +16,7 @@
 
 const TIER_COLORS = {
   LOUD:  { fill: '#5ad19a', empty: '#1f3a2c' },  // emerald
-  CLEAR: { fill: '#f4cf8e', empty: '#3a2f1c' },  // amber
+  CLEAR: { fill: '#f6cc7e', empty: '#3a2f1c' },  // amber
   FAINT: { fill: '#8a8a99', empty: '#2a2a36' },  // zinc
 }
 

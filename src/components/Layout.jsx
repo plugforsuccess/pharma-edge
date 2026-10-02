@@ -2,84 +2,64 @@ import { Suspense } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import {
   Activity,
-  BarChart2,
-  Briefcase,
+  Calculator,
   Flame,
   Home,
+  Landmark,
   Plus,
-  RefreshCw,
   Settings,
   Sparkles,
   Shield,
-  Star,
-  Trophy,
 } from 'lucide-react'
 import InstallPrompt from './InstallPrompt'
 import Spinner from './Spinner'
 import { useAuth } from '../context/AuthContext'
 import clsx from 'clsx'
+import { FEATURES } from '../lib/features'
 
-// Bottom nav (mobile) + sidebar nav (desktop). Naming conventions per
-// the Cash Moves brand:
-//   /        → "Tape"    (the home dashboard, "The Tape")
-//   /markets → "Pulse"   (HeatPulse™ — GEX/VEX/CEX/DEX/Velocity/Trinity)
-//   /flow    → "Flow"
-//   /record  → "Record"
-//   /settings→ "Settings"
+// Bottom nav (mobile) + sidebar nav (desktop). LEAPS-first structure
+// (decided 2026-10-02, see CLAUDE.md "Product tiers & page plan"):
+//   /           → "Home"       (LEAPS dashboard)
+//   /leaps      → "Positions"  (after-tax value + Exit Targets)
+//   /simulator  → "Simulator"  (after-tax what-if sandbox, Pro)
+//   /reasoning  → "Research"   (research bot)
+//   /markets    → "Pulse"      (HeatPulse™ + King Board — Elite)
+//   /settings   → "Settings"   (desktop rail; mobile via the Home header)
 //
-// "Pulse" replaces the older "Gamma" label — /markets has grown beyond
-// gamma-only into all five Greek exposures plus the Trinity multi-
-// ticker comparison, so the single-Greek name was misleading. We
-// don't use "Dashboard" here because The Tape is already the
-// dashboard; double-labeling would collide.
+// Mobile: 4 tabs split 2/2 around a prominent center button, which is
+// the Simulator:  [Home] [Positions] (SIMULATOR) [Research] [Pulse]
 //
-// Mobile bottom nav: 4 tabs split 2/2 around a prominent center
-// button. The center is Pulse (HeatPulse — the most-opened analysis
-// surface); Wheel sits immediately left of center. Final shape:
-//   [Tape] [Wheel] (PULSE center) [Record] [Picks]
-// "Log a Move" is no longer a bottom-nav slot — it lives on the
-// desktop sidebar CTA; on mobile it is reached via /log directly.
-// Settings still lives on the desktop sidebar + tape header avatar.
-//
-// The 5th slot used to be /leaderboard (Trophy/Top). Per owner the
-// wheel watchlist (/picks — curated dividend payers from
-// WHEEL_CANDIDATES) is the higher-leverage daily-driver placement.
-// Leaderboard stays accessible via direct URL + desktop sidebar.
+// Hidden indefinitely (src/lib/features.js): Wheel, Picks, Log a Move,
+// signal / play detail, Flow, Leaderboard.
 const navLeft = [
-  { to: '/', icon: Home, label: 'Tape' },
-  { to: '/wheel', icon: RefreshCw, label: 'Wheel' },
+  { to: '/', icon: Home, label: 'Home' },
+  { to: '/leaps', icon: Landmark, label: 'Positions' },
 ]
 const navRight = [
-  { to: '/record', icon: BarChart2, label: 'Record' },
-  { to: '/picks', icon: Star, label: 'Picks' },
-]
-// Mobile center button (prominent, FAB-style): Pulse → /markets.
-const navCenter = { to: '/markets', icon: Activity, label: 'Pulse' }
-// Desktop sidebar — explicit + complete. The mobile center/FAB concept
-// does not exist on desktop, so every primary is a normal rail item
-// (Pulse included). /flow is appended for is_admin users only.
-const navFull = [
-  { to: '/', icon: Home, label: 'Tape' },
+  { to: '/reasoning', icon: Sparkles, label: 'Research' },
   { to: '/markets', icon: Activity, label: 'Pulse' },
-  { to: '/wheel', icon: RefreshCw, label: 'Wheel' },
-  { to: '/record', icon: BarChart2, label: 'Record' },
-  { to: '/leaderboard', icon: Trophy, label: 'Top' },
-  { to: '/reasoning', icon: Sparkles, label: 'Reasoning' },
+]
+// Mobile center button (prominent, FAB-style).
+const navCenter = { to: '/simulator', icon: Calculator, label: 'Simulator' }
+// Desktop sidebar — every primary is a normal rail item.
+const navFull = [
+  { to: '/', icon: Home, label: 'Home' },
+  { to: '/leaps', icon: Landmark, label: 'Positions' },
+  { to: '/simulator', icon: Calculator, label: 'Simulator' },
+  { to: '/reasoning', icon: Sparkles, label: 'Research' },
+  { to: '/markets', icon: Activity, label: 'Pulse' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ]
 
 export default function Layout() {
   const navigate = useNavigate()
   const { profile } = useAuth()
-  // Owner-only Admin link; appended to the desktop sidebar nav when
-  // the signed-in user has profiles.is_admin = true. Mobile users
-  // reach /admin by typing the URL — it's a low-frequency surface.
-  // /flow is admin-only per the focus audit (bot UI, not a user
-  // product). Admins also get the /admin sidebar shortcut.
+  // Owner-only Admin link (profiles.is_admin). Mobile admins reach
+  // /admin by URL — it's a low-frequency surface.
   const sidebarNav = profile?.is_admin
     ? [
         ...navFull,
-        { to: '/flow', icon: Flame, label: 'Flow' },
+        ...(FEATURES.flow ? [{ to: '/flow', icon: Flame, label: 'Flow' }] : []),
         { to: '/admin', icon: Shield, label: 'Admin' },
       ]
     : navFull
@@ -95,20 +75,19 @@ export default function Layout() {
         <div className="px-3 mb-6">
           <div className="text-lg font-display tracking-tight">Cash Moves</div>
           <div className="text-[10px] uppercase tracking-[0.18em] text-muted mt-0.5">
-            pharma-edge.vercel.app
+            cashmoves.io
           </div>
         </div>
         <nav className="flex flex-col gap-1">
-          {/* Desktop: surface a primary "Log a Move" CTA at the top so
-              the most-frequent action is always one click away,
-              matching the mobile FAB pattern. */}
+          {/* Primary CTA: add a position so its after-tax Exit Targets
+              generate. (Log a Move is hidden — see lib/features.js.) */}
           <button
             type="button"
-            onClick={() => navigate('/log')}
+            onClick={() => navigate('/leaps?add=1')}
             className="tap-spring mb-2 inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-bg font-semibold text-sm"
           >
             <Plus size={15} strokeWidth={2.5} />
-            Log a Move
+            Add a position
           </button>
           {sidebarNav.map(({ to, icon: Icon, label }) => (
             <NavLink
@@ -131,8 +110,8 @@ export default function Layout() {
                       aria-hidden
                       className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-5 rounded-r-full"
                       style={{
-                        background: '#e8b558',
-                        boxShadow: '0 0 10px rgba(232,181,88,0.55)',
+                        background: '#f0b44c',
+                        boxShadow: '0 0 10px rgba(240, 180, 76,0.55)',
                       }}
                     />
                   )}
@@ -141,7 +120,7 @@ export default function Layout() {
                     strokeWidth={isActive ? 2.2 : 1.7}
                     className={clsx(
                       'shrink-0 transition-transform',
-                      isActive && 'drop-shadow-[0_0_6px_rgba(232,181,88,0.35)]',
+                      isActive && 'drop-shadow-[0_0_6px_rgba(240, 180, 76,0.35)]',
                     )}
                   />
                   <span className="text-sm font-medium tracking-tight">
@@ -153,7 +132,7 @@ export default function Layout() {
           ))}
         </nav>
         <div className="mt-auto px-3 text-[10px] text-muted leading-relaxed">
-          Dealer flow, suggested plays, immutable record.
+          After-tax LEAPS, Exit Targets, research.
         </div>
       </aside>
 
@@ -176,10 +155,8 @@ export default function Layout() {
 
       <InstallPrompt />
 
-      {/* Mobile-only bottom nav. 4 tabs split 2/2 around a prominent
-          center button = Pulse (/markets). Wheel sits immediately
-          left of center. Log a Move is no longer here — desktop has
-          the sidebar CTA; mobile reaches /log directly. */}
+      {/* Mobile-only bottom nav: 4 tabs split 2/2 around the
+          Simulator center button. */}
       <nav
         className="lg:hidden fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md
                    glass border-t border-border/80 px-2 pt-2 z-50"
@@ -195,7 +172,7 @@ export default function Layout() {
               type="button"
               onClick={() => navigate(navCenter.to)}
               aria-label={navCenter.label}
-              className="tap-bounce absolute -top-7 w-14 h-14 rounded-full bg-amber-400 hover:bg-amber-300 text-bg shadow-[0_4px_16px_rgba(232,181,88,0.45)] hover:shadow-[0_6px_22px_rgba(232,181,88,0.55)] flex items-center justify-center"
+              className="tap-bounce absolute -top-7 w-14 h-14 rounded-full bg-amber-400 hover:bg-amber-300 text-bg shadow-[0_4px_16px_rgba(240, 180, 76,0.45)] hover:shadow-[0_6px_22px_rgba(240, 180, 76,0.55)] flex items-center justify-center"
             >
               <navCenter.icon size={22} strokeWidth={2.5} />
             </button>
@@ -232,8 +209,8 @@ function BottomTab({ to, icon: Icon, label }) {
               className="absolute -top-2 left-1/2 -translate-x-1/2 w-7 h-[2px] rounded-full"
               style={{
                 background:
-                  'linear-gradient(90deg, transparent, #e8b558 50%, transparent)',
-                boxShadow: '0 0 12px rgba(232,181,88,0.65)',
+                  'linear-gradient(90deg, transparent, #f0b44c 50%, transparent)',
+                boxShadow: '0 0 12px rgba(240, 180, 76,0.65)',
               }}
             />
           )}
@@ -242,7 +219,7 @@ function BottomTab({ to, icon: Icon, label }) {
             strokeWidth={isActive ? 2.2 : 1.7}
             className={clsx(
               'transition-transform',
-              isActive && 'drop-shadow-[0_0_8px_rgba(232,181,88,0.35)]',
+              isActive && 'drop-shadow-[0_0_8px_rgba(240, 180, 76,0.35)]',
             )}
           />
           <span

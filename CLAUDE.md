@@ -18,7 +18,7 @@
 >   * Individual alert / signal → "A Move" (plural "Moves")
 >   * Watchlist → "Tracking"
 >   * Premium tier → "Cash Moves Pro"
->   * Top tier → "Inner Circle"
+>   * Top tier → "Elite" (formerly "Inner Circle")
 >   * GEX dashboard → "HeatPulse™"
 >   * Zero-gamma level → "The Flip"
 >   * Largest dealer position → "The Wall"
@@ -77,12 +77,22 @@ moves), `SignalDetail` (`maybeSingle`, formatted market cap, hash badge,
 legacy biotech rows render their drug/indication/catalyst-type fields
 conditionally on `signal_source='biotech_catalyst'`), `LogSignal` (4-step
 GEX-only flow: Trade Setup → Strike & Thesis → Pre-trade Checklist →
-Confirm), `Calendar`, `TrackRecord`, `Rules`, `Settings` (display name,
-slug, public toggle, risk fields, watchlist, sign-out), `OptionCalculator`
-(standalone calculator at `/calculator`), `PublicRecord` (no-auth
-`/r/:slug`), `Markets` (HeatPulse + Suggested Plays), `Flow`,
+Confirm), `Calendar`, `Rules`, `Settings` (display name, leaderboard username +
+visibility toggle, risk fields, watchlist, sign-out), `OptionCalculator`
+(standalone calculator at `/calculator`), `Markets` (HeatPulse +
+Suggested Plays), `Flow`,
 `Reasoning` (regime/confidence drift), `Glossary`, `LearnIndex` + 5 learn
-articles, `Admin` (owner-only — gated by `profiles.is_admin`).
+articles, `Admin` (owner-only — gated by `profiles.is_admin`),
+`Leaps` (`/leaps`, after-tax LEAPS + Exit Targets) and `LeapsOnboarding`
+(`/leaps/onboarding`).
+
+**Cut from the MVP (2026-10-02):** `TrackRecord` (`/record` → redirects
+to `/leaps`) and the public profile (`/u/:slug`, legacy `/r/:slug` →
+redirect to `/`), plus the Vercel edge middleware and `/api/og/[slug]`
+share-preview route that only served them. Signal hashing + GitHub
+anchoring are unchanged — the proof layer still exists, it just has no
+public page. The `profile-public-data` / `profile-view-track` edge
+functions are still deployed but unused by the app.
 Components: `LogOutcomeModal`, `StopLossCheck`, `StrikePriceCalculator`
 (40% premium cap, spreads only — no naked options, position size from
 2% rule), `SuggestedPlays`, `MarketPulse`, `OpenPositions`,
@@ -158,6 +168,17 @@ variable to its full name; set `VITE_PUBLIC_RECORD_REPO` in Vercel env.
   callers (`archive=true`) await the write; user calls fire-and-forget
   via `EdgeRuntime.waitUntil` so the time-series stays populated even
   when the GitHub Actions snapshot cron is broken.
+- `ldp-onboarding` v2 (`verify_jwt=true`). The only write path into
+  `ldp_risk_profiles`. Used by `/leaps/onboarding` (first run) and
+  `/settings` (partial updates: risk answers, catalyst plays, Exit
+  Target ladder, tax — each optional). Changing risk answers needs the
+  current disclosures accepted in the request or already on file. Takes
+  the LEAPS bot answers, computes the risk tier
+  (`_shared/ldpRiskTier.ts`, a mirror of `ldp/risk.py` kept in parity
+  by `ldp/tests/fixtures/risk_tier_cases.json` + `npm run ldp:risk:check`),
+  and writes `ldp_risk_profiles` (service role) + `leaps_tax_profiles`.
+  Never sets `account_tier` — new users default to self-directed.
+  Requires the current `LDP_DISCLOSURES_VERSION` to be accepted.
 - `monitor-positions` v1+ (`verify_jwt=true`). Polls Tastytrade
   `/accounts/:n/orders` for active orders and reconciles fill status
   onto `order_history`. Triggered by
@@ -308,7 +329,8 @@ pharma-edge/
 │       ├── SignalDetail.jsx
 │       ├── LogSignal.jsx            ← 4-step GEX-only flow
 │       ├── Calendar.jsx
-│       ├── TrackRecord.jsx
+│       ├── Leaps.jsx                ← /leaps — after-tax LEAPS + Exit Targets
+│       ├── LeapsOnboarding.jsx      ← /leaps/onboarding
 │       ├── Rules.jsx
 │       ├── Settings.jsx
 │       ├── OptionCalculator.jsx
@@ -318,7 +340,6 @@ pharma-edge/
 │       ├── Glossary.jsx
 │       ├── LearnIndex.jsx
 │       ├── learn/                   ← 5 learn articles
-│       ├── PublicRecord.jsx         ← /r/:slug — no auth required
 │       └── Admin.jsx                ← Owner-only (is_admin = true)
 │
 ├── supabase/
@@ -372,7 +393,9 @@ VITE_VAPID_PUBLIC_KEY=
 VITE_PUBLIC_RECORD_REPO=
 ```
 
-**Vercel Edge Middleware + OG image** (set in Vercel → Project Settings →
+**Vercel Edge Middleware + OG image** — REMOVED 2026-10-02 with the
+public profile page; the vars below are no longer read and can be
+deleted from Vercel. (Kept here for history.) (set in Vercel → Project Settings →
 Environment Variables, scope: all environments):
 ```
 SUPABASE_URL=                  # same value as VITE_SUPABASE_URL
@@ -463,6 +486,12 @@ tastytrade_sessions ← singleton id=1, OAuth access_token cache
 gex_snapshots       ← compute-gex 5-min response cache
 dxlink_quotes       ← live per-symbol price + greeks cache
 admin_cost_daily    ← VIEW — daily cost rollup for /admin (security_invoker)
+tax_year_config     ← federal brackets / LTCG thresholds / NIIT per tax year (is_current = one row)
+state_tax_rates     ← per (tax_year, state) ordinary + LTCG brackets, confidence flag
+leaps_tax_profiles  ← per-user after-tax inputs (portfolio, allocation, filing status, income, state, targets, CPA override)
+leaps_positions     ← per-user LEAPS positions (basis, current value, purchase date) — manual today
+ldp_risk_profiles   ← LDP engine risk tier + capping rule per user (service-role write only)
+ldp_audit_log       ← LDP append-only audit of every trade / suggestion / skip / hold
 ```
 
 ### RLS Policy
@@ -614,18 +643,17 @@ and the stop-loss UI. Do not remove or soften them.
 
 **Dark theme only.** No light mode. Never add light mode.
 
-```javascript
-// All colors from src/lib/design.js
-bg:           '#0a0a0f'
-bgCard:       '#111118'
-border:       '#1e1e2e'
-red:          '#ef4444'
-green:        '#22c55e'
-yellow:       '#eab308'
-blue:         '#6366f1'
-textPrimary:  '#e8e8f0'
-textSecondary:'#6b6b8a'
-textMuted:    '#3a3a5c'
+Palette (2026-10-02) is **tastytrade-adjacent**: neutral black /
+charcoal surfaces, white type, red for losses — but a **gold** brand
+accent (not red) and a softer money **green** for gains. Tokens live in
+`@theme` in `src/index.css`; Tailwind's `amber-*` (brand), `green-*`
+(gains) and `red-*` (losses) ramps are remapped there, so use those
+classes or the tokens — never hard-code hex in components.
+
+```
+bg          #0c0c0d    card        #161618    border   #27272a
+fg          #f2f2f3    subtle      #9a9aa1    muted    #5f5f68
+brand/gold  #f0b44c    gain/green  #2fd17c    loss/red #e5484d
 ```
 
 **Signal colors:**
@@ -680,6 +708,135 @@ on mobile, sidebar on desktop. All tap targets minimum 44px.
 - Position sizing rule (max 2% per spread / max 20% per ticker)
 - The R/R ≥ 1:1.5 + EV-edge ≥ 0 server filter in suggest-plays — these
   are the two gates that keep broken-math plays from reaching the user
+
+---
+
+## Product tiers & page plan (decided 2026-10-02)
+
+LEAPS drives growth. Tiers:
+
+| Tier | Includes |
+|---|---|
+| **Cash Moves Pro** ($45/mo) | LEAPS dashboard (home), Positions + Exit Targets (manual entry, later Tradier sync), Simulator, Research bot, later government alerts, LEAPS bot |
+| **Elite** (price TBD) | Everything in Pro + HeatPulse + King Board + the bot placing **spread** trades |
+
+Other revenue: Tradier referral fees; managed accounts (auto-trading)
+only after the adviser-registration question is settled with counsel.
+
+Nav (mobile): Home · Positions · Simulator (center) · Research · Pulse
+(Elite, locked teaser for Pro); desktop rail adds Settings + an "Add a
+position" CTA. Hidden indefinitely via `src/lib/features.js` (code
+kept; each flag gates the route AND every entry point to it — flip to
+true to restore): Wheel + Picks, Log a Move (`/log` → `/leaps?add=1`),
+signal / play detail, Flow, Leaderboard. Hidden routes redirect, never
+404. Position detail returns when the Elite spread bot ships.
+Learn stays for SEO, out of nav. Data: Tradier (orders, quotes,
+chains) + Massive/Polygon (IV history, bars, backtests); Tastytrade
+dxLink keeps feeding HeatPulse for now.
+
+---
+
+## Settings (`/settings`) — where users edit their LEAPS setup
+
+Settings is the single place to edit: account name, risk profile
+(answers → server recomputes the tier), tax profile, goals (LEAPS
+allocation + target returns), and the Exit Target ladder (1–5 rungs,
+after-tax gain target + share sold per rung). One **Save** button
+persists every changed section. `/leaps` shows these read-only with
+"Edit" links to `/settings#tax` / `#risk`. Managed vs self-directed is
+read-only for users (set by the owner after a signed managed-account
+agreement; admin control not built yet). Disclosure text + version
+live in `src/lib/ldpDisclosures.js` and must match the edge function.
+
+---
+
+## After-Tax LEAPS (`/leaps`)
+
+Shows what LEAPS positions are worth **after tax** and the multiple
+needed to hit each after-tax return goal. Math is pure and lives in
+`src/utils/afterTax.js`; `npm run aftertax:check` runs the spec's
+required cases (rate derivation, 7-row target table, live after-tax
+value, holding period) and must pass before any edit to that file lands.
+
+- Tax figures are **data, not code**: `tax_year_config` (federal) and
+  `state_tax_rates` (state). Each January, add a new year's rows from
+  the IRS inflation-adjustment Rev. Proc. and state revenue
+  departments, then flip `is_current`. NIIT thresholds ($200k single /
+  HoH, $250k MFJ, $125k MFS) are statutory and do not inflate.
+- Rates are combined marginal: federal LTCG or ordinary + NIIT + state,
+  with brackets picked at income **plus** the projected gain.
+- State component is the **effective** rate on the gain slice, derived
+  from the stored schedule + `ltcg_exclusion_pct` + `ltcg_applies_to`
+  (never a single flat number — WA's gain-only tax above its deduction
+  and partial exclusions depend on the gain size). Federal + NIIT stay
+  marginal.
+- Long-term = sold on or after anniversary + 1 day. Days until
+  long-term = (anniversary + 1) − today. A Feb 29 purchase anniversaries
+  on Feb 28, so it goes long-term Mar 1 (tested).
+- `leaps_positions.instrument_type`: `equity_option` (normal holding
+  period), `index_option_1256` (SPX/XSP/NDX/RUT/VIX… — §1256 60% LT /
+  40% ST at any holding period, no countdown; ETF options like SPY are
+  NOT §1256), `stock`.
+- Exercise (`exercise_leaps_position()` RPC, atomic, security invoker)
+  closes the call (`close_reason='exercised'`) and opens a `stock` row:
+  basis = premium + strike × shares, `purchase_date` = exercise date,
+  `exercised_from_id` → the call. The option's clock never carries
+  forward. Mirrors `exerciseCall()` in `afterTax.js` — keep in sync.
+- **Puerto Rico** is a residency option (`state_tax_rates` row `PR`,
+  `federal_exempt = true`). Bona fide PR residents exclude post-move
+  gains from federal tax (IRC §933), so federal + NIIT are 0 and only
+  PR tax applies. `leaps_tax_profiles.pr_act60_rate` holds an Act 60
+  decree rate (0 = decree by 2026-12-31, 0.04 = 2027+, NULL = none),
+  which replaces the PR schedule. Both `afterTax.js` and `ldp/tax.py`
+  honor it. The PR row is `confidence = 'low'` (15% LTCG rate and MFJ
+  upper thresholds not re-verified); pre-move appreciation staying
+  federally taxable is shown as a caveat, not modeled. UI says
+  "Residency", not "State".
+- Per-position values are never netted; the portfolio card shows a
+  netted figure labeled as an estimate.
+- Every tax figure in the UI is labeled an estimate with a
+  consult-a-professional note. Keep it that way.
+
+---
+
+## LDP engine (`ldp/`) — automated LEAPS
+
+Python package (stdlib only, 3.11+) that buys long-dated LEAPS on sector
+ETFs (core) plus risk-gated small-cap satellites through **Tradier**,
+and decides daily when to sell using each user's after-tax math. Start
+with `ldp/README.md`. Tests: `python -m pytest -q ldp` (CI:
+`.github/workflows/ldp-tests.yml`).
+
+- **Its own trading rules.** LDP buys single-leg long calls, not
+  spreads, and sizes satellites at 5% per name / 15% total. That
+  deliberately differs from the Cash Moves spread rules above (spreads
+  only, 2% per spread), which still govern the manual / GEX flows. LDP
+  thresholds live in `ldp/config.py`; never hard-code them in rule
+  modules.
+- **Compliance gate.** Auto-trading only when the account is
+  `managed`; self-directed accounts get suggestions, whatever the risk
+  tier. `ldp_audit_log` has a CHECK that rejects a `trade` row unless
+  it is `auto` on a managed account. Do not remove it.
+- **Risk beats tax.** Sell rules 1–2 (stop / thesis / satellite hard
+  reject / roll) run before any tax-motivated hold. Keep that order.
+- `ldp_risk_profiles` and `ldp_audit_log` are service-role write only.
+  Users read their own rows. Users must never be able to edit their own
+  tier or account tier.
+- Limit orders only. `LimitOrder` can't express a market order; keep
+  it that way.
+- Thresholds the edge function needs come from
+  `supabase/functions/_shared/ldpConfig.generated.ts`, generated by
+  `python -m ldp.tools.export_edge_config`. After changing a risk rule
+  or threshold in Python, regenerate it and the parity fixtures
+  (`python -m ldp.tools.export_risk_fixtures`), then run
+  `npm run ldp:risk:check`.
+- Changing the onboarding disclosure text means bumping
+  `LDP_DISCLOSURES_VERSION` in both `LeapsOnboarding.jsx` and the
+  `ldp-onboarding` function.
+- The engine's tax math is incremental (`T(income+gain) − T(income)`,
+  NIIT only above the threshold). The `/leaps` page (`afterTax.js`)
+  uses combined marginal rates per its spec, so the two can differ
+  slightly for gains that straddle a bracket.
 
 ---
 

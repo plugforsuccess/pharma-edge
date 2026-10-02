@@ -9,12 +9,12 @@
     "preview": "vite preview",
     "verdict:check:client": "node scripts/check-verdict-client.mjs",
     "verdict:check:server": "deno run --allow-read scripts/check-verdict-server.ts",
-    "verdict:check": "npm run verdict:check:client && npm run verdict:check:server"
+    "verdict:check": "npm run verdict:check:client && npm run verdict:check:server",
+    "aftertax:check": "node scripts/check-after-tax.mjs",
+    "ldp:risk:check": "node --experimental-strip-types --no-warnings scripts/check-ldp-risk-tier.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
-    "@vercel/edge": "^1.2.1",
-    "@vercel/og": "^0.11.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "lucide-react": "^0.460.0",

@@ -15,6 +15,7 @@ import TickerDrawer from '../components/TickerDrawer'
 import ReplaySlider from '../components/ReplaySlider'
 import SuggestedPlays from '../components/SuggestedPlays'
 import SuggestedWheel from '../components/SuggestedWheel'
+import { FEATURES } from '../lib/features'
 import WheelAnalyze from '../components/WheelAnalyze'
 import TrinityView from '../components/TrinityView'
 import UpgradeNotice from '../components/UpgradeNotice'
@@ -1073,7 +1074,7 @@ export default function Markets() {
       {/* Wheel CSPs — universe-wide batch feed, alongside the
           ticker-scoped Claude spreads above. Same feed as /wheel. */}
       <div className="lg:max-w-2xl lg:mx-auto">
-        <SuggestedWheel />
+        {FEATURES.wheel && <SuggestedWheel />}
       </div>
 
       <p className="text-[10px] text-muted leading-relaxed px-1 lg:text-center">

@@ -1,0 +1,64 @@
+# LDP engine — default thresholds. Mirrors the defaults in ldp/config.py;
+# copy this file and edit values to override. Unknown keys are rejected.
+
+[risk]
+min_account_aggressive = 25000
+min_horizon_years = 2
+
+[satellite]
+max_per_name = 0.05          # of account value at buy
+max_total = 0.15             # of account value
+min_runway_months = 12
+catalyst_blackout_days = 14
+sell_on_blackout_catalyst = true
+min_score = 0.5
+
+[satellite.weights]
+runway = 0.25
+catalysts = 0.20
+dilution = 0.20
+institutional = 0.15
+short_interest = 0.10
+momentum = 0.10
+
+[contracts]
+min_dte_days = 540
+target_dte_days = 730
+core_delta_min = 0.70
+core_delta_max = 0.80
+satellite_delta_min = 0.60
+satellite_delta_max = 0.80
+max_iv_rank = 70
+max_spread_pct = 0.10        # of mid
+min_open_interest = 100
+reject_missing_iv_rank = true
+
+[orders]                     # limit orders only — never market
+step_pct_of_spread = 0.25    # step from mid toward the ask by 25% of the spread
+max_steps = 4                # cancel after this many prices
+step_wait_seconds = 60
+poll_interval_seconds = 5
+tick_size = 0.05
+duration = "day"
+
+[exits]
+ladder = [1.0, 2.0, 3.0]     # after-tax gain multiples of basis
+# rung_fractions = [0.34, 0.33, 0.33]   # default: equal
+roll_dte_days = 180
+ltcg_wait_days = 60
+stop_loss_pct = 0.50
+
+[core]
+top_n_sectors = 3
+allocation_pct = 0.30
+require_above_200dma = true
+
+[core.weights]
+ret_3m = 0.20
+ret_6m = 0.30
+ret_12m = 0.30
+rel_strength = 0.20
+
+[cadence]
+buy_window_start = "01-15"   # MM-DD
+buy_window_days = 21
