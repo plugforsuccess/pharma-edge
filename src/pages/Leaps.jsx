@@ -898,7 +898,7 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
         columns={3}
         options={[
           { value: 'option', label: 'Options' }, { value: 'shares', label: 'Shares' }, { value: 'income', label: 'Income' },
-          { value: 'crypto', label: 'Crypto' }, { value: 'cash', label: 'Cash' }, { value: 'real_estate', label: 'Real estate' },
+          { value: 'crypto', label: 'Crypto' }, { value: 'cash', label: 'Cash' }, { value: 'real_estate', label: 'Real Estate' },
         ]}
       />
 
@@ -1956,7 +1956,7 @@ function PortfolioTotals({ summary, count, others }) {
         <div className="grid grid-cols-3 gap-3 pt-4 border-t border-hairline mb-4">
           <Stat label="Investments" value={usd(invested)} />
           <Stat label="Cash" value={usd(others.cash)} />
-          <Stat label="Real estate" value={usd(others.realEstate)} />
+          <Stat label="Real Estate" value={usd(others.realEstate)} />
         </div>
       )}
       {others?.income > 0 && (
