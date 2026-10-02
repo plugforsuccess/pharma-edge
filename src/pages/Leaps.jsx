@@ -67,6 +67,19 @@ export default function Leaps() {
   // The exit plan lives on the engine's risk profile (service-role
   // written, edited in Settings); default is the LEAPS playbook.
   const [plan, setPlan] = useState(EXIT_PLAYBOOK)
+  // Which holdings are expanded (remembered on this device). Collapsed by
+  // default; a newly added holding opens so its exit plan shows.
+  const [openIds, setOpenIds] = useState(readOpenIds)
+  const setOpen = useCallback((next) => {
+    setOpenIds(next)
+    try { localStorage.setItem(OPEN_KEY, JSON.stringify([...next])) } catch { /* per-visit only */ }
+  }, [])
+  const toggleOpen = (id) => {
+    const next = new Set(openIds)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    setOpen(next)
+  }
 
   useEffect(() => {
     if (!user?.id) return
@@ -254,6 +267,7 @@ export default function Leaps() {
     const { data, error } = await q.select().single()
     if (error) return error.message
     setPositions((cur) => (id ? cur.map((x) => (x.id === id ? data : x)) : [...cur, data]))
+    if (!id && data?.id) setOpen(new Set([...openIds, data.id]))
     return null
   }
 
@@ -279,6 +293,7 @@ export default function Leaps() {
   }
 
   const has1256 = (positions ?? []).some((x) => x.instrument_type === 'index_option_1256')
+  const allOpen = results.length > 0 && results.every((r) => openIds.has(r.pos.id))
 
   async function deletePosition(id) {
     if (!window.confirm('Remove this position from tracking?')) return
@@ -328,6 +343,13 @@ export default function Leaps() {
             <section className="mb-6">
               <div className="flex items-center gap-2 mb-3">
                 <h2 className="text-lg font-semibold flex-1">Holdings</h2>
+                {results.length > 1 && (
+                  <button type="button"
+                    onClick={() => setOpen(allOpen ? new Set() : new Set(results.map((r) => r.pos.id)))}
+                    className="min-h-[44px] px-3 rounded-lg text-sm text-subtle hover:text-fg transition">
+                    {allOpen ? 'Collapse all' : 'Expand all'}
+                  </button>
+                )}
                 {!adding && (
                   <button
                     type="button"
@@ -370,6 +392,8 @@ export default function Leaps() {
                   customLongTerm={customLongTerm}
                   runner={runner}
                   plan={plan}
+                  open={openIds.has(pos.id)}
+                  onToggle={() => toggleOpen(pos.id)}
                   previewFor={(f, own) => previewTargets(f, own, ladderFor, customFor)}
                   selectedTargetPct={Number(p.selected_target_pct)}
                   onSave={(row) => savePosition(row, pos.id)}
@@ -388,6 +412,11 @@ export default function Leaps() {
       )}
     </div>
   )
+}
+
+const OPEN_KEY = 'cm:holdings-open'
+function readOpenIds() {
+  try { return new Set(JSON.parse(localStorage.getItem(OPEN_KEY) ?? '[]')) } catch { return new Set() }
 }
 
 const CARD = 'bg-card border border-border rounded-2xl p-5 mb-5'
@@ -903,7 +932,7 @@ function positionMeta(pos) {
   return [contract.join(' · '), held.join(' · ')].filter(Boolean)
 }
 
-function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTerm, runner, plan, previewFor, selectedTargetPct, onSave, onDelete, onExercise }) {
+function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTerm, runner, plan, previewFor, selectedTargetPct, onSave, onDelete, onExercise, open, onToggle }) {
   const [editing, setEditing] = useState(false)
   const [exercising, setExercising] = useState(false)
   const [showTaxDetail, setShowTaxDetail] = useState(false)
@@ -933,27 +962,53 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
   const ltFits = longTermFitsPlan(calc.long_term_date, isStock ? null : pos.expiration, plan)
   const up = calc.gain >= 0
   return (
-    <div className="bg-card border border-border rounded-2xl p-5 mb-4">
-      <div className="flex items-start gap-3 mb-4">
+    <div className="bg-card border border-border rounded-2xl mb-4">
+      {/* Header — always visible; tap to expand or collapse. */}
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        aria-controls={`holding-${pos.id}`}
+        className="w-full text-left flex items-start gap-3 p-5 rounded-2xl hover:bg-card-hover/40 transition"
+      >
         <div className="flex-1 min-w-0">
           <div className="text-base font-semibold break-words">{label}</div>
           {positionMeta(pos).map((line) => (
             <div key={line} className="text-xs text-muted mt-0.5">{line}</div>
           ))}
+          <span
+            className={clsx(
+              'inline-block mt-2 text-[10px] uppercase tracking-wider px-2 py-1 rounded-md border font-semibold',
+              is1256
+                ? 'bg-sky-500/15 text-sky-300 border-sky-500/40'
+                : calc.is_long_term
+                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
+                  : 'bg-amber-500/15 text-amber-300 border-amber-500/40',
+            )}
+          >
+            {is1256 ? '§1256 · 60/40' : calc.is_long_term ? 'Long-term' : 'Short-term'}
+          </span>
         </div>
-        <span
-          className={clsx(
-            'text-[10px] uppercase tracking-wider px-2 py-1 rounded-md border font-semibold shrink-0',
-            is1256
-              ? 'bg-sky-500/15 text-sky-300 border-sky-500/40'
-              : calc.is_long_term
-                ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
-                : 'bg-amber-500/15 text-amber-300 border-amber-500/40',
+        <div className="shrink-0 flex items-start gap-2">
+          {!open && (
+            <div className="text-right">
+              <div className={clsx('text-base font-semibold font-mono-tab', up ? 'text-green-400' : 'text-rose-300')}>
+                {usd(calc.after_tax_value)}
+              </div>
+              <div className="text-xs text-muted mt-0.5">after tax</div>
+              {stop && stop.level !== 'ok' && (
+                <div className={clsx('text-xs mt-1 font-semibold', stop.level === 'act' ? 'text-rose-300' : 'text-amber-300')}>
+                  {stop.level === 'act' ? 'Time stop' : 'Roll window'}
+                </div>
+              )}
+            </div>
           )}
-        >
-          {is1256 ? '§1256 · 60/40' : calc.is_long_term ? 'Long-term' : 'Short-term'}
-        </span>
-      </div>
+          <ChevronDown size={18} className={clsx('mt-1 text-muted transition-transform', open && 'rotate-180')} aria-hidden />
+        </div>
+      </button>
+
+      {open && (
+      <div id={`holding-${pos.id}`} className="px-5 pb-5">
       {pos.notes && <div className="text-xs text-subtle -mt-2 mb-4">{pos.notes}</div>}
 
       <div className="mb-4">
@@ -1044,6 +1099,8 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
           <Trash2 size={14} />
         </button>
       </div>
+      </div>
+      )}
     </div>
   )
 }

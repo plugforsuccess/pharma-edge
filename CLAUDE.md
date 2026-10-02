@@ -676,6 +676,10 @@ professional before acting on them."
 (text-sm), plus an X that dismisses it on this device (localStorage,
 per position and per notice). A dismissed time stop returns the next day;
 a roll-window warning stays dismissed until it escalates.
+**Holdings collapse:** each holding is a tap-to-expand card (summary:
+name, dates, tax badge, after-tax value, roll-window / time-stop flag).
+Open state is remembered on the device (`cm:holdings-open`); new
+holdings open; "Expand all / Collapse all" sits by the Holdings title.
 
 **Mobile-first.** Max width 448px (max-w-md) centered. Bottom navigation
 on mobile, sidebar on desktop. All tap targets minimum 44px.
