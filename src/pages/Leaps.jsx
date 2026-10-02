@@ -12,6 +12,7 @@ import {
   customExitTargets, validateCustomTargets, MAX_CUSTOM_TARGETS,
 } from '../utils/afterTax'
 import NumberInput from '../components/NumberInput'
+import InfoTip from '../components/InfoTip'
 
 // LEAPS — after-tax targets + live after-tax value.
 //
@@ -265,20 +266,21 @@ export default function Leaps() {
 
   return (
     <div className="px-4 py-4 pb-24 max-w-2xl mx-auto">
-      <header className="mb-4">
+      <header className="mb-5">
         <div className="flex items-center gap-2 mb-1">
           <Landmark size={16} className="text-amber-400" />
-          <h1 className="text-lg font-semibold flex-1">LEAPS · After-Tax</h1>
+          <h1 className="text-lg font-semibold">Positions</h1>
+          <InfoTip title="Positions, after tax" className="ml-1">
+            <p>What each position is worth after tax, and where to sell to keep each after-tax goal.</p>
+            <p>Pre-tax gains overstate what you keep, so the after-tax value is the headline number everywhere on this page.</p>
+          </InfoTip>
+          <span className="flex-1" />
           {federal && (
-            <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border border-border text-subtle">
-              {federal.tax_year} tax figures
+            <span className="text-[10px] uppercase tracking-wider px-2 py-1 rounded-md border border-border text-subtle whitespace-nowrap">
+              {federal.tax_year} tax
             </span>
           )}
         </div>
-        <p className="text-xs text-subtle leading-relaxed">
-          What your LEAPS are worth after tax, and the multiple you need to
-          hit each after-tax goal. Pre-tax gains overstate what you keep.
-        </p>
       </header>
 
       {loadError && <Banner tone="rose">{loadError}</Banner>}
@@ -306,9 +308,9 @@ export default function Leaps() {
           )}
 
           {ready && (
-            <section className="mb-5">
-              <div className="flex items-center gap-2 mb-2">
-                <h2 className="text-sm font-semibold flex-1">Positions</h2>
+            <section className="mb-6">
+              <div className="flex items-center gap-2 mb-3">
+                <h2 className="text-lg font-semibold flex-1">Holdings</h2>
                 {!adding && (
                   <button
                     type="button"
@@ -335,7 +337,7 @@ export default function Leaps() {
               )}
 
               {results.length === 0 && !adding && (
-                <div className="text-xs text-muted py-6 px-4 text-center border border-dashed border-border rounded-xl">
+                <div className="text-sm text-muted py-8 px-6 text-center border border-dashed border-border rounded-2xl">
                   No positions yet. Tap Add + to enter one and generate its Exit Targets.
                 </div>
               )}
@@ -360,18 +362,27 @@ export default function Leaps() {
             </section>
           )}
 
-          <p className="text-[10px] text-muted leading-relaxed">
-            All tax figures are estimates using combined marginal rates
-            {federal ? ` from ${federal.tax_year} federal and state figures` : ''}.
-            Actual taxes depend on your full tax situation (deductions,
-            other gains and losses, AMT, credits, local taxes). Consult a
-            tax professional before acting on these numbers.
-          </p>
+          <div className="flex items-center gap-2 text-xs text-muted">
+            <span>All tax figures are estimates, not tax advice.</span>
+            <InfoTip title="About these estimates">
+              <p>
+                Tax figures use combined marginal rates
+                {federal ? ` from ${federal.tax_year} federal and state figures` : ''}.
+              </p>
+              <p>
+                Actual taxes depend on your full tax situation: deductions,
+                other gains and losses, AMT, credits and local taxes.
+              </p>
+              <p>Consult a tax professional before acting on these numbers.</p>
+            </InfoTip>
+          </div>
         </>
       )}
     </div>
   )
 }
+
+const CARD = 'bg-card border border-border rounded-2xl p-5 mb-5'
 
 // ── LEAPS bot risk profile ────────────────────────────────────────
 //
@@ -418,18 +429,18 @@ function RiskProfileCard({ userId }) {
   const d = row.display ?? {}
   const label = d.label ?? row.tier.charAt(0).toUpperCase() + row.tier.slice(1)
   return (
-    <div className="bg-card border border-border rounded-xl p-4 mb-4">
-      <div className="flex items-center gap-2 mb-2">
-        <ShieldCheck size={14} className="text-amber-400" />
+    <div className={CARD}>
+      <div className="flex items-center gap-2 mb-3">
+        <ShieldCheck size={15} className="text-amber-400" />
         <h2 className="text-sm font-semibold flex-1">LEAPS bot risk profile</h2>
         <span className={clsx('text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border font-semibold', TIER_TONE[row.tier])}>
           {label}
         </span>
       </div>
-      {d.capped_by_text && <p className="text-xs text-subtle mb-1">{d.capped_by_text}</p>}
-      {d.allows && <p className="text-xs text-fg leading-relaxed">{d.allows}</p>}
-      <div className="flex items-center gap-2 mt-2">
-        <p className="text-[10px] text-muted flex-1">
+      {d.capped_by_text && <p className="text-sm text-subtle mb-2">{d.capped_by_text}</p>}
+      {d.allows && <p className="text-sm text-fg">{d.allows}</p>}
+      <div className="flex items-center gap-2 mt-3 pt-3 border-t border-hairline">
+        <p className="text-xs text-muted flex-1">
           {d.account_text ?? (row.account_tier === 'managed' ? 'Managed account.' : 'Self-directed account — suggestions only.')}
         </p>
       </div>
@@ -458,13 +469,12 @@ function TaxSummaryCard({ profile, hasProfile, states }) {
   const status = FILING_STATUSES.find((x) => x.value === profile.filing_status)?.label
   const stateName = states.find((x) => x.state_code === profile.state_code)?.state_name ?? profile.state_code ?? '—'
   return (
-    <div className="bg-card border border-border rounded-xl p-4 mb-4">
-      <div className="flex items-start gap-2">
-        <div className="flex-1 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-          <Stat label="Filing status" value={status} />
-          <Stat label="Income before LEAPS" value={usd(Number(profile.annual_income))} />
-          <Stat label="Residency" value={stateName} />
-        </div>
+    <div className={CARD}>
+      <h2 className="text-sm font-semibold mb-3">Tax profile</h2>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+        <Stat label="Filing status" value={status} text />
+        <Stat label="Income before gains" value={usd(Number(profile.annual_income))} />
+        <Stat label="Residency" value={stateName} text />
       </div>
     </div>
   )
@@ -479,19 +489,26 @@ function RateBreakdown({ rates, state, taxYear, show1256 }) {
   ]
   const blend = blended1256Rate(rates)
   return (
-    <div className="bg-card border border-border rounded-xl p-4 mb-4">
-      <div className="flex items-center gap-2 mb-2">
-        <h2 className="text-sm font-semibold flex-1">Your estimated tax rates</h2>
-        <span className="text-[10px] text-muted">{taxYear}</span>
+    <div className={CARD}>
+      <div className="flex items-center gap-2 mb-4">
+        <h2 className="text-sm font-semibold">Your estimated tax rates</h2>
+        <InfoTip title="How your rates are worked out">
+          <p>Brackets use your income plus your current unrealized gain, so these update as position values change.</p>
+          <p>The state part is the effective rate on the gain, after any capital-gains exclusion or threshold.</p>
+          <p>Each target row uses the rate at that target's gain.</p>
+          {rates.federal_exempt && <p>As a bona fide Puerto Rico resident, gains on appreciation after your move are excluded from federal tax. Appreciation from before the move is still federally taxable.</p>}
+        </InfoTip>
+        <span className="flex-1" />
+        <span className="text-xs text-muted">{taxYear}</span>
       </div>
-      <div className="space-y-2">
+      <div className="space-y-4">
         {rows.map(([label, r]) => (
-          <div key={label} className="text-xs">
-            <div className="flex items-baseline gap-2">
+          <div key={label}>
+            <div className="flex items-baseline gap-2 text-sm">
               <span className="text-subtle flex-1">{label}</span>
               <span className="font-mono-tab text-fg font-semibold">{ratePct(r.total)}</span>
             </div>
-            <div className="text-[10px] text-muted font-mono-tab">
+            <div className="mt-1 text-xs text-muted font-mono-tab">
               {r.overridden
                 ? 'CPA-provided rate (override)'
                 : `${ratePct(r.federal)} federal + ${ratePct(r.niit)} NIIT + ${ratePct(r.state)} ${state?.state_code ?? 'state'} = ${ratePct(r.total)}`}
@@ -499,25 +516,22 @@ function RateBreakdown({ rates, state, taxYear, show1256 }) {
           </div>
         ))}
         {show1256 && (
-          <div className="text-xs">
-            <div className="flex items-baseline gap-2">
+          <div>
+            <div className="flex items-baseline gap-2 text-sm">
               <span className="text-subtle flex-1">Index options (§1256)</span>
               <span className="font-mono-tab text-fg font-semibold">{ratePct(blend)}</span>
             </div>
-            <div className="text-[10px] text-muted font-mono-tab">
+            <div className="mt-1 text-xs text-muted font-mono-tab">
               60% × {ratePct(rates.long_term.total)} + 40% × {ratePct(rates.short_term.total)} = {ratePct(blend)} · any holding period
             </div>
           </div>
         )}
       </div>
-      <p className="mt-2 text-[10px] text-muted leading-relaxed">
-        Brackets use your income plus your current unrealized LEAPS gain,
-        so these update as position values change. The state part is the
-        effective rate on the gain (after any capital-gains exclusion or
-        threshold). Each target row below uses the rate at that target's gain.
-        {rates.federal_exempt && ' As a bona fide Puerto Rico resident, gains on appreciation after your move are excluded from federal tax; appreciation from before the move is still federally taxable.'}
-        {state?.confidence === 'low' && ' These residency figures are flagged for review — consider entering a CPA rate.'}
-      </p>
+      {state?.confidence === 'low' && (
+        <p className="mt-4 text-xs text-amber-200/90">
+          These residency figures are flagged for review — consider entering a CPA rate in Settings.
+        </p>
+      )}
     </div>
   )
 }
@@ -526,22 +540,24 @@ function RateBreakdown({ rates, state, taxYear, show1256 }) {
 
 function TargetTable({ table, selected, onSelect, show1256 }) {
   return (
-    <section className="bg-card border border-border rounded-xl p-4 mb-4">
-      <h2 className="text-sm font-semibold mb-1">After-tax return targets</h2>
-      <p className="text-[10px] text-muted mb-3">
-        The multiple your positions ({usd(table.basis)} total cost) must reach
-        to keep each after-tax return on what you paid. Tap a row to track
-        each position's progress toward it.
-        {show1256 && ' §1256 = index options taxed 60/40 regardless of holding period.'}
-      </p>
-      <table className="w-full text-xs">
+    <section className={CARD}>
+      <div className="flex items-center gap-2 mb-1">
+        <h2 className="text-sm font-semibold">After-tax return targets</h2>
+        <InfoTip title="After-tax return targets">
+          <p>Each row is an after-tax return on what you paid for your positions ({usd(table.basis)} total cost), and the multiple they must reach to keep it.</p>
+          <p>Tap a row to track every position's progress toward that target.</p>
+          {show1256 && <p>§1256 = index options, taxed 60% long-term / 40% short-term regardless of holding period.</p>}
+        </InfoTip>
+      </div>
+      <p className="text-xs text-muted mb-4">On {usd(table.basis)} total cost · tap a row to track it</p>
+      <table className="w-full text-sm">
         <thead>
           <tr className="text-[10px] uppercase tracking-wider text-muted">
-            <th className="text-left font-medium pb-2">Target</th>
-            <th className="text-right font-medium pb-2">After-tax</th>
-            <th className="text-right font-medium pb-2">Long-term</th>
-            <th className="text-right font-medium pb-2">Short-term</th>
-            {show1256 && <th className="text-right font-medium pb-2">§1256</th>}
+            <th className="text-left font-medium pb-3">Target</th>
+            <th className="text-right font-medium pb-3">After-tax</th>
+            <th className="text-right font-medium pb-3">Long-term</th>
+            <th className="text-right font-medium pb-3">Short-term</th>
+            {show1256 && <th className="text-right font-medium pb-3">§1256</th>}
           </tr>
         </thead>
         <tbody>
@@ -554,11 +570,11 @@ function TargetTable({ table, selected, onSelect, show1256 }) {
                 row.target_pct === selected ? 'text-amber-300 bg-amber-400/5' : 'hover:bg-card-hover',
               )}
             >
-              <td className="py-3 font-mono-tab">{pct(row.target_pct, 0)}</td>
-              <td className="py-3 text-right font-mono-tab">{usd(row.after_tax_target)}</td>
-              <td className="py-3 text-right font-mono-tab font-semibold">{mult(row.long_term.required_multiple)}</td>
-              <td className="py-3 text-right font-mono-tab">{mult(row.short_term.required_multiple)}</td>
-              {show1256 && <td className="py-3 text-right font-mono-tab">{mult(row.section_1256.required_multiple)}</td>}
+              <td className="py-3.5 font-mono-tab">{pct(row.target_pct, 0)}</td>
+              <td className="py-3.5 text-right font-mono-tab">{usd(row.after_tax_target)}</td>
+              <td className="py-3.5 text-right font-mono-tab font-semibold">{mult(row.long_term.required_multiple)}</td>
+              <td className="py-3.5 text-right font-mono-tab">{mult(row.short_term.required_multiple)}</td>
+              {show1256 && <td className="py-3.5 text-right font-mono-tab">{mult(row.section_1256.required_multiple)}</td>}
             </tr>
           ))}
         </tbody>
@@ -606,7 +622,6 @@ function emptyForm(initial) {
   const str = (v) => (v == null ? '' : String(v))
   return {
     asset: initial?.instrument_type === 'stock' ? 'shares' : 'option',
-    is1256: initial?.instrument_type === 'index_option_1256',
     ticker: initial?.ticker ?? '',
     shares: str(initial?.shares),
     option_type: initial?.option_type ?? 'C',
@@ -649,17 +664,17 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
   const [error, setError] = useState('')
   const [savedNote, setSavedNote] = useState('')
   const [saving, setSaving] = useState(false)
-  // Pre-tick §1256 for index roots (SPX, XSP, NDX …) until the user
-  // sets it themselves.
-  const [typeTouched, setTypeTouched] = useState(!!initial)
   const setV = (k) => (v) => { setError(''); setF((x) => ({ ...x, [k]: v })) }
   const setTicker = (e) => {
     const v = e.target.value.toUpperCase().replace(/[^A-Z.]/g, '')
     setError('')
-    setF((x) => ({ ...x, ticker: v, ...(!typeTouched && { is1256: suggestInstrumentType(v) === 'index_option_1256' }) }))
+    setF((x) => ({ ...x, ticker: v }))
   }
   const isShares = f.asset === 'shares'
-  const instrumentType = isShares ? 'stock' : f.is1256 ? 'index_option_1256' : 'equity_option'
+  // Index options (SPX, XSP, NDX, RUT, VIX …) are §1256 contracts —
+  // detected from the ticker, never asked.
+  const instrumentType = isShares ? 'stock' : suggestInstrumentType(f.ticker)
+  const is1256 = instrumentType === 'index_option_1256'
   const { basis, value } = totalsOf(f)
 
   // Switching price entry carries the numbers across so nothing is lost.
@@ -683,6 +698,8 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
     if (!isShares && f.contracts !== '' && !Number.isInteger(num(f.contracts))) return setError('Contracts must be a whole number.')
     if (!f.purchase_date) return setError('Enter the purchase date.')
     if (f.purchase_date > todayYmd()) return setError('Purchase date can’t be in the future.')
+    if (!isShares && !f.expiration) return setError('Enter the expiration date.')
+    if (!isShares && f.expiration <= f.purchase_date) return setError('Expiration must be after the purchase date.')
     if (!(basis > 0)) return setError(f.price_mode === 'per_share' ? 'Enter what you paid per share.' : 'Total cost must be greater than $0.')
     if (value == null || value < 0) return setError(f.price_mode === 'per_share' ? 'Enter the current price per share.' : 'Enter the current value (0 or more).')
     let exitTargets = null
@@ -697,7 +714,7 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
       instrument_type: instrumentType,
       option_type: isShares ? null : f.option_type,
       strike: isShares ? null : num(f.strike),
-      expiration: isShares ? null : f.expiration || null,
+      expiration: isShares ? null : f.expiration,
       contracts: isShares ? null : num(f.contracts),
       shares: isShares ? num(f.shares) : null,
       cost_basis: exact(basis),
@@ -711,7 +728,6 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
     if (!err && keepOpen) {
       setSavedNote(`${f.ticker} saved — add the next one.`)
       setF((x) => ({ ...emptyForm(null), asset: x.asset, price_mode: x.price_mode }))
-      setTypeTouched(false)
     }
   }
 
@@ -734,9 +750,9 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
   const gainPct = basis > 0 && value != null ? value / basis - 1 : null
 
   return (
-    <div className="bg-card border border-amber-400/40 rounded-xl p-4 mb-3">
-      <div className="flex items-center mb-3">
-        <h3 className="text-sm font-semibold flex-1">{initial ? `Edit ${initial.ticker}` : 'Add a position'}</h3>
+    <div className="bg-card border border-amber-400/40 rounded-2xl p-5 mb-4">
+      <div className="flex items-center mb-4">
+        <h3 className="text-base font-semibold flex-1">{initial ? `Edit ${initial.ticker}` : 'Add a position'}</h3>
         <button type="button" onClick={onCancel} aria-label="Close"
           className="-mr-2 min-h-[44px] min-w-[44px] flex items-center justify-center rounded text-subtle hover:text-fg">
           <X size={16} />
@@ -776,8 +792,8 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
                   <NumberInput decimals={PRICE_DECIMALS} value={f.strike} onChange={setV('strike')} placeholder="250" className={clsx(inputCls, 'pl-7')} />
                 </Affix>
               </Field>
-              <Field label="Expiration" hint="optional">
-                <input type="date" value={f.expiration} onChange={(e) => setV('expiration')(e.target.value)} className={dateCls} />
+              <Field label="Expiration">
+                <input type="date" value={f.expiration} min={f.purchase_date || undefined} onChange={(e) => setV('expiration')(e.target.value)} className={dateCls} />
               </Field>
             </>
           )}
@@ -786,24 +802,26 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
           </Field>
         </div>
         {!isShares && (
-          <label className="mt-3 flex items-start gap-3 min-h-[44px] cursor-pointer">
-            <span className="relative mt-0.5 h-5 w-5 shrink-0">
-              <input type="checkbox" checked={f.is1256}
-                onChange={(e) => { setTypeTouched(true); setV('is1256')(e.target.checked) }}
-                className="peer appearance-none h-5 w-5 rounded-md border border-border bg-bg checked:bg-amber-400 checked:border-amber-400 focus-visible:ring-2 focus-visible:ring-amber-400/40 transition cursor-pointer" />
-              <Check size={14} strokeWidth={3} className="pointer-events-none absolute inset-0 m-auto text-bg opacity-0 peer-checked:opacity-100" />
-            </span>
-            <span className="text-xs leading-relaxed">
-              <span className="text-fg">Index option (§1256)</span>
-              <span className="block text-[10px] text-muted">
-                SPX, XSP, NDX, RUT, VIX… taxed 60% long-term / 40% short-term at any holding period and marked to market at year-end. Not SPY or QQQ.
-              </span>
-            </span>
-          </label>
+          is1256 && (
+            <div className="mt-4 flex items-center gap-2 rounded-lg border border-sky-500/30 bg-sky-500/5 px-3 py-2.5">
+              <span className="flex-1 text-sm text-sky-200">Index option · §1256 60/40 tax</span>
+              <InfoTip title="Index options (§1256)">
+                <p>{f.ticker} is a broad-based index option, so it's a §1256 contract.</p>
+                <p>Gains are taxed 60% long-term / 40% short-term however long you hold it, and open positions are marked to market at year-end (taxed as if sold on Dec 31).</p>
+                <p>ETF options like SPY and QQQ are not §1256 — they follow the normal one-year rule.</p>
+              </InfoTip>
+            </div>
+          )
         )}
       </FormSection>
 
-      <FormSection title="Cost & value" aside={
+      <FormSection title="Cost & value" info={
+        <InfoTip title="Entering cost and value">
+          <p><span className="text-fg">Per share</span> is how your broker quotes prices. For options that's the premium: total = premium × 100 × contracts.</p>
+          <p><span className="text-fg">Total</span> is the dollar amount for the whole position.</p>
+          <p>Prices are kept exactly as typed, up to 6 decimal places.</p>
+        </InfoTip>
+      } aside={
         <Segmented compact value={f.price_mode} onChange={setPriceMode}
           options={[{ value: 'per_share', label: 'Per share' }, { value: 'total', label: 'Total' }]} />
       }>
@@ -828,18 +846,13 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
             </>
           )}
         </div>
-        {perShare && !isShares && (
-          <p className="mt-2 text-[10px] text-muted leading-relaxed">
-            Per-share premium, as your broker shows it. Total = premium × 100 × contracts.
-          </p>
-        )}
         {(basis > 0 || value != null) && (
-          <div className="mt-3 grid grid-cols-3 gap-2 rounded-lg bg-bg/40 border border-hairline px-3 py-2 text-xs">
+          <div className="mt-4 grid grid-cols-3 gap-3 rounded-xl bg-bg/40 border border-hairline px-4 py-3">
             <Stat label="Total cost" value={usdExact(basis)} />
             <Stat label="Value now" value={usdExact(value)} />
             <div className="min-w-0 text-right">
-              <div className="text-[10px] text-muted">Gain</div>
-              <div className={clsx('font-mono-tab text-xs truncate', gainPct == null ? 'text-fg' : gainPct >= 0 ? 'text-green-400' : 'text-rose-300')}>
+              <div className="text-xs text-muted mb-1">Gain</div>
+              <div className={clsx('font-mono-tab text-sm truncate', gainPct == null ? 'text-fg' : gainPct >= 0 ? 'text-green-400' : 'text-rose-300')}>
                 {gainPct == null ? '—' : `${gainPct >= 0 ? '+' : ''}${pct(gainPct)}`}
               </div>
             </div>
@@ -847,7 +860,13 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
         )}
       </FormSection>
 
-      <FormSection title="Exit Targets">
+      <FormSection title="Exit Targets" info={
+        <InfoTip title="Exit Targets">
+          <p><span className="text-fg">My default</span> uses the after-tax Exit Targets from Settings — each target is the value where selling that share leaves the stated gain after tax.</p>
+          <p><span className="text-fg">Set my own</span>: a <span className="text-fg">%</span> target is the gain on what you paid (+100% = double). A <span className="text-fg">$</span> target is what the whole position is worth. Choose how much to sell at each.</p>
+          <p>The preview shows what you'd keep after tax at each target.</p>
+        </InfoTip>
+      }>
         <TargetsEditor
           own={f.own_targets}
           rows={f.targets}
@@ -891,11 +910,13 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
   )
 }
 
-function FormSection({ title, aside, children }) {
+function FormSection({ title, info, aside, children }) {
   return (
-    <section className="mt-5 pt-4 border-t border-hairline">
-      <div className="flex items-center gap-3 mb-3 min-h-[28px]">
-        <h4 className="flex-1 text-[11px] uppercase tracking-wider text-subtle font-semibold">{title}</h4>
+    <section className="mt-6 pt-5 border-t border-hairline">
+      <div className="flex items-center gap-3 mb-4 min-h-[28px]">
+        <h4 className="text-xs uppercase tracking-wider text-subtle font-semibold whitespace-nowrap">{title}</h4>
+        {info}
+        <span className="flex-1" />
         {aside}
       </div>
       {children}
@@ -978,20 +999,21 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
   const isStock = pos.instrument_type === 'stock'
   const label = isStock
     ? `${pos.ticker} · ${Number(pos.shares).toLocaleString()} shares`
-    : [pos.ticker, pos.strike && `$${Number(pos.strike).toLocaleString('en-US', { maximumFractionDigits: 2 })}`, pos.option_type === 'P' ? 'Put' : 'Call', pos.expiration]
+    : [pos.ticker, pos.strike && `$${Number(pos.strike).toLocaleString('en-US', { maximumFractionDigits: 2 })}`, pos.option_type === 'P' ? 'Put' : 'Call']
       .filter(Boolean).join(' ')
+  const expires = !isStock && pos.expiration ? `Exp ${shortDate(pos.expiration)}` : null
   const canExercise = exerciseCall({ option: pos, exerciseDate: todayYmd() }) != null
   const up = calc.gain >= 0
   return (
-    <div className="bg-card border border-border rounded-xl p-4 mb-3">
-      <div className="flex items-start gap-2 mb-3">
+    <div className="bg-card border border-border rounded-2xl p-5 mb-4">
+      <div className="flex items-start gap-3 mb-4">
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-semibold break-words">{label}</div>
-          <div className="text-[10px] text-muted truncate">{positionMeta(pos)}</div>
+          <div className="text-base font-semibold break-words">{label}</div>
+          <div className="text-xs text-muted mt-0.5">{[expires, positionMeta(pos)].filter(Boolean).join(' · ')}</div>
         </div>
         <span
           className={clsx(
-            'text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border font-semibold shrink-0',
+            'text-[10px] uppercase tracking-wider px-2 py-1 rounded-md border font-semibold shrink-0',
             is1256
               ? 'bg-sky-500/15 text-sky-300 border-sky-500/40'
               : calc.is_long_term
@@ -999,13 +1021,13 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
                 : 'bg-amber-500/15 text-amber-300 border-amber-500/40',
           )}
         >
-          {is1256 ? '§1256 · 60/40' : calc.is_long_term ? 'Long-term' : `Short-term · ${calc.days_until_long_term}d to LT`}
+          {is1256 ? '§1256 · 60/40' : calc.is_long_term ? 'Long-term' : 'Short-term'}
         </span>
       </div>
-      {pos.notes && <div className="text-[10px] text-subtle -mt-2 mb-3">{pos.notes}</div>}
+      {pos.notes && <div className="text-xs text-subtle -mt-2 mb-4">{pos.notes}</div>}
 
-      <div className="mb-3">
-        <div className="text-[10px] uppercase tracking-wider text-muted">After-tax value if sold today</div>
+      <div className="mb-4">
+        <div className="text-[10px] uppercase tracking-wider text-muted mb-1">After-tax value if sold today</div>
         {/* Tap the value to reveal the gain / tax breakdown. */}
         <button
           type="button"
@@ -1020,7 +1042,7 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
           <ChevronDown size={14} className={clsx('text-muted transition-transform', showTaxDetail && 'rotate-180')} />
         </button>
         {showTaxDetail && (
-          <div className="text-[10px] text-muted font-mono-tab">
+          <div className="mt-1 text-xs text-muted font-mono-tab">
             {calc.gain > 0
               ? `${usd(calc.after_tax_gain)} after-tax gain · est. tax ${usd(calc.estimated_tax)} at ${ratePct(calc.tax_rate)}`
               : 'Loss — no tax on sale'}
@@ -1028,16 +1050,23 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
         )}
       </div>
 
-      <div className="grid grid-cols-3 gap-2 text-xs mb-3">
-        <Stat label="Current value" value={usd(calc.current_value)} />
-        <Stat label="Basis" value={usd(calc.basis)} />
+      <div className="grid grid-cols-3 gap-3 mb-4 py-3 border-y border-hairline">
+        <Stat label="Value now" value={usd(calc.current_value)} />
+        <Stat label="Cost" value={usd(calc.basis)} />
         <Stat label="Multiple" value={mult(calc.current_multiple)} />
       </div>
 
       {calc.tax_saved_by_waiting != null && (
-        <div className="rounded border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-200 mb-3">
-          Waiting until {calc.long_term_date} ({calc.days_until_long_term} days) would save about{' '}
-          <span className="font-semibold font-mono-tab">{usd(calc.tax_saved_by_waiting)}</span> in tax at today's value.
+        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 mb-4 flex items-start gap-3">
+          <div className="flex-1 text-sm text-emerald-200">
+            Hold until <span className="font-semibold">{shortDate(calc.long_term_date)}</span> to save about{' '}
+            <span className="font-semibold font-mono-tab">{usd(calc.tax_saved_by_waiting)}</span> in tax.
+            <div className="text-xs text-emerald-200/70 mt-1">{calc.days_until_long_term} days until it's long-term</div>
+          </div>
+          <InfoTip title="Waiting for long-term">
+            <p>Sold today, this gain is short-term and taxed at {ratePct(calc.short_term_rate)}. From {shortDate(calc.long_term_date)} it's long-term at {ratePct(calc.long_term_rate)}.</p>
+            <p>At today's value that difference is about {usd(calc.tax_saved_by_waiting)}. The real saving moves with the position's value.</p>
+          </InfoTip>
         </div>
       )}
 
@@ -1050,9 +1079,9 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
       )}
 
       {calc.target_progress != null && (
-        <div className="mb-3">
-          <div className="flex text-[10px] text-muted mb-1">
-            <span className="flex-1">Progress to {pct(selectedTargetPct, 0)} after-tax target</span>
+        <div className="mb-4">
+          <div className="flex text-xs text-muted mb-1.5">
+            <span className="flex-1">Progress to {pct(selectedTargetPct, 0)} after-tax return</span>
             <span className="font-mono-tab">{mult(calc.current_multiple)} / {mult(calc.target_multiple)} {is1256 ? '60/40' : 'LT'}</span>
           </div>
           <div className="h-1.5 rounded bg-faint overflow-hidden">
@@ -1109,67 +1138,87 @@ const sellLabel = (r, isStock) => {
   return `sell ${r.contracts} ${isStock ? 'lot' : 'contract'}${r.contracts === 1 ? '' : 's'}`
 }
 
+function TargetsPanel({ title, subtitle, info, children, footer }) {
+  return (
+    <div className="mb-4 rounded-xl border border-border bg-bg/40 p-4">
+      <div className="flex items-center gap-2 mb-1">
+        <h3 className="text-sm font-semibold">{title}</h3>
+        {info}
+      </div>
+      <p className="text-xs text-muted mb-4">{subtitle}</p>
+      <ol className="space-y-4">{children}</ol>
+      {footer}
+    </div>
+  )
+}
+
+function RungProgress({ hit, progress }) {
+  if (hit) return <span className="text-xs text-green-400 font-semibold">Target reached</span>
+  if (progress == null) return null
+  return (
+    <div className="h-1.5 rounded-full bg-faint overflow-hidden" aria-label={`${Math.round(progress * 100)}% of the way`}>
+      <div className="h-full rounded-full bg-amber-400" style={{ width: `${progress * 100}%` }} />
+    </div>
+  )
+}
+
 function ExitLadder({ ladder, ladderLongTerm, character, longTermDate, isStock }) {
   if (!ladder?.length) return null
   return (
-    <div className="mb-3 rounded-lg border border-border bg-bg/40 p-3">
-      <div className="flex items-baseline gap-2 mb-2">
-        <div className="text-xs font-semibold flex-1">Exit Targets</div>
-        <div className="text-[10px] text-muted">at {CHARACTER_LABEL[character]} if sold today</div>
-      </div>
-      <ol className="space-y-2.5">
-        {ladder.map((r, i) => (
-          <li key={r.index} className="text-xs">
-            <div className="flex items-baseline gap-2">
-              <span className="text-subtle w-14 shrink-0">Rung {i + 1}</span>
-              <span className="flex-1 min-w-0">
-                <span className="text-fg">+{pct(r.target, 0)} after tax</span>
-                <span className="text-muted"> · {sellLabel(r, isStock)}</span>
-              </span>
-              <span className={clsx('font-mono-tab shrink-0', r.hit ? 'text-green-400 font-semibold' : 'text-fg')}>
-                {usd(r.exit_value)} <span className="text-muted">({mult(r.exit_multiple)})</span>
-              </span>
+    <TargetsPanel
+      title="Exit Targets"
+      subtitle={`At the ${CHARACTER_LABEL[character]} if sold today`}
+      info={
+        <InfoTip title="Exit Targets">
+          <p>Each target is the position value at which selling that share leaves the stated gain <span className="text-fg">after tax</span>.</p>
+          {ladderLongTerm && longTermDate && <p>"Long-term" is where each target moves once this goes long-term on {shortDate(longTermDate)}.</p>}
+          <p>Recalculated as your tax rate and position value change. Change the targets in Settings. Estimates.</p>
+        </InfoTip>
+      }
+    >
+      {ladder.map((r, i) => (
+        <li key={r.index}>
+          <div className="flex items-baseline gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="text-sm text-fg">+{pct(r.target, 0)} after tax</div>
+              <div className="text-xs text-muted mt-0.5">Target {i + 1} · {sellLabel(r, isStock)}</div>
             </div>
-            <div className="flex items-center gap-2 mt-1 pl-16">
-              {r.hit ? (
-                <span className="text-[10px] text-green-400 font-semibold">Target reached</span>
-              ) : (
-                <div className="flex-1 h-1 rounded bg-faint overflow-hidden" aria-label={`${Math.round(r.progress * 100)}% of the way`}>
-                  <div className="h-full bg-amber-400" style={{ width: `${r.progress * 100}%` }} />
-                </div>
-              )}
-              {ladderLongTerm?.[i] && (
-                <span className="text-[10px] text-muted font-mono-tab shrink-0">
-                  LT {usd(ladderLongTerm[i].exit_value)}
-                </span>
-              )}
+            <div className="text-right shrink-0">
+              <div className={clsx('text-sm font-mono-tab font-semibold', r.hit ? 'text-green-400' : 'text-fg')}>{usd(r.exit_value)}</div>
+              <div className="text-xs text-muted font-mono-tab mt-0.5">
+                {mult(r.exit_multiple)}
+              </div>
             </div>
-          </li>
-        ))}
-      </ol>
-      <p className="mt-2 text-[10px] text-muted leading-relaxed">
-        Each target is the value at which selling that share of the position leaves the stated gain after tax.
-        {ladderLongTerm && longTermDate && ` "LT" is where each target moves once this goes long-term on ${longTermDate}.`}
-        {' '}Recalculated as your tax rate and position value change. Estimates.
-      </p>
-    </div>
+          </div>
+          {ladderLongTerm?.[i] && (
+            <div className="mt-1 text-xs text-muted text-right">Long-term: <span className="font-mono-tab">{usd(ladderLongTerm[i].exit_value)}</span></div>
+          )}
+          <div className="mt-2"><RungProgress hit={r.hit} progress={r.progress} /></div>
+        </li>
+      ))}
+    </TargetsPanel>
   )
 }
 
 function LadderPreview({ rungs }) {
   if (!rungs?.length) return null
   return (
-    <div className="mt-3 rounded-lg border border-border bg-bg/40 p-3">
-      <div className="text-[10px] uppercase tracking-wider text-muted mb-1.5">Sell when the position is worth</div>
-      <div className="grid grid-cols-3 gap-2">
+    <div className="mt-4 rounded-xl border border-border bg-bg/40 p-4">
+      <div className="text-[10px] uppercase tracking-wider text-muted mb-3">Sell when the position is worth</div>
+      <ol className="space-y-3">
         {rungs.map((r, i) => (
-          <div key={r.index} className="text-xs">
-            <div className="text-muted text-[10px]">+{pct(r.target, 0)} after tax</div>
-            <div className="font-mono-tab text-fg">{usd(r.exit_value)}</div>
-            <div className="font-mono-tab text-muted text-[10px]">{mult(r.exit_multiple)} · rung {i + 1}</div>
-          </div>
+          <li key={r.index} className="flex items-baseline gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="text-sm text-fg">+{pct(r.target, 0)} after tax</div>
+              <div className="text-xs text-muted mt-0.5">Target {i + 1}</div>
+            </div>
+            <div className="text-right shrink-0">
+              <div className="text-sm font-mono-tab text-fg font-semibold">{usd(r.exit_value)}</div>
+              <div className="text-xs font-mono-tab text-muted mt-0.5">{mult(r.exit_multiple)}</div>
+            </div>
+          </li>
         ))}
-      </div>
+      </ol>
     </div>
   )
 }
@@ -1201,7 +1250,7 @@ function TargetsEditor({ own, rows, contracts, onOwn, onRow, onAdd, onRemove }) 
       <Segmented value={own ? 'own' : 'default'} onChange={(v) => onOwn(v === 'own')}
         options={[{ value: 'default', label: 'My default' }, { value: 'own', label: 'Set my own' }]} />
       {!own ? (
-        <p className="mt-2 text-[10px] text-muted leading-relaxed">
+        <p className="mt-3 text-xs text-muted">
           Uses your after-tax Exit Targets from <Link to="/settings#exit-targets" className="text-amber-300 underline underline-offset-2">Settings</Link>.
         </p>
       ) : (
@@ -1255,9 +1304,6 @@ function TargetsEditor({ own, rows, contracts, onOwn, onRow, onAdd, onRemove }) 
               </button>
             )}
           </div>
-          <p className="mt-1 text-[10px] text-muted leading-relaxed">
-            % = gain on what you paid (+100% = double). $ = what the whole position is worth.
-          </p>
         </>
       )}
     </div>
@@ -1277,21 +1323,21 @@ function CustomTargetsPreview({ rows, isStock }) {
   if (!rows?.length) return null
   const kept = rows.reduce((sum, r) => sum + r.after_tax_proceeds, 0)
   return (
-    <div className="mt-3 rounded-lg border border-border bg-bg/40 p-3">
-      <div className="text-[10px] uppercase tracking-wider text-muted mb-2">You keep, after tax</div>
-      <ol className="space-y-2">
+    <div className="mt-4 rounded-xl border border-border bg-bg/40 p-4">
+      <div className="text-[10px] uppercase tracking-wider text-muted mb-3">You keep, after tax</div>
+      <ol className="space-y-3">
         {rows.map((r) => (
-          <li key={r.index} className="flex items-start gap-3 text-xs">
+          <li key={r.index} className="flex items-baseline gap-3 text-sm">
             <div className="flex-1 min-w-0">
               <div className="text-fg">{targetLabel(r)} <span className="text-muted">· {targetOther(r)}</span></div>
-              <div className="text-[10px] text-muted">{soldLabel(r, isStock)}{r.estimated_tax > 0 ? ` · ${usd(r.estimated_tax)} tax` : ''}</div>
+              <div className="text-xs text-muted mt-0.5">{soldLabel(r, isStock)}{r.estimated_tax > 0 ? ` · ${usd(r.estimated_tax)} tax` : ''}</div>
             </div>
             <span className="font-mono-tab text-green-400 font-semibold shrink-0">{usd(r.after_tax_proceeds)}</span>
           </li>
         ))}
       </ol>
       {rows.length > 1 && (
-        <div className="mt-2 pt-2 border-t border-hairline flex items-baseline text-xs">
+        <div className="mt-4 pt-3 border-t border-hairline flex items-baseline text-sm">
           <span className="flex-1 text-subtle">Total if every target hits</span>
           <span className="font-mono-tab text-green-400 font-semibold">{usd(kept)}</span>
         </div>
@@ -1305,55 +1351,49 @@ function CustomExitTargets({ rows, rowsLongTerm, character, longTermDate, isStoc
   const kept = rows.reduce((sum, r) => sum + r.after_tax_proceeds, 0)
   const soldShare = rows.reduce((sum, r) => sum + r.fraction, 0)
   return (
-    <div className="mb-3 rounded-lg border border-border bg-bg/40 p-3">
-      <div className="flex items-baseline gap-2 mb-2">
-        <div className="text-xs font-semibold flex-1">Exit Targets</div>
-        <div className="text-[10px] text-muted">at {CHARACTER_LABEL[character]} if sold today</div>
-      </div>
-      <ol className="space-y-3">
-        {rows.map((r, i) => (
-          <li key={r.index} className="text-xs">
-            <div className="flex items-baseline gap-2">
-              <span className="flex-1 min-w-0">
-                <span className="text-fg">{targetLabel(r)}</span>
-                <span className="text-muted"> · {targetOther(r)} · {soldLabel(r, isStock)}</span>
-              </span>
-              <span className={clsx('font-mono-tab shrink-0 font-semibold', r.hit ? 'text-green-400' : 'text-fg')}>
-                {usd(r.after_tax_proceeds)}
-              </span>
+    <TargetsPanel
+      title="Exit Targets"
+      subtitle={`What you keep after tax · ${CHARACTER_LABEL[character]}`}
+      info={
+        <InfoTip title="Your Exit Targets">
+          <p>The green number is what you'd keep from each sale after estimated tax. The line under it shows the sale amount, the tax and the rate.</p>
+          {rowsLongTerm && longTermDate && <p>"Long-term" is the same sale once this goes long-term on {shortDate(longTermDate)}.</p>}
+          <p>Each sale is taxed on its own; selling several in one year can push the rate higher. Estimates.</p>
+        </InfoTip>
+      }
+      footer={
+        <div className="mt-4 pt-3 border-t border-hairline flex items-baseline gap-3">
+          <span className="flex-1 text-sm text-subtle">
+            Kept if every target hits
+            {soldShare < 0.9999 && <span className="block text-xs text-muted mt-0.5">{pct(1 - soldShare, 0)} still held</span>}
+          </span>
+          <span className="text-base font-mono-tab text-green-400 font-semibold">{usd(kept)}</span>
+        </div>
+      }
+    >
+      {rows.map((r, i) => (
+        <li key={r.index}>
+          <div className="flex items-baseline gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="text-sm text-fg">{targetLabel(r)} <span className="text-muted">· {targetOther(r)}</span></div>
+              <div className="text-xs text-muted mt-0.5">{soldLabel(r, isStock)}</div>
             </div>
-            <div className="flex items-center gap-2 mt-0.5 text-[10px] text-muted font-mono-tab">
-              <span className="flex-1">
-                {r.realized_gain > 0
-                  ? `${usd(r.proceeds)} sale − ${usd(r.estimated_tax)} tax (${ratePct(r.rate)}) · ${usd(r.after_tax_gain)} gain kept`
-                  : `${usd(r.proceeds)} sale · no gain, no tax`}
-              </span>
-              {rowsLongTerm?.[i] && <span className="shrink-0">LT {usd(rowsLongTerm[i].after_tax_proceeds)}</span>}
-            </div>
-            <div className="mt-1">
-              {r.hit ? (
-                <span className="text-[10px] text-green-400 font-semibold">Target reached</span>
-              ) : r.progress != null && (
-                <div className="h-1 rounded bg-faint overflow-hidden" aria-label={`${Math.round(r.progress * 100)}% of the way`}>
-                  <div className="h-full bg-amber-400" style={{ width: `${r.progress * 100}%` }} />
-                </div>
-              )}
-            </div>
-          </li>
-        ))}
-      </ol>
-      <div className="mt-3 pt-2 border-t border-hairline flex items-baseline text-xs">
-        <span className="flex-1 text-subtle">
-          Kept after tax if every target hits{soldShare < 0.9999 ? ` (${pct(1 - soldShare, 0)} still held)` : ''}
-        </span>
-        <span className="font-mono-tab text-green-400 font-semibold">{usd(kept)}</span>
-      </div>
-      <p className="mt-2 text-[10px] text-muted leading-relaxed">
-        Dollars are what you'd keep from each sale after estimated tax.
-        {rowsLongTerm && longTermDate && ` "LT" is the same sale once this goes long-term on ${longTermDate}.`}
-        {' '}Each sale is taxed on its own; selling several in one year can push the rate higher. Estimates.
-      </p>
-    </div>
+            <span className={clsx('text-sm font-mono-tab shrink-0 font-semibold', r.hit ? 'text-green-400' : 'text-fg')}>
+              {usd(r.after_tax_proceeds)}
+            </span>
+          </div>
+          <div className="mt-1 text-xs text-muted font-mono-tab">
+            {r.realized_gain > 0
+              ? `${usd(r.proceeds)} − ${usd(r.estimated_tax)} tax (${ratePct(r.rate)})`
+              : `${usd(r.proceeds)} · no gain, no tax`}
+          </div>
+          {rowsLongTerm?.[i] && (
+            <div className="text-xs text-muted">Long-term: <span className="font-mono-tab">{usd(rowsLongTerm[i].after_tax_proceeds)}</span></div>
+          )}
+          <div className="mt-2"><RungProgress hit={r.hit} progress={r.progress} /></div>
+        </li>
+      ))}
+    </TargetsPanel>
   )
 }
 
@@ -1374,17 +1414,18 @@ function ExerciseForm({ pos, onExercise, onCancel }) {
   }
 
   return (
-    <div className="rounded-xl border border-amber-400/40 p-3 mb-3">
-      <div className="text-xs font-semibold mb-1">Exercise into stock</div>
-      <p className="text-[10px] text-muted leading-relaxed mb-3">
-        The premium you paid rolls into the stock's cost basis. The stock
-        starts its own holding period from the exercise date — the call's
-        holding time does not carry over.
-      </p>
+    <div className="rounded-xl border border-amber-400/40 p-4 mb-4">
+      <div className="flex items-center gap-2 mb-4">
+        <h3 className="text-sm font-semibold">Exercise into stock</h3>
+        <InfoTip title="Exercising a call">
+          <p>The premium you paid rolls into the stock's cost basis: premium + strike × shares.</p>
+          <p>The stock starts its own holding period from the exercise date — the call's holding time does not carry over.</p>
+        </InfoTip>
+      </div>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Exercise date"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} /></Field>
+        <Field label="Exercise date"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={dateCls} /></Field>
         <Field label="Shares received"><NumberInput decimals={4} value={shares} onChange={setShares} className={inputCls} /></Field>
-        <Field label="Current value of shares ($)" wide><NumberInput value={value} onChange={setValue} className={inputCls} /></Field>
+        <Field label="Value of the shares now" wide><Affix prefix="$"><NumberInput decimals={PRICE_DECIMALS} value={value} onChange={setValue} className={clsx(inputCls, 'pl-7')} /></Affix></Field>
       </div>
       {preview && (
         <div className="mt-3 text-[10px] text-subtle font-mono-tab">
@@ -1411,29 +1452,29 @@ function holdingStart(date) {
 function PortfolioTotals({ summary, count }) {
   const up = summary.after_tax_gain >= 0
   return (
-    <section className="bg-card border border-amber-400/30 rounded-xl p-4 mb-4">
-      <div className="flex items-baseline gap-2 mb-3">
-        <h2 className="text-sm font-semibold flex-1">Portfolio</h2>
-        <span className="text-[10px] text-muted">{count} position{count === 1 ? '' : 's'}</span>
+    <section className="bg-card border border-amber-400/30 rounded-2xl p-5 mb-5">
+      <div className="flex items-center gap-2 mb-4">
+        <h2 className="text-sm font-semibold">Portfolio</h2>
+        <InfoTip title="How the portfolio is totaled">
+          <p>The portfolio is the sum of your open positions, each taxed on its own.</p>
+          <p>
+            If gains and losses were netted against each other, the estimated
+            after-tax value would be <span className="font-mono-tab text-fg">{usd(summary.netted.after_tax_value)}</span>.
+            That estimate excludes loss carryforwards and the $3k ordinary-income offset.
+          </p>
+        </InfoTip>
+        <span className="flex-1" />
+        <span className="text-xs text-muted">{count} position{count === 1 ? '' : 's'}</span>
       </div>
-      <div className="text-[10px] uppercase tracking-wider text-muted">After-tax value if all sold today</div>
-      <div className={clsx('text-2xl font-semibold font-mono-tab mb-3', up ? 'text-green-400' : 'text-rose-300')}>
+      <div className="text-[10px] uppercase tracking-wider text-muted mb-1">After-tax value if all sold today</div>
+      <div className={clsx('text-3xl font-semibold font-mono-tab mb-5', up ? 'text-green-400' : 'text-rose-300')}>
         {usd(summary.after_tax_value)}
       </div>
-      <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs mb-3">
+      <div className="grid grid-cols-2 gap-x-4 gap-y-4 pt-4 border-t border-hairline">
         <Stat label="Total cost" value={usd(summary.basis)} />
         <Stat label="Value now" value={usd(summary.current_value)} />
         <Stat label="After-tax gain" value={usd(summary.after_tax_gain)} />
-        <Stat label="After-tax return on cost" value={pct(summary.after_tax_return_pct)} />
-      </div>
-      <div className="flex items-start gap-1.5 text-[10px] text-muted leading-relaxed">
-        <Info size={11} className="shrink-0 mt-0.5" />
-        <span>
-          The sum of your positions, each taxed on its own. If gains and
-          losses were netted against each other, the estimated after-tax
-          value would be <span className="font-mono-tab text-subtle">{usd(summary.netted.after_tax_value)}</span>{' '}
-          (estimate — excludes loss carryforwards and the $3k ordinary-income offset).
-        </span>
+        <Stat label="After-tax return" value={pct(summary.after_tax_return_pct)} />
       </div>
     </section>
   )
@@ -1441,11 +1482,12 @@ function PortfolioTotals({ summary, count }) {
 
 // ── Bits ──────────────────────────────────────────────────────────
 
-function Stat({ label, value, strong }) {
+// `text` = a word value (Single, Georgia) — sans, not the number font.
+function Stat({ label, value, strong, text }) {
   return (
     <div className="min-w-0">
-      <div className="text-[10px] text-muted truncate">{label}</div>
-      <div className={clsx('font-mono-tab truncate', strong ? 'text-fg font-semibold' : 'text-fg')}>{value ?? '—'}</div>
+      <div className="text-xs text-muted truncate mb-1">{label}</div>
+      <div className={clsx('text-sm truncate', !text && 'font-mono-tab', strong ? 'text-fg font-semibold' : 'text-fg')}>{value ?? '—'}</div>
     </div>
   )
 }
