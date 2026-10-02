@@ -1595,7 +1595,7 @@ function GoalSection({ goal, onGoal, basis, is1256 }) {
       </Field>
       {row && (
         <div className="mt-2 text-xs text-muted space-y-0.5">
-          <div><span className="font-mono-tab text-green-400">{usd(row.after_tax_target)}</span> after taxes</div>
+          <div><span className="font-mono-tab text-green-400">+{usd(row.after_tax_target)}</span> after taxes</div>
           <div>Needs <span className="font-mono-tab text-fg">{mult(is1256 ? row.section_1256.required_multiple : row.long_term.required_multiple)}</span> {is1256 ? '(§1256 60/40)' : 'long-term'}</div>
           {!is1256 && <div>Needs <span className="font-mono-tab text-fg">{mult(row.short_term.required_multiple)}</span> short-term</div>}
         </div>
@@ -1942,6 +1942,9 @@ function CustomExitTargets({ title = 'Exit Targets', rows, runner, isStock, unit
             <div className="flex-1 min-w-0">
               <div className="text-sm text-fg">{gainLabel(r)}</div>
               <div className="text-xs text-muted mt-0.5">Target {i + 1} · {soldLabel(r, isStock, units)}</div>
+              {r.after_tax_gain > 0 && (
+                <div className="text-xs text-muted mt-0.5"><span className="font-mono-tab text-green-400">+{usd(r.after_tax_gain)}</span> after taxes</div>
+              )}
             </div>
             <div className={clsx('text-sm font-mono-tab font-semibold shrink-0', r.hit ? 'text-green-400' : 'text-fg')}>
               {usd(r.exit_value)}

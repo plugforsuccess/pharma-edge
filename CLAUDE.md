@@ -688,8 +688,9 @@ Open state is remembered on the device (`cm:holdings-open`); new
 holdings open; "Expand all / Collapse all" sits by the Holdings title.
 **Exit Targets rows** keep the original card format: "100% gain • 2x" /
 "Target 1 · sell 35 contracts" on the left, the whole-position sell
-value on the right, a progress strip under each, the runner as a last
-row. No tax-math line and no Long-term line (option-price targets sell
+value on the right, that sale's after-tax gain on its own row under
+the sell line ("+$1,999 after taxes", green; the value itself never
+gets a "+", it's a price trigger), a progress strip under each, the runner as a last row. No tax-math line and no Long-term line (option-price targets sell
 at the same price either way). The form toggle reads "Default" /
 "Custom". Titles read "RXRX • 50 contracts" / "NAUT • 3,500 shares" / "BTC • 0.5 $BTC" (crypto counts in `$TICKER`, never "coins": "sell 0.35 $BTC");
 options show "$5 Call • Exp Jan 21, 2028" below, then "Bought …".
@@ -858,7 +859,7 @@ value, holding period) and must pass before any edit to that file lands.
   empty field fills with the default when the editor opens or on blur,
   and saving the untouched default stores NULL so it keeps following
   Settings), the line
-  "$1,800 after taxes" (amount in green) / "Needs 1.37x long-term" / "Needs 1.42x
+  "+$1,800 after taxes" (amount in green) / "Needs 1.37x long-term" / "Needs 1.42x
   short-term" (one per row), and a
   "Show all targets" tap that expands the full 50%–20% table on that
   holding's cost (tap a row to pick it; §1256 shows its 60/40 column).
