@@ -882,7 +882,10 @@ value, holding period) and must pass before any edit to that file lands.
   Payouts / Tax now / Tax at sale; the yield card ranks ROC on
   `after_tax_yield_at_sale` so a deferral never reads as tax-free. The
   kind is user-picked, never inferred from the ticker (an issuer's ROC
-  status depends on its earnings & profits each year).
+  status depends on its earnings & profits each year). **No exit plan on
+  ROC holdings** (owner, 2026-10-02): STRC-style preferreds trade near
+  par, so the card hides Exit Targets / runner / tax-wait notices and
+  the form hides the Exit Targets section (saves `exit_targets` NULL).
   `dividendAfterTax` / `incomeYieldComparison` in `afterTax.js`. The
   card shows dividends / yr, after tax / yr and after-tax yield; the
   Portfolio card adds an "Income after tax" row (cash interest +

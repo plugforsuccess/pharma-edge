@@ -736,6 +736,9 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
   const isRE = f.asset === 'real_estate'
   // "Shares" below means any quantity holding (shares or coins).
   const isShares = f.asset === 'shares' || isCrypto
+  // Return-of-capital income holdings (STRC-style preferreds) sit near
+  // par, so the LEAPS exit plan doesn't apply to them.
+  const rocIncome = f.asset === 'shares' && f.div_kind === 'roc'
   const qtyWord = isCrypto ? 'coin' : 'share'
   // Index options (SPX, XSP, NDX, RUT, VIX …) are §1256 contracts —
   // detected from the ticker, never asked.
@@ -827,7 +830,7 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
     if (!(basis > 0)) return setError(f.price_mode === 'per_share' ? `Enter what you paid per ${isShares ? qtyWord : 'share'}.` : 'Total cost must be greater than $0.')
     if (value == null || value < 0) return setError(f.price_mode === 'per_share' ? `Enter the current price per ${isShares ? qtyWord : 'share'}.` : 'Enter the current value (0 or more).')
     let exitTargets = null
-    if (f.own_targets) {
+    if (f.own_targets && !rocIncome) {
       exitTargets = f.targets.map(rowToTarget)
       const bad = validateCustomTargets(exitTargets, basis)
       if (bad) return setError(bad)
@@ -839,8 +842,8 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
     return finish({
       ticker: f.ticker,
       name: null,
-      details: f.asset === 'shares' && divYield > 0
-        ? { dividend_yield: exact(divYield / 100), dividend_kind: f.div_kind }
+      details: f.asset === 'shares' && (divYield > 0 || rocIncome)
+        ? { dividend_yield: exact((divYield ?? 0) / 100), dividend_kind: f.div_kind }
         : null,
       instrument_type: instrumentType,
       option_type: isShares ? null : f.option_type,
@@ -1067,6 +1070,7 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
         )}
       </FormSection>
 
+      {!rocIncome && (
       <FormSection title="Exit Targets">
         <TargetsEditor
           own={f.own_targets}
@@ -1079,6 +1083,7 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
         />
         {previewRows && previewRows.length > 0 && <CustomTargetsPreview rows={previewRows} isStock={isShares ? qtyWord : false} units={isShares ? num(f.shares) : num(f.contracts)} />}
       </FormSection>
+      )}
       </>)}
 
       {error && (
@@ -1186,6 +1191,8 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
   const [editing, setEditing] = useState(false)
   const [exercising, setExercising] = useState(false)
   const [showTaxDetail, setShowTaxDetail] = useState(false)
+  // Return-of-capital income (STRC-style preferreds): no exit plan.
+  const noExitPlan = pos.instrument_type === 'stock' && pos.details?.dividend_kind === 'roc'
   if (editing) {
     return (
       <PositionForm
@@ -1315,7 +1322,7 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
 
       <TimeStopBanner stop={stop} positionId={pos.id} />
 
-      {calc.tax_saved_by_waiting != null && (ltFits ? (
+      {!noExitPlan && calc.tax_saved_by_waiting != null && (ltFits ? (
         <Notice id={`${pos.id}:tax-wait:${calc.long_term_date}`} tone="green"
           title={`Long-term on ${shortDate(calc.long_term_date)} saves about ${usd(calc.tax_saved_by_waiting)}`}>
           {calc.days_until_long_term} days away and before your roll window, so it's worth waiting for if a target hits close to it.
@@ -1327,11 +1334,13 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
         </Notice>
       ))}
 
-      <CustomExitTargets
-        rows={custom?.length > 0 ? custom : ladder}
-        runner={custom?.length > 0 ? null : runner}
-        isStock={unit}
-        units={isStock ? Number(pos.shares) : Number(pos.contracts)} />
+      {!noExitPlan && (
+        <CustomExitTargets
+          rows={custom?.length > 0 ? custom : ladder}
+          runner={custom?.length > 0 ? null : runner}
+          isStock={unit}
+          units={isStock ? Number(pos.shares) : Number(pos.contracts)} />
+      )}
 
       {calc.target_progress != null && (
         <div className="mb-4">
