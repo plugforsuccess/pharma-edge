@@ -905,7 +905,8 @@ value, holding period) and must pass before any edit to that file lands.
   ≤25% + NIIT + state, rest at LT rates; after-tax equity nets the
   mortgage). The Portfolio card leads with **after-tax net worth**
   (investments + cash + real-estate equity) when cash or property
-  exist, with **Before tax** in gold on the right (investments at
+  exist, with **Before tax** in gold beside it (two equal columns, same label row
+  and number size) (investments at
   current value + cash balances + property value − mortgage) and, only after
   tapping the Before tax number, a line under both: "−$X tax & selling
   costs if everything sold today" ("tax"
