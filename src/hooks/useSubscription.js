@@ -28,7 +28,7 @@ export function useSubscription() {
   const { user, profile, profileLoaded, loading } = useAuth()
   // There is no free tier — every authenticated user has full access.
   // The `subscription_tier` column is kept in the DB for future-tier
-  // work (Inner Circle, etc.) and for billing audit, but the customer-
+  // work (Elite, etc.) and for billing audit, but the customer-
   // facing app treats "logged in" as "Pro." Unauthenticated visitors
   // are kept on /login and never reach gated surfaces.
   //

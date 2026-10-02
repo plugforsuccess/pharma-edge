@@ -18,7 +18,7 @@
 >   * Individual alert / signal → "A Move" (plural "Moves")
 >   * Watchlist → "Tracking"
 >   * Premium tier → "Cash Moves Pro"
->   * Top tier → "Inner Circle"
+>   * Top tier → "Elite" (formerly "Inner Circle")
 >   * GEX dashboard → "HeatPulse™"
 >   * Zero-gamma level → "The Flip"
 >   * Largest dealer position → "The Wall"
@@ -705,6 +705,28 @@ on mobile, sidebar on desktop. All tap targets minimum 44px.
 - Position sizing rule (max 2% per spread / max 20% per ticker)
 - The R/R ≥ 1:1.5 + EV-edge ≥ 0 server filter in suggest-plays — these
   are the two gates that keep broken-math plays from reaching the user
+
+---
+
+## Product tiers & page plan (decided 2026-10-02)
+
+LEAPS drives growth. Tiers:
+
+| Tier | Includes |
+|---|---|
+| **Cash Moves Pro** ($45/mo) | LEAPS dashboard (home), Positions + Exit Targets (manual entry, later Tradier sync), Simulator, Research bot, later government alerts, LEAPS bot |
+| **Elite** (price TBD) | Everything in Pro + HeatPulse + King Board + the bot placing **spread** trades |
+
+Other revenue: Tradier referral fees; managed accounts (auto-trading)
+only after the adviser-registration question is settled with counsel.
+
+Nav (mobile): Home · Positions · Simulator · Research · Pulse (Elite,
+locked teaser for Pro). Hidden indefinitely (code kept, routes/nav
+removed): Wheel, Picks, Log a Move, signal / play detail, Flow,
+Leaderboard. Position detail returns when the Elite spread bot ships.
+Learn stays for SEO, out of nav. Data: Tradier (orders, quotes,
+chains) + Massive/Polygon (IV history, bars, backtests); Tastytrade
+dxLink keeps feeding HeatPulse for now.
 
 ---
 
