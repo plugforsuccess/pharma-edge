@@ -691,7 +691,7 @@ holdings open; "Expand all / Collapse all" sits by the Holdings title.
 value on the right, a progress strip under each, the runner as a last
 row. No tax-math line and no Long-term line (option-price targets sell
 at the same price either way). The form toggle reads "Default" /
-"Custom". Titles read "RXRX • 50 contracts" / "NAUT • 3,500 shares";
+"Custom". Titles read "RXRX • 50 contracts" / "NAUT • 3,500 shares" / "BTC • 0.5 $BTC" (crypto counts in `$TICKER`, never "coins": "sell 0.35 $BTC");
 options show "$5 Call • Exp Jan 21, 2028" below, then "Bought …".
 
 **Mobile-first.** Max width 448px (max-w-md) centered. Bottom navigation

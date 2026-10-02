@@ -65,6 +65,12 @@ const QUANTITY_TYPES = new Set(['stock', 'crypto'])
 const INVESTMENT_TYPES = new Set(['equity_option', 'index_option_1256', 'stock', 'crypto'])
 const isQuantity = (t) => QUANTITY_TYPES.has(t)
 const unitWord = (t) => (t === 'crypto' ? 'coin' : t === 'stock' ? 'share' : 'contract')
+// Crypto counts in its own symbol, "$BTC"; other units take a plural.
+const cryptoUnit = (ticker) => (ticker ? `$${ticker}` : 'coin')
+const qtyText = (n, unit, digits = 8) => {
+  const num = Number(n).toLocaleString('en-US', { maximumFractionDigits: digits })
+  return unit.startsWith('$') ? `${num} ${unit}` : `${num} ${unit}${Number(n) === 1 ? '' : 's'}`
+}
 
 function num(v) {
   if (v === '' || v == null) return null
@@ -1104,7 +1110,7 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
           onAdd={addRow}
           onRemove={removeRow}
         />
-        {previewRows && previewRows.length > 0 && <CustomTargetsPreview rows={previewRows} isStock={isShares ? qtyWord : false} units={isShares ? num(f.shares) : num(f.contracts)} />}
+        {previewRows && previewRows.length > 0 && <CustomTargetsPreview rows={previewRows} isStock={isShares ? (isCrypto ? cryptoUnit(f.ticker) : qtyWord) : false} units={isShares ? num(f.shares) : num(f.contracts)} />}
       </FormSection>
       )}
       </>)}
@@ -1233,10 +1239,10 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
   if (!calc) return null
   const is1256 = calc.tax_character === 'section_1256'
   const isStock = isQuantity(pos.instrument_type)
-  const unit = unitWord(pos.instrument_type)
+  const unit = pos.instrument_type === 'crypto' ? cryptoUnit(pos.ticker) : unitWord(pos.instrument_type)
   const qty = Number(pos.shares)
   const label = isStock
-    ? `${pos.ticker} • ${qty.toLocaleString('en-US', { maximumFractionDigits: 8 })} ${unit}${qty === 1 ? '' : 's'}`
+    ? `${pos.ticker} • ${qtyText(qty, unit)}`
     : [pos.ticker,
       Number(pos.contracts) > 0 && `${Number(pos.contracts).toLocaleString('en-US')} contract${Number(pos.contracts) === 1 ? '' : 's'}`,
     ].filter(Boolean).join(' • ')
@@ -1811,15 +1817,15 @@ function TargetsEditor({ own, rows, contracts, onOwn, onRow, onAdd, onRemove }) 
 
 // "sell 35 contracts" / "sell 1,050 shares" — always a count, never a
 // fraction. Fractional share holdings get a share count to 2 dp.
-// `isStock` is true for shares, or the unit word itself ('coin').
+// `isStock` is true for shares, or the unit itself ('$BTC' for crypto).
 const soldLabel = (r, isStock, units = null) => {
   const unit = typeof isStock === 'string' ? isStock : isStock ? 'share' : 'contract'
   if (r.contracts == null) {
     const n = units > 0 ? +(units * r.fraction).toFixed(2) : null
-    return n == null ? `sell ${pct(r.fraction, 0)}` : `sell ${n.toLocaleString('en-US')} ${unit}${n === 1 ? '' : 's'}`
+    return n == null ? `sell ${pct(r.fraction, 0)}` : `sell ${qtyText(n, unit)}`
   }
-  if (r.contracts === 0) return `nothing to sell (too few ${unit}s)`
-  return `sell ${r.contracts.toLocaleString('en-US')} ${unit}${r.contracts === 1 ? '' : 's'}`
+  if (r.contracts === 0) return `nothing to sell (too few ${unit.startsWith('$') ? unit : `${unit}s`})`
+  return `sell ${qtyText(r.contracts, unit)}`
 }
 
 // Whole units (contracts or shares) to split across targets, or null.
@@ -1874,8 +1880,8 @@ function CustomExitTargets({ title = 'Exit Targets', rows, runner, isStock, unit
               <div className="text-sm text-fg">Runner · {pct(runner.trail_pct, 0)} trail</div>
               <div className="text-xs text-muted mt-0.5">
                 {runner.contracts != null
-                  ? `last ${runner.contracts.toLocaleString('en-US')} ${unit}${runner.contracts === 1 ? '' : 's'}`
-                  : units > 0 ? `last ${(+(units * runner.share).toFixed(2)).toLocaleString('en-US')} ${unit}s` : `last ${pct(runner.share, 0)}`}
+                  ? `last ${qtyText(runner.contracts, unit)}`
+                  : units > 0 ? `last ${qtyText(+(units * runner.share).toFixed(2), unit)}` : `last ${pct(runner.share, 0)}`}
               </div>
             </div>
             <div className="text-right shrink-0">
