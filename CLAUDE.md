@@ -467,6 +467,8 @@ tax_year_config     ← federal brackets / LTCG thresholds / NIIT per tax year (
 state_tax_rates     ← per (tax_year, state) ordinary + LTCG brackets, confidence flag
 leaps_tax_profiles  ← per-user after-tax inputs (portfolio, allocation, filing status, income, state, targets, CPA override)
 leaps_positions     ← per-user LEAPS positions (basis, current value, purchase date) — manual today
+ldp_risk_profiles   ← LDP engine risk tier + capping rule per user (service-role write only)
+ldp_audit_log       ← LDP append-only audit of every trade / suggestion / skip / hold
 ```
 
 ### RLS Policy
@@ -723,6 +725,38 @@ value, holding period) and must pass before any edit to that file lands.
   netted figure labeled as an estimate.
 - Every tax figure in the UI is labeled an estimate with a
   consult-a-professional note. Keep it that way.
+
+---
+
+## LDP engine (`ldp/`) — automated LEAPS
+
+Python package (stdlib only, 3.11+) that buys long-dated LEAPS on sector
+ETFs (core) plus risk-gated small-cap satellites through **Tradier**,
+and decides daily when to sell using each user's after-tax math. Start
+with `ldp/README.md`. Tests: `python -m pytest -q ldp` (CI:
+`.github/workflows/ldp-tests.yml`).
+
+- **Its own trading rules.** LDP buys single-leg long calls, not
+  spreads, and sizes satellites at 5% per name / 15% total. That
+  deliberately differs from the Cash Moves spread rules above (spreads
+  only, 2% per spread), which still govern the manual / GEX flows. LDP
+  thresholds live in `ldp/config.py`; never hard-code them in rule
+  modules.
+- **Compliance gate.** Auto-trading only when the account is
+  `managed`; self-directed accounts get suggestions, whatever the risk
+  tier. `ldp_audit_log` has a CHECK that rejects a `trade` row unless
+  it is `auto` on a managed account. Do not remove it.
+- **Risk beats tax.** Sell rules 1–2 (stop / thesis / satellite hard
+  reject / roll) run before any tax-motivated hold. Keep that order.
+- `ldp_risk_profiles` and `ldp_audit_log` are service-role write only.
+  Users read their own rows. Users must never be able to edit their own
+  tier or account tier.
+- Limit orders only. `LimitOrder` can't express a market order; keep
+  it that way.
+- The engine's tax math is incremental (`T(income+gain) − T(income)`,
+  NIIT only above the threshold). The `/leaps` page (`afterTax.js`)
+  uses combined marginal rates per its spec, so the two can differ
+  slightly for gains that straddle a bracket.
 
 ---
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Landmark, Plus, Pencil, Trash2, Check, X, AlertTriangle, Info, ArrowRightLeft } from 'lucide-react'
+import { Landmark, Plus, Pencil, Trash2, Check, X, AlertTriangle, Info, ArrowRightLeft, ShieldCheck } from 'lucide-react'
 import clsx from 'clsx'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
@@ -215,6 +215,7 @@ export default function Leaps() {
       </header>
 
       {loadError && <Banner tone="rose">{loadError}</Banner>}
+      <RiskProfileCard userId={user?.id} />
       {federal === null && positions !== null && !loadError && (
         <Banner tone="amber">Tax figures for the current year haven't been loaded yet.</Banner>
       )}
@@ -303,6 +304,64 @@ export default function Leaps() {
           </p>
         </>
       )}
+    </div>
+  )
+}
+
+// ── LEAPS bot risk profile ────────────────────────────────────────
+//
+// Written by the LDP engine (service role) — the tier gates what the bot
+// may buy and whether it auto-trades, so users can't edit it here. The
+// copy in `display` is rendered by the engine (ldp.risk.describe) so the
+// thresholds it quotes stay in engine config.
+
+const TIER_TONE = {
+  conservative: 'bg-sky-500/15 text-sky-300 border-sky-500/40',
+  moderate: 'bg-amber-500/15 text-amber-300 border-amber-500/40',
+  aggressive: 'bg-rose-500/15 text-rose-300 border-rose-500/40',
+}
+
+function RiskProfileCard({ userId }) {
+  const [row, setRow] = useState(undefined)   // undefined = loading, null = none
+  useEffect(() => {
+    if (!userId) return
+    let cancelled = false
+    supabase.from('ldp_risk_profiles')
+      .select('tier, capped_by, account_tier, display, computed_at')
+      .eq('user_id', userId).maybeSingle()
+      .then(({ data, error }) => {
+        if (cancelled) return
+        if (error) console.error('[leaps] risk profile load failed', error)
+        setRow(data ?? null)
+      })
+    return () => { cancelled = true }
+  }, [userId])
+
+  if (row === undefined) return null
+  if (row === null) {
+    return (
+      <div className="bg-card border border-border rounded-xl px-4 py-3 mb-4 text-xs text-subtle flex items-start gap-2">
+        <ShieldCheck size={14} className="shrink-0 mt-0.5 text-muted" />
+        <span>Your LEAPS bot risk profile hasn't been set up yet. Until it is, the bot won't buy anything for you.</span>
+      </div>
+    )
+  }
+  const d = row.display ?? {}
+  const label = d.label ?? row.tier.charAt(0).toUpperCase() + row.tier.slice(1)
+  return (
+    <div className="bg-card border border-border rounded-xl p-4 mb-4">
+      <div className="flex items-center gap-2 mb-2">
+        <ShieldCheck size={14} className="text-amber-400" />
+        <h2 className="text-sm font-semibold flex-1">LEAPS bot risk profile</h2>
+        <span className={clsx('text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border font-semibold', TIER_TONE[row.tier])}>
+          {label}
+        </span>
+      </div>
+      {d.capped_by_text && <p className="text-xs text-subtle mb-1">{d.capped_by_text}</p>}
+      {d.allows && <p className="text-xs text-fg leading-relaxed">{d.allows}</p>}
+      <p className="text-[10px] text-muted mt-2">
+        {d.account_text ?? (row.account_tier === 'managed' ? 'Managed account.' : 'Self-directed account — suggestions only.')}
+      </p>
     </div>
   )
 }
