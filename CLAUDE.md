@@ -905,6 +905,24 @@ value, holding period) and must pass before any edit to that file lands.
 
 ---
 
+## Simulator (`/simulator`)
+
+After-tax what-if sandbox; nothing is saved. Same math as `/leaps`.
+- **Grow** — add money over time: start from a share / income / crypto
+  holding (prefilled; income holdings start at 0% price growth) or a new
+  investment; monthly contribution, years, price growth, yield, income
+  type, reinvest or take payouts as cash. `growthProjection()` in
+  `afterTax.js` runs month by month (payouts taxed as paid via
+  `incomeTaxRate`, reinvested after tax into basis; ROC lowers basis and
+  is taxed past zero) and shows the after-tax value if sold at each year
+  end at long-term rates.
+- **Sell** — one sale (from a holding or new: cost, sell price, bought /
+  sell dates) under your setup vs a what-if residency, filing status and
+  income, side by side, plus what waiting for long-term would keep. CPA
+  rate overrides carry over only while the what-if matches your setup.
+
+---
+
 ## LDP engine (`ldp/`) — automated LEAPS
 
 Python package (stdlib only, 3.11+) that buys long-dated LEAPS on sector

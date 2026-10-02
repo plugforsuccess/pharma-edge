@@ -876,3 +876,75 @@ export function incomeYieldComparison({ balance, options, rateForGain }) {
     })
     .sort((a, b) => b.after_tax_yield - a.after_tax_yield)
 }
+
+// ── Contributions (Simulator) ────────────────────────────────────
+//
+// Month by month: the price grows at `priceGrowth` a year, the holding
+// pays `yieldPct` a year (monthly), and `monthly` is added at each month
+// end. Payouts are taxed as they're paid (incomeTaxRate) and, with
+// `reinvest`, the after-tax payout buys more (adding to basis). Return of
+// capital isn't taxed when paid: it lowers basis, and once basis hits 0
+// the rest is a capital gain taxed then at the long-term rate.
+//
+// Each year-end row also shows the holding if sold then: the gain over
+// basis taxed at long-term rates (an estimate — the last year's
+// contributions would really be short-term).
+export function growthProjection({
+  startValue = 0, startBasis = startValue, monthly = 0, years, priceGrowth = 0,
+  yieldPct = 0, kind = 'qualified', reinvest = true, rateForGain,
+}) {
+  const months = Math.max(0, Math.round((Number(years) || 0) * 12))
+  const g = Math.pow(1 + (Number(priceGrowth) || 0), 1 / 12) - 1
+  const y = Math.max(0, Number(yieldPct) || 0)
+  const add = Math.max(0, Number(monthly) || 0)
+  let value = Math.max(0, Number(startValue) || 0)
+  let basis = Math.max(0, Number(startBasis) || 0)
+  let contributed = 0
+  let payouts = 0
+  let taxPaid = 0
+  let kept = 0
+  let rate = 0
+  let ltRate = 0
+  const rows = []
+  for (let m = 1; m <= months; m += 1) {
+    // Rates follow this year's expected payout (bracket stacking).
+    if ((m - 1) % 12 === 0) {
+      const rates = rateForGain(value * y)
+      rate = incomeTaxRate(rates, kind)
+      ltRate = rates.long_term.total
+    }
+    value *= 1 + g
+    const payout = value * y / 12
+    if (payout > 0) {
+      let tax = payout * rate
+      if (kind === 'roc') {
+        basis -= payout
+        if (basis < 0) { tax += -basis * ltRate; basis = 0 }
+      }
+      payouts += payout
+      taxPaid += tax
+      if (reinvest) { value += payout - tax; basis += payout - tax } else kept += payout - tax
+    }
+    value += add
+    basis += add
+    contributed += add
+    if (m % 12 === 0 || m === months) {
+      const gain = value - basis
+      const saleTax = gain > 0 ? gain * rateForGain(gain).long_term.total : 0
+      rows.push({
+        year: Math.ceil(m / 12),
+        contributed,
+        invested: Math.max(0, Number(startBasis) || 0) + contributed,
+        value,
+        basis,
+        payouts,
+        tax_paid: taxPaid,
+        income_kept: kept,
+        sale_tax: saleTax,
+        after_tax_value: value - saleTax,
+        total_after_tax: value - saleTax + kept,
+      })
+    }
+  }
+  return rows
+}

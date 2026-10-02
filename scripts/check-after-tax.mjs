@@ -18,7 +18,7 @@ import {
   isValidTaxRate, isValidBasis, exerciseCall, blended1256Rate, suggestInstrumentType, bracketTax,
   exitLadder, allocateContracts, rateAtGainFor, customExitTargets, validateCustomTargets,
   cashAfterTax, cashYieldComparison, realEstateAfterTax, interestTaxRate,
-  dividendAfterTax, incomeTaxRate, incomeYieldComparison,
+  dividendAfterTax, incomeTaxRate, incomeYieldComparison, growthProjection,
   EXIT_PLAYBOOK, allocateWithRunner, playbookTargets, runnerPlan, timeStop, longTermFitsPlan, entryRunwayDays,
 } from '../src/utils/afterTax.js'
 
@@ -432,6 +432,35 @@ const round2 = (x) => Math.round(x * 100) / 100
   eq('non-ROC: nothing deferred', q.deferred_tax, 0)
   const rocCmp = incomeYieldComparison({ balance: 100000, rateForGain: ga, options: [{ kind: 'roc', apy: 0.11 }] })
   eq('ROC compared after tax at sale', rocCmp[0].after_tax_yield, 0.11 * (1 - 0.2879), 1e-9)
+}
+
+// ── Contributions (Simulator) ────────────────────────────────────
+{
+  const flat = () => ({ long_term: { total: 0.2 }, short_term: { total: 0.3, federal: 0.24, niit: 0, state: 0.06 } })
+  const last = (rows) => rows[rows.length - 1]
+  const c = last(growthProjection({ monthly: 100, years: 1, rateForGain: flat }))
+  eq('contrib: 12 x $100', c.value, 1200, 1e-9)
+  eq('contrib: no gain, no tax', c.sale_tax, 0)
+  eq('contrib: invested', c.invested, 1200, 1e-9)
+  const gr = last(growthProjection({ startValue: 10000, years: 1, priceGrowth: 0.1, rateForGain: flat }))
+  eq('growth: 10% in a year', gr.value, 11000, 1e-6)
+  eq('growth: tax at sale on the gain', gr.sale_tax, 1000 * 0.2, 1e-6)
+  const roc = last(growthProjection({ startValue: 10000, years: 1, yieldPct: 0.12, kind: 'roc', reinvest: true, rateForGain: flat }))
+  eq('ROC reinvested compounds monthly', roc.value, 10000 * Math.pow(1.01, 12), 1e-6)
+  eq('ROC reinvested: basis unchanged', roc.basis, 10000, 1e-6)
+  eq('ROC: no tax while held', roc.tax_paid, 0)
+  const q = last(growthProjection({ startValue: 10000, years: 1, yieldPct: 0.03, kind: 'qualified', reinvest: false, rateForGain: flat }))
+  eq('qualified paid out: $300', q.payouts, 300, 1e-6)
+  eq('qualified paid out: taxed at LT', q.tax_paid, 60, 1e-6)
+  eq('qualified paid out: kept', q.income_kept, 240, 1e-6)
+  eq('qualified paid out: value flat', q.value, 10000, 1e-6)
+  const rocCash = last(growthProjection({ startValue: 10000, years: 1, yieldPct: 0.12, kind: 'roc', reinvest: false, rateForGain: flat }))
+  eq('ROC paid out lowers basis', rocCash.basis, 8800, 1e-6)
+  eq('ROC paid out: gain at sale', rocCash.sale_tax, 1200 * 0.2, 1e-6)
+  const floor = last(growthProjection({ startValue: 1000, startBasis: 100, years: 1, yieldPct: 0.12, kind: 'roc', reinvest: false, rateForGain: flat }))
+  eq('ROC past zero basis is taxed then', floor.tax_paid, 20 * 0.2, 1e-6)
+  eq('ROC basis floors at 0', floor.basis, 0)
+  eq('rows: one per year', growthProjection({ monthly: 10, years: 3, rateForGain: flat }).length, 3)
 }
 
 // ── Real estate ──────────────────────────────────────────────────
