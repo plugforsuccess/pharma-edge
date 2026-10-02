@@ -664,11 +664,12 @@ function emptyForm(initial) {
   const d = initial?.details ?? {}
   const t = initial?.instrument_type
   return {
-    asset: t === 'stock' ? 'shares' : t === 'crypto' ? 'crypto' : t === 'cash' ? 'cash'
+    // Shares paying an income (a yield, or return of capital) open as Income.
+    asset: t === 'stock' ? (Number(d.dividend_yield) > 0 || d.dividend_kind === 'roc' ? 'income' : 'shares') : t === 'crypto' ? 'crypto' : t === 'cash' ? 'cash'
       : t === 'real_estate' ? 'real_estate' : 'option',
     ticker: initial?.ticker ?? '',
     name: initial?.name ?? '',
-    // Dividends (shares)
+    // Income (shares with a yield)
     div_yield: d.dividend_yield != null ? String(+(Number(d.dividend_yield) * 100).toFixed(4)) : '',
     div_kind: d.dividend_kind ?? 'qualified',
     // Cash
@@ -704,7 +705,7 @@ function emptyForm(initial) {
 
 // Units the per-share prices multiply by: shares, or contracts × 100.
 function unitsOf(f) {
-  if (f.asset === 'shares' || f.asset === 'crypto') return num(f.shares)
+  if (f.asset === 'shares' || f.asset === 'income' || f.asset === 'crypto') return num(f.shares)
   const c = num(f.contracts)
   return c > 0 ? c * OPTION_MULTIPLIER : null
 }
@@ -734,16 +735,19 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
   const isCrypto = f.asset === 'crypto'
   const isCash = f.asset === 'cash'
   const isRE = f.asset === 'real_estate'
-  // "Shares" below means any quantity holding (shares or coins).
-  const isShares = f.asset === 'shares' || isCrypto
+  // Income = shares bought for their yield (dividend stocks, preferreds,
+  // income ETFs); saved as stock with the yield in details.
+  const isIncome = f.asset === 'income'
+  // "Shares" below means any quantity holding (shares, income or coins).
+  const isShares = f.asset === 'shares' || isIncome || isCrypto
   // Return-of-capital income holdings (STRC-style preferreds) sit near
   // par, so the LEAPS exit plan doesn't apply to them.
-  const rocIncome = f.asset === 'shares' && f.div_kind === 'roc'
+  const rocIncome = isIncome && f.div_kind === 'roc'
   const qtyWord = isCrypto ? 'coin' : 'share'
   // Index options (SPX, XSP, NDX, RUT, VIX …) are §1256 contracts —
   // detected from the ticker, never asked.
   const instrumentType = isCash ? 'cash' : isRE ? 'real_estate' : isCrypto ? 'crypto'
-    : f.asset === 'shares' ? 'stock' : suggestInstrumentType(f.ticker)
+    : f.asset === 'shares' || isIncome ? 'stock' : suggestInstrumentType(f.ticker)
   const is1256 = instrumentType === 'index_option_1256'
   const runwayDays = entryRunwayDays(f.purchase_date, f.expiration)
   const shortRunway = runwayDays != null && runwayDays > 0 && runwayDays < EXIT_PLAYBOOK.minEntryDays
@@ -836,14 +840,14 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
       if (bad) return setError(bad)
     }
     const divYield = num(f.div_yield)
-    if (f.asset === 'shares' && divYield != null && (divYield < 0 || divYield > 50)) {
-      return setError('Enter the dividend yield as a % between 0 and 50.')
+    if (isIncome && !(divYield > 0 && divYield <= 50)) {
+      return setError('Enter the yield as a % between 0 and 50.')
     }
     return finish({
       ticker: f.ticker,
       name: null,
-      details: f.asset === 'shares' && (divYield > 0 || rocIncome)
-        ? { dividend_yield: exact((divYield ?? 0) / 100), dividend_kind: f.div_kind }
+      details: isIncome
+        ? { dividend_yield: exact(divYield / 100), dividend_kind: f.div_kind }
         : null,
       instrument_type: instrumentType,
       option_type: isShares ? null : f.option_type,
@@ -893,8 +897,8 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
         onChange={(v) => { setError(''); setF((x) => ({ ...x, asset: v })) }}
         columns={3}
         options={[
-          { value: 'option', label: 'Options' }, { value: 'shares', label: 'Shares' }, { value: 'crypto', label: 'Crypto' },
-          { value: 'cash', label: 'Cash' }, { value: 'real_estate', label: 'Real estate' },
+          { value: 'option', label: 'Options' }, { value: 'shares', label: 'Shares' }, { value: 'income', label: 'Income' },
+          { value: 'crypto', label: 'Crypto' }, { value: 'cash', label: 'Cash' }, { value: 'real_estate', label: 'Real estate' },
         ]}
       />
 
@@ -969,10 +973,10 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
 
       {!isCash && !isRE && (<>
 
-      <FormSection title={isCrypto ? 'Crypto' : isShares ? 'Shares' : 'Contract'}>
+      <FormSection title={isCrypto ? 'Crypto' : isIncome ? 'Income' : isShares ? 'Shares' : 'Contract'}>
         <div className="grid grid-cols-2 gap-3">
           <Field label={isCrypto ? 'Coin' : 'Ticker'}>
-            <input value={f.ticker} onChange={setTicker} maxLength={12} placeholder={isCrypto ? 'BTC' : isShares ? 'AAPL' : 'XLK'}
+            <input value={f.ticker} onChange={setTicker} maxLength={12} placeholder={isCrypto ? 'BTC' : isIncome ? 'SCHD' : isShares ? 'AAPL' : 'XLK'}
               autoCapitalize="characters" autoComplete="off" spellCheck={false} className={inputCls} />
           </Field>
           {isShares ? (
@@ -1004,15 +1008,15 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
             <input type="date" value={f.purchase_date} max={todayYmd()} onChange={(e) => setV('purchase_date')(e.target.value)} className={dateCls} />
           </Field>
         </div>
-        {f.asset === 'shares' && (
+        {isIncome && (
           <div className="mt-3 grid grid-cols-2 gap-3">
-            <Field label="Dividend yield" hint="optional">
-              <Affix suffix="%"><NumberInput decimals={4} value={f.div_yield} onChange={setV('div_yield')} placeholder="0" className={clsx(inputCls, 'pr-8')} /></Affix>
-            </Field>
-            <Field label="Dividend type">
+            <Field label="Income type" wide>
               <select value={f.div_kind} onChange={(e) => setV('div_kind')(e.target.value)} className={inputCls}>
-                {INCOME_KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
+                {INCOME_KINDS.map((k) => <option key={k.value} value={k.value}>{k.long}</option>)}
               </select>
+            </Field>
+            <Field label="Yield" wide>
+              <Affix suffix="%"><NumberInput decimals={4} value={f.div_yield} onChange={setV('div_yield')} placeholder={f.div_kind === 'roc' ? '11' : '3.5'} className={clsx(inputCls, 'pr-8')} /></Affix>
             </Field>
           </div>
         )}

@@ -818,12 +818,12 @@ export function realEstateAfterTax({
 // CPA overrides use the overridden total (no breakdown to adjust).
 
 export const INCOME_KINDS = [
-  { value: 'qualified', label: 'Qualified', long: 'Qualified dividends (most stocks, dividend ETFs)' },
-  { value: 'ordinary', label: 'Ordinary', long: 'Ordinary income (covered-call ETFs, BDCs, bond funds)' },
-  { value: 'reit', label: 'REIT', long: 'REIT dividends (20% deduction)' },
-  { value: 'muni', label: 'Muni', long: 'Muni bond fund (no federal tax)' },
-  { value: 'treasury', label: 'Treasury', long: 'Treasury bond fund (no state tax)' },
-  { value: 'roc', label: 'Return of capital', long: 'Return of capital (tax deferred, lowers your basis)' },
+  { value: 'qualified', label: 'Qualified', long: 'Qualified dividends' },
+  { value: 'ordinary', label: 'Ordinary', long: 'Ordinary (covered-call, BDCs)' },
+  { value: 'reit', label: 'REIT', long: 'REIT dividends' },
+  { value: 'muni', label: 'Muni', long: 'Muni bond fund' },
+  { value: 'treasury', label: 'Treasury', long: 'Treasury bond fund' },
+  { value: 'roc', label: 'Return of capital', long: 'Return of capital (taxed at sale)' },
 ]
 export const REIT_199A_DEDUCTION = 0.2
 
