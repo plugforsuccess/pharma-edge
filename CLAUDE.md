@@ -811,6 +811,11 @@ value, holding period) and must pass before any edit to that file lands.
   `afterTax.js` shows proceeds, tax and after-tax dollars per sale
   (rate at that sale's realized gain, each sale taxed on its own).
   The add form has "Save & add another" for entering many positions.
+- The add form starts with **Options / Shares**. Options take contracts,
+  call/put, optional strike + expiration and a §1256 checkbox (auto-ticked
+  for index roots). Cost & value can be entered **per share** (default;
+  options = premium × 100 × contracts) or as **totals**; only totals are
+  stored (`cost_basis`, `current_value`).
 - Per-position values are never netted; the portfolio card shows a
   netted figure labeled as an estimate.
 - Every tax figure in the UI is labeled an estimate with a
