@@ -313,7 +313,7 @@ export default function Leaps() {
 
               {results.length === 0 && !adding && (
                 <div className="text-xs text-muted py-6 px-4 text-center border border-dashed border-border rounded-xl">
-                  No LEAPS tracked yet. Add a position to generate its after-tax exit targets.
+                  No LEAPS tracked yet. Add a position to generate its exit targets.
                 </div>
               )}
 
@@ -898,7 +898,7 @@ function ExitLadder({ ladder, ladderLongTerm, character, longTermDate, isStock }
   return (
     <div className="mb-3 rounded-lg border border-border bg-bg/40 p-3">
       <div className="flex items-baseline gap-2 mb-2">
-        <div className="text-xs font-semibold flex-1">After-tax exit targets</div>
+        <div className="text-xs font-semibold flex-1">Exit Targets</div>
         <div className="text-[10px] text-muted">at {CHARACTER_LABEL[character]} if sold today</div>
       </div>
       <ol className="space-y-2.5">
@@ -944,7 +944,7 @@ function LadderPreview({ rungs }) {
   if (!rungs?.length) return null
   return (
     <div className="mt-3 rounded-lg border border-border bg-bg/40 p-3">
-      <div className="text-[10px] uppercase tracking-wider text-muted mb-1.5">Your after-tax exit targets</div>
+      <div className="text-[10px] uppercase tracking-wider text-muted mb-1.5">Exit Targets</div>
       <div className="grid grid-cols-3 gap-2">
         {rungs.map((r, i) => (
           <div key={r.index} className="text-xs">

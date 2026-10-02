@@ -358,7 +358,7 @@ function ResultCard({ result, onDone, onAdd }) {
           Go to LEAPS
         </button>
         <p className="text-[10px] text-muted mt-3 leading-relaxed">
-          Each position you add gets its own after-tax exit targets, so the bot knows when to sell once your broker is connected.
+          Each position you add gets its own exit targets, so the bot knows when to sell once your broker is connected.
         </p>
       </div>
       <p className="text-[10px] text-muted leading-relaxed mt-4">
