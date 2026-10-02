@@ -664,6 +664,12 @@ brand/gold  #f0b44c    gain/green  #2fd17c    loss/red #e5484d
 **Typography:** System monospace for hash values and trade data. Default
 Tailwind sans for UI copy.
 
+**Line height** is opened up app-wide in `@theme` (text-xs 18px, text-sm
+22px). **Explanations go in an (i):** use `components/InfoTip.jsx` (a
+closable bottom sheet) for "how this works" copy instead of footnote
+paragraphs under cards. Keep a short visible "estimates, not tax advice"
+line on tax screens — the full disclaimer can live in its (i).
+
 **Mobile-first.** Max width 448px (max-w-md) centered. Bottom navigation
 on mobile, sidebar on desktop. All tap targets minimum 44px.
 
@@ -812,9 +818,9 @@ value, holding period) and must pass before any edit to that file lands.
   (rate at that sale's realized gain, each sale taxed on its own).
   The add form has "Save & add another" for entering many positions.
 - The add form starts with **Options / Shares**. Options take contracts,
-  call/put, a required expiration (after the purchase date), optional
-  strike and a §1256 checkbox (auto-ticked
-  for index roots). Cost & value can be entered **per share** (default;
+  call/put, a required expiration (after the purchase date) and an
+  optional strike. §1256 is never asked: it's detected from the ticker
+  (`suggestInstrumentType`, SPX/XSP/NDX/RUT/VIX…) and shown as a badge. Cost & value can be entered **per share** (default;
   options = premium × 100 × contracts) or as **totals**; only totals are
   stored (`cost_basis`, `current_value`).
 - **No LEAPS basis / allocation.** Each position is independent; the
