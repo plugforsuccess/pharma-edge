@@ -88,7 +88,7 @@ export default function Layout() {
             className="tap-spring mb-2 inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-bg font-semibold text-sm"
           >
             <Plus size={15} strokeWidth={2.5} />
-            Add a position
+            Add a holding
           </button>
           {sidebarNav.map(({ to, icon: Icon, label }) => (
             <NavLink

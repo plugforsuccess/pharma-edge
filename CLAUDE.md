@@ -850,6 +850,25 @@ value, holding period) and must pass before any edit to that file lands.
   `leaps_tax_profiles.leaps_allocation_pct` / `portfolio_size` are no
   longer read by `/leaps` (columns kept; Settings no longer shows the
   allocation field).
+- **Holding types** (2026-10-02): `leaps_positions.instrument_type` also
+  takes `crypto` (ticker = coin, quantity in `shares`, taxed like stock,
+  exit plan applies), `cash` (`name`, cost_basis = current_value =
+  balance, `details.apy` / `account_kind`) and `real_estate` (`name`,
+  cost_basis = purchase price + improvements, `details.kind` primary |
+  rental, `mortgage`, `selling_cost_pct`, `depreciation`,
+  `exclusion_eligible`). `ticker` is nullable for cash / real estate.
+  Math in `afterTax.js`: `cashAfterTax` (interest at the ordinary rate;
+  T-bills skip state tax), `cashYieldComparison`, `realEstateAfterTax`
+  (6% selling costs default, §121 $250k / $500k MFJ exclusion for a
+  primary home lived in 2 of 5 years, rental depreciation recaptured at
+  ≤25% + NIIT + state, rest at LT rates; after-tax equity nets the
+  mortgage). The Portfolio card leads with **after-tax net worth**
+  (investments + cash + real-estate equity) when cash or property
+  exist; cost / gain / return and the target table cover investments
+  only. The **Cash yield** card compares savings / money market /
+  T-bills / CD at the user's after-tax rate — categories only, no named
+  products (named partners wait on counsel); rates are user-entered,
+  prefilled with example rates (`cm:cash-yield-apys`).
 - Per-position values are never netted; the portfolio card shows a
   netted figure labeled as an estimate.
 - Every tax figure in the UI is labeled an estimate with a

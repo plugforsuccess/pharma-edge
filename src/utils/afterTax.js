@@ -683,3 +683,122 @@ export function portfolioSummary(results, portfolioSize, rateForGain) {
     },
   }
 }
+
+// ── Cash ──────────────────────────────────────────────────────────
+//
+// A cash account has no gain to tax: its after-tax value is the balance.
+// Its interest is ordinary income, taxed each year at the short-term
+// (ordinary) rate stacked on the user's income. T-bill interest skips
+// state income tax. After-tax yield = APY × (1 − rate).
+
+export const CASH_KINDS = [
+  { value: 'savings', label: 'Savings', long: 'High-yield savings' },
+  { value: 'money_market', label: 'Money market', long: 'Money market fund' },
+  { value: 't_bills', label: 'T-bills', long: 'T-bills (no state tax)' },
+  { value: 'cd', label: 'CD', long: 'CD' },
+  { value: 'checking', label: 'Checking', long: 'Checking' },
+]
+
+export function interestTaxRate(rates, kind) {
+  const st = rates.short_term
+  if (st.overridden) return st.total
+  return kind === 't_bills' ? Math.max(0, st.total - st.state) : st.total
+}
+
+export function cashAfterTax({ balance, apy, kind = 'savings', rateForGain }) {
+  const b = Math.max(0, Number(balance) || 0)
+  const y = Math.max(0, Number(apy) || 0)
+  const interest = b * y
+  const rate = interestTaxRate(rateForGain(interest), kind)
+  return {
+    balance: b,
+    apy: y,
+    kind,
+    interest,
+    rate,
+    after_tax_interest: interest * (1 - rate),
+    after_tax_yield: y * (1 - rate),
+    after_tax_value: b,
+  }
+}
+
+// Same cash, different homes: after-tax yield and dollars per year for
+// each option at the APY the user enters, best first.
+export function cashYieldComparison({ balance, options, rateForGain }) {
+  return options
+    .map((o) => {
+      const c = cashAfterTax({ balance, apy: o.apy, kind: o.kind, rateForGain })
+      return { ...o, rate: c.rate, after_tax_yield: c.after_tax_yield, after_tax_interest: c.after_tax_interest }
+    })
+    .sort((a, b) => b.after_tax_yield - a.after_tax_yield)
+}
+
+// ── Real estate ───────────────────────────────────────────────────
+//
+// What a property is worth after tax if sold today:
+//   selling_costs   = value × selling_cost_pct          (default 6%)
+//   amount_realized = value − selling_costs
+//   adjusted_basis  = purchase price + improvements − depreciation taken
+//   gain            = amount_realized − adjusted_basis
+// Primary home (lived there 2 of the last 5 years): the §121 exclusion
+// removes up to $250k of gain ($500k married filing jointly).
+// Rental: the gain up to the depreciation taken is "unrecaptured §1250"
+// gain, taxed at the ordinary federal rate capped at 25% (+ NIIT +
+// state); the rest at long-term rates.
+//   after_tax_equity = amount_realized − tax − mortgage owed
+// Held a year or less → the whole taxable gain is short-term.
+
+export const HOME_SALE_EXCLUSION = { single: 250000, hoh: 250000, mfs: 250000, mfj: 500000 }
+export const DEFAULT_SELLING_COST_PCT = 0.06
+export const UNRECAPTURED_1250_MAX_RATE = 0.25
+
+export function realEstateAfterTax({
+  value, basis, mortgage = 0, sellingCostPct = DEFAULT_SELLING_COST_PCT, depreciation = 0,
+  primary = true, exclusionEligible = true, filingStatus = 'single', purchaseDate, asOf, rateForGain,
+}) {
+  if (!isValidBasis(basis)) return null
+  const v = Math.max(0, Number(value) || 0)
+  const owed = Math.max(0, Number(mortgage) || 0)
+  const s = Math.min(0.5, Math.max(0, Number(sellingCostPct) || 0))
+  const dep = primary ? 0 : Math.max(0, Number(depreciation) || 0)
+  const sellingCosts = v * s
+  const realized = v - sellingCosts
+  const adjustedBasis = basis - dep
+  const gain = realized - adjustedBasis
+  const exclusion = primary && exclusionEligible ? (HOME_SALE_EXCLUSION[filingStatus] ?? HOME_SALE_EXCLUSION.single) : 0
+  const excluded = Math.max(0, Math.min(gain, exclusion))
+  const recaptureGain = primary ? 0 : Math.max(0, Math.min(dep, gain))
+  const capitalGain = Math.max(0, gain - excluded - recaptureGain)
+  const taxableGain = recaptureGain + capitalGain
+  const hp = holdingPeriod(purchaseDate, asOf)
+  const isLongTerm = hp?.is_long_term ?? false
+  const rates = rateForGain(taxableGain)
+  const st = rates.short_term
+  const capRate = isLongTerm ? rates.long_term.total : st.total
+  const recaptureRate = !isLongTerm || st.overridden
+    ? st.total
+    : Math.min(UNRECAPTURED_1250_MAX_RATE, st.federal) + st.niit + st.state
+  const tax = recaptureGain * recaptureRate + capitalGain * capRate
+  return {
+    value: v,
+    basis,
+    mortgage: owed,
+    equity: v - owed,
+    selling_costs: sellingCosts,
+    amount_realized: realized,
+    adjusted_basis: adjustedBasis,
+    gain,
+    exclusion,
+    excluded,
+    recapture_gain: recaptureGain,
+    capital_gain: capitalGain,
+    taxable_gain: taxableGain,
+    recapture_rate: recaptureRate,
+    capital_gain_rate: capRate,
+    estimated_tax: tax,
+    after_tax_equity: realized - tax - owed,
+    is_long_term: isLongTerm,
+    long_term_date: hp?.long_term_date ?? null,
+    days_until_long_term: hp?.days_until_long_term ?? null,
+  }
+}

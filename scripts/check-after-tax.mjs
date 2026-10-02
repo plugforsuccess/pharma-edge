@@ -17,6 +17,7 @@ import {
   positionAfterTax, holdingPeriod, portfolioSummary, marginalRate,
   isValidTaxRate, isValidBasis, exerciseCall, blended1256Rate, suggestInstrumentType, bracketTax,
   exitLadder, allocateContracts, rateAtGainFor, customExitTargets, validateCustomTargets,
+  cashAfterTax, cashYieldComparison, realEstateAfterTax, interestTaxRate,
   EXIT_PLAYBOOK, allocateWithRunner, playbookTargets, runnerPlan, timeStop, longTermFitsPlan, entryRunwayDays,
 } from '../src/utils/afterTax.js'
 
@@ -383,6 +384,61 @@ const round2 = (x) => Math.round(x * 100) / 100
   eq('LT before roll window → can wait', longTermFitsPlan('2027-03-01', '2028-06-30'), true)
   eq('stock has no time stop', longTermFitsPlan('2027-03-01', null), true)
   eq('entry runway RXRX', entryRunwayDays('2026-09-28', '2028-01-21'), 480)
+}
+
+// ── Cash ─────────────────────────────────────────────────────────
+{
+  // Fixture GA single at $800k: ordinary 37% + 3.8% NIIT + 4.99% GA = 45.79%.
+  const gaRates = makeRateResolver({ federal, state: GA, filingStatus: 'single', income: 800000 })
+  const c = cashAfterTax({ balance: 100000, apy: 0.04, kind: 'savings', rateForGain: gaRates })
+  eq('cash interest', c.interest, 4000)
+  eq('cash rate = ordinary stack', c.rate, 0.37 + 0.038 + 0.0499, 1e-9)
+  eq('cash after-tax yield', c.after_tax_yield, 0.04 * (1 - 0.4579), 1e-9)
+  eq('cash after-tax value = balance', c.after_tax_value, 100000)
+  const t = cashAfterTax({ balance: 100000, apy: 0.04, kind: 't_bills', rateForGain: gaRates })
+  eq('T-bills skip state tax', t.rate, 0.37 + 0.038, 1e-9)
+  // Same 4% pays more after tax as T-bills in a taxing state; a 4.2% savings rate can lose to a 4% T-bill.
+  const cmp = cashYieldComparison({ balance: 100000, rateForGain: gaRates,
+    options: [{ kind: 'savings', apy: 0.042 }, { kind: 't_bills', apy: 0.04 }] })
+  eq('best after-tax first', cmp[0].kind, 't_bills')
+  eq('override uses CPA rate', interestTaxRate({ short_term: { total: 0.3, state: 0.05, overridden: true } }, 't_bills'), 0.3)
+}
+
+// ── Real estate ──────────────────────────────────────────────────
+{
+  const flatRE = (lt, st, fed = 0.37, niit = 0.038, stateR = 0.05) => () => ({
+    long_term: { total: lt }, short_term: { total: st, federal: fed, niit, state: stateR },
+  })
+  // Primary home, single: $800k value, $300k cost, 6% to sell → $752k realized,
+  // $452k gain − $250k exclusion = $202k taxed at 25% LT → $50,500. Mortgage $200k.
+  const home = realEstateAfterTax({ value: 800000, basis: 300000, mortgage: 200000, primary: true,
+    filingStatus: 'single', purchaseDate: '2015-06-01', asOf: '2026-10-02', rateForGain: flatRE(0.25, 0.45) })
+  eq('home realized', home.amount_realized, 752000)
+  eq('home gain', home.gain, 452000)
+  eq('home excluded', home.excluded, 250000)
+  eq('home tax', home.estimated_tax, 202000 * 0.25, 1e-6)
+  eq('home after-tax equity', home.after_tax_equity, 752000 - 50500 - 200000, 1e-6)
+  const mfj = realEstateAfterTax({ value: 800000, basis: 300000, primary: true, filingStatus: 'mfj',
+    purchaseDate: '2015-06-01', asOf: '2026-10-02', rateForGain: flatRE(0.25, 0.45) })
+  eq('MFJ $500k exclusion', mfj.taxable_gain, 0)
+  const noEx = realEstateAfterTax({ value: 800000, basis: 300000, primary: true, exclusionEligible: false,
+    purchaseDate: '2015-06-01', asOf: '2026-10-02', rateForGain: flatRE(0.25, 0.45) })
+  eq('no exclusion when not eligible', noEx.taxable_gain, 452000)
+  // Rental: $500k value, $300k cost, $50k depreciation, 6% costs → $470k realized,
+  // $250k adjusted basis, $220k gain: $50k recapture at min(25%, 37%) + 3.8% + 5% = 33.8%,
+  // $170k at 28.8% LT.
+  const rental = realEstateAfterTax({ value: 500000, basis: 300000, depreciation: 50000, primary: false,
+    purchaseDate: '2015-06-01', asOf: '2026-10-02', rateForGain: flatRE(0.288, 0.458) })
+  eq('rental gain', rental.gain, 220000)
+  eq('rental recapture', rental.recapture_gain, 50000)
+  eq('rental recapture rate', rental.recapture_rate, 0.25 + 0.038 + 0.05, 1e-9)
+  eq('rental tax', rental.estimated_tax, 50000 * 0.338 + 170000 * 0.288, 1e-6)
+  const shortHeld = realEstateAfterTax({ value: 500000, basis: 300000, depreciation: 50000, primary: false,
+    purchaseDate: '2026-03-01', asOf: '2026-10-02', rateForGain: flatRE(0.288, 0.458) })
+  eq('held under a year → all short-term', shortHeld.estimated_tax, 220000 * 0.458, 1e-6)
+  const loss = realEstateAfterTax({ value: 250000, basis: 300000, primary: false,
+    purchaseDate: '2015-06-01', asOf: '2026-10-02', rateForGain: flatRE(0.288, 0.458) })
+  eq('loss → no tax', loss.estimated_tax, 0)
 }
 
 // ── Validation ───────────────────────────────────────────────────
