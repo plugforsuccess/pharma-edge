@@ -2,7 +2,6 @@ import { Suspense } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import {
   Activity,
-  BarChart2,
   Briefcase,
   Flame,
   Home,
@@ -25,7 +24,7 @@ import clsx from 'clsx'
 //   /        → "Tape"    (the home dashboard, "The Tape")
 //   /markets → "Pulse"   (HeatPulse™ — GEX/VEX/CEX/DEX/Velocity/Trinity)
 //   /flow    → "Flow"
-//   /record  → "Record"
+//   /leaps   → "LEAPS"   (after-tax LEAPS + Exit Targets)
 //   /settings→ "Settings"
 //
 // "Pulse" replaces the older "Gamma" label — /markets has grown beyond
@@ -37,7 +36,9 @@ import clsx from 'clsx'
 // Mobile bottom nav: 4 tabs split 2/2 around a prominent center
 // button. The center is Pulse (HeatPulse — the most-opened analysis
 // surface); Wheel sits immediately left of center. Final shape:
-//   [Tape] [Wheel] (PULSE center) [Record] [Picks]
+//   [Tape] [Wheel] (PULSE center) [LEAPS] [Picks]
+// (Record was cut with public track records on 2026-10-02; LEAPS took
+// its slot.)
 // "Log a Move" is no longer a bottom-nav slot — it lives on the
 // desktop sidebar CTA; on mobile it is reached via /log directly.
 // Settings still lives on the desktop sidebar + tape header avatar.
@@ -51,7 +52,7 @@ const navLeft = [
   { to: '/wheel', icon: RefreshCw, label: 'Wheel' },
 ]
 const navRight = [
-  { to: '/record', icon: BarChart2, label: 'Record' },
+  { to: '/leaps', icon: Landmark, label: 'LEAPS' },
   { to: '/picks', icon: Star, label: 'Picks' },
 ]
 // Mobile center button (prominent, FAB-style): Pulse → /markets.
@@ -64,7 +65,6 @@ const navFull = [
   { to: '/markets', icon: Activity, label: 'Pulse' },
   { to: '/wheel', icon: RefreshCw, label: 'Wheel' },
   { to: '/leaps', icon: Landmark, label: 'LEAPS' },
-  { to: '/record', icon: BarChart2, label: 'Record' },
   { to: '/leaderboard', icon: Trophy, label: 'Top' },
   { to: '/reasoning', icon: Sparkles, label: 'Reasoning' },
   { to: '/settings', icon: Settings, label: 'Settings' },

@@ -197,7 +197,6 @@ export default function Leaderboard() {
             <RankingTable
               rankings={data.rankings}
               activeTab={activeTab}
-              onRowClick={(slug) => navigate(`/u/${slug}`)}
               startRank={(page - 1) * PER_PAGE + 1}
             />
             <SnapshotFooter
@@ -234,7 +233,7 @@ function RankingTable({ rankings, activeTab, onRowClick, startRank }) {
             key={r.user_id}
             row={r}
             activeTab={activeTab}
-            onClick={() => r.public_slug && onRowClick(r.public_slug)}
+            onClick={onRowClick && r.public_slug ? () => onRowClick(r.public_slug) : undefined}
           />
         ))}
       </div>
@@ -243,7 +242,9 @@ function RankingTable({ rankings, activeTab, onRowClick, startRank }) {
 }
 
 function RankingRow({ row, activeTab, onClick }) {
-  const clickable = !!row.public_slug
+  // Public profiles were cut from the MVP, so rows only link when a
+  // caller passes onRowClick.
+  const clickable = !!row.public_slug && !!onClick
   const Tag = clickable ? 'button' : 'div'
   return (
     <Tag

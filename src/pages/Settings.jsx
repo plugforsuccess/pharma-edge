@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Bell, BellOff, Check, Copy, Download, ExternalLink, Link2, LogOut, Share2, Zap } from 'lucide-react'
+import { Bell, BellOff, Check, Download, ExternalLink, Link2, LogOut, Zap } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { useSubscription } from '../hooks/useSubscription'
@@ -38,8 +38,6 @@ export default function Settings() {
   const [form, setForm] = useState(initialForm(profile))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const [copied, setCopied] = useState(false)
-  const [shareCopied, setShareCopied] = useState(false)
   const [savedFlash, setSavedFlash] = useState(false)
 
   useEffect(() => {
@@ -51,11 +49,6 @@ export default function Settings() {
   }
 
   const slugDraft = slugify(form.public_slug)
-  // /u/:slug is the canonical public profile route (post leaderboard
-  // focus-audit 2026-05-12). /r/:slug 301-redirects to it but we
-  // surface /u/ directly so shared URLs land on the canonical form.
-  const publicUrl = slugDraft ? `${window.location.origin}/u/${slugDraft}` : ''
-
   // Realtime slug availability check. Debounced 300ms after the user
   // stops typing. Three states surfaced inline below the input:
   //   * 'reserved'  — matches RESERVED_SLUGS
@@ -133,26 +126,12 @@ export default function Settings() {
     setSaving(false)
   }
 
-  async function copyPublicUrl() {
-    if (!publicUrl) return
-    try {
-      await navigator.clipboard.writeText(publicUrl)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    } catch {
-      /* noop */
-    }
-  }
-
   return (
     <div className="px-4 lg:px-6 pt-6 pb-8 space-y-4 mx-auto lg:max-w-2xl w-full">
       <h1 className="text-white text-xl lg:text-2xl font-bold tracking-tight">Settings</h1>
 
       <Section title="Account">
         <p className="text-white text-sm font-medium break-all">{user?.email}</p>
-        {profile?.public_slug && (
-          <p className="text-subtle text-xs mt-2 font-mono">/u/{profile.public_slug}</p>
-        )}
       </Section>
 
       <SubscriptionSection tier={tier} isPro={isPro} />
@@ -180,7 +159,7 @@ export default function Settings() {
           />
         </div>
         <Input
-          label="Public URL Slug"
+          label="Username (shown on the leaderboard)"
           value={form.public_slug}
           onChange={(v) => update('public_slug', v)}
           placeholder="cameron-wiley"
@@ -205,90 +184,23 @@ export default function Settings() {
           </p>
         )}
 
-        {/* Share button — convenience surface so the user can drop their
-            /r/:slug link into iMessage / X / etc. without navigating to
-            the public record page first. Same native-share-then-clipboard
-            fallback as the hero card on PublicRecord. */}
-        {profile?.public_slug && profile?.is_public && (
-          <button
-            type="button"
-            onClick={async () => {
-              const url = `${window.location.origin}/u/${profile.public_slug}`
-              const display =
-                [form.first_name, form.last_name].filter(Boolean).join(' ').trim() ||
-                'My Cash Moves track record'
-              const text = `${display} — verifiable Cash Moves track record`
-              if (typeof navigator.share === 'function') {
-                try {
-                  await navigator.share({ title: text, text, url })
-                  return
-                } catch (e) {
-                  if (e?.name === 'AbortError') return
-                }
-              }
-              try {
-                await navigator.clipboard.writeText(url)
-                setShareCopied(true)
-                setTimeout(() => setShareCopied(false), 2000)
-              } catch { /* swallow */ }
-            }}
-            className={clsx(
-              'mt-1 w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl border text-sm font-semibold transition',
-              shareCopied
-                ? 'border-green-700 bg-green-950/40 text-green-400'
-                : 'border-amber-400/40 bg-amber-400/10 text-amber-400 hover:bg-amber-400/20',
-            )}
-          >
-            {shareCopied ? <><Check size={14} /> Link copied</> : <><Share2 size={14} /> Share my track record</>}
-          </button>
-        )}
       </Section>
 
-      <Section title="Public Track Record">
+      <Section title="Leaderboard">
         <div className="flex items-center justify-between">
           <div className="flex-1 pr-4">
-            <p className="text-white text-sm font-medium">Public Record Page</p>
+            <p className="text-white text-sm font-medium">Show me on the leaderboard</p>
             <p className="text-subtle text-xs mt-0.5">
-              Anyone with the link can view your signal history.
+              Lists your username and trade stats on the Cash Moves leaderboard.
             </p>
           </div>
           <Toggle
             value={form.is_public}
             onChange={(v) => update('is_public', v)}
-            label="Public record visibility"
+            label="Leaderboard visibility"
           />
         </div>
 
-        {form.is_public && publicUrl && (
-          <div className="bg-bg border border-border rounded-xl p-3">
-            <p className="text-muted text-[10px] uppercase tracking-wider mb-2">Your Public Link</p>
-            <div className="flex items-center gap-2">
-              <p className="text-zinc-300 text-xs font-mono flex-1 truncate">{publicUrl}</p>
-              <button
-                type="button"
-                onClick={copyPublicUrl}
-                className="text-subtle hover:text-white transition-colors flex-shrink-0"
-                aria-label="Copy public URL"
-              >
-                {copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
-              </button>
-              <a
-                href={publicUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-subtle hover:text-white transition-colors flex-shrink-0"
-                aria-label="Open public URL in a new tab"
-              >
-                <ExternalLink size={14} />
-              </a>
-            </div>
-          </div>
-        )}
-
-        <div className="text-muted text-xs space-y-1">
-          <p>✓ Shows: ticker, direction, catalyst date, logged date, outcome, win/loss, hash</p>
-          <p>✗ Hides: entry prices, position sizes, personal notes, email</p>
-        </div>
       </Section>
 
       <PushSection userId={user?.id} />

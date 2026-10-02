@@ -1,5 +1,5 @@
 import { Suspense, lazy } from 'react'
-import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
@@ -8,9 +8,7 @@ import LogSignal from './pages/LogSignal'
 import Layout from './components/Layout'
 
 // Non-critical screens can pay their bytes lazily.
-const TrackRecord = lazy(() => import('./pages/TrackRecord'))
 const Settings = lazy(() => import('./pages/Settings'))
-const PublicProfile = lazy(() => import('./pages/PublicProfile'))
 const Leaderboard = lazy(() => import('./pages/Leaderboard'))
 const Markets = lazy(() => import('./pages/Markets'))
 const PositionDetail = lazy(() => import('./pages/PositionDetail'))
@@ -41,12 +39,12 @@ function ProtectedRoute({ children }) {
 
 // Admin-only route gate. Used for /flow (bot UI demoted to admin-only
 // per the leaderboard focus audit 2026-05-12) and /admin. Falls back
-// to /record for non-admins so the URL-typed visit goes somewhere
+// to the Tape for non-admins so the URL-typed visit goes somewhere
 // sensible.
 function AdminOnly({ children }) {
   const { profile, loading } = useAuth()
   if (loading) return <LoadingScreen />
-  if (!profile?.is_admin) return <Navigate to="/record" replace />
+  if (!profile?.is_admin) return <Navigate to="/" replace />
   return children
 }
 
@@ -62,28 +60,12 @@ function ProtectedLayout() {
   return <Layout />
 }
 
-// Legacy /r/:slug → /u/:slug. Per the leaderboard focus-audit spec,
-// public profiles are at /u/:slug going forward; the old /r/:slug
-// route 301-redirects so existing share links don't break.
-function LegacyRecordRedirect() {
-  const { slug } = useParams()
-  return <Navigate to={`/u/${slug}`} replace />
-}
-
 export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
-          <Route
-            path="/u/:slug"
-            element={
-              <Suspense fallback={<LoadingScreen />}>
-                <PublicProfile />
-              </Suspense>
-            }
-          />
           <Route
             path="/leaderboard"
             element={
@@ -92,7 +74,10 @@ export default function App() {
               </Suspense>
             }
           />
-          <Route path="/r/:slug" element={<LegacyRecordRedirect />} />
+          {/* Public track-record profiles were cut from the MVP (2026-10-02).
+              Old share links land on the app instead of a 404. */}
+          <Route path="/u/:slug" element={<Navigate to="/" replace />} />
+          <Route path="/r/:slug" element={<Navigate to="/" replace />} />
           <Route
             path="/"
             element={
@@ -112,7 +97,7 @@ export default function App() {
               }
             />
             <Route path="log" element={<LogSignal />} />
-            <Route path="record" element={<TrackRecord />} />
+            <Route path="record" element={<Navigate to="/leaps" replace />} />
             <Route path="settings" element={<Settings />} />
             <Route path="markets" element={<Markets />} />
             <Route path="markets/king-board" element={<KingBoard />} />

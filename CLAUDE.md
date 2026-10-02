@@ -77,12 +77,22 @@ moves), `SignalDetail` (`maybeSingle`, formatted market cap, hash badge,
 legacy biotech rows render their drug/indication/catalyst-type fields
 conditionally on `signal_source='biotech_catalyst'`), `LogSignal` (4-step
 GEX-only flow: Trade Setup → Strike & Thesis → Pre-trade Checklist →
-Confirm), `Calendar`, `TrackRecord`, `Rules`, `Settings` (display name,
-slug, public toggle, risk fields, watchlist, sign-out), `OptionCalculator`
-(standalone calculator at `/calculator`), `PublicRecord` (no-auth
-`/r/:slug`), `Markets` (HeatPulse + Suggested Plays), `Flow`,
+Confirm), `Calendar`, `Rules`, `Settings` (display name, leaderboard username +
+visibility toggle, risk fields, watchlist, sign-out), `OptionCalculator`
+(standalone calculator at `/calculator`), `Markets` (HeatPulse +
+Suggested Plays), `Flow`,
 `Reasoning` (regime/confidence drift), `Glossary`, `LearnIndex` + 5 learn
-articles, `Admin` (owner-only — gated by `profiles.is_admin`).
+articles, `Admin` (owner-only — gated by `profiles.is_admin`),
+`Leaps` (`/leaps`, after-tax LEAPS + Exit Targets) and `LeapsOnboarding`
+(`/leaps/onboarding`).
+
+**Cut from the MVP (2026-10-02):** `TrackRecord` (`/record` → redirects
+to `/leaps`) and the public profile (`/u/:slug`, legacy `/r/:slug` →
+redirect to `/`), plus the Vercel edge middleware and `/api/og/[slug]`
+share-preview route that only served them. Signal hashing + GitHub
+anchoring are unchanged — the proof layer still exists, it just has no
+public page. The `profile-public-data` / `profile-view-track` edge
+functions are still deployed but unused by the app.
 Components: `LogOutcomeModal`, `StopLossCheck`, `StrikePriceCalculator`
 (40% premium cap, spreads only — no naked options, position size from
 2% rule), `SuggestedPlays`, `MarketPulse`, `OpenPositions`,
@@ -315,7 +325,8 @@ pharma-edge/
 │       ├── SignalDetail.jsx
 │       ├── LogSignal.jsx            ← 4-step GEX-only flow
 │       ├── Calendar.jsx
-│       ├── TrackRecord.jsx
+│       ├── Leaps.jsx                ← /leaps — after-tax LEAPS + Exit Targets
+│       ├── LeapsOnboarding.jsx      ← /leaps/onboarding
 │       ├── Rules.jsx
 │       ├── Settings.jsx
 │       ├── OptionCalculator.jsx
@@ -325,7 +336,6 @@ pharma-edge/
 │       ├── Glossary.jsx
 │       ├── LearnIndex.jsx
 │       ├── learn/                   ← 5 learn articles
-│       ├── PublicRecord.jsx         ← /r/:slug — no auth required
 │       └── Admin.jsx                ← Owner-only (is_admin = true)
 │
 ├── supabase/
@@ -379,7 +389,9 @@ VITE_VAPID_PUBLIC_KEY=
 VITE_PUBLIC_RECORD_REPO=
 ```
 
-**Vercel Edge Middleware + OG image** (set in Vercel → Project Settings →
+**Vercel Edge Middleware + OG image** — REMOVED 2026-10-02 with the
+public profile page; the vars below are no longer read and can be
+deleted from Vercel. (Kept here for history.) (set in Vercel → Project Settings →
 Environment Variables, scope: all environments):
 ```
 SUPABASE_URL=                  # same value as VITE_SUPABASE_URL

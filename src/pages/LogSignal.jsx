@@ -1151,15 +1151,13 @@ function PopVerificationModal({ open, popBp, onCancel, onConfirm }) {
           Verify entry POP
         </p>
         <h2 className="text-white text-lg font-semibold mt-1">
-          Lock {pct}% into the public record?
+          Lock {pct}% into the record?
         </h2>
       </div>
       <p className="text-subtle text-sm leading-relaxed">
         This number is part of the SHA-256 signal hash — once
-        submitted it can't be revised. It will appear on your
-        public track record at <span className="font-mono text-zinc-300">/r/:slug</span>{' '}
-        alongside the actual outcome, and rolls into your
-        calibration stats on the Record page.
+        submitted it can't be revised. It is locked into the signal's
+        hashed record alongside the actual outcome.
       </p>
       <p className="text-muted text-xs leading-relaxed">
         Confirm <span className="text-white font-semibold">{pct}%</span>{' '}
