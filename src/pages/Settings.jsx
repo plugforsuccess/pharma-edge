@@ -84,8 +84,18 @@ function taxFrom(t) {
     state_code: t?.state_code ?? '',
     lt_rate_override: pctStr(t?.lt_rate_override),
     st_rate_override: pctStr(t?.st_rate_override),
+    pr_act60_rate: t?.pr_act60_rate == null ? 'none' : String(Number(t.pr_act60_rate)),
   }
 }
+
+// Puerto Rico Act 60 resident individual investor decree. Decrees
+// obtained by 2026-12-31 pay 0% PR tax on post-move gains; applications
+// from 2027 pay 4% (Act 38-2026).
+const ACT60_OPTIONS = [
+  { value: 'none', label: 'No decree' },
+  { value: '0', label: '0% — decree by Dec 31, 2026' },
+  { value: '0.04', label: '4% — decree from 2027' },
+]
 
 function goalsFrom(t) {
   return {
@@ -220,7 +230,7 @@ export default function Settings() {
     if (dirty.tax || dirty.goals || dirty.accountSize) {
       const income = num(tax.annual_income)
       if (income == null || income < 0) errs.push('Tax profile: enter your expected taxable income (0 or more).')
-      if (!tax.state_code) errs.push('Tax profile: pick your state.')
+      if (!tax.state_code) errs.push('Tax profile: pick your residency.')
       for (const [k, label] of [['lt_rate_override', 'long-term'], ['st_rate_override', 'short-term']]) {
         const v = num(tax[k])
         if (v != null && !isValidTaxRate(v / 100)) errs.push(`Tax profile: CPA ${label} rate must be between 0% and 99%.`)
@@ -307,6 +317,7 @@ export default function Settings() {
         state_code: tax.state_code,
         lt_rate_override: lt == null ? null : lt / 100,
         st_rate_override: st == null ? null : st / 100,
+        pr_act60_rate: tax.state_code === 'PR' && tax.pr_act60_rate !== 'none' ? Number(tax.pr_act60_rate) : null,
         leaps_allocation_pct: num(goals.leaps_allocation_pct) / 100,
         target_pcts: targets,
         selected_target_pct: targets.includes(prevSel) ? prevSel : targets[0],
@@ -393,9 +404,19 @@ export default function Settings() {
         <div className="grid grid-cols-2 gap-2">
           <Select label="Filing status" value={tax.filing_status} onChange={(v) => setT('filing_status', v)}
             options={FILING_STATUSES.map((s) => ({ value: s.value, label: s.label }))} />
-          <Select label="State" value={tax.state_code} onChange={(v) => setT('state_code', v)}
+          <Select label="Residency" value={tax.state_code} onChange={(v) => setT('state_code', v)}
             options={[{ value: '', label: 'Select…' }, ...states.map((s) => ({ value: s.state_code, label: s.state_name }))]} />
         </div>
+        {tax.state_code === 'PR' && (
+          <>
+            <Select label="Act 60 decree" value={tax.pr_act60_rate} onChange={(v) => setT('pr_act60_rate', v)}
+              options={ACT60_OPTIONS} />
+            <p className="text-muted text-[10px] leading-relaxed -mt-1">
+              As a bona fide Puerto Rico resident, gains on appreciation after your move are excluded from federal
+              tax. Appreciation from before the move is still federally taxable.
+            </p>
+          </>
+        )}
         <Input label="Taxable income this year, before LEAPS gains" prefix="$" inputMode="decimal"
           value={tax.annual_income} onChange={(v) => setT('annual_income', v)} placeholder="150000" />
         <div className="grid grid-cols-2 gap-2">

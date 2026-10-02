@@ -499,3 +499,19 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
+
+/* Dropdowns: replace the native arrow (which hugs the right edge) with
+   a chevron inset from the border, and reserve room so long labels
+   never run under it. Unlayered on purpose so it wins over the
+   px-* padding utilities on each <select>. */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239a9aa1' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.875rem center;
+  background-size: 0.875rem;
+  padding-right: 2.5rem;
+  text-overflow: ellipsis;
+}
+select::-ms-expand { display: none; }

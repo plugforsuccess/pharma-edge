@@ -281,6 +281,27 @@ const round2 = (x) => Math.round(x * 100) / 100
   eq('invalid basis → no ladder', exitLadder({ basis: 0, currentValue: 1, rateAtGain: fixed(0.2) }).length, 0)
 }
 
+// ── Puerto Rico (IRC §933 + Act 60) ──────────────────────────────
+{
+  const PR = { state_code: 'PR', federal_exempt: true, ltcg_applies_to: 'income', ltcg_exclusion_pct: 0, stcg: null,
+    ordinary: { single: [[0, 0], [9000, 0.07], [25000, 0.14], [41500, 0.25], [61500, 0.33]] }, ltcg: { single: [[0, 0.15]] } }
+  const pr = deriveRates({ federal, state: PR, filingStatus: 'single', income: 800000, gain: 100000 })
+  eq('PR: no federal', pr.long_term.federal + pr.short_term.federal, 0)
+  eq('PR: no NIIT', pr.long_term.niit, 0)
+  eq('PR: LT at 15%', pr.long_term.total, 0.15)
+  eq('PR: ST at top PR bracket', pr.short_term.total, 0.33)
+  for (const rate of [0, 0.04]) {
+    const a = deriveRates({ federal, state: PR, filingStatus: 'single', income: 800000, gain: 100000, act60Rate: rate })
+    eq(`PR Act 60 ${rate}: LT`, a.long_term.total, rate)
+    eq(`PR Act 60 ${rate}: ST`, a.short_term.total, rate)
+  }
+  eq('Act 60 ignored outside PR', deriveRates({ federal, state: TX, filingStatus: 'single', income: 800000, act60Rate: 0 }).long_term.total, 0.238)
+  // Live value: $30k → $60k long-term in PR, no decree → 15% on the gain.
+  const live = positionAfterTax({ basis: 30000, currentValue: 60000, purchaseDate: '2025-01-15', asOf: '2026-10-02',
+    rateForGain: makeRateResolver({ federal, state: PR, filingStatus: 'single', income: 800000 }) })
+  eq('PR after-tax value', Math.round(live.after_tax_value), 55500)
+}
+
 // ── Validation ───────────────────────────────────────────────────
 {
   eq('rate 0 valid', isValidTaxRate(0), true)

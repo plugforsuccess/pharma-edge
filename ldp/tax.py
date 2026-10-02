@@ -58,6 +58,9 @@ class StateTax:
     ltcg_exclusion_pct: float = 0.0
     stcg: Schedule | None = None
     confidence: str = "medium"
+    # Gains excluded from US federal tax + NIIT for bona fide residents
+    # (Puerto Rico, IRC §933 — post-move appreciation only).
+    federal_exempt: bool = False
 
 
 @dataclass(frozen=True)
@@ -81,6 +84,7 @@ class TaxYear:
                 ltcg_exclusion_pct=float(r.get("ltcg_exclusion_pct") or 0),
                 stcg=r.get("stcg"),
                 confidence=r.get("confidence") or "medium",
+                federal_exempt=bool(r.get("federal_exempt", False)),
             )
             for r in state_rows
         }
@@ -124,11 +128,14 @@ class TaxProfile:
     # CPA-provided combined rates; replace the computed figure entirely.
     lt_rate_override: float | None = None
     st_rate_override: float | None = None
+    # Puerto Rico Act 60 decree rate on PR-source gains (0 for decrees by
+    # 2026-12-31, 0.04 for 2027+). None = no decree.
+    pr_act60_rate: float | None = None
 
     def __post_init__(self) -> None:
         if self.filing_status not in ("single", "mfj", "mfs", "hoh"):
             raise ValueError(f"unknown filing status: {self.filing_status}")
-        for r in (self.lt_rate_override, self.st_rate_override):
+        for r in (self.lt_rate_override, self.st_rate_override, self.pr_act60_rate):
             if r is not None and not (0 <= r <= 0.99):
                 raise ValueError("rate overrides must be between 0% and 99%")
         if self.income < 0:
@@ -217,6 +224,20 @@ def tax_on_gains(profile: TaxProfile, ty: TaxYear, *, short_term: float = 0.0, l
 
     fs = profile.filing_status
     inc = profile.income
+    st_row = ty.states.get(profile.state_code or "")
+
+    if st_row is not None and st_row.federal_exempt:
+        # Bona fide Puerto Rico resident: gains on post-move appreciation
+        # are PR-source and excluded from federal tax and NIIT (§933).
+        if profile.pr_act60_rate is not None:
+            return GainTax(gain, st, lt, 0.0, 0.0, gain * profile.pr_act60_rate)
+        ordinary = _for_status(st_row.ordinary, fs)
+        state_tax = stacked_tax(_for_status(st_row.stcg, fs) if st_row.stcg else ordinary, inc, st)
+        if st_row.ltcg:
+            state_tax += stacked_tax(_for_status(st_row.ltcg, fs), inc + st, lt)
+        else:
+            state_tax += stacked_tax(ordinary, inc + st, lt * (1 - st_row.ltcg_exclusion_pct))
+        return GainTax(gain, st, lt, 0.0, 0.0, state_tax)
 
     federal = stacked_tax(_for_status(ty.ordinary, fs), inc, st)
     federal += stacked_tax(_for_status(ty.ltcg, fs), inc + st, lt)
@@ -231,7 +252,6 @@ def tax_on_gains(profile: TaxProfile, ty: TaxYear, *, short_term: float = 0.0, l
     niit = _niit(magi + gain, nii_before + gain) - _niit(magi, nii_before)
 
     state_tax = 0.0
-    st_row = ty.states.get(profile.state_code or "")
     if st_row is not None:
         ordinary = _for_status(st_row.ordinary, fs)
         st_sched = _for_status(st_row.stcg, fs) if st_row.stcg else ordinary
@@ -315,6 +335,10 @@ def marginal_breakdown(profile: TaxProfile, ty: TaxYear, gain: float = 0.0) -> d
         st_lt = marginal_rate(_for_status(st_row.ltcg, fs), max(0.0, gain) if st_row.ltcg_applies_to == "gain" else top)
     fed_lt = marginal_rate(_for_status(ty.ltcg, fs), top)
     fed_st = marginal_rate(_for_status(ty.ordinary, fs), top)
+    if st_row and st_row.federal_exempt:
+        fed_lt = fed_st = niit = 0.0
+        if profile.pr_act60_rate is not None:
+            st_lt = st_ord = profile.pr_act60_rate
     return {
         "long_term": {"federal": fed_lt, "niit": niit, "state": st_lt, "total": round(fed_lt + niit + st_lt, 6)},
         "short_term": {"federal": fed_st, "niit": niit, "state": st_ord, "total": round(fed_st + niit + st_ord, 6)},

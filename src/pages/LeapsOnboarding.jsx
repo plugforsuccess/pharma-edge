@@ -102,7 +102,7 @@ export default function LeapsOnboarding() {
       const income = num(form.annual_income)
       if (!form.filing_status) return 'Pick your filing status.'
       if (income == null || income < 0) return 'Enter your expected taxable income (0 or more).'
-      if (!form.state_code) return 'Pick your state.'
+      if (!form.state_code) return 'Pick your residency.'
     }
     if (i === 3 && !DISCLOSURES.every((d) => accepted[d.id])) return 'Please read and accept each statement.'
     return ''
@@ -228,7 +228,7 @@ export default function LeapsOnboarding() {
             <input inputMode="decimal" value={form.annual_income} onChange={(e) => set('annual_income', e.target.value)}
               placeholder="150000" className={inputCls} />
           </Field>
-          <Field label="State of residence">
+          <Field label="Residency">
             <select value={form.state_code} onChange={(e) => set('state_code', e.target.value)} className={inputCls}>
               <option value="">Select…</option>
               {states.map((s) => <option key={s.state_code} value={s.state_code}>{s.state_name}</option>)}
@@ -246,7 +246,7 @@ export default function LeapsOnboarding() {
             <Row label="Time horizon" value={`${num(form.horizon_years)} yr`} />
             <Row label="Filing status" value={FILING_STATUSES.find((s) => s.value === form.filing_status)?.label} />
             <Row label="Taxable income" value={`$${(num(form.annual_income) ?? 0).toLocaleString()}`} />
-            <Row label="State" value={states.find((s) => s.state_code === form.state_code)?.state_name ?? form.state_code} />
+            <Row label="Residency" value={states.find((s) => s.state_code === form.state_code)?.state_name ?? form.state_code} />
           </div>
 
           <label className="flex items-start gap-3 mb-4 bg-card border border-border rounded-xl p-4 cursor-pointer">

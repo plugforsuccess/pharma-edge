@@ -141,3 +141,42 @@ def test_user_rates_bundle():
     assert r.long_term == pytest.approx(0.2879) and r.short_term == pytest.approx(0.4579)
     assert r.for_character("section_1256") == pytest.approx(0.6 * 0.2879 + 0.4 * 0.4579)
     assert r.breakdown["tax_year"] == 2026
+
+
+# ── Puerto Rico (bona fide resident, IRC §933) ─────────────────────
+
+def test_puerto_rico_no_federal_or_niit():
+    p = prof(state_code="PR")
+    lt = tax_on_gain(p, TY, 100_000, "long_term")
+    st = tax_on_gain(p, TY, 100_000, "short_term")
+    assert lt.federal == 0 and lt.niit == 0
+    assert lt.blended_rate == pytest.approx(0.15)          # PR preferential LTCG
+    assert st.federal == 0 and st.niit == 0
+    assert st.blended_rate == pytest.approx(0.33)          # top PR ordinary bracket
+
+
+def test_puerto_rico_ordinary_brackets_stack():
+    # $20k income + $10k ST gain: 5k at 7%, 5k at 14%.
+    t = tax_on_gain(prof(state_code="PR", income=20_000), TY, 10_000, "short_term")
+    assert t.state == pytest.approx(5_000 * 0.07 + 5_000 * 0.14)
+
+
+@pytest.mark.parametrize("rate", [0.0, 0.04])
+def test_puerto_rico_act_60_decree_rate(rate):
+    p = prof(state_code="PR", pr_act60_rate=rate)
+    for ch in ("long_term", "short_term", "section_1256"):
+        t = tax_on_gain(p, TY, 100_000, ch)
+        assert t.federal == 0 and t.niit == 0
+        assert t.blended_rate == pytest.approx(rate)
+
+
+def test_act_60_ignored_outside_puerto_rico():
+    t = tax_on_gain(prof(state_code="TX", pr_act60_rate=0.0), TY, 100_000, "long_term")
+    assert t.blended_rate == pytest.approx(0.238)
+
+
+def test_puerto_rico_marginal_breakdown():
+    m = marginal_breakdown(prof(state_code="PR"), TY)
+    assert m["long_term"] == {"federal": 0.0, "niit": 0.0, "state": 0.15, "total": 0.15}
+    m60 = marginal_breakdown(prof(state_code="PR", pr_act60_rate=0.04), TY)
+    assert m60["long_term"]["total"] == pytest.approx(0.04) and m60["short_term"]["total"] == pytest.approx(0.04)

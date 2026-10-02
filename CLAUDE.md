@@ -782,6 +782,16 @@ value, holding period) and must pass before any edit to that file lands.
   basis = premium + strike × shares, `purchase_date` = exercise date,
   `exercised_from_id` → the call. The option's clock never carries
   forward. Mirrors `exerciseCall()` in `afterTax.js` — keep in sync.
+- **Puerto Rico** is a residency option (`state_tax_rates` row `PR`,
+  `federal_exempt = true`). Bona fide PR residents exclude post-move
+  gains from federal tax (IRC §933), so federal + NIIT are 0 and only
+  PR tax applies. `leaps_tax_profiles.pr_act60_rate` holds an Act 60
+  decree rate (0 = decree by 2026-12-31, 0.04 = 2027+, NULL = none),
+  which replaces the PR schedule. Both `afterTax.js` and `ldp/tax.py`
+  honor it. The PR row is `confidence = 'low'` (15% LTCG rate and MFJ
+  upper thresholds not re-verified); pre-move appreciation staying
+  federally taxable is shown as a caveat, not modeled. UI says
+  "Residency", not "State".
 - Per-position values are never netted; the portfolio card shows a
   netted figure labeled as an estimate.
 - Every tax figure in the UI is labeled an estimate with a

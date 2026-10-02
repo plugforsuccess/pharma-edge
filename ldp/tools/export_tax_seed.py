@@ -16,13 +16,20 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-MIGRATION = ROOT / "supabase" / "migrations" / "20261002000000_after_tax_leaps.sql"
+MIGRATIONS_DIR = ROOT / "supabase" / "migrations"
+# Every migration that seeds tax figures, in apply order.
+MIGRATIONS = [
+    MIGRATIONS_DIR / "20261002000000_after_tax_leaps.sql",
+    MIGRATIONS_DIR / "20261002030000_puerto_rico_tax.sql",
+]
+MIGRATION = MIGRATIONS[0]  # back-compat for callers that read one file
 DATA_DIR = ROOT / "ldp" / "data"
 
 _JSONB = r"(NULL|'[^']*'::jsonb)"
 _STATE_ROW = re.compile(
     r"^\s*\((\d{4}), '([A-Z]{2})', '((?:[^']|'')*)', '(\w+)', " + _JSONB + r", " + _JSONB
-    + r", '(\w+)', ([\d.]+), " + _JSONB + r", '(\w+)', (NULL|'(?:[^']|'')*'), (NULL|'(?:[^']|'')*')\)[,]?\s*$",
+    + r", '(\w+)', ([\d.]+), " + _JSONB + r", '(\w+)', (NULL|'(?:[^']|'')*'), (NULL|'(?:[^']|'')*')"
+    + r"(?:, (true|false))?\)[,]?\s*$",
     re.M,
 )
 _FED = re.compile(
@@ -66,6 +73,7 @@ def parse_migration(sql: str) -> dict[int, dict]:
             "stcg": _j(m.group(9)),
             "confidence": m.group(10),
             "source_url": _t(m.group(11)),
+            "federal_exempt": m.group(13) == "true",
         })
     return out
 
@@ -74,8 +82,13 @@ def render(year_data: dict) -> str:
     return json.dumps(year_data, indent=1, sort_keys=True) + "\n"
 
 
+def parse_all() -> dict[int, dict]:
+    """Merge the tax seed across every seeding migration."""
+    return parse_migration("\n".join(p.read_text() for p in MIGRATIONS))
+
+
 def main() -> int:
-    years = parse_migration(MIGRATION.read_text())
+    years = parse_all()
     if not years:
         print("no tax seed found in migration", file=sys.stderr)
         return 1

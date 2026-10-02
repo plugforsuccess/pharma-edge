@@ -18,6 +18,7 @@
 //     ltcg_applies_to: 'income' | 'gain',   // WA taxes the gain itself
 //     ltcg_exclusion_pct: 0,                // e.g. 0.5 = half of LTCG excluded
 //     stcg: null | { single: [...] },       // MA taxes ST gains at 8.5%, not 5%
+//     federal_exempt: false,                // PR: gains excluded from federal tax + NIIT
 //   }
 //
 // Brackets are [lower_bound, rate] pairs sorted ascending; the first
@@ -137,7 +138,7 @@ function forStatus(table, filingStatus) {
 // AR 50% …) and Washington's gain-only tax above its deduction can't be
 // expressed as one flat number — a $300k WA gain pays 7% on only the
 // $22k above $278k (≈0.5% effective), not 7% on all of it.
-export function deriveRates({ federal, state, filingStatus, income, gain = 0 }) {
+export function deriveRates({ federal, state, filingStatus, income, gain = 0, act60Rate = null }) {
   const g = Math.max(0, Number(gain) || 0)
   const stacked = Math.max(0, Number(income) || 0) + g
 
@@ -156,6 +157,22 @@ export function deriveRates({ federal, state, filingStatus, income, gain = 0 }) 
       ? effectiveOnGain(forStatus(state.ltcg, filingStatus), inc, g, state.ltcg_applies_to)
       : effectiveOnGain(ordinary, inc, g, 'income') * (1 - (Number(state.ltcg_exclusion_pct) || 0))
     stateSt = effectiveOnGain(state.stcg ? forStatus(state.stcg, filingStatus) : ordinary, inc, g, 'income')
+  }
+
+  // Bona fide Puerto Rico resident (IRC §933): gains on post-move
+  // appreciation are PR-source and excluded from federal tax + NIIT.
+  // An Act 60 decree replaces PR's own tax with the decree rate.
+  if (state?.federal_exempt) {
+    if (act60Rate != null && isValidTaxRate(act60Rate)) {
+      stateLt = act60Rate
+      stateSt = act60Rate
+    }
+    return {
+      stacked_income: stacked,
+      federal_exempt: true,
+      long_term: { federal: 0, niit: 0, state: r4(stateLt), total: r4(stateLt) },
+      short_term: { federal: 0, niit: 0, state: r4(stateSt), total: r4(stateSt) },
+    }
   }
 
   return {
@@ -189,9 +206,9 @@ export function applyRateOverride(rates, override) {
 // rateForGain(gain) → { long_term: { total }, short_term: { total } }
 // Builds it from the user's tax profile so callers don't repeat the
 // federal/state/override plumbing.
-export function makeRateResolver({ federal, state, filingStatus, income, override }) {
+export function makeRateResolver({ federal, state, filingStatus, income, override, act60Rate = null }) {
   return (gain) =>
-    applyRateOverride(deriveRates({ federal, state, filingStatus, income, gain }), override)
+    applyRateOverride(deriveRates({ federal, state, filingStatus, income, gain, act60Rate }), override)
 }
 
 // Gross gain needed to keep `afterTaxTarget` after tax. The rate depends

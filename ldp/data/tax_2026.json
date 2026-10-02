@@ -2,6 +2,7 @@
  "state_tax_rates": [
   {
    "confidence": "high",
+   "federal_exempt": false,
    "kind": "progressive",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -57,6 +58,7 @@
   },
   {
    "confidence": "high",
+   "federal_exempt": false,
    "kind": "none",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -76,6 +78,7 @@
   },
   {
    "confidence": "medium",
+   "federal_exempt": false,
    "kind": "flat",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -95,6 +98,7 @@
   },
   {
    "confidence": "medium",
+   "federal_exempt": false,
    "kind": "progressive",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -130,6 +134,7 @@
   },
   {
    "confidence": "medium",
+   "federal_exempt": false,
    "kind": "progressive",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -227,6 +232,7 @@
   },
   {
    "confidence": "medium",
+   "federal_exempt": false,
    "kind": "flat",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -246,6 +252,7 @@
   },
   {
    "confidence": "medium",
+   "federal_exempt": false,
    "kind": "progressive",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -349,6 +356,7 @@
   },
   {
    "confidence": "high",
+   "federal_exempt": false,
    "kind": "progressive",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -392,6 +400,7 @@
   },
   {
    "confidence": "high",
+   "federal_exempt": false,
    "kind": "progressive",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -435,6 +444,7 @@
   },
   {
    "confidence": "high",
+   "federal_exempt": false,
    "kind": "none",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -454,6 +464,7 @@
   },
   {
    "confidence": "high",
+   "federal_exempt": false,
    "kind": "flat",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -473,6 +484,7 @@
   },
   {
    "confidence": "medium",
+   "federal_exempt": false,
    "kind": "progressive",
    "ltcg": {
     "mfj": [
@@ -687,6 +699,7 @@
   },
   {
    "confidence": "medium",
+   "federal_exempt": false,
    "kind": "flat",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -706,6 +719,7 @@
   },
   {
    "confidence": "high",
+   "federal_exempt": false,
    "kind": "flat",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -725,6 +739,7 @@
   },
   {
    "confidence": "high",
+   "federal_exempt": false,
    "kind": "flat",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -744,6 +759,7 @@
   },
   {
    "confidence": "high",
+   "federal_exempt": false,
    "kind": "flat",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -763,6 +779,7 @@
   },
   {
    "confidence": "medium",
+   "federal_exempt": false,
    "kind": "progressive",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -796,6 +813,7 @@
   },
   {
    "confidence": "high",
+   "federal_exempt": false,
    "kind": "flat",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -815,6 +833,7 @@
   },
   {
    "confidence": "high",
+   "federal_exempt": false,
    "kind": "flat",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -834,6 +853,7 @@
   },
   {
    "confidence": "high",
+   "federal_exempt": false,
    "kind": "progressive",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -901,6 +921,7 @@
   },
   {
    "confidence": "high",
+   "federal_exempt": false,
    "kind": "progressive",
    "ltcg": {
     "hoh": [
@@ -1318,6 +1339,7 @@
   },
   {
    "confidence": "medium",
+   "federal_exempt": false,
    "kind": "flat",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -1352,6 +1374,7 @@
   },
   {
    "confidence": "high",
+   "federal_exempt": false,
    "kind": "flat",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -1371,6 +1394,7 @@
   },
   {
    "confidence": "high",
+   "federal_exempt": false,
    "kind": "progressive",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -1438,6 +1462,7 @@
   },
   {
    "confidence": "medium",
+   "federal_exempt": false,
    "kind": "flat",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -1461,6 +1486,7 @@
   },
   {
    "confidence": "medium",
+   "federal_exempt": false,
    "kind": "progressive",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -1515,6 +1541,7 @@
   },
   {
    "confidence": "high",
+   "federal_exempt": false,
    "kind": "progressive",
    "ltcg": {
     "hoh": [
@@ -1589,6 +1616,7 @@
   },
   {
    "confidence": "medium",
+   "federal_exempt": false,
    "kind": "progressive",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -1630,6 +1658,7 @@
   },
   {
    "confidence": "high",
+   "federal_exempt": false,
    "kind": "none",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -1649,6 +1678,7 @@
   },
   {
    "confidence": "high",
+   "federal_exempt": false,
    "kind": "none",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -1668,6 +1698,7 @@
   },
   {
    "confidence": "high",
+   "federal_exempt": false,
    "kind": "progressive",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -1809,6 +1840,7 @@
   },
   {
    "confidence": "medium",
+   "federal_exempt": false,
    "kind": "progressive",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -1926,6 +1958,7 @@
   },
   {
    "confidence": "high",
+   "federal_exempt": false,
    "kind": "progressive",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -2053,6 +2086,7 @@
   },
   {
    "confidence": "high",
+   "federal_exempt": false,
    "kind": "flat",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -2072,6 +2106,7 @@
   },
   {
    "confidence": "medium",
+   "federal_exempt": false,
    "kind": "progressive",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -2113,6 +2148,7 @@
   },
   {
    "confidence": "high",
+   "federal_exempt": false,
    "kind": "flat",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -2136,6 +2172,7 @@
   },
   {
    "confidence": "medium",
+   "federal_exempt": false,
    "kind": "progressive",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -2203,6 +2240,7 @@
   },
   {
    "confidence": "medium",
+   "federal_exempt": false,
    "kind": "progressive",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -2252,6 +2290,7 @@
   },
   {
    "confidence": "high",
+   "federal_exempt": false,
    "kind": "flat",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -2271,6 +2310,7 @@
   },
   {
    "confidence": "medium",
+   "federal_exempt": false,
    "kind": "progressive",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -2298,6 +2338,7 @@
   },
   {
    "confidence": "medium",
+   "federal_exempt": false,
    "kind": "progressive",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -2321,6 +2362,7 @@
   },
   {
    "confidence": "high",
+   "federal_exempt": false,
    "kind": "none",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -2340,6 +2382,7 @@
   },
   {
    "confidence": "high",
+   "federal_exempt": false,
    "kind": "none",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -2359,6 +2402,7 @@
   },
   {
    "confidence": "high",
+   "federal_exempt": false,
    "kind": "none",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -2378,6 +2422,7 @@
   },
   {
    "confidence": "high",
+   "federal_exempt": false,
    "kind": "flat",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -2397,6 +2442,7 @@
   },
   {
    "confidence": "low",
+   "federal_exempt": false,
    "kind": "progressive",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -2446,6 +2492,7 @@
   },
   {
    "confidence": "high",
+   "federal_exempt": false,
    "kind": "progressive",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -2477,6 +2524,7 @@
   },
   {
    "confidence": "medium",
+   "federal_exempt": false,
    "kind": "none",
    "ltcg": {
     "single": [
@@ -2511,6 +2559,7 @@
   },
   {
    "confidence": "medium",
+   "federal_exempt": false,
    "kind": "progressive",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -2568,6 +2617,7 @@
   },
   {
    "confidence": "medium",
+   "federal_exempt": false,
    "kind": "progressive",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -2635,6 +2685,7 @@
   },
   {
    "confidence": "high",
+   "federal_exempt": false,
    "kind": "none",
    "ltcg": null,
    "ltcg_applies_to": "income",
@@ -2650,6 +2701,71 @@
    "source_url": "https://taxfoundation.org/data/all/state/state-income-tax-rates-2026/",
    "state_code": "WY",
    "state_name": "Wyoming",
+   "stcg": null
+  },
+  {
+   "confidence": "low",
+   "federal_exempt": true,
+   "kind": "progressive",
+   "ltcg": {
+    "single": [
+     [
+      0,
+      0.15
+     ]
+    ]
+   },
+   "ltcg_applies_to": "income",
+   "ltcg_exclusion_pct": 0.0,
+   "ordinary": {
+    "mfj": [
+     [
+      0,
+      0
+     ],
+     [
+      18000,
+      0.07
+     ],
+     [
+      50000,
+      0.14
+     ],
+     [
+      83000,
+      0.25
+     ],
+     [
+      123000,
+      0.33
+     ]
+    ],
+    "single": [
+     [
+      0,
+      0
+     ],
+     [
+      9000,
+      0.07
+     ],
+     [
+      25000,
+      0.14
+     ],
+     [
+      41500,
+      0.25
+     ],
+     [
+      61500,
+      0.33
+     ]
+    ]
+   },
+   "source_url": "https://www.dlapiper.com/insights/publications/2026/03/puerto-rico-individual-resident-investor-tax-benefits-extended-through-2055",
+   "state_code": "PR",
+   "state_name": "Puerto Rico",
    "stcg": null
   }
  ],

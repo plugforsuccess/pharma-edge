@@ -30,6 +30,7 @@ const DEFAULT_PROFILE = {
   selected_target_pct: 0.5,
   lt_rate_override: null,
   st_rate_override: null,
+  pr_act60_rate: null,
 }
 
 const usd = (n) =>
@@ -106,11 +107,12 @@ export default function Leaps() {
     [p.lt_rate_override, p.st_rate_override],
   )
   const ready = !!federal && (!!state || (override.long_term != null && override.short_term != null))
+  const act60Rate = p.pr_act60_rate == null ? null : Number(p.pr_act60_rate)
 
   const rateForGain = useMemo(() => {
     if (!federal) return null
-    return makeRateResolver({ federal, state, filingStatus: p.filing_status, income: Number(p.annual_income) || 0, override })
-  }, [federal, state, p.filing_status, p.annual_income, override])
+    return makeRateResolver({ federal, state, filingStatus: p.filing_status, income: Number(p.annual_income) || 0, override, act60Rate })
+  }, [federal, state, p.filing_status, p.annual_income, override, act60Rate])
 
   const portfolio = Number(p.portfolio_size) || 0
   const table = useMemo(() => {
@@ -173,9 +175,9 @@ export default function Leaps() {
   const totalGain = Math.max(0, results.reduce((s, r) => s + (r.calc?.gain ?? 0), 0))
   const breakdown = useMemo(() => {
     if (!federal) return null
-    const derived = deriveRates({ federal, state, filingStatus: p.filing_status, income: Number(p.annual_income) || 0, gain: totalGain })
+    const derived = deriveRates({ federal, state, filingStatus: p.filing_status, income: Number(p.annual_income) || 0, gain: totalGain, act60Rate })
     return applyRateOverride(derived, override)
-  }, [federal, state, p.filing_status, p.annual_income, totalGain, override])
+  }, [federal, state, p.filing_status, p.annual_income, totalGain, override, act60Rate])
 
   const saveProfile = useCallback(async (next) => {
     const row = { ...DEFAULT_PROFILE, ...profile, ...next, user_id: user.id }
@@ -264,7 +266,7 @@ export default function Leaps() {
           {breakdown && ready && <RateBreakdown rates={breakdown} state={state} taxYear={federal.tax_year} show1256={has1256} />}
 
           {!ready && profile && (
-            <Banner tone="amber">Pick your state in Settings (or enter both CPA rates) to see after-tax figures.</Banner>
+            <Banner tone="amber">Pick your residency in Settings (or enter both CPA rates) to see after-tax figures.</Banner>
           )}
 
           {ready && table && (
@@ -429,7 +431,7 @@ function TaxSummaryCard({ profile, hasProfile, states }) {
           <Stat label={`LEAPS basis (${pct(Number(profile.leaps_allocation_pct), 0)})`} value={usd(basis)} />
           <Stat label="Filing status" value={status} />
           <Stat label="Income before LEAPS" value={usd(Number(profile.annual_income))} />
-          <Stat label="State" value={stateName} />
+          <Stat label="Residency" value={stateName} />
         </div>
       </div>
     </div>
@@ -481,7 +483,8 @@ function RateBreakdown({ rates, state, taxYear, show1256 }) {
         so these update as position values change. The state part is the
         effective rate on the gain (after any capital-gains exclusion or
         threshold). Each target row below uses the rate at that target's gain.
-        {state?.confidence === 'low' && ' Your state’s figures are flagged for review — consider entering a CPA rate.'}
+        {rates.federal_exempt && ' As a bona fide Puerto Rico resident, gains on appreciation after your move are excluded from federal tax; appreciation from before the move is still federally taxable.'}
+        {state?.confidence === 'low' && ' These residency figures are flagged for review — consider entering a CPA rate.'}
       </p>
     </div>
   )
