@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { Landmark, Plus, Pencil, Trash2, Check, X, AlertTriangle, Info, ArrowRightLeft, ShieldCheck } from 'lucide-react'
 import clsx from 'clsx'
 import { supabase } from '../lib/supabase'
@@ -8,7 +8,7 @@ import {
   FILING_STATUSES, DEFAULT_TARGET_PCTS, makeRateResolver, deriveRates,
   applyRateOverride, targetTable, positionAfterTax, portfolioSummary,
   isValidTaxRate, todayYmd, holdingPeriod, INSTRUMENT_TYPES, suggestInstrumentType, exerciseCall,
-  blended1256Rate,
+  blended1256Rate, exitLadder, rateAtGainFor, DEFAULT_EXIT_LADDER,
 } from '../utils/afterTax'
 
 // LEAPS — after-tax targets + live after-tax value.
@@ -53,18 +53,23 @@ export default function Leaps() {
   const [positions, setPositions] = useState(null)
   const [loadError, setLoadError] = useState('')
   const [editingProfile, setEditingProfile] = useState(false)
-  const [adding, setAdding] = useState(false)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [adding, setAdding] = useState(searchParams.get('add') === '1')
+  // Exit-ladder settings live on the engine's risk profile (service-role
+  // written); fall back to the default 1x/2x/3x after-tax ladder.
+  const [ladderCfg, setLadderCfg] = useState({ targets: DEFAULT_EXIT_LADDER, fractions: null })
 
   useEffect(() => {
     if (!user?.id) return
     let cancelled = false
     ;(async () => {
       try {
-        const [fed, prof, pos] = await Promise.all([
+        const [fed, prof, pos, risk] = await Promise.all([
           supabase.from('tax_year_config').select('*').eq('is_current', true).maybeSingle(),
           supabase.from('leaps_tax_profiles').select('*').eq('user_id', user.id).maybeSingle(),
           supabase.from('leaps_positions').select('*').eq('user_id', user.id)
             .is('closed_at', null).order('purchase_date', { ascending: true }),
+          supabase.from('ldp_risk_profiles').select('exit_ladder, rung_fractions').eq('user_id', user.id).maybeSingle(),
         ])
         if (cancelled) return
         if (fed.error || prof.error || pos.error) {
@@ -74,6 +79,11 @@ export default function Leaps() {
         setFederal(fed.data ?? null)
         setProfile(prof.data ?? null)
         setPositions(pos.data ?? [])
+        const ladder = (risk.data?.exit_ladder ?? []).map(Number).filter((t) => t > 0)
+        if (ladder.length) {
+          const fr = risk.data?.rung_fractions?.map(Number)
+          setLadderCfg({ targets: ladder, fractions: fr?.length === ladder.length ? fr : null })
+        }
         if (fed.data) {
           const st = await supabase.from('state_tax_rates').select('*')
             .eq('tax_year', fed.data.tax_year).order('state_name')
@@ -118,11 +128,17 @@ export default function Leaps() {
   const selectedRow = table?.rows.find((r) => r.target_pct === Number(p.selected_target_pct)) ?? null
   const asOf = todayYmd()
 
+  const ladderFor = useCallback((basis, currentValue, character, contracts) => {
+    if (!rateForGain) return []
+    return exitLadder({
+      basis, currentValue, contracts, targets: ladderCfg.targets, fractions: ladderCfg.fractions,
+      rateAtGain: rateAtGainFor(character, rateForGain),
+    })
+  }, [rateForGain, ladderCfg])
+
   const results = useMemo(() => {
     if (!rateForGain || !positions) return []
-    return positions.map((pos) => ({
-      pos,
-      calc: positionAfterTax({
+    return positions.map((pos) => withLadder(pos, positionAfterTax({
         basis: Number(pos.cost_basis),
         currentValue: Number(pos.current_value),
         purchaseDate: pos.purchase_date,
@@ -132,9 +148,22 @@ export default function Leaps() {
         targetMultiple: pos.instrument_type === 'index_option_1256'
           ? selectedRow?.section_1256.required_multiple
           : selectedRow?.long_term.required_multiple,
-      }),
-    }))
-  }, [positions, rateForGain, asOf, selectedRow])
+      })))
+
+    function withLadder(pos, calc) {
+      if (!calc) return { pos, calc, ladder: [], ladderLongTerm: null }
+      const contracts = pos.instrument_type === 'stock' ? null : (Number(pos.contracts) || null)
+      return {
+        pos,
+        calc,
+        ladder: ladderFor(calc.basis, calc.current_value, calc.tax_character, contracts),
+        // While short-term, show where each rung sits once it goes long-term.
+        ladderLongTerm: calc.tax_character === 'short_term'
+          ? ladderFor(calc.basis, calc.current_value, 'long_term', contracts)
+          : null,
+      }
+    }
+  }, [positions, rateForGain, asOf, selectedRow, ladderFor])
 
   const summary = useMemo(() => {
     if (!rateForGain || results.length === 0) return null
@@ -187,6 +216,13 @@ export default function Leaps() {
     if (error) return error.message
     setPositions((cur) => [...cur.filter((x) => x.id !== pos.id), data])
     return null
+  }
+
+  function dropAddParam() {
+    if (searchParams.has('add')) {
+      searchParams.delete('add')
+      setSearchParams(searchParams, { replace: true })
+    }
   }
 
   const has1256 = (positions ?? []).some((x) => x.instrument_type === 'index_option_1256')
@@ -265,26 +301,30 @@ export default function Leaps() {
 
               {adding && (
                 <PositionForm
-                  onCancel={() => setAdding(false)}
+                  preview={(f) => previewLadder(f, ladderFor)}
+                  onCancel={() => { setAdding(false); dropAddParam() }}
                   onSave={async (row) => {
                     const err = await savePosition(row)
-                    if (!err) setAdding(false)
+                    if (!err) { setAdding(false); dropAddParam() }
                     return err
                   }}
                 />
               )}
 
               {results.length === 0 && !adding && (
-                <div className="text-xs text-muted py-6 text-center border border-dashed border-border rounded-xl">
-                  No LEAPS tracked yet.
+                <div className="text-xs text-muted py-6 px-4 text-center border border-dashed border-border rounded-xl">
+                  No LEAPS tracked yet. Add a position to generate its after-tax exit targets.
                 </div>
               )}
 
-              {results.map(({ pos, calc }) => (
+              {results.map(({ pos, calc, ladder, ladderLongTerm }) => (
                 <PositionCard
                   key={pos.id}
                   pos={pos}
                   calc={calc}
+                  ladder={ladder}
+                  ladderLongTerm={ladderLongTerm}
+                  previewFor={(f) => previewLadder(f, ladderFor)}
                   selectedTargetPct={Number(p.selected_target_pct)}
                   onSave={(row) => savePosition(row, pos.id)}
                   onExercise={(args) => exercisePosition(pos, args)}
@@ -611,7 +651,7 @@ function TargetTable({ table, selected, onSelect, show1256 }) {
 
 const inputCls = 'w-full min-h-[44px] bg-bg border border-border rounded px-3 py-2 text-sm font-mono-tab focus:outline-none focus:ring-1 focus:ring-amber-400/40'
 
-function PositionForm({ initial, onSave, onCancel }) {
+function PositionForm({ initial, onSave, onCancel, preview }) {
   const [f, setF] = useState(() => ({
     ticker: initial?.ticker ?? '',
     instrument_type: initial?.instrument_type ?? 'equity_option',
@@ -693,6 +733,7 @@ function PositionForm({ initial, onSave, onCancel }) {
         <Field label="Total cost basis ($)"><input inputMode="decimal" value={f.cost_basis} onChange={set('cost_basis')} className={inputCls} /></Field>
         <Field label="Current value ($)"><input inputMode="decimal" value={f.current_value} onChange={set('current_value')} className={inputCls} /></Field>
       </div>
+      {preview && <LadderPreview rungs={preview(f)} />}
       {f.instrument_type === 'index_option_1256' && (
         <p className="mt-3 text-[10px] text-muted leading-relaxed">
           §1256 contracts are taxed 60% long-term / 40% short-term however long
@@ -713,13 +754,14 @@ function PositionForm({ initial, onSave, onCancel }) {
   )
 }
 
-function PositionCard({ pos, calc, selectedTargetPct, onSave, onDelete, onExercise }) {
+function PositionCard({ pos, calc, ladder, ladderLongTerm, previewFor, selectedTargetPct, onSave, onDelete, onExercise }) {
   const [editing, setEditing] = useState(false)
   const [exercising, setExercising] = useState(false)
   if (editing) {
     return (
       <PositionForm
         initial={pos}
+        preview={previewFor}
         onCancel={() => setEditing(false)}
         onSave={async (row) => {
           const err = await onSave(row)
@@ -788,6 +830,9 @@ function PositionCard({ pos, calc, selectedTargetPct, onSave, onDelete, onExerci
         </div>
       )}
 
+      <ExitLadder ladder={ladder} ladderLongTerm={ladderLongTerm} character={calc.tax_character}
+        longTermDate={calc.long_term_date} isStock={isStock} />
+
       {calc.target_progress != null && (
         <div className="mb-3">
           <div className="flex text-[10px] text-muted mb-1">
@@ -826,6 +871,103 @@ function PositionCard({ pos, calc, selectedTargetPct, onSave, onDelete, onExerci
       </div>
     </div>
   )
+}
+
+// ── After-tax exit ladder ─────────────────────────────────────────
+
+const CHARACTER_LABEL = {
+  long_term: 'long-term rate',
+  short_term: 'short-term rate',
+  section_1256: '§1256 60/40 rate',
+}
+
+const fractionLabel = (f) => {
+  const known = { [1 / 2]: 'half', [1 / 3]: 'a third', [1 / 4]: 'a quarter' }
+  for (const [k, v] of Object.entries(known)) if (Math.abs(f - Number(k)) < 1e-6) return v
+  return pct(f, 0)
+}
+
+const sellLabel = (r, isStock) => {
+  if (r.contracts == null) return `sell ${fractionLabel(r.fraction)}`
+  if (r.contracts === 0) return 'nothing to sell (too few contracts)'
+  return `sell ${r.contracts} ${isStock ? 'lot' : 'contract'}${r.contracts === 1 ? '' : 's'}`
+}
+
+function ExitLadder({ ladder, ladderLongTerm, character, longTermDate, isStock }) {
+  if (!ladder?.length) return null
+  return (
+    <div className="mb-3 rounded-lg border border-border bg-bg/40 p-3">
+      <div className="flex items-baseline gap-2 mb-2">
+        <div className="text-xs font-semibold flex-1">After-tax exit targets</div>
+        <div className="text-[10px] text-muted">at {CHARACTER_LABEL[character]} if sold today</div>
+      </div>
+      <ol className="space-y-2.5">
+        {ladder.map((r, i) => (
+          <li key={r.index} className="text-xs">
+            <div className="flex items-baseline gap-2">
+              <span className="text-subtle w-14 shrink-0">Rung {i + 1}</span>
+              <span className="flex-1 min-w-0">
+                <span className="text-fg">+{pct(r.target, 0)} after tax</span>
+                <span className="text-muted"> · {sellLabel(r, isStock)}</span>
+              </span>
+              <span className={clsx('font-mono-tab shrink-0', r.hit ? 'text-green-400 font-semibold' : 'text-fg')}>
+                {usd(r.exit_value)} <span className="text-muted">({mult(r.exit_multiple)})</span>
+              </span>
+            </div>
+            <div className="flex items-center gap-2 mt-1 pl-16">
+              {r.hit ? (
+                <span className="text-[10px] text-green-400 font-semibold">Target reached</span>
+              ) : (
+                <div className="flex-1 h-1 rounded bg-faint overflow-hidden" aria-label={`${Math.round(r.progress * 100)}% of the way`}>
+                  <div className="h-full bg-amber-400" style={{ width: `${r.progress * 100}%` }} />
+                </div>
+              )}
+              {ladderLongTerm?.[i] && (
+                <span className="text-[10px] text-muted font-mono-tab shrink-0">
+                  LT {usd(ladderLongTerm[i].exit_value)}
+                </span>
+              )}
+            </div>
+          </li>
+        ))}
+      </ol>
+      <p className="mt-2 text-[10px] text-muted leading-relaxed">
+        Each target is the value at which selling that share of the position leaves the stated gain after tax.
+        {ladderLongTerm && longTermDate && ` "LT" is where each target moves once this goes long-term on ${longTermDate}.`}
+        {' '}Recalculated as your tax rate and position value change. Estimates.
+      </p>
+    </div>
+  )
+}
+
+function LadderPreview({ rungs }) {
+  if (!rungs?.length) return null
+  return (
+    <div className="mt-3 rounded-lg border border-border bg-bg/40 p-3">
+      <div className="text-[10px] uppercase tracking-wider text-muted mb-1.5">Your after-tax exit targets</div>
+      <div className="grid grid-cols-3 gap-2">
+        {rungs.map((r, i) => (
+          <div key={r.index} className="text-xs">
+            <div className="text-muted text-[10px]">+{pct(r.target, 0)} after tax</div>
+            <div className="font-mono-tab text-fg">{usd(r.exit_value)}</div>
+            <div className="font-mono-tab text-muted text-[10px]">{mult(r.exit_multiple)} · rung {i + 1}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// Live preview while the user is typing a position in the form.
+function previewLadder(f, ladderFor) {
+  const basis = num(f.cost_basis)
+  if (!(basis > 0) || !f.purchase_date) return []
+  const value = num(f.current_value) ?? basis
+  const character = f.instrument_type === 'index_option_1256'
+    ? 'section_1256'
+    : (holdingPeriod(f.purchase_date, todayYmd())?.is_long_term ? 'long_term' : 'short_term')
+  const contracts = f.instrument_type === 'stock' ? null : (Number.parseInt(f.contracts, 10) || null)
+  return ladderFor(basis, value, character, contracts)
 }
 
 function ExerciseForm({ pos, onExercise, onCancel }) {

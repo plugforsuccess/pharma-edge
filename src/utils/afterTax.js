@@ -353,6 +353,75 @@ export function positionAfterTax({
   }
 }
 
+// ── Per-position after-tax exit ladder ───────────────────────────
+//
+// Mirrors the LDP engine's ladder (ldp/ladder.py). Each rung is an
+// after-tax GAIN target as a multiple of the position's basis
+// (1.0 = double after tax):
+//   after_tax_gain_target = basis × target
+//   rate                  = rate that applies if sold today
+//   required_gain         = after_tax_gain_target ÷ (1 − rate)
+//   exit_value            = basis + required_gain
+//   exit_multiple         = exit_value ÷ basis
+// Each rung sells its share of the position (default equal thirds),
+// split into whole contracts by largest remainder so the rungs always
+// add up to the full position. The engine re-solves these daily with
+// its own (incremental) tax math, so figures here can differ slightly
+// for gains that straddle a bracket.
+
+export const DEFAULT_EXIT_LADDER = [1, 2, 3]
+
+export function equalFractions(n) {
+  return Array.from({ length: n }, () => 1 / n)
+}
+
+export function allocateContracts(total, fractions) {
+  const raw = fractions.map((f) => total * f)
+  const base = raw.map((x) => Math.floor(x + 1e-9))
+  let left = total - base.reduce((a, b) => a + b, 0)
+  const order = raw.map((x, i) => [x - base[i], i]).sort((a, b) => b[0] - a[0] || a[1] - b[1])
+  for (const [, i] of order) {
+    if (left <= 0) break
+    base[i] += 1
+    left -= 1
+  }
+  return base
+}
+
+// The rate function for a position's tax character if sold today.
+export function rateAtGainFor(character, rateForGain) {
+  if (character === 'section_1256') return (g) => blended1256Rate(rateForGain(g))
+  if (character === 'long_term') return (g) => rateForGain(g).long_term.total
+  return (g) => rateForGain(g).short_term.total
+}
+
+export function exitLadder({
+  basis, currentValue, contracts = null, targets = DEFAULT_EXIT_LADDER, fractions = null, rateAtGain,
+}) {
+  if (!isValidBasis(basis) || !targets?.length) return []
+  const fr = fractions && fractions.length === targets.length ? fractions : equalFractions(targets.length)
+  const alloc = Number.isInteger(contracts) && contracts > 0 ? allocateContracts(contracts, fr) : null
+  const value = Number(currentValue) || 0
+  return targets.map((target, i) => {
+    const afterTaxGainTarget = basis * target
+    const { gain, rate } = solveRequiredGain(afterTaxGainTarget, rateAtGain)
+    const exitValue = basis + gain
+    return {
+      index: i,
+      target,
+      fraction: fr[i],
+      contracts: alloc ? alloc[i] : null,
+      after_tax_gain_target: afterTaxGainTarget,
+      rate,
+      required_gain: gain,
+      exit_value: exitValue,
+      exit_multiple: exitValue / basis,
+      hit: value >= exitValue - 0.005,
+      progress: Math.max(0, Math.min(1, (value - basis) / gain)),
+    }
+  })
+}
+
 // Exercising a long call: the premium paid rolls into the stock's cost
 // basis, and the stock gets its own holding clock starting the day after
 // exercise (the option's purchase date does NOT carry forward). The

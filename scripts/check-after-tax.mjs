@@ -16,6 +16,7 @@ import {
   deriveRates, applyRateOverride, makeRateResolver, targetTable,
   positionAfterTax, holdingPeriod, portfolioSummary, marginalRate,
   isValidTaxRate, isValidBasis, exerciseCall, blended1256Rate, suggestInstrumentType, bracketTax,
+  exitLadder, allocateContracts, rateAtGainFor,
 } from '../src/utils/afterTax.js'
 
 const federal = {
@@ -242,6 +243,42 @@ const round2 = (x) => Math.round(x * 100) / 100
   eq('Feb 28 2027 purchase → LT Feb 29 2028', holdingPeriod('2027-02-28', '2027-03-01').long_term_date, '2028-02-29')
   // Year-end purchase crosses the year boundary cleanly.
   eq('Dec 31 purchase → LT Jan 1 two years on', holdingPeriod('2025-12-31', '2026-06-01').long_term_date, '2027-01-01')
+}
+
+// ── Exit ladder (same required cases as the LDP engine) ──────────
+{
+  const fixed = (rate) => () => rate
+  const [lt208] = exitLadder({ basis: 10000, currentValue: 10000, targets: [1], rateAtGain: fixed(0.208) })
+  eq('ladder 20.8%: required gain', Math.round(lt208.required_gain), 12626)
+  eq('ladder 20.8%: exit value', Math.round(lt208.exit_value), 22626)
+  eq('ladder 20.8%: exit multiple', round2(lt208.exit_multiple), 2.26)
+  const [lt288] = exitLadder({ basis: 10000, currentValue: 10000, targets: [1], rateAtGain: fixed(0.288) })
+  eq('ladder 28.8%: required gain', Math.round(lt288.required_gain), 14045)
+  eq('ladder 28.8%: exit value', Math.round(lt288.exit_value), 24045)
+  eq('ladder 28.8%: exit multiple', round2(lt288.exit_multiple), 2.40)
+
+  // Default ladder: 1x/2x/3x after-tax gain, equal thirds of 3 contracts.
+  const rungs = exitLadder({ basis: 10000, currentValue: 24000, contracts: 3, rateAtGain: fixed(0.238) })
+  eq('default ladder rung count', rungs.length, 3)
+  eq('default ladder multiples', rungs.map((r) => round2(r.exit_multiple)).join(','), '2.31,3.62,4.94')
+  eq('default ladder contracts', rungs.map((r) => r.contracts).join(','), '1,1,1')
+  eq('rung 1 hit at 2.4x', rungs[0].hit, true)
+  eq('rung 2 not hit at 2.4x', rungs[1].hit, false)
+  eq('rung 2 progress', round2(rungs[1].progress), round2(14000 / 26246.72))
+
+  // Contracts unknown → fractions only; allocation matches the engine.
+  eq('no contracts → null', exitLadder({ basis: 1, currentValue: 1, rateAtGain: fixed(0.2) })[0].contracts, null)
+  eq('allocate 4 → 2,1,1', allocateContracts(4, [1 / 3, 1 / 3, 1 / 3]).join(','), '2,1,1')
+  eq('allocate 1 → 1,0,0', allocateContracts(1, [1 / 3, 1 / 3, 1 / 3]).join(','), '1,0,0')
+  eq('allocate 10 → 4,3,3', allocateContracts(10, [1 / 3, 1 / 3, 1 / 3]).join(','), '4,3,3')
+
+  // Rate if sold today: short-term exit is higher than long-term; §1256 in between.
+  const rateForGain = makeRateResolver({ federal, state: TX, filingStatus: 'single', income: 800000 })
+  const exitAt = (ch) => exitLadder({ basis: 30000, currentValue: 30000, targets: [1], rateAtGain: rateAtGainFor(ch, rateForGain) })[0].exit_value
+  eq('ST exit > §1256 exit', exitAt('short_term') > exitAt('section_1256'), true)
+  eq('§1256 exit > LT exit', exitAt('section_1256') > exitAt('long_term'), true)
+  eq('LT exit at 23.8%', Math.round(exitAt('long_term')), Math.round(30000 + 30000 / 0.762))
+  eq('invalid basis → no ladder', exitLadder({ basis: 0, currentValue: 1, rateAtGain: fixed(0.2) }).length, 0)
 }
 
 // ── Validation ───────────────────────────────────────────────────

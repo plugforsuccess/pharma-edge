@@ -175,7 +175,9 @@ export default function LeapsOnboarding() {
     setResult(data.profile)
   }
 
-  if (result) return <ResultCard result={result} onDone={() => navigate('/leaps')} />
+  if (result) {
+    return <ResultCard result={result} onDone={() => navigate('/leaps')} onAdd={() => navigate('/leaps?add=1')} />
+  }
 
   return (
     <div className="px-4 py-4 pb-24 max-w-md mx-auto">
@@ -332,7 +334,7 @@ const TIER_TONE = {
   aggressive: 'bg-rose-500/15 text-rose-300 border-rose-500/40',
 }
 
-function ResultCard({ result, onDone }) {
+function ResultCard({ result, onDone, onAdd }) {
   const d = result.display ?? {}
   return (
     <div className="px-4 py-4 pb-24 max-w-md mx-auto">
@@ -347,10 +349,17 @@ function ResultCard({ result, onDone }) {
         <p className="text-xs text-subtle mb-2">{d.capped_by_text}</p>
         <p className="text-sm text-fg leading-relaxed mb-3">{d.allows}</p>
         <p className="text-[10px] text-muted mb-4">{d.account_text}</p>
-        <button type="button" onClick={onDone}
+        <button type="button" onClick={onAdd}
           className="w-full min-h-[44px] rounded bg-amber-400/10 border border-amber-400/40 text-amber-300 text-sm font-semibold hover:bg-amber-400/20 transition">
+          Add your LEAPS positions
+        </button>
+        <button type="button" onClick={onDone}
+          className="w-full min-h-[44px] mt-2 rounded border border-border text-sm text-subtle hover:text-fg transition">
           Go to LEAPS
         </button>
+        <p className="text-[10px] text-muted mt-3 leading-relaxed">
+          Each position you add gets its own after-tax exit targets, so the bot knows when to sell once your broker is connected.
+        </p>
       </div>
       <p className="text-[10px] text-muted leading-relaxed mt-4">
         Tax figures are estimates. Actual taxes depend on your full tax situation; consult a tax professional.
