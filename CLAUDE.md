@@ -850,9 +850,12 @@ value, holding period) and must pass before any edit to that file lands.
   stored (`cost_basis`, `current_value`).
 - **No LEAPS basis / allocation.** Each position is independent; the
   portfolio is the sum of the open positions (total cost, value,
-  after-tax value). The target table solves on the sum of position
-  cost, so a target is an after-tax return on what was paid; each
-  position's progress bar solves the selected target on its own cost.
+  after-tax value). **No portfolio target table** (removed 2026-10-02):
+  the single after-tax return goal is set in Settings → Goals
+  (`selected_target_pct`; `target_pcts` holds just that value), and each
+  holding's goal bar solves it on its own cost — "50% after-tax goal ·
+  now 1.25x" / "Needs 1.62x long-term · 1.70x short-term" (§1256 shows
+  its 60/40 multiple). No goal bar on ROC holdings.
   `leaps_tax_profiles.leaps_allocation_pct` / `portfolio_size` are no
   longer read by `/leaps` (columns kept; Settings no longer shows the
   allocation field).
@@ -871,8 +874,11 @@ value, holding period) and must pass before any edit to that file lands.
   mortgage). The Portfolio card leads with **after-tax net worth**
   (investments + cash + real-estate equity) when cash or property
   exist; cost / gain / return and the target table cover investments
-  only. The **Cash yield** card compares savings / money market /
-  T-bills / CD at the user's after-tax rate — categories only, no named
+  only. **Yield comparisons live in the editor, not on the page**
+  (owner, 2026-10-02): the Cash editor's "Compare after tax" section
+  compares savings / money market / T-bills / CD on the balance entered,
+  and the Income editor's compares the income categories on the value
+  entered (`YieldCompare`), both at the user's after-tax rate — categories only, no named
   products (named partners wait on counsel); rates are user-entered,
   prefilled with example rates (`cm:cash-yield-apys`).
 - **Dividend income.** The add form's 6th type, **Income** (Options ·
@@ -885,7 +891,7 @@ value, holding period) and must pass before any edit to that file lands.
   federal + NIIT, no state; roc → 0 now, `deferred_tax` at the LT rate
   because return of capital lowers basis and is taxed at sale; a CPA
   override uses the ordinary total, never for roc). ROC cards show
-  Payouts / Tax now / Tax at sale; the yield card ranks ROC on
+  Payouts / Tax now / Tax at sale; the income comparison ranks ROC on
   `after_tax_yield_at_sale` so a deferral never reads as tax-free. The
   kind is user-picked, never inferred from the ticker (an issuer's ROC
   status depends on its earnings & profits each year). **No exit plan on
@@ -895,13 +901,31 @@ value, holding period) and must pass before any edit to that file lands.
   `dividendAfterTax` / `incomeYieldComparison` in `afterTax.js`. The
   card shows dividends / yr, after tax / yr and after-tax yield; the
   Portfolio card adds an "Income after tax" row (cash interest +
-  dividends). The yield card lists income categories (dividend ETF,
-  REIT, covered-call, muni, Treasury fund, BTC preferred) under the cash rows, marked
+  dividends). The income comparison lists categories (dividend ETF,
+  REIT, covered-call, muni, Treasury fund, BTC preferred), marked
   "prices can move" — categories only, user-entered yields.
 - Per-position values are never netted; the portfolio card shows a
   netted figure labeled as an estimate.
 - Every tax figure in the UI is labeled an estimate with a
   consult-a-professional note. Keep it that way.
+
+---
+
+## Simulator (`/simulator`)
+
+After-tax what-if sandbox; nothing is saved. Same math as `/leaps`.
+- **Grow** — add money over time: start from a share / income / crypto
+  holding (prefilled; income holdings start at 0% price growth) or a new
+  investment; monthly contribution, years, price growth, yield, income
+  type, reinvest or take payouts as cash. `growthProjection()` in
+  `afterTax.js` runs month by month (payouts taxed as paid via
+  `incomeTaxRate`, reinvested after tax into basis; ROC lowers basis and
+  is taxed past zero) and shows the after-tax value if sold at each year
+  end at long-term rates.
+- **Sell** — one sale (from a holding or new: cost, sell price, bought /
+  sell dates) under your setup vs a what-if residency, filing status and
+  income, side by side, plus what waiting for long-term would keep. CPA
+  rate overrides carry over only while the what-if matches your setup.
 
 ---
 
