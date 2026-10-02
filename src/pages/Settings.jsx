@@ -100,7 +100,6 @@ const ACT60_OPTIONS = [
 
 function goalsFrom(t) {
   return {
-    leaps_allocation_pct: pctStr(t?.leaps_allocation_pct ?? 0.3),
     target_pcts: (t?.target_pcts ?? DEFAULT_TARGET_PCTS).map((x) => pctStr(x)).join(', '),
   }
 }
@@ -236,8 +235,6 @@ export default function Settings() {
         const v = num(tax[k])
         if (v != null && !isValidTaxRate(v / 100)) errs.push(`Tax profile: CPA ${label} rate must be between 0% and 99%.`)
       }
-      const alloc = num(goals.leaps_allocation_pct)
-      if (!(alloc > 0 && alloc <= 100)) errs.push('Goals: LEAPS allocation must be between 0% and 100%.')
       const targets = goals.target_pcts.split(',').map((x) => num(x)).filter((x) => x != null && x > 0)
       if (targets.length === 0) errs.push('Goals: enter at least one target return.')
       if (!(num(risk.account_size) > 0) && !taxRow) errs.push('Risk profile: enter your account size (used as your portfolio size).')
@@ -319,7 +316,6 @@ export default function Settings() {
         lt_rate_override: lt == null ? null : lt / 100,
         st_rate_override: st == null ? null : st / 100,
         pr_act60_rate: tax.state_code === 'PR' && tax.pr_act60_rate !== 'none' ? Number(tax.pr_act60_rate) : null,
-        leaps_allocation_pct: num(goals.leaps_allocation_pct) / 100,
         target_pcts: targets,
         selected_target_pct: targets.includes(prevSel) ? prevSel : targets[0],
         ...(size > 0 ? { portfolio_size: size } : {}),
@@ -432,9 +428,7 @@ export default function Settings() {
       </Section>
 
       <Section title="Goals" id="goals">
-        <Input label="LEAPS allocation (share of your account)" suffix="%" inputMode="decimal"
-          value={goals.leaps_allocation_pct} onChange={(v) => setG('leaps_allocation_pct', v)} />
-        <Input label="Target after-tax returns (% of account, comma-separated)"
+        <Input label="Target after-tax returns (% of what you paid, comma-separated)"
           value={goals.target_pcts} onChange={(v) => setG('target_pcts', v)} />
       </Section>
 
@@ -567,11 +561,11 @@ function PlanSection({ tier }) {
           <Zap size={16} className="text-amber-400" />
         </div>
         <div className="flex-1">
-          <p className="text-fg text-sm font-semibold">{isElite ? 'Elite' : 'Cash Moves Pro'}</p>
+          <p className="text-fg text-sm font-semibold">{isElite ? 'Elite' : 'Pro'}</p>
           <p className="text-subtle text-xs">Your current plan</p>
         </div>
       </div>
-      <PlanCard name="Cash Moves Pro" price="$45/mo" current={!isElite}
+      <PlanCard name="Pro" price="$45/mo" current={!isElite}
         items={['LEAPS dashboard and positions', 'After-tax Exit Targets', 'Simulator', 'Research']} />
       <PlanCard name="Elite" price="Pricing soon" current={isElite}
         items={['Everything in Pro', 'HeatPulse™ and King Board', 'Bot-placed spread trades']}

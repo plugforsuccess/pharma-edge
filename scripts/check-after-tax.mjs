@@ -302,6 +302,15 @@ const round2 = (x) => Math.round(x * 100) / 100
   eq('PR after-tax value', Math.round(live.after_tax_value), 55500)
 }
 
+// ── Target table on a direct basis (sum of positions) ────────────
+{
+  const flat = makeRateResolver({ federal, state: TX, filingStatus: 'single', income: 0, override: { long_term: 0.2, short_term: 0.4 } })
+  const t = targetTable({ basis: 40000, targetPcts: [0.5], rateForGain: flat })
+  eq('direct basis kept', t.basis, 40000)
+  eq('direct basis after-tax target = basis × pct', t.rows[0].after_tax_target, 20000)
+  eq('direct basis LT multiple', t.rows[0].long_term.required_multiple, 1 + 0.5 / 0.8, 1e-9)
+}
+
 // ── User-set Exit Targets (% / $) ────────────────────────────────
 {
   const flat = (r) => () => r

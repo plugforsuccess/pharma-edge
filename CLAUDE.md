@@ -17,7 +17,7 @@
 >   * Main dashboard → "The Tape"
 >   * Individual alert / signal → "A Move" (plural "Moves")
 >   * Watchlist → "Tracking"
->   * Premium tier → "Cash Moves Pro"
+>   * Premium tier → "Pro" (formerly "Cash Moves Pro")
 >   * Top tier → "Elite" (formerly "Inner Circle")
 >   * GEX dashboard → "HeatPulse™"
 >   * Zero-gamma level → "The Flip"
@@ -717,7 +717,7 @@ LEAPS drives growth. Tiers:
 
 | Tier | Includes |
 |---|---|
-| **Cash Moves Pro** ($45/mo) | LEAPS dashboard (home), Positions + Exit Targets (manual entry, later Tradier sync), Simulator, Research bot, later government alerts, LEAPS bot |
+| **Pro** ($45/mo) | LEAPS dashboard (home), Positions + Exit Targets (manual entry, later Tradier sync), Simulator, Research bot, later government alerts, LEAPS bot |
 | **Elite** (price TBD) | Everything in Pro + HeatPulse + King Board + the bot placing **spread** trades |
 
 Other revenue: Tradier referral fees; managed accounts (auto-trading)
@@ -816,6 +816,14 @@ value, holding period) and must pass before any edit to that file lands.
   for index roots). Cost & value can be entered **per share** (default;
   options = premium × 100 × contracts) or as **totals**; only totals are
   stored (`cost_basis`, `current_value`).
+- **No LEAPS basis / allocation.** Each position is independent; the
+  portfolio is the sum of the open positions (total cost, value,
+  after-tax value). The target table solves on the sum of position
+  cost, so a target is an after-tax return on what was paid; each
+  position's progress bar solves the selected target on its own cost.
+  `leaps_tax_profiles.leaps_allocation_pct` / `portfolio_size` are no
+  longer read by `/leaps` (columns kept; Settings no longer shows the
+  allocation field).
 - Per-position values are never netted; the portfolio card shows a
   netted figure labeled as an estimate.
 - Every tax figure in the UI is labeled an estimate with a

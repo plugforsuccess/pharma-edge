@@ -263,12 +263,17 @@ export function targetRow({ portfolio, basis, targetPct, rateForGain }) {
   }
 }
 
-export function targetTable({ portfolio, allocationPct, targetPcts = DEFAULT_TARGET_PCTS, rateForGain }) {
-  const basis = portfolio * allocationPct
+// Pass `basis` directly (the /leaps page uses the sum of the open
+// positions' cost, so targets are an after-tax return on what was paid);
+// `portfolio × allocationPct` is the original spec's form. `portfolio`
+// defaults to the basis.
+export function targetTable({ portfolio, allocationPct, basis: basisIn, targetPcts = DEFAULT_TARGET_PCTS, rateForGain }) {
+  const basis = basisIn ?? portfolio * allocationPct
+  const port = portfolio ?? basis
   if (!isValidBasis(basis)) return { basis, rows: [] }
   const rows = [...targetPcts]
     .sort((a, b) => b - a)
-    .map((targetPct) => targetRow({ portfolio, basis, targetPct, rateForGain }))
+    .map((targetPct) => targetRow({ portfolio: port, basis, targetPct, rateForGain }))
   return { basis, rows }
 }
 
