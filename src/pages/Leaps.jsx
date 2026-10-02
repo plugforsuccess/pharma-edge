@@ -2160,6 +2160,7 @@ function holdingStart(date) {
 // leads with after-tax net worth and breaks it down by type; the cost /
 // gain / return stats cover investments only (options, shares, crypto).
 function PortfolioTotals({ summary, count, others }) {
+  const [showCost, setShowCost] = useState(false)
   const hasOthers = others && (others.cashCount > 0 || others.realEstateCount > 0)
   const invested = summary?.after_tax_value ?? 0
   const total = invested + (others?.cash ?? 0) + (others?.realEstate ?? 0)
@@ -2177,22 +2178,28 @@ function PortfolioTotals({ summary, count, others }) {
         <span className="flex-1" />
         <span className="text-xs text-muted">{holdings} holding{holdings === 1 ? '' : 's'}</span>
       </div>
-      <div className="flex items-end gap-4 mb-5">
+      {/* After tax and before tax side by side: same label row, same size. */}
+      <div className="grid grid-cols-2 gap-4 mb-5">
         <div className="min-w-0">
-          <div className="text-[10px] uppercase tracking-wider text-muted mb-1 whitespace-nowrap">
-            {hasOthers ? 'After-tax net worth' : 'After-tax if all sold'}
+          <div className="text-[10px] uppercase tracking-wider text-muted mb-1 truncate">
+            {hasOthers ? 'After-tax net worth' : 'After tax'}
           </div>
-          <div className={clsx('text-3xl font-semibold font-mono-tab', up ? 'text-green-400' : 'text-rose-300')}>
+          <div className={clsx('text-2xl font-semibold font-mono-tab truncate', up ? 'text-green-400' : 'text-rose-300')}>
             {usd(after)}
           </div>
         </div>
-        <span className="flex-1" />
-        <div className="text-right min-w-0">
-          <div className="text-[10px] uppercase tracking-wider text-muted mb-1">Before tax</div>
-          <div className="text-lg font-semibold font-mono-tab text-amber-300">{usd(before)}</div>
+        <div className="min-w-0">
+          <div className="text-[10px] uppercase tracking-wider text-muted mb-1 truncate">Before tax</div>
+          {/* Tap to see what tax & selling costs take off. */}
+          <button type="button" onClick={() => setShowCost((v) => !v)} aria-expanded={showCost}
+            aria-label={`Before tax ${usd(before)}. ${showCost ? 'Hide' : 'Show'} what tax takes`}
+            className="max-w-full -my-[7px] py-[7px] text-2xl font-semibold font-mono-tab text-amber-300 inline-flex items-center gap-1">
+            <span className="truncate">{usd(before)}</span>
+            <ChevronDown size={14} className={clsx('shrink-0 text-muted transition-transform', showCost && 'rotate-180')} aria-hidden />
+          </button>
         </div>
       </div>
-      {cost > 0.5 && (
+      {showCost && cost > 0.5 && (
         <div className="-mt-3 mb-5 text-xs text-muted">
           <span className="font-mono-tab">−{usd(cost)}</span> {costLabel} if everything sold today
         </div>
