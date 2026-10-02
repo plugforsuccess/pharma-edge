@@ -683,6 +683,8 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
     if (!isShares && f.contracts !== '' && !Number.isInteger(num(f.contracts))) return setError('Contracts must be a whole number.')
     if (!f.purchase_date) return setError('Enter the purchase date.')
     if (f.purchase_date > todayYmd()) return setError('Purchase date can’t be in the future.')
+    if (!isShares && !f.expiration) return setError('Enter the expiration date.')
+    if (!isShares && f.expiration <= f.purchase_date) return setError('Expiration must be after the purchase date.')
     if (!(basis > 0)) return setError(f.price_mode === 'per_share' ? 'Enter what you paid per share.' : 'Total cost must be greater than $0.')
     if (value == null || value < 0) return setError(f.price_mode === 'per_share' ? 'Enter the current price per share.' : 'Enter the current value (0 or more).')
     let exitTargets = null
@@ -697,7 +699,7 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
       instrument_type: instrumentType,
       option_type: isShares ? null : f.option_type,
       strike: isShares ? null : num(f.strike),
-      expiration: isShares ? null : f.expiration || null,
+      expiration: isShares ? null : f.expiration,
       contracts: isShares ? null : num(f.contracts),
       shares: isShares ? num(f.shares) : null,
       cost_basis: exact(basis),
@@ -776,8 +778,8 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
                   <NumberInput decimals={PRICE_DECIMALS} value={f.strike} onChange={setV('strike')} placeholder="250" className={clsx(inputCls, 'pl-7')} />
                 </Affix>
               </Field>
-              <Field label="Expiration" hint="optional">
-                <input type="date" value={f.expiration} onChange={(e) => setV('expiration')(e.target.value)} className={dateCls} />
+              <Field label="Expiration">
+                <input type="date" value={f.expiration} min={f.purchase_date || undefined} onChange={(e) => setV('expiration')(e.target.value)} className={dateCls} />
               </Field>
             </>
           )}
