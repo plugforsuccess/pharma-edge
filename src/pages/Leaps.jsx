@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Landmark, Plus, Pencil, Trash2, Check, X, AlertTriangle, Info, ArrowRightLeft, ShieldCheck } from 'lucide-react'
+import { Landmark, Plus, Pencil, Trash2, Check, X, AlertTriangle, Info, ArrowRightLeft, ShieldCheck, ChevronDown } from 'lucide-react'
 import clsx from 'clsx'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
@@ -757,6 +757,7 @@ function PositionForm({ initial, onSave, onCancel, preview }) {
 function PositionCard({ pos, calc, ladder, ladderLongTerm, previewFor, selectedTargetPct, onSave, onDelete, onExercise }) {
   const [editing, setEditing] = useState(false)
   const [exercising, setExercising] = useState(false)
+  const [showTaxDetail, setShowTaxDetail] = useState(false)
   if (editing) {
     return (
       <PositionForm
@@ -807,14 +808,26 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, previewFor, selectedT
 
       <div className="mb-3">
         <div className="text-[10px] uppercase tracking-wider text-muted">After-tax value if sold today</div>
-        <div className={clsx('text-2xl font-semibold font-mono-tab', up ? 'text-green-400' : 'text-rose-300')}>
-          {usd(calc.after_tax_value)}
-        </div>
-        <div className="text-[10px] text-muted font-mono-tab">
-          {calc.gain > 0
-            ? `${usd(calc.after_tax_gain)} after-tax gain · est. tax ${usd(calc.estimated_tax)} at ${ratePct(calc.tax_rate)}`
-            : 'Loss — no tax on sale'}
-        </div>
+        {/* Tap the value to reveal the gain / tax breakdown. */}
+        <button
+          type="button"
+          onClick={() => setShowTaxDetail((v) => !v)}
+          aria-expanded={showTaxDetail}
+          aria-label={`After-tax value ${usd(calc.after_tax_value)}. ${showTaxDetail ? 'Hide' : 'Show'} tax details`}
+          className="min-h-[44px] inline-flex items-center gap-1.5 -ml-1 px-1 rounded hover:bg-card-hover transition"
+        >
+          <span className={clsx('text-2xl font-semibold font-mono-tab', up ? 'text-green-400' : 'text-rose-300')}>
+            {usd(calc.after_tax_value)}
+          </span>
+          <ChevronDown size={14} className={clsx('text-muted transition-transform', showTaxDetail && 'rotate-180')} />
+        </button>
+        {showTaxDetail && (
+          <div className="text-[10px] text-muted font-mono-tab">
+            {calc.gain > 0
+              ? `${usd(calc.after_tax_gain)} after-tax gain · est. tax ${usd(calc.estimated_tax)} at ${ratePct(calc.tax_rate)}`
+              : 'Loss — no tax on sale'}
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-3 gap-2 text-xs mb-3">
