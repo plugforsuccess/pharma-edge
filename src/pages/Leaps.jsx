@@ -591,8 +591,9 @@ const OPTION_MULTIPLIER = 100
 // binary float noise (0.1 × 300 = 30.000000000000004), never real digits.
 const PRICE_DECIMALS = 6
 const exact = (x) => +Number(x).toFixed(PRICE_DECIMALS)
+// Shows every saved digit (at least cents) so the summary matches what's stored.
 const usdExact = (n) => (Number.isFinite(n)
-  ? `${n < 0 ? '−' : ''}$${Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`
+  ? `${n < 0 ? '−' : ''}$${Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: PRICE_DECIMALS })}`
   : '—')
 
 function emptyForm(initial) {
