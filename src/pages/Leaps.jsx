@@ -1680,15 +1680,18 @@ function Notice({ id, tone = 'neutral', title, children }) {
     try { localStorage.setItem(dismissKey(id), '1') } catch { /* storage blocked — hide for this visit only */ }
   }
   return (
-    <div role="status" className={clsx('rounded-xl border pl-4 pr-1 py-1 mb-4 flex items-start gap-1', NOTICE_TONE[tone])}>
-      <div className="flex-1 min-w-0 py-2.5 text-sm">
+    <div role="status" className={clsx('rounded-xl border pl-4 pr-1 pt-1 pb-3.5 mb-4', NOTICE_TONE[tone])}>
+      {/* The X sits on its own row, top right, so the text runs full width. */}
+      <div className="flex justify-end -mb-3">
+        <button type="button" onClick={dismiss} aria-label="Dismiss"
+          className="min-h-[44px] min-w-[44px] -mt-1 flex items-start justify-end pt-2.5 pr-2.5 rounded-lg opacity-60 hover:opacity-100 transition">
+          <X size={12} />
+        </button>
+      </div>
+      <div className="pr-3 text-sm">
         <div className="font-semibold">{title}</div>
         <div className="mt-1 opacity-75">{children}</div>
       </div>
-      <button type="button" onClick={dismiss} aria-label="Dismiss"
-        className="shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg opacity-70 hover:opacity-100 hover:bg-white/5 transition">
-        <X size={16} />
-      </button>
     </div>
   )
 }

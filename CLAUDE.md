@@ -676,7 +676,7 @@ slot, "Estimated tax rate", is a "View rates" link that opens the
 breakdown (long / short-term, §1256 blend) in a `Modal`.
 **Card notices** (tax-wait, take-gains, roll window, time stop) use the
 `Notice` component in `Leaps.jsx`: bold title and body at the same size
-(text-sm), plus an X that dismisses it on this device (localStorage,
+(text-sm), plus a small X on its own row in the top-right corner (so the text runs full width) that dismisses it on this device (localStorage,
 per position and per notice). A dismissed time stop returns the next day;
 a roll-window warning stays dismissed until it escalates.
 **Holdings collapse:** each holding is a tap-to-expand card (summary:
