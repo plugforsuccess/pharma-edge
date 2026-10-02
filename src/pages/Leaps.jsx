@@ -1385,17 +1385,15 @@ function CustomExitTargets({ title = 'Exit Targets', rows, rowsLongTerm, runner,
               <div className="text-sm text-fg">{targetLabel(r)} <span className="text-muted">· {targetOther(r)}</span></div>
               <div className="text-xs text-muted mt-0.5">{soldLabel(r, isStock, units)}</div>
             </div>
-            <span className={clsx('text-sm font-mono-tab shrink-0 font-semibold', r.hit ? 'text-green-400' : 'text-fg')}>
-              {usd(r.after_tax_proceeds)}
-            </span>
-          </div>
-          <div className="mt-1 text-xs text-muted font-mono-tab">
-            {r.realized_gain > 0
-              ? `${usd(r.proceeds)} − ${usd(r.estimated_tax)} tax (${ratePct(r.rate)})`
-              : `${usd(r.proceeds)} · no gain, no tax`}
+            <div className="text-right shrink-0">
+              <div className={clsx('text-sm font-mono-tab font-semibold', r.hit ? 'text-green-400' : 'text-fg')}>
+                {usd(r.after_tax_proceeds)}
+              </div>
+              <div className="text-xs text-muted font-mono-tab mt-0.5">{mult(r.exit_multiple)}</div>
+            </div>
           </div>
           {rowsLongTerm?.[i] && (
-            <div className="text-xs text-muted">Long-term: <span className="font-mono-tab">{usd(rowsLongTerm[i].after_tax_proceeds)}</span></div>
+            <div className="mt-1 text-xs text-muted text-right">Long-term: <span className="font-mono-tab">{usd(rowsLongTerm[i].after_tax_proceeds)}</span></div>
           )}
           <div className="mt-2"><RungProgress hit={r.hit} progress={r.progress} /></div>
         </li>
