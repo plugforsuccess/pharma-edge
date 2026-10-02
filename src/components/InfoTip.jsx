@@ -3,6 +3,9 @@ import { createPortal } from 'react-dom'
 import { Info, X } from 'lucide-react'
 import clsx from 'clsx'
 
+// UNUSED for now (2026-10-02): every (i) was removed until the copy and
+// pop-up behavior are designed. Kept for that work.
+//
 // (i) button that opens a closable explainer. Keeps cards clean: the
 // detail is one tap away instead of a paragraph under every number.
 // Bottom sheet on phones, centered card on wider screens. Closes on the
