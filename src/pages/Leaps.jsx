@@ -799,7 +799,7 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
               <Field label="Total cost">
                 <Affix prefix="$"><NumberInput decimals={PRICE_DECIMALS} value={f.cost_basis} onChange={setV('cost_basis')} placeholder="10,000" className={clsx(inputCls, 'pl-7')} /></Affix>
               </Field>
-              <Field label="Value now">
+              <Field label="Current Value">
                 <Affix prefix="$"><NumberInput decimals={PRICE_DECIMALS} value={f.current_value} onChange={setV('current_value')} placeholder="12,500" className={clsx(inputCls, 'pl-7')} /></Affix>
               </Field>
             </>
@@ -808,7 +808,7 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
         {(basis > 0 || value != null) && (
           <div className="mt-4 grid grid-cols-3 gap-3 rounded-xl bg-bg/40 border border-hairline px-4 py-3">
             <Stat label="Total cost" value={usdExact(basis)} />
-            <Stat label="Value now" value={usdExact(value)} />
+            <Stat label="Current Value" value={usdExact(value)} />
             <div className="min-w-0 text-right">
               <div className="text-xs text-muted mb-1">Gain</div>
               <div className={clsx('font-mono-tab text-sm truncate', gainPct == null ? 'text-fg' : gainPct >= 0 ? 'text-green-400' : 'text-rose-300')}>
@@ -1036,7 +1036,7 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
       </div>
 
       <div className="grid grid-cols-3 gap-3 mb-4 py-3 border-y border-hairline">
-        <Stat label="Value now" value={usd(calc.current_value)} />
+        <Stat label="Current Value" value={usd(calc.current_value)} />
         <Stat label="Cost" value={usd(calc.basis)} />
         <Stat label="Multiple" value={mult(calc.current_multiple)} />
       </div>
@@ -1464,7 +1464,7 @@ function PortfolioTotals({ summary, count }) {
       </div>
       <div className="grid grid-cols-2 gap-x-4 gap-y-4 pt-4 border-t border-hairline">
         <Stat label="Total cost" value={usd(summary.basis)} />
-        <Stat label="Value now" value={usd(summary.current_value)} />
+        <Stat label="Current Value" value={usd(summary.current_value)} />
         <Stat label="After-tax gain" value={usd(summary.after_tax_gain)} />
         <Stat label="After-tax return" value={pct(summary.after_tax_return_pct)} />
       </div>
