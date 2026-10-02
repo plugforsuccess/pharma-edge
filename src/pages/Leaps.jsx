@@ -1225,7 +1225,7 @@ function TargetsEditor({ own, rows, contracts, onOwn, onRow, onAdd, onRemove }) 
         options={[{ value: 'default', label: 'My plan' }, { value: 'own', label: 'Set my own' }]} />
       {!own ? (
         <p className="mt-3 text-xs text-muted">
-          Uses your exit plan from <Link to="/settings#exit-targets" className="text-amber-300 underline underline-offset-2">Settings</Link> — by default +100% sell 70%, +200% sell 15%, and the last 15% trails 30% from its peak.
+          Uses your exit plan from <Link to="/settings#exit-targets" className="text-amber-300 underline underline-offset-2">Settings</Link>.
         </p>
       ) : (
         <>
