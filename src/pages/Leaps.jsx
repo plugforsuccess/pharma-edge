@@ -1122,8 +1122,8 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
         )}
         {!isShares && (
           is1256 && (
-            <div className="mt-4 flex items-center gap-2 rounded-lg border border-sky-500/30 bg-sky-500/5 px-3 py-2.5">
-              <span className="flex-1 text-sm text-sky-200">Index option · §1256 60/40 tax</span>
+            <div className="mt-4 flex items-center gap-2 rounded-lg border border-violet-400/30 bg-violet-400/5 px-3 py-2.5">
+              <span className="flex-1 text-sm text-violet-200">Index option · §1256 60/40 tax</span>
             </div>
           )
         )}
@@ -1347,7 +1347,7 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
             className={clsx(
               'inline-block mt-2 text-[10px] uppercase tracking-wider px-2 py-1 rounded-md border font-semibold',
               is1256
-                ? 'bg-sky-500/15 text-sky-300 border-sky-500/40'
+                ? 'bg-violet-400/15 text-violet-300 border-violet-400/40'
                 : calc.is_long_term
                   ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
                   : 'bg-amber-500/15 text-amber-300 border-amber-500/40',
