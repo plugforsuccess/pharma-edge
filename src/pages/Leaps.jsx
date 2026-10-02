@@ -620,17 +620,25 @@ const inputCls = 'w-full min-h-[44px] bg-bg border border-border rounded-lg px-3
 const dateCls = `${inputCls} appearance-none text-left [&::-webkit-date-and-time-value]:text-left [&::-webkit-calendar-picker-indicator]:opacity-60`
 
 // Form rows hold what the user typed: % values and sell shares as
-// percents ("100" = +100%), $ values as dollars.
-const targetToRow = (t) => ({
-  kind: t.kind,
-  value: t.kind === 'pct' ? String(+(Number(t.value) * 100).toFixed(2)) : String(t.value),
-  sell: String(+(Number(t.sell) * 100).toFixed(2)),
-})
-const rowToTarget = (r) => ({
-  kind: r.kind,
-  value: r.kind === 'pct' ? (num(r.value) ?? NaN) / 100 : (num(r.value) ?? NaN),
-  sell: (num(r.sell) ?? NaN) / 100,
-})
+// percents ("100" = +100%), $ values as dollars. A $ target can be typed
+// per share / coin ('each', premium per share for options) or as the
+// whole position ('usd'); both save as the whole-position value.
+// `priceUnits` = shares, coins, or contracts × 100.
+// A per-unit price from a division: cents above $1,000, exact below.
+const perUnitStr = (x) => String(+x.toFixed(x >= 1000 ? 2 : PRICE_DECIMALS))
+const targetToRow = (t, priceUnits = null) => {
+  const sell = String(+(Number(t.sell) * 100).toFixed(2))
+  if (t.kind === 'pct') return { kind: 'pct', value: String(+(Number(t.value) * 100).toFixed(2)), sell }
+  if (priceUnits > 0) return { kind: 'each', value: perUnitStr(Number(t.value) / priceUnits), sell }
+  return { kind: 'usd', value: String(t.value), sell }
+}
+const rowToTarget = (r, priceUnits = null) => {
+  const v = num(r.value) ?? NaN
+  const sell = (num(r.sell) ?? NaN) / 100
+  if (r.kind === 'pct') return { kind: 'pct', value: v / 100, sell }
+  if (r.kind === 'each') return { kind: 'usd', value: priceUnits > 0 ? exact(v * priceUnits) : NaN, sell }
+  return { kind: 'usd', value: v, sell }
+}
 const DEFAULT_OWN_ROWS = [
   { kind: 'pct', value: '100', sell: '50' },
   { kind: 'pct', value: '200', sell: '50' },
@@ -690,8 +698,16 @@ function emptyForm(initial) {
     price_each: '',
     purchase_date: initial?.purchase_date ?? '',
     own_targets: own,
-    targets: own ? initial.exit_targets.map(targetToRow) : DEFAULT_OWN_ROWS,
+    targets: own ? initial.exit_targets.map((t) => targetToRow(t, priceUnitsOf(initial))) : DEFAULT_OWN_ROWS,
   }
+}
+
+// A saved row's price units: shares / coins, or contracts × 100.
+function priceUnitsOf(pos) {
+  if (!pos) return null
+  if (isQuantity(pos.instrument_type)) return Number(pos.shares) || null
+  const c = Number(pos.contracts)
+  return c > 0 ? c * OPTION_MULTIPLIER : null
 }
 
 // Units the per-share prices multiply by: shares, or contracts × 100.
@@ -827,7 +843,7 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
     if (value == null || value < 0) return setError(f.price_mode === 'per_share' ? `Enter the current price per ${isShares ? qtyWord : 'share'}.` : 'Enter the current value (0 or more).')
     let exitTargets = null
     if (f.own_targets && !rocIncome) {
-      exitTargets = f.targets.map(rowToTarget)
+      exitTargets = f.targets.map((r) => rowToTarget(r, unitsOf(f)))
       const bad = validateCustomTargets(exitTargets, basis)
       if (bad) return setError(bad)
     }
@@ -860,12 +876,28 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
     }, keepOpen, f.ticker)
   }
 
-  const setRow = (i, k, v) => { setError(''); setF((x) => ({ ...x, targets: x.targets.map((r, j) => (j === i ? { ...r, [k]: v } : r)) })) }
+  const setRow = (i, k, v) => {
+    setError('')
+    setF((x) => ({
+      ...x,
+      targets: x.targets.map((r, j) => {
+        if (j !== i) return r
+        // Switching $ each ⇄ $ total carries the number across.
+        const u = unitsOf(x)
+        const val = num(r.value)
+        if (k === 'kind' && u > 0 && val != null) {
+          if (r.kind === 'each' && v === 'usd') return { ...r, kind: v, value: String(exact(val * u)) }
+          if (r.kind === 'usd' && v === 'each') return { ...r, kind: v, value: perUnitStr(val / u) }
+        }
+        return { ...r, [k]: v }
+      }),
+    }))
+  }
   const addRow = () => setF((x) => {
     const used = x.targets.reduce((sum, r) => sum + (num(r.sell) ?? 0), 0)
     const last = x.targets[x.targets.length - 1]
-    const next = last?.kind === 'usd'
-      ? { kind: 'usd', value: '', sell: '' }
+    const next = last?.kind === 'usd' || last?.kind === 'each'
+      ? { kind: last.kind, value: '', sell: '' }
       : { kind: 'pct', value: last ? String((num(last.value) ?? 0) + 100) : '100', sell: '' }
     next.sell = String(Math.max(0, +(100 - used).toFixed(2)) || '')
     return { ...x, targets: [...x.targets, next] }
@@ -873,7 +905,7 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
   const removeRow = (i) => setF((x) => ({ ...x, targets: x.targets.filter((_, j) => j !== i) }))
   const previewRows = preview
     ? preview({ ...f, instrument_type: instrumentType, cost_basis: basis, current_value: value ?? basis },
-      f.own_targets ? f.targets.map(rowToTarget) : null)
+      f.own_targets ? f.targets.map((r) => rowToTarget(r, unitsOf(f))) : null)
     : null
   const perShare = f.price_mode === 'per_share'
   const gainPct = basis > 0 && value != null ? value / basis - 1 : null
@@ -1083,6 +1115,7 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
           own={f.own_targets}
           rows={f.targets}
           contracts={isShares ? null : (Number.parseInt(f.contracts, 10) || null)}
+          eachLabel={isCrypto ? `per ${cryptoUnit(f.ticker)}` : 'per share'}
           onOwn={(v) => setF((x) => ({ ...x, own_targets: v }))}
           onRow={setRow}
           onAdd={addRow}
@@ -1796,7 +1829,7 @@ function previewTargets(f, own, ladderFor, customFor) {
 
 // ── User-set Exit Targets (% or $) ───────────────────────────────
 
-function TargetsEditor({ own, rows, contracts, onOwn, onRow, onAdd, onRemove }) {
+function TargetsEditor({ own, rows, contracts, eachLabel = 'per share', onOwn, onRow, onAdd, onRemove }) {
   const sold = rows.reduce((sum, r) => sum + (num(r.sell) ?? 0), 0)
   const over = sold > 100.0001
   return (
@@ -1823,13 +1856,14 @@ function TargetsEditor({ own, rows, contracts, onOwn, onRow, onAdd, onRemove }) 
                       <Trash2 size={14} />
                     </button>
                   </div>
-                  <div className="grid grid-cols-[6rem_minmax(0,1fr)] gap-2">
-                    <Segmented compact value={r.kind} onChange={(k) => onRow(i, 'kind', k)}
-                      options={[{ value: 'pct', label: '%' }, { value: 'usd', label: '$' }]} />
+                  <Segmented compact value={r.kind} onChange={(k) => onRow(i, 'kind', k)}
+                    options={[{ value: 'pct', label: '% gain' }, { value: 'each', label: `$ ${eachLabel}` }, { value: 'usd', label: '$ total' }]} />
+                  <div className="mt-2">
                     <Affix prefix={r.kind === 'pct' ? '+' : '$'} suffix={r.kind === 'pct' ? '%' : null}>
                       <NumberInput value={r.value} onChange={(v) => onRow(i, 'value', v)}
-                        aria-label={r.kind === 'pct' ? `Target ${i + 1} gain percent` : `Target ${i + 1} position value`}
-                        placeholder={r.kind === 'pct' ? '100' : '60,000'}
+                        decimals={r.kind === 'each' ? PRICE_DECIMALS : 2}
+                        aria-label={r.kind === 'pct' ? `Target ${i + 1} gain percent` : r.kind === 'each' ? `Target ${i + 1} price ${eachLabel}` : `Target ${i + 1} position value`}
+                        placeholder={r.kind === 'pct' ? '100' : r.kind === 'each' ? '250' : '60,000'}
                         className={clsx(inputCls, 'pl-7', r.kind === 'pct' && 'pr-8')} />
                     </Affix>
                   </div>
@@ -1867,10 +1901,13 @@ function TargetsEditor({ own, rows, contracts, onOwn, onRow, onAdd, onRemove }) 
 // "−35 contracts" / "−1,050 shares" (what the sale takes off) — always a count, never a
 // fraction. Fractional share holdings get a share count to 2 dp.
 // `isStock` is true for shares, or the unit itself ('$BTC' for crypto).
+// Fractional shares to 2 dp; crypto keeps up to 8 (0.1625 $BTC, not 0.16).
+const roundUnits = (n, unit) => +Number(n).toFixed(unit.startsWith('$') ? 8 : 2)
+
 const soldLabel = (r, isStock, units = null) => {
   const unit = typeof isStock === 'string' ? isStock : isStock ? 'share' : 'contract'
   if (r.contracts == null) {
-    const n = units > 0 ? +(units * r.fraction).toFixed(2) : null
+    const n = units > 0 ? roundUnits(units * r.fraction, unit) : null
     return n == null ? `−${pct(r.fraction, 0)}` : `−${qtyText(n, unit)}`
   }
   if (r.contracts === 0) return `nothing to sell (too few ${unit.startsWith('$') ? unit : `${unit}s`})`
@@ -1891,9 +1928,9 @@ function wholeUnits(v) {
 // target to sell. Targets are gains on the option (the playbook), so the
 // price is the same short- or long-term.
 const multShort = (n) => (!Number.isFinite(n) ? '—' : Number.isInteger(+n.toFixed(2)) ? `${+n.toFixed(2)}x` : `${n.toFixed(2)}x`)
-const gainLabel = (r) => (r.kind === 'usd'
-  ? `${usd(r.input)} • ${multShort(r.exit_multiple)}`
-  : `${pct(r.gain_pct, Number.isInteger(+(r.gain_pct * 100).toFixed(4)) ? 0 : 1)} gain • ${multShort(r.exit_multiple)}`)
+// Every target reads "N% gain • Nx"; the position value sits on the right
+// (a $ target's value is what the user typed).
+const gainLabel = (r) => `${pct(r.gain_pct, r.gain_pct >= 1 || Number.isInteger(+(r.gain_pct * 100).toFixed(4)) ? 0 : 1)} gain • ${multShort(r.exit_multiple)}`
 
 function CustomTargetsPreview({ rows, isStock, units }) {
   if (!rows?.length) return null
@@ -1904,7 +1941,7 @@ function CustomTargetsPreview({ rows, isStock, units }) {
         {rows.map((r, i) => (
           <li key={r.index} className="flex items-baseline gap-3">
             <div className="flex-1 min-w-0">
-              <div className="text-sm text-fg">{gainLabel(r)}</div>
+              <div className="text-sm text-fg whitespace-nowrap">{gainLabel(r)}</div>
               <div className={clsx('text-xs mt-0.5', r.contracts === 0 ? 'text-muted' : 'text-amber-300')}>{soldLabel(r, isStock, units)}</div>
             </div>
             <div className="text-sm font-mono-tab text-fg font-semibold shrink-0">{usd(r.exit_value)}</div>
@@ -1918,11 +1955,26 @@ function CustomTargetsPreview({ rows, isStock, units }) {
 function CustomExitTargets({ title = 'Exit Targets', rows, runner, isStock, units }) {
   if (!rows?.length) return null
   const unit = typeof isStock === 'string' ? isStock : isStock ? 'share' : 'contract'
+  // Price per share / coin at each target (options: premium per share).
+  const priceUnits = units > 0 ? (isStock ? units : units * OPTION_MULTIPLIER) : null
+  const perUnit = unit.startsWith('$') ? unit : 'share'
+  // Custom targets may sell less than all of it: show what's kept.
+  const soldShare = rows.reduce((a, r) => a + (r.fraction || 0), 0)
+  const heldShare = !runner && soldShare < 1 - 1e-9 ? 1 - soldShare : 0
+  const heldLabel = units > 0 ? qtyText(roundUnits(units * heldShare, unit), unit) : pct(heldShare, 0)
   return (
     <TargetsPanel
       title={title}
       subtitle="Sell when the position is worth"
-      footer={runner && runner.contracts !== 0 ? (
+      footer={heldShare > 0 ? (
+        <div className="mt-4 pt-4 border-t border-hairline flex items-baseline gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="text-sm text-fg">Kept</div>
+            <div className="text-xs mt-0.5 text-subtle">{heldLabel} not in a target</div>
+          </div>
+          <div className="text-xs text-muted shrink-0">{pct(heldShare, 0)} of position</div>
+        </div>
+      ) : runner && runner.contracts !== 0 ? (
         <div className="mt-4 pt-4 border-t border-hairline">
           <div className="flex items-baseline gap-3">
             <div className="flex-1 min-w-0">
@@ -1930,7 +1982,7 @@ function CustomExitTargets({ title = 'Exit Targets', rows, runner, isStock, unit
               <div className="text-xs mt-0.5 text-amber-300">
                 {runner.contracts != null
                   ? `−${qtyText(runner.contracts, unit)}`
-                  : units > 0 ? `−${qtyText(+(units * runner.share).toFixed(2), unit)}` : `−${pct(runner.share, 0)}`}
+                  : units > 0 ? `−${qtyText(roundUnits(units * runner.share, unit), unit)}` : `−${pct(runner.share, 0)}`}
               </div>
               {runner.after_tax_gain != null && (
                 <div className="text-xs text-muted mt-0.5">
@@ -1952,14 +2004,15 @@ function CustomExitTargets({ title = 'Exit Targets', rows, runner, isStock, unit
         <li key={r.index}>
           <div className="flex items-baseline gap-3">
             <div className="flex-1 min-w-0">
-              <div className="text-sm text-fg">{gainLabel(r)}</div>
+              <div className="text-sm text-fg whitespace-nowrap">{gainLabel(r)}</div>
               <div className={clsx('text-xs mt-0.5', r.contracts === 0 ? 'text-muted' : 'text-amber-300')}>{soldLabel(r, isStock, units)}</div>
               {r.after_tax_gain > 0 && (
                 <div className="text-xs text-muted mt-0.5"><span className="font-mono-tab text-green-400">+{usd(r.after_tax_gain)}</span> after taxes</div>
               )}
             </div>
-            <div className={clsx('text-sm font-mono-tab font-semibold shrink-0', r.hit ? 'text-green-400' : 'text-fg')}>
-              {usd(r.exit_value)}
+            <div className="text-right shrink-0">
+              <div className={clsx('text-sm font-mono-tab font-semibold', r.hit ? 'text-green-400' : 'text-fg')}>{usd(r.exit_value)}</div>
+              {priceUnits && <div className="text-xs text-muted mt-0.5 font-mono-tab">{usdUnit(r.exit_value / priceUnits)} / {perUnit}</div>}
             </div>
           </div>
           <div className="mt-2"><RungProgress hit={r.hit} progress={r.progress} /></div>

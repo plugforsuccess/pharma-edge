@@ -693,7 +693,16 @@ value on the right, that sale's after-tax gain on its own row under
 the sell line ("+$1,999 after taxes", green; the value itself never
 gets a "+", it's a price trigger), a progress strip under each, the runner as a last row with
 its after-tax gain if the trail fired today (`runnerAfterTax`; a loss
-shows red "−$X loss at today's trail"). No tax-math line and no Long-term line (option-price targets sell
+shows red "−$X loss at today's trail"). Every target's left label reads "N% gain •
+Nx" — a $ target too (its value sits on the right, with the price per
+share / coin under it: "$769,231 / $BTC"; options show the premium per
+share). In the editor a target is "% gain", "$ per share" (crypto: "$
+per $BTC") or "$ total"; per-unit entries save as the whole-position
+value (× shares, coins or contracts × 100), and saved $ targets reopen
+per unit. Crypto counts
+keep up to 8 decimals ("−0.1625 $BTC"), shares 2. When custom targets
+sell less than the whole position, a **Kept** row closes the panel
+("3.0875 $BTC not in a target · 95% of position") so the rows add up. No tax-math line and no Long-term line (option-price targets sell
 at the same price either way). The form toggle reads "Default" /
 "Custom". Titles read "RXRX • 50 contracts" / "NAUT • 3,500 shares" / "BTC • 0.5 $BTC" (crypto counts in `$TICKER`, never "coins": "sell 0.35 $BTC");
 options show "$5 Call • Exp Jan 21, 2028" below, then "Bought …".
