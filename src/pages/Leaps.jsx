@@ -412,6 +412,9 @@ export default function Leaps() {
       + results.reduce((sum, r) => sum + (r.dividend?.after_tax_income ?? 0), 0),
     cash: cashResults.reduce((sum, r) => sum + r.cash.after_tax_value, 0),
     realEstate: realEstateResults.reduce((sum, r) => sum + (r.re?.after_tax_equity ?? 0), 0),
+    // Before tax: cash balances, and property value less the mortgage.
+    cashBefore: cashResults.reduce((sum, r) => sum + r.cash.balance, 0),
+    realEstateBefore: realEstateResults.reduce((sum, r) => sum + (r.re?.equity ?? 0), 0),
     cashCount: cashResults.length,
     realEstateCount: realEstateResults.length,
   }
@@ -2162,6 +2165,11 @@ function PortfolioTotals({ summary, count, others }) {
   const total = invested + (others?.cash ?? 0) + (others?.realEstate ?? 0)
   const up = hasOthers ? total >= 0 : (summary?.after_tax_gain ?? 0) >= 0
   const holdings = count + (others?.cashCount ?? 0) + (others?.realEstateCount ?? 0)
+  // What it's all worth today, before tax (and before selling costs).
+  const before = (summary?.current_value ?? 0) + (hasOthers ? (others.cashBefore ?? 0) + (others.realEstateBefore ?? 0) : 0)
+  const after = hasOthers ? total : invested
+  const cost = before - after
+  const costLabel = others?.realEstateCount > 0 ? 'tax & selling costs' : 'tax'
   return (
     <section className="bg-card border border-amber-400/30 rounded-2xl p-5 mb-5">
       <div className="flex items-center gap-2 mb-4">
@@ -2169,12 +2177,26 @@ function PortfolioTotals({ summary, count, others }) {
         <span className="flex-1" />
         <span className="text-xs text-muted">{holdings} holding{holdings === 1 ? '' : 's'}</span>
       </div>
-      <div className="text-[10px] uppercase tracking-wider text-muted mb-1">
-        {hasOthers ? 'After-tax net worth' : 'After-tax value if all sold today'}
+      <div className="flex items-end gap-4 mb-5">
+        <div className="min-w-0">
+          <div className="text-[10px] uppercase tracking-wider text-muted mb-1 whitespace-nowrap">
+            {hasOthers ? 'After-tax net worth' : 'After-tax if all sold'}
+          </div>
+          <div className={clsx('text-3xl font-semibold font-mono-tab', up ? 'text-green-400' : 'text-rose-300')}>
+            {usd(after)}
+          </div>
+        </div>
+        <span className="flex-1" />
+        <div className="text-right min-w-0">
+          <div className="text-[10px] uppercase tracking-wider text-muted mb-1">Before tax</div>
+          <div className="text-lg font-semibold font-mono-tab text-amber-300">{usd(before)}</div>
+        </div>
       </div>
-      <div className={clsx('text-3xl font-semibold font-mono-tab mb-5', up ? 'text-green-400' : 'text-rose-300')}>
-        {usd(hasOthers ? total : invested)}
-      </div>
+      {cost > 0.5 && (
+        <div className="-mt-3 mb-5 text-xs text-muted">
+          <span className="font-mono-tab">−{usd(cost)}</span> {costLabel} if everything sold today
+        </div>
+      )}
       {hasOthers && (
         <div className="grid grid-cols-3 gap-3 pt-4 border-t border-hairline mb-4">
           <Stat label="Investments" value={usd(invested)} />

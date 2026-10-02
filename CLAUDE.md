@@ -905,7 +905,10 @@ value, holding period) and must pass before any edit to that file lands.
   ≤25% + NIIT + state, rest at LT rates; after-tax equity nets the
   mortgage). The Portfolio card leads with **after-tax net worth**
   (investments + cash + real-estate equity) when cash or property
-  exist; cost / gain / return and the target table cover investments
+  exist, with **Before tax** in gold on the right (investments at
+  current value + cash balances + property value − mortgage) and a line
+  under both: "−$X tax & selling costs if everything sold today" ("tax"
+  alone without property); cost / gain / return and the target table cover investments
   only. **Yield comparisons live in the editor, not on the page**
   (owner, 2026-10-02): the Cash editor's "Compare after tax" section
   compares savings / money market / T-bills / CD on the balance entered,
