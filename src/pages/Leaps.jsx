@@ -532,7 +532,7 @@ function TaxSummaryCard({ profile, hasProfile, states, rates }) {
           <div className="min-w-0">
             <div className="text-xs text-muted truncate mb-1">Estimated tax rate</div>
             <button type="button" onClick={() => setRatesOpen(true)}
-              className="-my-3 min-h-[44px] text-sm text-amber-300 underline underline-offset-4 decoration-amber-400/50 hover:text-amber-200">
+              className="block -my-[11px] py-[11px] text-sm text-amber-300 underline underline-offset-4 decoration-amber-400/50 hover:text-amber-200">
               View rates
             </button>
           </div>
