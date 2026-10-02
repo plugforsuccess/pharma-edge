@@ -110,8 +110,8 @@ export default function Layout() {
                       aria-hidden
                       className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-5 rounded-r-full"
                       style={{
-                        background: '#e8b558',
-                        boxShadow: '0 0 10px rgba(232,181,88,0.55)',
+                        background: '#f0b44c',
+                        boxShadow: '0 0 10px rgba(240, 180, 76,0.55)',
                       }}
                     />
                   )}
@@ -120,7 +120,7 @@ export default function Layout() {
                     strokeWidth={isActive ? 2.2 : 1.7}
                     className={clsx(
                       'shrink-0 transition-transform',
-                      isActive && 'drop-shadow-[0_0_6px_rgba(232,181,88,0.35)]',
+                      isActive && 'drop-shadow-[0_0_6px_rgba(240, 180, 76,0.35)]',
                     )}
                   />
                   <span className="text-sm font-medium tracking-tight">
@@ -172,7 +172,7 @@ export default function Layout() {
               type="button"
               onClick={() => navigate(navCenter.to)}
               aria-label={navCenter.label}
-              className="tap-bounce absolute -top-7 w-14 h-14 rounded-full bg-amber-400 hover:bg-amber-300 text-bg shadow-[0_4px_16px_rgba(232,181,88,0.45)] hover:shadow-[0_6px_22px_rgba(232,181,88,0.55)] flex items-center justify-center"
+              className="tap-bounce absolute -top-7 w-14 h-14 rounded-full bg-amber-400 hover:bg-amber-300 text-bg shadow-[0_4px_16px_rgba(240, 180, 76,0.45)] hover:shadow-[0_6px_22px_rgba(240, 180, 76,0.55)] flex items-center justify-center"
             >
               <navCenter.icon size={22} strokeWidth={2.5} />
             </button>
@@ -209,8 +209,8 @@ function BottomTab({ to, icon: Icon, label }) {
               className="absolute -top-2 left-1/2 -translate-x-1/2 w-7 h-[2px] rounded-full"
               style={{
                 background:
-                  'linear-gradient(90deg, transparent, #e8b558 50%, transparent)',
-                boxShadow: '0 0 12px rgba(232,181,88,0.65)',
+                  'linear-gradient(90deg, transparent, #f0b44c 50%, transparent)',
+                boxShadow: '0 0 12px rgba(240, 180, 76,0.65)',
               }}
             />
           )}
@@ -219,7 +219,7 @@ function BottomTab({ to, icon: Icon, label }) {
             strokeWidth={isActive ? 2.2 : 1.7}
             className={clsx(
               'transition-transform',
-              isActive && 'drop-shadow-[0_0_8px_rgba(232,181,88,0.35)]',
+              isActive && 'drop-shadow-[0_0_8px_rgba(240, 180, 76,0.35)]',
             )}
           />
           <span

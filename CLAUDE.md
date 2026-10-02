@@ -639,18 +639,17 @@ and the stop-loss UI. Do not remove or soften them.
 
 **Dark theme only.** No light mode. Never add light mode.
 
-```javascript
-// All colors from src/lib/design.js
-bg:           '#0a0a0f'
-bgCard:       '#111118'
-border:       '#1e1e2e'
-red:          '#ef4444'
-green:        '#22c55e'
-yellow:       '#eab308'
-blue:         '#6366f1'
-textPrimary:  '#e8e8f0'
-textSecondary:'#6b6b8a'
-textMuted:    '#3a3a5c'
+Palette (2026-10-02) is **tastytrade-adjacent**: neutral black /
+charcoal surfaces, white type, red for losses — but a **gold** brand
+accent (not red) and a softer money **green** for gains. Tokens live in
+`@theme` in `src/index.css`; Tailwind's `amber-*` (brand), `green-*`
+(gains) and `red-*` (losses) ramps are remapped there, so use those
+classes or the tokens — never hard-code hex in components.
+
+```
+bg          #0c0c0d    card        #161618    border   #27272a
+fg          #f2f2f3    subtle      #9a9aa1    muted    #5f5f68
+brand/gold  #f0b44c    gain/green  #2fd17c    loss/red #e5484d
 ```
 
 **Signal colors:**

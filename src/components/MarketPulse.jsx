@@ -151,7 +151,7 @@ export default function MarketPulse({ ticker }) {
           <span
             className={clsx(
               'inline-flex items-center gap-1 text-sm font-mono-tab tabular-nums',
-              view.changePct >= 0 ? 'text-green-400' : 'text-[#f25068]',
+              view.changePct >= 0 ? 'text-green-400' : 'text-[#f0646a]',
             )}
           >
             {view.changePct >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
@@ -169,7 +169,7 @@ export default function MarketPulse({ ticker }) {
         className={clsx(
           'text-xs leading-relaxed mb-3',
           view.regimeTone === 'positive' && 'text-green-400',
-          view.regimeTone === 'negative' && 'text-[#f25068]',
+          view.regimeTone === 'negative' && 'text-[#f0646a]',
           view.regimeTone === 'neutral' && 'text-subtle',
         )}
       >
@@ -205,7 +205,7 @@ function PulseCell({ label, value, sub, tone }) {
     amber: 'text-amber-400',
     purple: 'text-purple-400',
     green: 'text-green-400',
-    red: 'text-[#f25068]',
+    red: 'text-[#f0646a]',
     neutral: 'text-fg',
   }[tone] ?? 'text-fg'
   return (

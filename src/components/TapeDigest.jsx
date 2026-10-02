@@ -120,7 +120,7 @@ export default function TapeDigest() {
   return (
     <section className="surface rounded-2xl p-4 mb-5 border border-amber-400/15">
       <div className="flex items-center justify-between mb-3">
-        <p className="eyebrow text-[#f4cf8e]">Since you were away · {agoLabel}</p>
+        <p className="eyebrow text-[#f6cc7e]">Since you were away · {agoLabel}</p>
         <button
           type="button"
           onClick={() => setDismissed(true)}
@@ -185,8 +185,8 @@ export default function TapeDigest() {
 function RegimeTag({ r }) {
   const map = {
     A: 'text-green-400',
-    B: 'text-[#f25068]',
-    mixed: 'text-[#f4cf8e]',
+    B: 'text-[#f0646a]',
+    mixed: 'text-[#f6cc7e]',
   }
   return (
     <span className={clsx('font-semibold', map[r] || 'text-subtle')}>
