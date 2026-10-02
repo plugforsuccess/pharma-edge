@@ -75,16 +75,13 @@ function GainLine({ afterGain, beforeGain, cost, purchaseDate }) {
   const a = annualizedReturn({ gain: afterGain, cost, purchaseDate, asOf })
   const b = annualizedReturn({ gain: beforeGain, cost, purchaseDate, asOf })
   const annual = mode === 'annual'
-  const months = a ? Math.max(1, Math.round(a.days / 30.44)) : null
   const tone = (n, gainTone) => (n < 0 ? 'text-rose-300' : gainTone)
   let after = gainPct(afterGain, cost)
   let before = gainPct(beforeGain, cost)
-  let tail = null
+  // Under a year the total is the return — nothing to annualize.
   if (annual && a?.annualized != null && b?.annualized != null) {
     after = `${gainPct(a.annualized, 1)}/yr`
     before = `${gainPct(b.annualized, 1)}/yr`
-  } else if (annual && months != null) {
-    tail = ` · ${months} mo, not annualized`
   }
   return (
     <button type="button" onClick={flip}
@@ -92,7 +89,6 @@ function GainLine({ afterGain, beforeGain, cost, purchaseDate }) {
       className="block text-left -my-[11px] py-[11px] text-sm text-subtle">
       <span className={tone(afterGain, 'text-green-400')}>{after}</span> after tax
       {' · '}<span className={tone(beforeGain, 'text-amber-300')}>{before}</span> before tax
-      {tail && <span className="text-muted">{tail}</span>}
     </button>
   )
 }

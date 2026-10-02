@@ -685,8 +685,8 @@ after tax" — and the roll-window / time-stop flag; expanded cards show
 "+17.8% after tax · +25.0% before tax" under the hero value (after-tax % green, before-tax % gold; either turns red only on a loss). Tapping that line flips every card to **annualized** ("+5.9%/yr
 after tax · +6.7%/yr before tax", `annualizedReturn` in `afterTax.js`:
 (1 + total)^(365.25 / days) − 1); the choice is remembered on the device
-(`cm:gain-mode`). Holdings under a year aren't annualized — they keep
-the total and add "· 4 mo, not annualized"; cash has
+(`cm:gain-mode`). Under a year the line just shows the total (no
+annualizing, no extra label); cash has
 no gain line).
 Open state is remembered on the device (`cm:holdings-open`); new
 holdings open; "Expand all / Collapse all" sits by the Holdings title.
