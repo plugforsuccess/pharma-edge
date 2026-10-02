@@ -6,7 +6,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import {
   FILING_STATUSES, DEFAULT_TARGET_PCTS, makeRateResolver, deriveRates,
-  applyRateOverride, targetTable, positionAfterTax, portfolioSummary,
+  applyRateOverride, targetTable, targetRow, positionAfterTax, portfolioSummary,
   todayYmd, holdingPeriod, suggestInstrumentType, exerciseCall,
   blended1256Rate, exitLadder, rateAtGainFor, DEFAULT_EXIT_LADDER,
   customExitTargets, validateCustomTargets, MAX_CUSTOM_TARGETS,
@@ -118,18 +118,17 @@ export default function Leaps() {
     return makeRateResolver({ federal, state, filingStatus: p.filing_status, income: Number(p.annual_income) || 0, override, act60Rate })
   }, [federal, state, p.filing_status, p.annual_income, override, act60Rate])
 
-  const portfolio = Number(p.portfolio_size) || 0
+  // Each position stands on its own; the portfolio is just their sum.
+  const totalCost = useMemo(
+    () => (positions ?? []).reduce((sum, x) => sum + (Number(x.cost_basis) || 0), 0),
+    [positions],
+  )
+  const targetPcts = useMemo(() => (p.target_pcts ?? DEFAULT_TARGET_PCTS).map(Number), [p.target_pcts])
+  const selectedPct = Number(p.selected_target_pct)
   const table = useMemo(() => {
-    if (!rateForGain) return null
-    return targetTable({
-      portfolio,
-      allocationPct: Number(p.leaps_allocation_pct) || 0,
-      targetPcts: (p.target_pcts ?? DEFAULT_TARGET_PCTS).map(Number),
-      rateForGain,
-    })
-  }, [rateForGain, portfolio, p.leaps_allocation_pct, p.target_pcts])
-
-  const selectedRow = table?.rows.find((r) => r.target_pct === Number(p.selected_target_pct)) ?? null
+    if (!rateForGain || !(totalCost > 0)) return null
+    return targetTable({ basis: totalCost, targetPcts, rateForGain })
+  }, [rateForGain, totalCost, targetPcts])
   const asOf = todayYmd()
 
   const ladderFor = useCallback((basis, currentValue, character, contracts) => {
@@ -155,10 +154,16 @@ export default function Leaps() {
         asOf,
         rateForGain,
         instrumentType: pos.instrument_type,
-        targetMultiple: pos.instrument_type === 'index_option_1256'
-          ? selectedRow?.section_1256.required_multiple
-          : selectedRow?.long_term.required_multiple,
+        targetMultiple: ownTarget(Number(pos.cost_basis), pos.instrument_type),
       })))
+
+    // The selected after-tax return, solved on this position's own cost.
+    function ownTarget(basis, instrumentType) {
+      if (!(selectedPct > 0)) return null
+      const row = targetRow({ portfolio: basis, basis, targetPct: selectedPct, rateForGain })
+      if (!row) return null
+      return instrumentType === 'index_option_1256' ? row.section_1256.required_multiple : row.long_term.required_multiple
+    }
 
     function withLadder(pos, calc) {
       if (!calc) return { pos, calc, ladder: [], ladderLongTerm: null, custom: [], customLongTerm: null }
@@ -188,12 +193,12 @@ export default function Leaps() {
           : null,
       }
     }
-  }, [positions, rateForGain, asOf, selectedRow, ladderFor, customFor])
+  }, [positions, rateForGain, asOf, selectedPct, ladderFor, customFor])
 
   const summary = useMemo(() => {
     if (!rateForGain || results.length === 0) return null
-    return portfolioSummary(results.map((r) => r.calc), portfolio, rateForGain)
-  }, [results, portfolio, rateForGain])
+    return portfolioSummary(results.map((r) => r.calc), totalCost, rateForGain)
+  }, [results, totalCost, rateForGain])
 
   // Breakdown is shown at the user's current unrealized gain — it moves
   // as position values change (a big gain can cross a bracket or NIIT).
@@ -294,6 +299,8 @@ export default function Leaps() {
             <Banner tone="amber">Pick your residency in Settings (or enter both CPA rates) to see after-tax figures.</Banner>
           )}
 
+          {ready && summary && <PortfolioTotals summary={summary} count={results.length} />}
+
           {ready && table && (
             <TargetTable table={table} selected={Number(p.selected_target_pct)} onSelect={selectTarget} show1256={has1256} />
           )}
@@ -308,7 +315,7 @@ export default function Leaps() {
                     onClick={() => setAdding(true)}
                     className="min-h-[44px] px-3 rounded bg-amber-400/10 border border-amber-400/40 text-amber-300 text-sm font-semibold hover:bg-amber-400/20 transition"
                   >
-                    <Plus size={14} className="inline -mt-0.5" /> Add LEAPS
+                    <Plus size={14} className="inline -mt-0.5" /> Add position
                   </button>
                 )}
               </div>
@@ -349,7 +356,6 @@ export default function Leaps() {
                 />
               ))}
 
-              {summary && <PortfolioTotals summary={summary} count={results.length} />}
             </section>
           )}
 
@@ -448,15 +454,12 @@ function TaxSummaryCard({ profile, hasProfile, states }) {
       </div>
     )
   }
-  const basis = Number(profile.portfolio_size) * Number(profile.leaps_allocation_pct)
   const status = FILING_STATUSES.find((x) => x.value === profile.filing_status)?.label
   const stateName = states.find((x) => x.state_code === profile.state_code)?.state_name ?? profile.state_code ?? '—'
   return (
     <div className="bg-card border border-border rounded-xl p-4 mb-4">
       <div className="flex items-start gap-2">
         <div className="flex-1 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-          <Stat label="Portfolio" value={usd(Number(profile.portfolio_size))} />
-          <Stat label={`LEAPS basis (${pct(Number(profile.leaps_allocation_pct), 0)})`} value={usd(basis)} />
           <Stat label="Filing status" value={status} />
           <Stat label="Income before LEAPS" value={usd(Number(profile.annual_income))} />
           <Stat label="Residency" value={stateName} />
@@ -523,10 +526,11 @@ function RateBreakdown({ rates, state, taxYear, show1256 }) {
 function TargetTable({ table, selected, onSelect, show1256 }) {
   return (
     <section className="bg-card border border-border rounded-xl p-4 mb-4">
-      <h2 className="text-sm font-semibold mb-1">After-tax targets</h2>
+      <h2 className="text-sm font-semibold mb-1">After-tax return targets</h2>
       <p className="text-[10px] text-muted mb-3">
-        Multiple your {usd(table.basis)} LEAPS basis must reach to keep each
-        after-tax goal. Tap a row to track progress toward it.
+        The multiple your positions ({usd(table.basis)} total cost) must reach
+        to keep each after-tax return on what you paid. Tap a row to track
+        each position's progress toward it.
         {show1256 && ' §1256 = index options taxed 60/40 regardless of holding period.'}
       </p>
       <table className="w-full text-xs">
@@ -1402,25 +1406,35 @@ function holdingStart(date) {
   return holdingPeriod(date, date)?.long_term_date ?? '—'
 }
 
+// The portfolio is the sum of the open positions — nothing else.
 function PortfolioTotals({ summary, count }) {
+  const up = summary.after_tax_gain >= 0
   return (
-    <div className="bg-card border border-amber-400/30 rounded-xl p-4">
-      <h3 className="text-sm font-semibold mb-3">All LEAPS ({count})</h3>
-      <div className="grid grid-cols-3 gap-2 text-xs mb-3">
-        <Stat label="After-tax value" value={usd(summary.after_tax_value)} strong />
+    <section className="bg-card border border-amber-400/30 rounded-xl p-4 mb-4">
+      <div className="flex items-baseline gap-2 mb-3">
+        <h2 className="text-sm font-semibold flex-1">Portfolio</h2>
+        <span className="text-[10px] text-muted">{count} position{count === 1 ? '' : 's'}</span>
+      </div>
+      <div className="text-[10px] uppercase tracking-wider text-muted">After-tax value if all sold today</div>
+      <div className={clsx('text-2xl font-semibold font-mono-tab mb-3', up ? 'text-green-400' : 'text-rose-300')}>
+        {usd(summary.after_tax_value)}
+      </div>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs mb-3">
+        <Stat label="Total cost" value={usd(summary.basis)} />
+        <Stat label="Value now" value={usd(summary.current_value)} />
         <Stat label="After-tax gain" value={usd(summary.after_tax_gain)} />
-        <Stat label="Return on portfolio" value={pct(summary.after_tax_return_pct)} />
+        <Stat label="After-tax return on cost" value={pct(summary.after_tax_return_pct)} />
       </div>
       <div className="flex items-start gap-1.5 text-[10px] text-muted leading-relaxed">
         <Info size={11} className="shrink-0 mt-0.5" />
         <span>
-          Totals add each position's after-tax value separately. If gains and
+          The sum of your positions, each taxed on its own. If gains and
           losses were netted against each other, the estimated after-tax
           value would be <span className="font-mono-tab text-subtle">{usd(summary.netted.after_tax_value)}</span>{' '}
           (estimate — excludes loss carryforwards and the $3k ordinary-income offset).
         </span>
       </div>
-    </div>
+    </section>
   )
 }
 
