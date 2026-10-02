@@ -586,6 +586,14 @@ const DEFAULT_OWN_ROWS = [
 ]
 
 const OPTION_MULTIPLIER = 100
+// Prices are kept exactly as typed (up to PRICE_DECIMALS places — option
+// premiums and average costs often run past the cent). `exact` only strips
+// binary float noise (0.1 × 300 = 30.000000000000004), never real digits.
+const PRICE_DECIMALS = 6
+const exact = (x) => +Number(x).toFixed(PRICE_DECIMALS)
+const usdExact = (n) => (Number.isFinite(n)
+  ? `${n < 0 ? '−' : ''}$${Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`
+  : '—')
 
 function emptyForm(initial) {
   const own = Array.isArray(initial?.exit_targets) && initial.exit_targets.length > 0
@@ -625,8 +633,8 @@ function totalsOf(f) {
   const each = num(f.cost_each)
   const now = num(f.price_each)
   return {
-    basis: units > 0 && each != null ? each * units : null,
-    value: units > 0 && now != null ? now * units : null,
+    basis: units > 0 && each != null ? exact(each * units) : null,
+    value: units > 0 && now != null ? exact(now * units) : null,
   }
 }
 
@@ -655,9 +663,9 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
       const units = unitsOf(x)
       if (mode === 'total') {
         const t = totalsOf(x)
-        return { ...x, price_mode: mode, cost_basis: t.basis != null ? String(+t.basis.toFixed(2)) : x.cost_basis, current_value: t.value != null ? String(+t.value.toFixed(2)) : x.current_value }
+        return { ...x, price_mode: mode, cost_basis: t.basis != null ? String(exact(t.basis)) : x.cost_basis, current_value: t.value != null ? String(exact(t.value)) : x.current_value }
       }
-      const per = (v) => (units > 0 && num(v) != null ? String(+(num(v) / units).toFixed(4)) : '')
+      const per = (v) => (units > 0 && num(v) != null ? String(exact(num(v) / units)) : '')
       return { ...x, price_mode: mode, cost_each: per(x.cost_basis) || x.cost_each, price_each: per(x.current_value) || x.price_each }
     })
   }
@@ -686,8 +694,8 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
       expiration: isShares ? null : f.expiration || null,
       contracts: isShares ? null : num(f.contracts),
       shares: isShares ? num(f.shares) : null,
-      cost_basis: +basis.toFixed(2),
-      current_value: +value.toFixed(2),
+      cost_basis: exact(basis),
+      current_value: exact(value),
       value_as_of: new Date().toISOString(),
       purchase_date: f.purchase_date,
       exit_targets: exitTargets,
@@ -759,7 +767,7 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
               </Field>
               <Field label="Strike" hint="optional">
                 <Affix prefix="$">
-                  <NumberInput value={f.strike} onChange={setV('strike')} placeholder="250" className={clsx(inputCls, 'pl-7')} />
+                  <NumberInput decimals={PRICE_DECIMALS} value={f.strike} onChange={setV('strike')} placeholder="250" className={clsx(inputCls, 'pl-7')} />
                 </Affix>
               </Field>
               <Field label="Expiration" hint="optional">
@@ -797,19 +805,19 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
           {perShare ? (
             <>
               <Field label={isShares ? 'Paid per share' : 'Premium paid'}>
-                <Affix prefix="$"><NumberInput value={f.cost_each} onChange={setV('cost_each')} placeholder={isShares ? '180.00' : '12.50'} className={clsx(inputCls, 'pl-7')} /></Affix>
+                <Affix prefix="$"><NumberInput decimals={PRICE_DECIMALS} value={f.cost_each} onChange={setV('cost_each')} placeholder={isShares ? '180.00' : '12.50'} className={clsx(inputCls, 'pl-7')} /></Affix>
               </Field>
               <Field label={isShares ? 'Price now' : 'Premium now'}>
-                <Affix prefix="$"><NumberInput value={f.price_each} onChange={setV('price_each')} placeholder={isShares ? '210.00' : '18.00'} className={clsx(inputCls, 'pl-7')} /></Affix>
+                <Affix prefix="$"><NumberInput decimals={PRICE_DECIMALS} value={f.price_each} onChange={setV('price_each')} placeholder={isShares ? '210.00' : '18.00'} className={clsx(inputCls, 'pl-7')} /></Affix>
               </Field>
             </>
           ) : (
             <>
               <Field label="Total cost">
-                <Affix prefix="$"><NumberInput value={f.cost_basis} onChange={setV('cost_basis')} placeholder="10,000" className={clsx(inputCls, 'pl-7')} /></Affix>
+                <Affix prefix="$"><NumberInput decimals={PRICE_DECIMALS} value={f.cost_basis} onChange={setV('cost_basis')} placeholder="10,000" className={clsx(inputCls, 'pl-7')} /></Affix>
               </Field>
               <Field label="Value now">
-                <Affix prefix="$"><NumberInput value={f.current_value} onChange={setV('current_value')} placeholder="12,500" className={clsx(inputCls, 'pl-7')} /></Affix>
+                <Affix prefix="$"><NumberInput decimals={PRICE_DECIMALS} value={f.current_value} onChange={setV('current_value')} placeholder="12,500" className={clsx(inputCls, 'pl-7')} /></Affix>
               </Field>
             </>
           )}
@@ -821,8 +829,8 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
         )}
         {(basis > 0 || value != null) && (
           <div className="mt-3 grid grid-cols-3 gap-2 rounded-lg bg-bg/40 border border-hairline px-3 py-2 text-xs">
-            <Stat label="Total cost" value={usd(basis)} />
-            <Stat label="Value now" value={usd(value)} />
+            <Stat label="Total cost" value={usdExact(basis)} />
+            <Stat label="Value now" value={usdExact(value)} />
             <div className="min-w-0 text-right">
               <div className="text-[10px] text-muted">Gain</div>
               <div className={clsx('font-mono-tab text-xs truncate', gainPct == null ? 'text-fg' : gainPct >= 0 ? 'text-green-400' : 'text-rose-300')}>
