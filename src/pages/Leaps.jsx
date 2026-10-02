@@ -1747,7 +1747,7 @@ function TargetsEditor({ own, rows, contracts, onOwn, onRow, onAdd, onRemove }) 
   return (
     <div>
       <Segmented value={own ? 'own' : 'default'} onChange={(v) => onOwn(v === 'own')}
-        options={[{ value: 'default', label: 'Default' }, { value: 'own', label: 'Set my own' }]} />
+        options={[{ value: 'default', label: 'Default' }, { value: 'own', label: 'Custom' }]} />
       {!own ? (
         <p className="mt-3 text-xs text-muted">
           Uses your exit plan from <Link to="/settings#exit-targets" className="text-amber-300 underline underline-offset-2">Settings</Link>.
