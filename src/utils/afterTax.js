@@ -960,3 +960,18 @@ export function runnerAfterTax({ runner, basis, units, rateAtGain }) {
   const tax = gain > 0 ? gain * rateAtGain(gain) : 0
   return { cost, gain, tax, after_tax_gain: gain - tax }
 }
+
+// ── Annualized return ────────────────────────────────────────────
+//
+// (1 + total)^(365.25 / days) − 1, from the purchase date to `asOf`.
+// Not annualized under a year (a few weeks' gain compounded to a year
+// is noise) — `annualized` is null then and `days` says how long.
+export function annualizedReturn({ gain, cost, purchaseDate, asOf }) {
+  const p = parseYmd(purchaseDate)
+  const t = parseYmd(asOf)
+  if (p == null || t == null || !isValidBasis(cost)) return null
+  const days = Math.round((t - p) / DAY_MS)
+  const total = gain / cost
+  const annualized = days >= 365 && 1 + total > 0 ? Math.pow(1 + total, 365.25 / days) - 1 : null
+  return { days, total, annualized }
+}

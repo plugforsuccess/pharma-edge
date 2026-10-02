@@ -682,7 +682,11 @@ a roll-window warning stays dismissed until it escalates.
 **Holdings collapse:** each holding is a tap-to-expand card (summary:
 name (real estate drops "• Primary home / Rental" until expanded), dates, tax badge, after-tax value with its gain on cost — "+17.8%
 after tax" — and the roll-window / time-stop flag; expanded cards show
-"+17.8% after tax · +25.0% before tax" under the hero value (after-tax % green, before-tax % gold; either turns red only on a loss); cash has
+"+17.8% after tax · +25.0% before tax" under the hero value (after-tax % green, before-tax % gold; either turns red only on a loss). Tapping that line flips every card to **annualized** ("+5.9%/yr
+after tax · +6.7%/yr before tax", `annualizedReturn` in `afterTax.js`:
+(1 + total)^(365.25 / days) − 1); the choice is remembered on the device
+(`cm:gain-mode`). Under a year the line just shows the total (no
+annualizing, no extra label); cash has
 no gain line).
 Open state is remembered on the device (`cm:holdings-open`); new
 holdings open; "Expand all / Collapse all" sits by the Holdings title.
@@ -901,7 +905,10 @@ value, holding period) and must pass before any edit to that file lands.
   ≤25% + NIIT + state, rest at LT rates; after-tax equity nets the
   mortgage). The Portfolio card leads with **after-tax net worth**
   (investments + cash + real-estate equity) when cash or property
-  exist; cost / gain / return and the target table cover investments
+  exist, with **Before tax** in gold on the right (investments at
+  current value + cash balances + property value − mortgage) and a line
+  under both: "−$X tax & selling costs if everything sold today" ("tax"
+  alone without property); cost / gain / return and the target table cover investments
   only. **Yield comparisons live in the editor, not on the page**
   (owner, 2026-10-02): the Cash editor's "Compare after tax" section
   compares savings / money market / T-bills / CD on the balance entered,

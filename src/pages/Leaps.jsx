@@ -8,7 +8,7 @@ import {
   FILING_STATUSES, DEFAULT_TARGET_PCTS, makeRateResolver, deriveRates,
   applyRateOverride, targetTable, targetRow, positionAfterTax, portfolioSummary,
   todayYmd, holdingPeriod, suggestInstrumentType, exerciseCall,
-  blended1256Rate, rateAtGainFor, EXIT_PLAYBOOK, playbookTargets, runnerPlan, runnerAfterTax, timeStop,
+  blended1256Rate, rateAtGainFor, EXIT_PLAYBOOK, playbookTargets, runnerPlan, runnerAfterTax, annualizedReturn, timeStop,
   longTermFitsPlan, entryRunwayDays,
   CASH_KINDS, DEFAULT_SELLING_COST_PCT, cashAfterTax, cashYieldComparison, realEstateAfterTax,
   INCOME_KINDS, dividendAfterTax, incomeYieldComparison,
@@ -49,6 +49,50 @@ const mult = (n) => (Number.isFinite(n) ? `${n.toFixed(2)}x` : '—')
 const pct = (n, dp = 1) => (Number.isFinite(n)
   ? `${(n * 100).toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp })}%`
   : '—')
+// Total ⇄ annualized gain line on expanded cards. Tap to flip; the
+// choice is remembered on the device and every card follows it.
+const GAIN_MODE_KEY = 'cm:gain-mode'
+function useGainMode() {
+  const [mode, setMode] = useState(() => {
+    try { return localStorage.getItem(GAIN_MODE_KEY) === 'annual' ? 'annual' : 'total' } catch { return 'total' }
+  })
+  useEffect(() => {
+    const on = (e) => setMode(e.detail)
+    window.addEventListener(GAIN_MODE_KEY, on)
+    return () => window.removeEventListener(GAIN_MODE_KEY, on)
+  }, [])
+  const flip = () => {
+    const next = mode === 'annual' ? 'total' : 'annual'
+    try { localStorage.setItem(GAIN_MODE_KEY, next) } catch { /* this visit only */ }
+    window.dispatchEvent(new CustomEvent(GAIN_MODE_KEY, { detail: next }))
+  }
+  return [mode, flip]
+}
+
+function GainLine({ afterGain, beforeGain, cost, purchaseDate }) {
+  const [mode, flip] = useGainMode()
+  const asOf = todayYmd()
+  const a = annualizedReturn({ gain: afterGain, cost, purchaseDate, asOf })
+  const b = annualizedReturn({ gain: beforeGain, cost, purchaseDate, asOf })
+  const annual = mode === 'annual'
+  const tone = (n, gainTone) => (n < 0 ? 'text-rose-300' : gainTone)
+  let after = gainPct(afterGain, cost)
+  let before = gainPct(beforeGain, cost)
+  // Under a year the total is the return — nothing to annualize.
+  if (annual && a?.annualized != null && b?.annualized != null) {
+    after = `${gainPct(a.annualized, 1)}/yr`
+    before = `${gainPct(b.annualized, 1)}/yr`
+  }
+  return (
+    <button type="button" onClick={flip}
+      aria-label={annual ? 'Show total return' : 'Show annualized return'}
+      className="block text-left -my-[11px] py-[11px] text-sm text-subtle">
+      <span className={tone(afterGain, 'text-green-400')}>{after}</span> after tax
+      {' · '}<span className={tone(beforeGain, 'text-amber-300')}>{before}</span> before tax
+    </button>
+  )
+}
+
 // Gain on cost with its sign: "+15.2%", "−8.0%".
 const gainPct = (gain, cost) => {
   if (!(cost > 0) || !Number.isFinite(gain)) return '—'
@@ -368,6 +412,9 @@ export default function Leaps() {
       + results.reduce((sum, r) => sum + (r.dividend?.after_tax_income ?? 0), 0),
     cash: cashResults.reduce((sum, r) => sum + r.cash.after_tax_value, 0),
     realEstate: realEstateResults.reduce((sum, r) => sum + (r.re?.after_tax_equity ?? 0), 0),
+    // Before tax: cash balances, and property value less the mortgage.
+    cashBefore: cashResults.reduce((sum, r) => sum + r.cash.balance, 0),
+    realEstateBefore: realEstateResults.reduce((sum, r) => sum + (r.re?.equity ?? 0), 0),
     cashCount: cashResults.length,
     realEstateCount: realEstateResults.length,
   }
@@ -1346,10 +1393,7 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
           </span>
           <ChevronDown size={14} className={clsx('text-muted transition-transform', showTaxDetail && 'rotate-180')} />
         </button>
-        <div className="text-sm text-subtle">
-          <span className={calc.after_tax_gain < 0 ? 'text-rose-300' : 'text-green-400'}>{gainPct(calc.after_tax_gain, calc.basis)}</span> after tax
-          {' · '}<span className={calc.gain < 0 ? 'text-rose-300' : 'text-amber-300'}>{gainPct(calc.gain, calc.basis)}</span> before tax
-        </div>
+        <GainLine afterGain={calc.after_tax_gain} beforeGain={calc.gain} cost={calc.basis} purchaseDate={pos.purchase_date} />
         {showTaxDetail && (
           <div className="mt-1 text-xs text-muted font-mono-tab">
             {calc.gain > 0
@@ -1545,9 +1589,8 @@ function RealEstateCard({ pos, re, open, onToggle, onSave, onDelete }) {
         <div className={clsx('text-2xl font-semibold font-mono-tab', re.after_tax_equity >= 0 ? 'text-green-400' : 'text-rose-300')}>
           {usd(re.after_tax_equity)}
         </div>
-        <div className="mt-1 text-sm text-subtle">
-          <span className={reAfterTaxGain >= 0 ? 'text-green-400' : 'text-rose-300'}>{gainPct(reAfterTaxGain, re.basis)}</span> after tax
-          {' · '}<span className={re.value < re.basis ? 'text-rose-300' : 'text-amber-300'}>{gainPct(re.value - re.basis, re.basis)}</span> before tax
+        <div className="mt-1">
+          <GainLine afterGain={reAfterTaxGain} beforeGain={re.value - re.basis} cost={re.basis} purchaseDate={pos.purchase_date} />
         </div>
       </div>
       <div className="grid grid-cols-3 gap-3 py-3 border-y border-hairline">
@@ -2122,6 +2165,11 @@ function PortfolioTotals({ summary, count, others }) {
   const total = invested + (others?.cash ?? 0) + (others?.realEstate ?? 0)
   const up = hasOthers ? total >= 0 : (summary?.after_tax_gain ?? 0) >= 0
   const holdings = count + (others?.cashCount ?? 0) + (others?.realEstateCount ?? 0)
+  // What it's all worth today, before tax (and before selling costs).
+  const before = (summary?.current_value ?? 0) + (hasOthers ? (others.cashBefore ?? 0) + (others.realEstateBefore ?? 0) : 0)
+  const after = hasOthers ? total : invested
+  const cost = before - after
+  const costLabel = others?.realEstateCount > 0 ? 'tax & selling costs' : 'tax'
   return (
     <section className="bg-card border border-amber-400/30 rounded-2xl p-5 mb-5">
       <div className="flex items-center gap-2 mb-4">
@@ -2129,12 +2177,26 @@ function PortfolioTotals({ summary, count, others }) {
         <span className="flex-1" />
         <span className="text-xs text-muted">{holdings} holding{holdings === 1 ? '' : 's'}</span>
       </div>
-      <div className="text-[10px] uppercase tracking-wider text-muted mb-1">
-        {hasOthers ? 'After-tax net worth' : 'After-tax value if all sold today'}
+      <div className="flex items-end gap-4 mb-5">
+        <div className="min-w-0">
+          <div className="text-[10px] uppercase tracking-wider text-muted mb-1 whitespace-nowrap">
+            {hasOthers ? 'After-tax net worth' : 'After-tax if all sold'}
+          </div>
+          <div className={clsx('text-3xl font-semibold font-mono-tab', up ? 'text-green-400' : 'text-rose-300')}>
+            {usd(after)}
+          </div>
+        </div>
+        <span className="flex-1" />
+        <div className="text-right min-w-0">
+          <div className="text-[10px] uppercase tracking-wider text-muted mb-1">Before tax</div>
+          <div className="text-lg font-semibold font-mono-tab text-amber-300">{usd(before)}</div>
+        </div>
       </div>
-      <div className={clsx('text-3xl font-semibold font-mono-tab mb-5', up ? 'text-green-400' : 'text-rose-300')}>
-        {usd(hasOthers ? total : invested)}
-      </div>
+      {cost > 0.5 && (
+        <div className="-mt-3 mb-5 text-xs text-muted">
+          <span className="font-mono-tab">−{usd(cost)}</span> {costLabel} if everything sold today
+        </div>
+      )}
       {hasOthers && (
         <div className="grid grid-cols-3 gap-3 pt-4 border-t border-hairline mb-4">
           <Stat label="Investments" value={usd(invested)} />
