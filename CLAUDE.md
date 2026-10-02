@@ -685,8 +685,8 @@ holdings open; "Expand all / Collapse all" sits by the Holdings title.
 value on the right, a progress strip under each, the runner as a last
 row. No tax-math line and no Long-term line (option-price targets sell
 at the same price either way). The form toggle reads "Default" /
-"Set my own". Option titles read "RXRX · 50 contracts" with
-"$5 Call · Exp Jan 21, 2028" below.
+"Set my own". Titles read "RXRX • 50 contracts" / "NAUT • 3,500 shares";
+options show "$5 Call • Exp Jan 21, 2028" below, then "Bought …".
 
 **Mobile-first.** Max width 448px (max-w-md) centered. Bottom navigation
 on mobile, sidebar on desktop. All tap targets minimum 44px.

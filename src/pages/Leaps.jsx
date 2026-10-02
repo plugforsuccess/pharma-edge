@@ -915,12 +915,12 @@ const shortDate = (ymd, withYear = true) => {
 }
 
 // Two lines under the position name:
-//   "$5 Call · Exp Jan 21, 2028"        (options only)
+//   "$5 Call • Exp Jan 21, 2028"        (options only)
 //   "Bought Sep 28, 2026"               (+ "· value Sep 28" when the
 //                                         stored value isn't from today)
 function positionMeta(pos) {
   const contract = []
-  // Title is "RXRX · 50 contracts"; this line is "$5 Call · Exp Jan 21, 2028".
+  // Title is "RXRX • 50 contracts"; this line is "$5 Call • Exp Jan 21, 2028".
   if (pos.instrument_type !== 'stock') {
     contract.push([pos.strike && `$${Number(pos.strike).toLocaleString('en-US', { maximumFractionDigits: 2 })}`,
       pos.option_type === 'P' ? 'Put' : 'Call'].filter(Boolean).join(' '))
@@ -931,7 +931,7 @@ function positionMeta(pos) {
     const asOf = todayYmd(new Date(pos.value_as_of))
     if (asOf !== todayYmd()) held.push(`value ${shortDate(asOf, asOf.slice(0, 4) !== todayYmd().slice(0, 4))}`)
   }
-  return [contract.join(' · '), held.join(' · ')].filter(Boolean)
+  return [contract.join(' • '), held.join(' · ')].filter(Boolean)
 }
 
 function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTerm, runner, plan, previewFor, selectedTargetPct, onSave, onDelete, onExercise, open, onToggle }) {
@@ -956,10 +956,10 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
   const is1256 = calc.tax_character === 'section_1256'
   const isStock = pos.instrument_type === 'stock'
   const label = isStock
-    ? `${pos.ticker} · ${Number(pos.shares).toLocaleString()} shares`
+    ? `${pos.ticker} • ${Number(pos.shares).toLocaleString()} shares`
     : [pos.ticker,
       Number(pos.contracts) > 0 && `${Number(pos.contracts).toLocaleString('en-US')} contract${Number(pos.contracts) === 1 ? '' : 's'}`,
-    ].filter(Boolean).join(' · ')
+    ].filter(Boolean).join(' • ')
   const canExercise = exerciseCall({ option: pos, exerciseDate: todayYmd() }) != null
   const stop = isStock ? null : timeStop(pos.expiration, todayYmd(), plan)
   const ltFits = longTermFitsPlan(calc.long_term_date, isStock ? null : pos.expiration, plan)
