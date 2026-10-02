@@ -354,7 +354,7 @@ function ExportDataButton({ userId, email }) {
           generated_at: new Date().toISOString(),
           generated_for: email || null,
           schema_note:
-            'JSON export of every Cash Moves row attached to your account. Hashes match the rows on pharma-edge.vercel.app and the GitHub anchor commits.',
+            'JSON export of every Cash Moves row attached to your account. Hashes match the rows in Cash Moves and the GitHub anchor commits.',
         },
         profile: profileRes.data ?? null,
         signals: signalsRes.data ?? [],

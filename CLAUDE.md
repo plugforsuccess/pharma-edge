@@ -720,10 +720,13 @@ LEAPS drives growth. Tiers:
 Other revenue: Tradier referral fees; managed accounts (auto-trading)
 only after the adviser-registration question is settled with counsel.
 
-Nav (mobile): Home · Positions · Simulator · Research · Pulse (Elite,
-locked teaser for Pro). Hidden indefinitely (code kept, routes/nav
-removed): Wheel, Picks, Log a Move, signal / play detail, Flow,
-Leaderboard. Position detail returns when the Elite spread bot ships.
+Nav (mobile): Home · Positions · Simulator (center) · Research · Pulse
+(Elite, locked teaser for Pro); desktop rail adds Settings + an "Add a
+position" CTA. Hidden indefinitely via `src/lib/features.js` (code
+kept; each flag gates the route AND every entry point to it — flip to
+true to restore): Wheel + Picks, Log a Move (`/log` → `/leaps?add=1`),
+signal / play detail, Flow, Leaderboard. Hidden routes redirect, never
+404. Position detail returns when the Elite spread bot ships.
 Learn stays for SEO, out of nav. Data: Tradier (orders, quotes,
 chains) + Massive/Polygon (IV history, bars, backtests); Tastytrade
 dxLink keeps feeding HeatPulse for now.

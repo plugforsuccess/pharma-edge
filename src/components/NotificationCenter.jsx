@@ -14,6 +14,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import clsx from 'clsx'
+import { FEATURES } from '../lib/features'
 
 // Map alert_type → lucide icon + tone. Kept terse: emoji ages poorly
 // across platforms (Apple's clock vs Android's clock vs the empty-box
@@ -151,7 +152,7 @@ export default function NotificationCenter() {
 
   function handleRowClick(alert) {
     markRead(alert.id)
-    if (alert.signal_id) {
+    if (alert.signal_id && FEATURES.signalDetail) {
       setOpen(false)
       navigate(`/signal/${alert.signal_id}`)
     }

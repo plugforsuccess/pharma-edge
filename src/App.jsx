@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard'
 import SignalDetail from './pages/SignalDetail'
 import LogSignal from './pages/LogSignal'
 import Layout from './components/Layout'
+import { FEATURES } from './lib/features'
 
 // Non-critical screens can pay their bytes lazily.
 const Settings = lazy(() => import('./pages/Settings'))
@@ -29,6 +30,7 @@ const WheelWatchlist = lazy(() => import('./pages/WheelWatchlist'))
 const KingBoard = lazy(() => import('./pages/KingBoard'))
 const Leaps = lazy(() => import('./pages/Leaps'))
 const LeapsOnboarding = lazy(() => import('./pages/LeapsOnboarding'))
+const Simulator = lazy(() => import('./pages/Simulator'))
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -60,6 +62,11 @@ function ProtectedLayout() {
   return <Layout />
 }
 
+// A route switched off in FEATURES redirects (to the Tape by default).
+function hidden(enabled, element, fallback = '/') {
+  return enabled ? element : <Navigate to={fallback} replace />
+}
+
 export default function App() {
   return (
     <AuthProvider>
@@ -69,9 +76,11 @@ export default function App() {
           <Route
             path="/leaderboard"
             element={
-              <Suspense fallback={<LoadingScreen />}>
-                <Leaderboard />
-              </Suspense>
+              FEATURES.leaderboard ? (
+                <Suspense fallback={<LoadingScreen />}>
+                  <Leaderboard />
+                </Suspense>
+              ) : <Navigate to="/" replace />
             }
           />
           {/* Public track-record profiles were cut from the MVP (2026-10-02).
@@ -87,25 +96,28 @@ export default function App() {
             }
           >
             <Route index element={<Dashboard />} />
-            <Route path="signal/:id" element={<SignalDetail />} />
+            {/* Hidden from the MVP via src/lib/features.js — old links
+                redirect instead of 404ing. */}
+            <Route path="signal/:id" element={hidden(FEATURES.signalDetail, <SignalDetail />)} />
             <Route
               path="play/:claude_call_id"
-              element={
+              element={hidden(FEATURES.playDetail, (
                 <Suspense fallback={<LoadingScreen />}>
                   <PlayDetail />
                 </Suspense>
-              }
+              ))}
             />
-            <Route path="log" element={<LogSignal />} />
+            <Route path="log" element={hidden(FEATURES.logMove, <LogSignal />, '/leaps?add=1')} />
             <Route path="record" element={<Navigate to="/leaps" replace />} />
             <Route path="settings" element={<Settings />} />
             <Route path="markets" element={<Markets />} />
             <Route path="markets/king-board" element={<KingBoard />} />
-            <Route path="wheel" element={<Wheel />} />
-            <Route path="picks" element={<WheelWatchlist />} />
+            <Route path="wheel" element={hidden(FEATURES.wheel, <Wheel />)} />
+            <Route path="picks" element={hidden(FEATURES.wheel, <WheelWatchlist />)} />
             <Route path="leaps" element={<Leaps />} />
             <Route path="leaps/onboarding" element={<LeapsOnboarding />} />
-            <Route path="flow" element={<AdminOnly><Flow /></AdminOnly>} />
+            <Route path="simulator" element={<Simulator />} />
+            <Route path="flow" element={hidden(FEATURES.flow, <AdminOnly><Flow /></AdminOnly>)} />
             <Route path="reasoning" element={<Reasoning />} />
             <Route path="learn" element={<LearnIndex />} />
             <Route path="learn/dealer-positioning-guide" element={<DealerPositioningGuide />} />

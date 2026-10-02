@@ -6,6 +6,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { useSubscription } from '../hooks/useSubscription'
 import { logAsSignal } from '../lib/logAsSignal'
+import { FEATURES } from '../lib/features'
 
 // Ask Claude for 0-3 spread trade ideas based on the live GEX matrix
 // for the current ticker. Renders each as a card with strikes, expiry,
@@ -251,19 +252,18 @@ export default function SuggestedPlays({ ticker, isPro: isProProp }) {
               key={i}
               play={play}
               ticker={ticker}
-              onLogSignal={() =>
+              onLogSignal={FEATURES.logMove ? () =>
                 logAsSignal(navigate, play, ticker, data.spot, data.regime, {
                   claudeCallId: data.claude_call_id ?? null,
                   otherPlays: data.plays.filter((_, j) => j !== i),
-                })
-              }
+                }) : null}
             />
           ))}
 
         {data && (
           <p className="text-[10px] text-muted leading-relaxed pt-2 border-t border-border">
-            Suggestions, not advice. Verify pricing on Tap Log Signal →
-            calculator step before placing. GEX informs probability,
+            Suggestions, not advice. Verify pricing with your broker
+            before placing. GEX informs probability,
             not certainty — walls fail and regimes flip intraday.
           </p>
         )}
@@ -516,13 +516,15 @@ function PlayCard({ play, onLogSignal }) {
           POP. LogSignal step 2 IS the calculator with full prefill,
           so the cleaner path is direct → log. Users still hit the
           standalone /calculator from primary nav for what-if work. */}
-      <button
-        onClick={onLogSignal}
-        className="w-full inline-flex items-center justify-center gap-1.5 bg-amber-400 hover:bg-amber-300 text-bg text-xs font-semibold rounded-md py-2 transition"
-      >
-        <FileText size={11} />
-        Log Signal
-      </button>
+      {onLogSignal && (
+        <button
+          onClick={onLogSignal}
+          className="w-full inline-flex items-center justify-center gap-1.5 bg-amber-400 hover:bg-amber-300 text-bg text-xs font-semibold rounded-md py-2 transition"
+        >
+          <FileText size={11} />
+          Log Signal
+        </button>
+      )}
     </div>
   )
 }
