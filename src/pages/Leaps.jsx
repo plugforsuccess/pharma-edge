@@ -1595,7 +1595,7 @@ function GoalSection({ goal, onGoal, basis, is1256 }) {
       </Field>
       {row && (
         <div className="mt-2 text-xs text-muted space-y-0.5">
-          <div>Keeps <span className="font-mono-tab text-fg">{usd(row.after_tax_target)}</span> after tax</div>
+          <div><span className="font-mono-tab text-green-400">{usd(row.after_tax_target)}</span> after taxes</div>
           <div>Needs <span className="font-mono-tab text-fg">{mult(is1256 ? row.section_1256.required_multiple : row.long_term.required_multiple)}</span> {is1256 ? '(§1256 60/40)' : 'long-term'}</div>
           {!is1256 && <div>Needs <span className="font-mono-tab text-fg">{mult(row.short_term.required_multiple)}</span> short-term</div>}
         </div>

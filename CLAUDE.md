@@ -858,7 +858,7 @@ value, holding period) and must pass before any edit to that file lands.
   empty field fills with the default when the editor opens or on blur,
   and saving the untouched default stores NULL so it keeps following
   Settings), the line
-  "Keeps $X after tax" / "Needs 1.37x long-term" / "Needs 1.42x
+  "$1,800 after taxes" (amount in green) / "Needs 1.37x long-term" / "Needs 1.42x
   short-term" (one per row), and a
   "Show all targets" tap that expands the full 50%–20% table on that
   holding's cost (tap a row to pick it; §1256 shows its 60/40 column).
