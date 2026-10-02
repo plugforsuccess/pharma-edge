@@ -1122,8 +1122,8 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
         )}
         {!isShares && (
           is1256 && (
-            <div className="mt-4 flex items-center gap-2 rounded-lg border border-sky-500/30 bg-sky-500/5 px-3 py-2.5">
-              <span className="flex-1 text-sm text-sky-200">Index option · §1256 60/40 tax</span>
+            <div className="mt-4 flex items-center gap-2 rounded-lg border border-violet-400/30 bg-violet-400/5 px-3 py-2.5">
+              <span className="flex-1 text-sm text-violet-200">Index option · §1256 60/40 tax</span>
             </div>
           )
         )}
@@ -1347,7 +1347,7 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
             className={clsx(
               'inline-block mt-2 text-[10px] uppercase tracking-wider px-2 py-1 rounded-md border font-semibold',
               is1256
-                ? 'bg-sky-500/15 text-sky-300 border-sky-500/40'
+                ? 'bg-violet-400/15 text-violet-300 border-violet-400/40'
                 : calc.is_long_term
                   ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
                   : 'bg-amber-500/15 text-amber-300 border-amber-500/40',
@@ -1496,7 +1496,14 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
 
 // Collapsible card frame shared by cash and real estate (same header as
 // PositionCard: title, meta lines, badge, and the value when collapsed).
-function HoldingShell({ pos, open, onToggle, title, meta, badge, value, valueLabel, valueUp = true, editing, form, onEdit, onDelete, children }) {
+// Type badges: cash = blue (the $100-bill ribbon), real estate = brick.
+const BADGE_TONE = {
+  neutral: 'bg-bg/40 text-subtle border-border',
+  cash: 'bg-blue-400/10 text-blue-300 border-blue-400/40',
+  realEstate: 'bg-orange-400/10 text-orange-300 border-orange-400/35',
+}
+
+function HoldingShell({ pos, open, onToggle, title, meta, badge, badgeTone = 'neutral', value, valueLabel, valueUp = true, editing, form, onEdit, onDelete, children }) {
   if (editing) return form
   return (
     <div className="bg-card border border-border rounded-2xl mb-4">
@@ -1505,7 +1512,8 @@ function HoldingShell({ pos, open, onToggle, title, meta, badge, value, valueLab
         <div className="flex-1 min-w-0">
           <div className="text-base font-semibold break-words">{title}</div>
           {meta.filter(Boolean).map((line) => <div key={line} className="text-xs text-muted mt-0.5">{line}</div>)}
-          <span className="inline-block mt-2 text-[10px] uppercase tracking-wider px-2 py-1 rounded-md border font-semibold bg-bg/40 text-subtle border-border">
+          <span className={clsx('inline-block mt-2 text-[10px] uppercase tracking-wider px-2 py-1 rounded-md border font-semibold',
+            BADGE_TONE[badgeTone] ?? BADGE_TONE.neutral)}>
             {badge}
           </span>
         </div>
@@ -1550,7 +1558,7 @@ function CashCard({ pos, cash, open, onToggle, onSave, onDelete }) {
         onSave={async (row) => { const err = await onSave(row); if (!err) setEditing(false); return err }} />}
       title={`${pos.name} • ${cashKindLabel(kind)}`}
       meta={[cash.apy > 0 ? `${ratePct(cash.apy)} APY` : 'No yield entered']}
-      badge="Cash"
+      badge="Cash" badgeTone="cash"
       value={usd(cash.balance)} valueLabel="balance"
     >
       <div className="mb-4">
@@ -1581,7 +1589,7 @@ function RealEstateCard({ pos, re, open, onToggle, onSave, onDelete }) {
         onSave={async (row) => { const err = await onSave(row); if (!err) setEditing(false); return err }} />}
       title={open ? `${pos.name} • ${rental ? 'Rental' : 'Primary home'}` : pos.name}
       meta={[`Bought ${shortDate(pos.purchase_date)}`]}
-      badge={re.is_long_term ? 'Long-term' : 'Short-term'}
+      badge="Real Estate" badgeTone="realEstate"
       value={usd(re.after_tax_equity)} valueLabel={`${gainPct(reAfterTaxGain, re.basis)} after tax`} valueUp={reAfterTaxGain >= 0}
     >
       <div className="mb-4">
