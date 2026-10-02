@@ -665,10 +665,12 @@ brand/gold  #f0b44c    gain/green  #2fd17c    loss/red #e5484d
 Tailwind sans for UI copy.
 
 **Line height** is opened up app-wide in `@theme` (text-xs 18px, text-sm
-22px). **Explanations go in an (i):** use `components/InfoTip.jsx` (a
-closable bottom sheet) for "how this works" copy instead of footnote
-paragraphs under cards. Keep a short visible "estimates, not tax advice"
-line on tax screens — the full disclaimer can live in its (i).
+22px). **No (i) info pop-ups for now** (removed 2026-10-02 at the
+owner's request until the copy and the pop-up behavior are designed).
+`components/InfoTip.jsx` is kept but unused; don't add footnote
+paragraphs back under cards either. Tax screens keep one visible line:
+"All tax figures are estimates, not tax advice. Consult a tax
+professional before acting on them."
 
 **Mobile-first.** Max width 448px (max-w-md) centered. Bottom navigation
 on mobile, sidebar on desktop. All tap targets minimum 44px.

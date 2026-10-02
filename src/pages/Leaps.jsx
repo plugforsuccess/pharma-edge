@@ -12,7 +12,6 @@ import {
   customExitTargets, validateCustomTargets, MAX_CUSTOM_TARGETS,
 } from '../utils/afterTax'
 import NumberInput from '../components/NumberInput'
-import InfoTip from '../components/InfoTip'
 
 // LEAPS — after-tax targets + live after-tax value.
 //
@@ -270,10 +269,6 @@ export default function Leaps() {
         <div className="flex items-center gap-2 mb-1">
           <Landmark size={16} className="text-amber-400" />
           <h1 className="text-lg font-semibold">Positions</h1>
-          <InfoTip title="Positions, after tax" className="ml-1">
-            <p>What each position is worth after tax, and where to sell to keep each after-tax goal.</p>
-            <p>Pre-tax gains overstate what you keep, so the after-tax value is the headline number everywhere on this page.</p>
-          </InfoTip>
           <span className="flex-1" />
           {federal && (
             <span className="text-[10px] uppercase tracking-wider px-2 py-1 rounded-md border border-border text-subtle whitespace-nowrap">
@@ -363,18 +358,7 @@ export default function Leaps() {
           )}
 
           <div className="flex items-center gap-2 text-xs text-muted">
-            <span>All tax figures are estimates, not tax advice.</span>
-            <InfoTip title="About these estimates">
-              <p>
-                Tax figures use combined marginal rates
-                {federal ? ` from ${federal.tax_year} federal and state figures` : ''}.
-              </p>
-              <p>
-                Actual taxes depend on your full tax situation: deductions,
-                other gains and losses, AMT, credits and local taxes.
-              </p>
-              <p>Consult a tax professional before acting on these numbers.</p>
-            </InfoTip>
+            <span>All tax figures are estimates, not tax advice. Consult a tax professional before acting on them.</span>
           </div>
         </>
       )}
@@ -492,12 +476,6 @@ function RateBreakdown({ rates, state, taxYear, show1256 }) {
     <div className={CARD}>
       <div className="flex items-center gap-2 mb-4">
         <h2 className="text-sm font-semibold">Your estimated tax rates</h2>
-        <InfoTip title="How your rates are worked out">
-          <p>Brackets use your income plus your current unrealized gain, so these update as position values change.</p>
-          <p>The state part is the effective rate on the gain, after any capital-gains exclusion or threshold.</p>
-          <p>Each target row uses the rate at that target's gain.</p>
-          {rates.federal_exempt && <p>As a bona fide Puerto Rico resident, gains on appreciation after your move are excluded from federal tax. Appreciation from before the move is still federally taxable.</p>}
-        </InfoTip>
         <span className="flex-1" />
         <span className="text-xs text-muted">{taxYear}</span>
       </div>
@@ -543,11 +521,6 @@ function TargetTable({ table, selected, onSelect, show1256 }) {
     <section className={CARD}>
       <div className="flex items-center gap-2 mb-1">
         <h2 className="text-sm font-semibold">After-tax return targets</h2>
-        <InfoTip title="After-tax return targets">
-          <p>Each row is an after-tax return on what you paid for your positions ({usd(table.basis)} total cost), and the multiple they must reach to keep it.</p>
-          <p>Tap a row to track every position's progress toward that target.</p>
-          {show1256 && <p>§1256 = index options, taxed 60% long-term / 40% short-term regardless of holding period.</p>}
-        </InfoTip>
       </div>
       <p className="text-xs text-muted mb-4">On {usd(table.basis)} total cost · tap a row to track it</p>
       <table className="w-full text-sm">
@@ -805,23 +778,12 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
           is1256 && (
             <div className="mt-4 flex items-center gap-2 rounded-lg border border-sky-500/30 bg-sky-500/5 px-3 py-2.5">
               <span className="flex-1 text-sm text-sky-200">Index option · §1256 60/40 tax</span>
-              <InfoTip title="Index options (§1256)">
-                <p>{f.ticker} is a broad-based index option, so it's a §1256 contract.</p>
-                <p>Gains are taxed 60% long-term / 40% short-term however long you hold it, and open positions are marked to market at year-end (taxed as if sold on Dec 31).</p>
-                <p>ETF options like SPY and QQQ are not §1256 — they follow the normal one-year rule.</p>
-              </InfoTip>
             </div>
           )
         )}
       </FormSection>
 
-      <FormSection title="Cost & value" info={
-        <InfoTip title="Entering cost and value">
-          <p><span className="text-fg">Per share</span> is how your broker quotes prices. For options that's the premium: total = premium × 100 × contracts.</p>
-          <p><span className="text-fg">Total</span> is the dollar amount for the whole position.</p>
-          <p>Prices are kept exactly as typed, up to 6 decimal places.</p>
-        </InfoTip>
-      } aside={
+      <FormSection title="Cost & value" aside={
         <Segmented compact value={f.price_mode} onChange={setPriceMode}
           options={[{ value: 'per_share', label: 'Per share' }, { value: 'total', label: 'Total' }]} />
       }>
@@ -860,13 +822,7 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
         )}
       </FormSection>
 
-      <FormSection title="Exit Targets" info={
-        <InfoTip title="Exit Targets">
-          <p><span className="text-fg">My default</span> uses the after-tax Exit Targets from Settings — each target is the value where selling that share leaves the stated gain after tax.</p>
-          <p><span className="text-fg">Set my own</span>: a <span className="text-fg">%</span> target is the gain on what you paid (+100% = double). A <span className="text-fg">$</span> target is what the whole position is worth. Choose how much to sell at each.</p>
-          <p>The preview shows what you'd keep after tax at each target.</p>
-        </InfoTip>
-      }>
+      <FormSection title="Exit Targets">
         <TargetsEditor
           own={f.own_targets}
           rows={f.targets}
@@ -955,8 +911,6 @@ function Affix({ prefix, suffix, children }) {
   )
 }
 
-// "3 contracts · Bought Jun 2, 2025" — plus "· value Sep 28" only when
-// the stored value isn't from today (manual entries go stale).
 const shortDate = (ymd, withYear = true) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(ymd ?? ''))
   if (!m) return ''
@@ -964,16 +918,23 @@ const shortDate = (ymd, withYear = true) => {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', ...(withYear && { year: 'numeric' }), timeZone: 'UTC' })
 }
 
+// Two lines under the position name:
+//   "Exp Jan 21, 2028 · 50 contracts"   (options only)
+//   "Bought Sep 28, 2026"               (+ "· value Sep 28" when the
+//                                         stored value isn't from today)
 function positionMeta(pos) {
-  const parts = []
+  const contract = []
   const n = Number(pos.contracts)
-  if (pos.instrument_type !== 'stock' && n > 0) parts.push(`${n} contract${n === 1 ? '' : 's'}`)
-  parts.push(`${pos.exercised_from_id ? 'Exercised' : 'Bought'} ${shortDate(pos.purchase_date)}`)
+  if (pos.instrument_type !== 'stock') {
+    if (pos.expiration) contract.push(`Exp ${shortDate(pos.expiration)}`)
+    if (n > 0) contract.push(`${n} contract${n === 1 ? '' : 's'}`)
+  }
+  const held = [`${pos.exercised_from_id ? 'Exercised' : 'Bought'} ${shortDate(pos.purchase_date)}`]
   if (pos.value_as_of) {
     const asOf = todayYmd(new Date(pos.value_as_of))
-    if (asOf !== todayYmd()) parts.push(`value ${shortDate(asOf, asOf.slice(0, 4) !== todayYmd().slice(0, 4))}`)
+    if (asOf !== todayYmd()) held.push(`value ${shortDate(asOf, asOf.slice(0, 4) !== todayYmd().slice(0, 4))}`)
   }
-  return parts.join(' · ')
+  return [contract.join(' · '), held.join(' · ')].filter(Boolean)
 }
 
 function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTerm, previewFor, selectedTargetPct, onSave, onDelete, onExercise }) {
@@ -1001,7 +962,6 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
     ? `${pos.ticker} · ${Number(pos.shares).toLocaleString()} shares`
     : [pos.ticker, pos.strike && `$${Number(pos.strike).toLocaleString('en-US', { maximumFractionDigits: 2 })}`, pos.option_type === 'P' ? 'Put' : 'Call']
       .filter(Boolean).join(' ')
-  const expires = !isStock && pos.expiration ? `Exp ${shortDate(pos.expiration)}` : null
   const canExercise = exerciseCall({ option: pos, exerciseDate: todayYmd() }) != null
   const up = calc.gain >= 0
   return (
@@ -1009,7 +969,9 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
       <div className="flex items-start gap-3 mb-4">
         <div className="flex-1 min-w-0">
           <div className="text-base font-semibold break-words">{label}</div>
-          <div className="text-xs text-muted mt-0.5">{[expires, positionMeta(pos)].filter(Boolean).join(' · ')}</div>
+          {positionMeta(pos).map((line) => (
+            <div key={line} className="text-xs text-muted mt-0.5">{line}</div>
+          ))}
         </div>
         <span
           className={clsx(
@@ -1063,10 +1025,6 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
             <span className="font-semibold font-mono-tab">{usd(calc.tax_saved_by_waiting)}</span> in tax.
             <div className="text-xs text-emerald-200/70 mt-1">{calc.days_until_long_term} days until it's long-term</div>
           </div>
-          <InfoTip title="Waiting for long-term">
-            <p>Sold today, this gain is short-term and taxed at {ratePct(calc.short_term_rate)}. From {shortDate(calc.long_term_date)} it's long-term at {ratePct(calc.long_term_rate)}.</p>
-            <p>At today's value that difference is about {usd(calc.tax_saved_by_waiting)}. The real saving moves with the position's value.</p>
-          </InfoTip>
         </div>
       )}
 
@@ -1168,13 +1126,6 @@ function ExitLadder({ ladder, ladderLongTerm, character, longTermDate, isStock }
     <TargetsPanel
       title="Exit Targets"
       subtitle={`At the ${CHARACTER_LABEL[character]} if sold today`}
-      info={
-        <InfoTip title="Exit Targets">
-          <p>Each target is the position value at which selling that share leaves the stated gain <span className="text-fg">after tax</span>.</p>
-          {ladderLongTerm && longTermDate && <p>"Long-term" is where each target moves once this goes long-term on {shortDate(longTermDate)}.</p>}
-          <p>Recalculated as your tax rate and position value change. Change the targets in Settings. Estimates.</p>
-        </InfoTip>
-      }
     >
       {ladder.map((r, i) => (
         <li key={r.index}>
@@ -1354,13 +1305,6 @@ function CustomExitTargets({ rows, rowsLongTerm, character, longTermDate, isStoc
     <TargetsPanel
       title="Exit Targets"
       subtitle={`What you keep after tax · ${CHARACTER_LABEL[character]}`}
-      info={
-        <InfoTip title="Your Exit Targets">
-          <p>The green number is what you'd keep from each sale after estimated tax. The line under it shows the sale amount, the tax and the rate.</p>
-          {rowsLongTerm && longTermDate && <p>"Long-term" is the same sale once this goes long-term on {shortDate(longTermDate)}.</p>}
-          <p>Each sale is taxed on its own; selling several in one year can push the rate higher. Estimates.</p>
-        </InfoTip>
-      }
       footer={
         <div className="mt-4 pt-3 border-t border-hairline flex items-baseline gap-3">
           <span className="flex-1 text-sm text-subtle">
@@ -1417,10 +1361,6 @@ function ExerciseForm({ pos, onExercise, onCancel }) {
     <div className="rounded-xl border border-amber-400/40 p-4 mb-4">
       <div className="flex items-center gap-2 mb-4">
         <h3 className="text-sm font-semibold">Exercise into stock</h3>
-        <InfoTip title="Exercising a call">
-          <p>The premium you paid rolls into the stock's cost basis: premium + strike × shares.</p>
-          <p>The stock starts its own holding period from the exercise date — the call's holding time does not carry over.</p>
-        </InfoTip>
       </div>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Exercise date"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={dateCls} /></Field>
@@ -1455,14 +1395,6 @@ function PortfolioTotals({ summary, count }) {
     <section className="bg-card border border-amber-400/30 rounded-2xl p-5 mb-5">
       <div className="flex items-center gap-2 mb-4">
         <h2 className="text-sm font-semibold">Portfolio</h2>
-        <InfoTip title="How the portfolio is totaled">
-          <p>The portfolio is the sum of your open positions, each taxed on its own.</p>
-          <p>
-            If gains and losses were netted against each other, the estimated
-            after-tax value would be <span className="font-mono-tab text-fg">{usd(summary.netted.after_tax_value)}</span>.
-            That estimate excludes loss carryforwards and the $3k ordinary-income offset.
-          </p>
-        </InfoTip>
         <span className="flex-1" />
         <span className="text-xs text-muted">{count} position{count === 1 ? '' : 's'}</span>
       </div>
