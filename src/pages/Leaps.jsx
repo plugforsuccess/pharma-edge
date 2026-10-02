@@ -915,16 +915,13 @@ const shortDate = (ymd, withYear = true) => {
 }
 
 // Two lines under the position name:
-//   "Exp Jan 21, 2028 · 50 contracts"   (options only)
+//   "Exp Jan 21, 2028"                  (options only)
 //   "Bought Sep 28, 2026"               (+ "· value Sep 28" when the
 //                                         stored value isn't from today)
 function positionMeta(pos) {
   const contract = []
-  const n = Number(pos.contracts)
-  if (pos.instrument_type !== 'stock') {
-    if (pos.expiration) contract.push(`Exp ${shortDate(pos.expiration)}`)
-    if (n > 0) contract.push(`${n} contract${n === 1 ? '' : 's'}`)
-  }
+  // The count lives in the title ("RXRX $5 Call · 50 contracts").
+  if (pos.instrument_type !== 'stock' && pos.expiration) contract.push(`Exp ${shortDate(pos.expiration)}`)
   const held = [`${pos.exercised_from_id ? 'Exercised' : 'Bought'} ${shortDate(pos.purchase_date)}`]
   if (pos.value_as_of) {
     const asOf = todayYmd(new Date(pos.value_as_of))
@@ -956,8 +953,11 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
   const isStock = pos.instrument_type === 'stock'
   const label = isStock
     ? `${pos.ticker} · ${Number(pos.shares).toLocaleString()} shares`
-    : [pos.ticker, pos.strike && `$${Number(pos.strike).toLocaleString('en-US', { maximumFractionDigits: 2 })}`, pos.option_type === 'P' ? 'Put' : 'Call']
-      .filter(Boolean).join(' ')
+    : [
+      [pos.ticker, pos.strike && `$${Number(pos.strike).toLocaleString('en-US', { maximumFractionDigits: 2 })}`, pos.option_type === 'P' ? 'Put' : 'Call']
+        .filter(Boolean).join(' '),
+      Number(pos.contracts) > 0 && `${Number(pos.contracts).toLocaleString('en-US')} contract${Number(pos.contracts) === 1 ? '' : 's'}`,
+    ].filter(Boolean).join(' · ')
   const canExercise = exerciseCall({ option: pos, exerciseDate: todayYmd() }) != null
   const stop = isStock ? null : timeStop(pos.expiration, todayYmd(), plan)
   const ltFits = longTermFitsPlan(calc.long_term_date, isStock ? null : pos.expiration, plan)
