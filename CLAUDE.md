@@ -702,7 +702,13 @@ value (× shares, coins or contracts × 100), and saved $ targets reopen
 per unit. Crypto counts
 keep up to 8 decimals ("−0.1625 $BTC"), shares 2. When custom targets
 sell less than the whole position, a **Kept** row closes the panel
-("3.0875 $BTC not in a target · 95% of position") so the rows add up. No tax-math line and no Long-term line (option-price targets sell
+("3.0875 $BTC not in a target · 95% of position") so the rows add up. Custom
+targets can add a **runner** (`leaps_positions.runner_trail_pct`,
+NULL = off): the editor's Runner row (Off / On + trail %, default 30%)
+runs whatever the targets don't sell on a give-back from its peak, shown
+on the card like the playbook runner (`runnerPlan` with the custom sell
+shares). Targets selling 100% leave nothing to run (save is refused
+with the runner on). With the runner off the rest shows as Kept. No tax-math line and no Long-term line (option-price targets sell
 at the same price either way). The form toggle reads "Default" /
 "Custom". Titles read "RXRX • 50 contracts" / "NAUT • 3,500 shares" / "BTC • 0.5 $BTC" (crypto counts in `$TICKER`, never "coins": "sell 0.35 $BTC");
 options show "$5 Call • Exp Jan 21, 2028" below, then "Bought …".

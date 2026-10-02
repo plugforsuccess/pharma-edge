@@ -272,7 +272,11 @@ export default function Leaps() {
           customLongTerm: calc.tax_character === 'short_term'
             ? customFor(calc.basis, calc.current_value, 'long_term', contracts, own)
             : null,
-          runner: null,
+          // Custom runner: what the targets don't sell, on its own trail.
+          runner: Number(pos.runner_trail_pct) > 0
+            ? withRunnerTax(runnerPlan({ fractions: own.map((t) => Number(t.sell) || 0), contracts, units,
+              peakUnitValue: pos.peak_unit_value, currentValue: calc.current_value, trailPct: Number(pos.runner_trail_pct) }), calc, units)
+            : null,
           dividend,
         }
       }
@@ -698,6 +702,9 @@ function emptyForm(initial) {
     price_each: '',
     purchase_date: initial?.purchase_date ?? '',
     own_targets: own,
+    // Custom runner: the unsold rest trails its peak by this % ('' = off)
+    runner_on: initial?.runner_trail_pct != null,
+    runner_trail: initial?.runner_trail_pct != null ? String(+(Number(initial.runner_trail_pct) * 100).toFixed(2)) : '30',
     targets: own ? initial.exit_targets.map((t) => targetToRow(t, priceUnitsOf(initial))) : DEFAULT_OWN_ROWS,
   }
 }
@@ -842,6 +849,14 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
     if (!(basis > 0)) return setError(f.price_mode === 'per_share' ? `Enter what you paid per ${isShares ? qtyWord : 'share'}.` : 'Total cost must be greater than $0.')
     if (value == null || value < 0) return setError(f.price_mode === 'per_share' ? `Enter the current price per ${isShares ? qtyWord : 'share'}.` : 'Enter the current value (0 or more).')
     let exitTargets = null
+    let runnerTrail = null
+    if (f.own_targets && !rocIncome && f.runner_on) {
+      const soldPct = f.targets.reduce((sum, r) => sum + (num(r.sell) ?? 0), 0)
+      const trail = num(f.runner_trail)
+      if (soldPct >= 100 - 1e-9) return setError('Your targets sell 100% — lower one to leave something for the runner, or turn the runner off.')
+      if (!(trail > 0 && trail < 100)) return setError('Enter the runner trail as a % between 0 and 100.')
+      runnerTrail = exact(trail / 100)
+    }
     if (f.own_targets && !rocIncome) {
       exitTargets = f.targets.map((r) => rowToTarget(r, unitsOf(f)))
       const bad = validateCustomTargets(exitTargets, basis)
@@ -873,6 +888,7 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
       value_as_of: new Date().toISOString(),
       purchase_date: f.purchase_date,
       exit_targets: exitTargets,
+      runner_trail_pct: exitTargets ? runnerTrail : null,
     }, keepOpen, f.ticker)
   }
 
@@ -1120,6 +1136,10 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
           onRow={setRow}
           onAdd={addRow}
           onRemove={removeRow}
+          runnerOn={f.runner_on}
+          runnerTrail={f.runner_trail}
+          onRunnerOn={(v) => setF((x) => ({ ...x, runner_on: v }))}
+          onRunnerTrail={setV('runner_trail')}
         />
         {previewRows && previewRows.length > 0 && <CustomTargetsPreview rows={previewRows} isStock={isShares ? (isCrypto ? cryptoUnit(f.ticker) : qtyWord) : false} units={isShares ? num(f.shares) : num(f.contracts)} />}
       </FormSection>
@@ -1377,7 +1397,7 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
       {!noExitPlan && (
         <CustomExitTargets
           rows={custom?.length > 0 ? custom : ladder}
-          runner={custom?.length > 0 ? null : runner}
+          runner={runner}
           isStock={unit}
           units={isStock ? Number(pos.shares) : Number(pos.contracts)} />
       )}
@@ -1829,7 +1849,8 @@ function previewTargets(f, own, ladderFor, customFor) {
 
 // ── User-set Exit Targets (% or $) ───────────────────────────────
 
-function TargetsEditor({ own, rows, contracts, eachLabel = 'per share', onOwn, onRow, onAdd, onRemove }) {
+function TargetsEditor({ own, rows, contracts, eachLabel = 'per share', onOwn, onRow, onAdd, onRemove,
+  runnerOn = false, runnerTrail = '30', onRunnerOn, onRunnerTrail }) {
   const sold = rows.reduce((sum, r) => sum + (num(r.sell) ?? 0), 0)
   const over = sold > 100.0001
   return (
@@ -1881,9 +1902,31 @@ function TargetsEditor({ own, rows, contracts, eachLabel = 'per share', onOwn, o
               )
             })}
           </ol>
+          {/* Runner: what the targets don't sell, exiting on a trail from its peak. */}
+          <div className="mt-2 rounded-lg border border-border bg-bg/40 p-3">
+            <div className="flex items-center gap-2">
+              <span className="flex-1 text-[11px] font-semibold text-subtle">Runner</span>
+              <div className="w-36">
+                <Segmented compact value={runnerOn ? 'on' : 'off'} onChange={(v) => onRunnerOn?.(v === 'on')}
+                  options={[{ value: 'off', label: 'Off' }, { value: 'on', label: 'On' }]} />
+              </div>
+            </div>
+            {runnerOn && (
+              <div className="mt-2 grid grid-cols-[6rem_minmax(0,1fr)] gap-2 items-center">
+                <Affix suffix="%">
+                  <NumberInput value={runnerTrail} onChange={(v) => onRunnerTrail?.(v)}
+                    aria-label="Runner trail percent" placeholder="30" className={clsx(inputCls, 'pr-8')} />
+                </Affix>
+                <span className="text-xs text-subtle">
+                  {sold >= 99.9999 ? <span className="text-rose-300">nothing left to run — targets sell 100%</span>
+                    : <>trail · sells the last {+(100 - sold).toFixed(2)}% on a drop from its peak</>}
+                </span>
+              </div>
+            )}
+          </div>
           <div className="flex items-center gap-2 mt-2">
             <span className={clsx('flex-1 text-[11px]', over ? 'text-rose-300' : 'text-muted')}>
-              {over ? `${+sold.toFixed(2)}% sold — more than the whole position` : `${+sold.toFixed(2)}% sold${sold < 99.9999 ? ` · ${+(100 - sold).toFixed(2)}% held` : ''}`}
+              {over ? `${+sold.toFixed(2)}% sold — more than the whole position` : `${+sold.toFixed(2)}% sold${sold < 99.9999 ? ` · ${+(100 - sold).toFixed(2)}% ${runnerOn ? 'runner' : 'held'}` : ''}`}
             </span>
             {rows.length < MAX_CUSTOM_TARGETS && (
               <button type="button" onClick={onAdd}
