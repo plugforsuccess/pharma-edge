@@ -802,3 +802,64 @@ export function realEstateAfterTax({
     days_until_long_term: hp?.days_until_long_term ?? null,
   }
 }
+
+// ── Dividend income ──────────────────────────────────────────────
+//
+// What a dividend payer leaves you after tax each year. The rate depends
+// on what kind of income it pays (stacked on the user's income):
+//   qualified — most US stocks / dividend ETFs: long-term capital-gain
+//               rates (+ NIIT + state)
+//   ordinary  — covered-call ETFs, BDCs, bond funds: ordinary rates
+//   reit      — REIT dividends: ordinary, but 20% of the federal part is
+//               deducted (§199A): federal × 0.8 + NIIT + state
+//   muni      — muni bond funds: no federal tax or NIIT; state still
+//               applies (unless the fund holds your own state's bonds)
+//   treasury  — Treasury bond funds: ordinary federal + NIIT, no state
+// CPA overrides use the overridden total (no breakdown to adjust).
+
+export const INCOME_KINDS = [
+  { value: 'qualified', label: 'Qualified', long: 'Qualified dividends (most stocks, dividend ETFs)' },
+  { value: 'ordinary', label: 'Ordinary', long: 'Ordinary income (covered-call ETFs, BDCs, bond funds)' },
+  { value: 'reit', label: 'REIT', long: 'REIT dividends (20% deduction)' },
+  { value: 'muni', label: 'Muni', long: 'Muni bond fund (no federal tax)' },
+  { value: 'treasury', label: 'Treasury', long: 'Treasury bond fund (no state tax)' },
+]
+export const REIT_199A_DEDUCTION = 0.2
+
+export function incomeTaxRate(rates, kind) {
+  const lt = rates.long_term
+  const st = rates.short_term
+  if (kind === 'qualified') return lt.total
+  if (st.overridden) return st.total
+  if (kind === 'reit') return st.federal * (1 - REIT_199A_DEDUCTION) + st.niit + st.state
+  if (kind === 'muni') return st.state
+  if (kind === 'treasury') return st.federal + st.niit
+  return st.total
+}
+
+export function dividendAfterTax({ value, yieldPct, kind = 'qualified', rateForGain }) {
+  const v = Math.max(0, Number(value) || 0)
+  const y = Math.max(0, Number(yieldPct) || 0)
+  const income = v * y
+  const rate = incomeTaxRate(rateForGain(income), kind)
+  return {
+    value: v,
+    yield: y,
+    kind,
+    income,
+    rate,
+    after_tax_income: income * (1 - rate),
+    after_tax_yield: y * (1 - rate),
+  }
+}
+
+// Income investments next to cash, on the same balance and the same
+// after-tax footing. Best after-tax yield first.
+export function incomeYieldComparison({ balance, options, rateForGain }) {
+  return options
+    .map((o) => {
+      const d = dividendAfterTax({ value: balance, yieldPct: o.apy, kind: o.kind, rateForGain })
+      return { ...o, rate: d.rate, after_tax_yield: d.after_tax_yield, after_tax_interest: d.after_tax_income }
+    })
+    .sort((a, b) => b.after_tax_yield - a.after_tax_yield)
+}

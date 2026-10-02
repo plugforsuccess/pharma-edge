@@ -869,6 +869,17 @@ value, holding period) and must pass before any edit to that file lands.
   T-bills / CD at the user's after-tax rate — categories only, no named
   products (named partners wait on counsel); rates are user-entered,
   prefilled with example rates (`cm:cash-yield-apys`).
+- **Dividend income.** A `stock` holding can carry
+  `details.dividend_yield` (fraction) + `dividend_kind` (`INCOME_KINDS`:
+  qualified → LT rate; ordinary → ordinary rate; reit → ordinary
+  federal × 0.8 (§199A) + NIIT + state; muni → state only; treasury →
+  federal + NIIT, no state; a CPA override uses the ordinary total).
+  `dividendAfterTax` / `incomeYieldComparison` in `afterTax.js`. The
+  card shows dividends / yr, after tax / yr and after-tax yield; the
+  Portfolio card adds an "Income after tax" row (cash interest +
+  dividends). The yield card lists income categories (dividend ETF,
+  REIT, covered-call, muni, Treasury fund) under the cash rows, marked
+  "prices can move" — categories only, user-entered yields.
 - Per-position values are never netted; the portfolio card shows a
   netted figure labeled as an estimate.
 - Every tax figure in the UI is labeled an estimate with a
