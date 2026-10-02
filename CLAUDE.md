@@ -671,6 +671,9 @@ owner's request until the copy and the pop-up behavior are designed).
 paragraphs back under cards either. Tax screens keep one visible line:
 "All tax figures are estimates, not tax advice. Consult a tax
 professional before acting on them."
+**Tax rates** on `/leaps` aren't a card: the Tax profile card's 4th
+slot, "Estimated tax rate", is a "View rates" link that opens the
+breakdown (long / short-term, §1256 blend) in a `Modal`.
 **Card notices** (tax-wait, take-gains, roll window, time stop) use the
 `Notice` component in `Leaps.jsx`: bold title and body at the same size
 (text-sm), plus an X that dismisses it on this device (localStorage,
@@ -679,7 +682,7 @@ a roll-window warning stays dismissed until it escalates.
 **Holdings collapse:** each holding is a tap-to-expand card (summary:
 name (real estate drops "• Primary home / Rental" until expanded), dates, tax badge, after-tax value with its gain on cost — "+17.8%
 after tax" — and the roll-window / time-stop flag; expanded cards show
-"+17.8% after tax · +25.0% before tax" under the hero value; cash has
+"+17.8% after tax · +25.0% before tax" under the hero value (after-tax % green, before-tax % gold; either turns red only on a loss); cash has
 no gain line).
 Open state is remembered on the device (`cm:holdings-open`); new
 holdings open; "Expand all / Collapse all" sits by the Holdings title.
