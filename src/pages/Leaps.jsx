@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Landmark, Plus, Pencil, Trash2, Check, X, AlertTriangle, Info, ArrowRightLeft, ShieldCheck } from 'lucide-react'
 import clsx from 'clsx'
 import { supabase } from '../lib/supabase'
@@ -342,7 +343,11 @@ function RiskProfileCard({ userId }) {
     return (
       <div className="bg-card border border-border rounded-xl px-4 py-3 mb-4 text-xs text-subtle flex items-start gap-2">
         <ShieldCheck size={14} className="shrink-0 mt-0.5 text-muted" />
-        <span>Your LEAPS bot risk profile hasn't been set up yet. Until it is, the bot won't buy anything for you.</span>
+        <span className="flex-1">Your LEAPS bot risk profile hasn't been set up yet. Until it is, the bot won't buy anything for you.</span>
+        <Link to="/leaps/onboarding"
+          className="shrink-0 min-h-[44px] px-3 inline-flex items-center rounded bg-amber-400/10 border border-amber-400/40 text-amber-300 font-semibold hover:bg-amber-400/20 transition">
+          Set up
+        </Link>
       </div>
     )
   }
@@ -359,9 +364,14 @@ function RiskProfileCard({ userId }) {
       </div>
       {d.capped_by_text && <p className="text-xs text-subtle mb-1">{d.capped_by_text}</p>}
       {d.allows && <p className="text-xs text-fg leading-relaxed">{d.allows}</p>}
-      <p className="text-[10px] text-muted mt-2">
-        {d.account_text ?? (row.account_tier === 'managed' ? 'Managed account.' : 'Self-directed account — suggestions only.')}
-      </p>
+      <div className="flex items-center gap-2 mt-2">
+        <p className="text-[10px] text-muted flex-1">
+          {d.account_text ?? (row.account_tier === 'managed' ? 'Managed account.' : 'Self-directed account — suggestions only.')}
+        </p>
+        <Link to="/leaps/onboarding" className="shrink-0 min-h-[44px] inline-flex items-center text-[11px] text-subtle hover:text-fg underline">
+          Retake
+        </Link>
+      </div>
     </div>
   )
 }

@@ -30,6 +30,7 @@ const Wheel = lazy(() => import('./pages/Wheel'))
 const WheelWatchlist = lazy(() => import('./pages/WheelWatchlist'))
 const KingBoard = lazy(() => import('./pages/KingBoard'))
 const Leaps = lazy(() => import('./pages/Leaps'))
+const LeapsOnboarding = lazy(() => import('./pages/LeapsOnboarding'))
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -118,6 +119,7 @@ export default function App() {
             <Route path="wheel" element={<Wheel />} />
             <Route path="picks" element={<WheelWatchlist />} />
             <Route path="leaps" element={<Leaps />} />
+            <Route path="leaps/onboarding" element={<LeapsOnboarding />} />
             <Route path="flow" element={<AdminOnly><Flow /></AdminOnly>} />
             <Route path="reasoning" element={<Reasoning />} />
             <Route path="learn" element={<LearnIndex />} />

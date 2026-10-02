@@ -79,14 +79,11 @@ CREATE INDEX IF NOT EXISTS ldp_audit_log_user_time_idx ON public.ldp_audit_log (
 
 ALTER TABLE public.ldp_audit_log ENABLE ROW LEVEL SECURITY;
 
+-- One SELECT policy (own rows OR admin) rather than two permissive
+-- policies, per the multiple_permissive_policies advisor.
 DROP POLICY IF EXISTS ldp_audit_log_select_own ON public.ldp_audit_log;
 CREATE POLICY ldp_audit_log_select_own ON public.ldp_audit_log
-  FOR SELECT TO authenticated USING ((select auth.uid()) = user_id);
-
-DROP POLICY IF EXISTS ldp_audit_log_select_admin ON public.ldp_audit_log;
-CREATE POLICY ldp_audit_log_select_admin ON public.ldp_audit_log
-  FOR SELECT TO authenticated
-  USING (public.is_admin());
+  FOR SELECT TO authenticated USING ((select auth.uid()) = user_id OR public.is_admin());
 
 DROP POLICY IF EXISTS ldp_audit_log_service_insert ON public.ldp_audit_log;
 CREATE POLICY ldp_audit_log_service_insert ON public.ldp_audit_log

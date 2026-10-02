@@ -182,6 +182,8 @@ CREATE TABLE IF NOT EXISTS public.leaps_positions (
 
 CREATE INDEX IF NOT EXISTS leaps_positions_user_open_idx
   ON public.leaps_positions (user_id, purchase_date) WHERE closed_at IS NULL;
+CREATE INDEX IF NOT EXISTS leaps_positions_exercised_from_idx
+  ON public.leaps_positions (exercised_from_id) WHERE exercised_from_id IS NOT NULL;
 
 DROP TRIGGER IF EXISTS leaps_positions_set_updated_at ON public.leaps_positions;
 CREATE TRIGGER leaps_positions_set_updated_at
