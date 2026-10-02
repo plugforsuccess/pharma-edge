@@ -10,6 +10,7 @@ import {
   todayYmd, holdingPeriod, suggestInstrumentType, exerciseCall,
   blended1256Rate, rateAtGainFor, EXIT_PLAYBOOK, playbookTargets, runnerPlan, timeStop,
   longTermFitsPlan, entryRunwayDays,
+  CASH_KINDS, DEFAULT_SELLING_COST_PCT, cashAfterTax, cashYieldComparison, realEstateAfterTax,
   customExitTargets, validateCustomTargets, MAX_CUSTOM_TARGETS,
 } from '../utils/afterTax'
 import NumberInput from '../components/NumberInput'
@@ -48,6 +49,13 @@ const pct = (n, dp = 1) => (Number.isFinite(n)
   : '—')
 // Rates like 0.2879 read best at 2dp ("28.79%"); trim trailing zeros.
 const ratePct = (n) => (Number.isFinite(n) ? `${+(n * 100).toFixed(2)}%` : '—')
+
+// Holding families. Quantity holdings (shares, crypto) split whole units
+// across targets like contracts; cash and real estate have their own math.
+const QUANTITY_TYPES = new Set(['stock', 'crypto'])
+const INVESTMENT_TYPES = new Set(['equity_option', 'index_option_1256', 'stock', 'crypto'])
+const isQuantity = (t) => QUANTITY_TYPES.has(t)
+const unitWord = (t) => (t === 'crypto' ? 'coin' : t === 'stock' ? 'share' : 'contract')
 
 function num(v) {
   if (v === '' || v == null) return null
@@ -143,9 +151,12 @@ export default function Leaps() {
   }, [federal, state, p.filing_status, p.annual_income, override, act60Rate])
 
   // Each position stands on its own; the portfolio is just their sum.
+  // Investments (options, shares, crypto) drive the targets and returns;
+  // cash and real estate add to net worth with their own after-tax math.
+  const investments = useMemo(() => (positions ?? []).filter((x) => INVESTMENT_TYPES.has(x.instrument_type)), [positions])
   const totalCost = useMemo(
-    () => (positions ?? []).reduce((sum, x) => sum + (Number(x.cost_basis) || 0), 0),
-    [positions],
+    () => investments.reduce((sum, x) => sum + (Number(x.cost_basis) || 0), 0),
+    [investments],
   )
   const targetPcts = useMemo(() => (p.target_pcts ?? DEFAULT_TARGET_PCTS).map(Number), [p.target_pcts])
   const selectedPct = Number(p.selected_target_pct)
@@ -169,9 +180,34 @@ export default function Leaps() {
     return customExitTargets({ basis, currentValue, contracts, targets, rateAtGain: rateAtGainFor(character, rateForGain) })
   }, [rateForGain])
 
+  const cashResults = useMemo(() => {
+    if (!rateForGain || !positions) return []
+    return positions.filter((x) => x.instrument_type === 'cash').map((pos) => ({
+      pos,
+      cash: cashAfterTax({ balance: Number(pos.current_value), apy: Number(pos.details?.apy) || 0,
+        kind: pos.details?.account_kind ?? 'savings', rateForGain }),
+    }))
+  }, [positions, rateForGain])
+
+  const realEstateResults = useMemo(() => {
+    if (!rateForGain || !positions) return []
+    return positions.filter((x) => x.instrument_type === 'real_estate').map((pos) => {
+      const d = pos.details ?? {}
+      return {
+        pos,
+        re: realEstateAfterTax({
+          value: Number(pos.current_value), basis: Number(pos.cost_basis), mortgage: Number(d.mortgage) || 0,
+          sellingCostPct: d.selling_cost_pct ?? DEFAULT_SELLING_COST_PCT, depreciation: Number(d.depreciation) || 0,
+          primary: d.kind !== 'rental', exclusionEligible: d.exclusion_eligible !== false,
+          filingStatus: p.filing_status, purchaseDate: pos.purchase_date, asOf, rateForGain,
+        }),
+      }
+    })
+  }, [positions, rateForGain, p.filing_status, asOf])
+
   const results = useMemo(() => {
     if (!rateForGain || !positions) return []
-    return positions.map((pos) => withLadder(pos, positionAfterTax({
+    return investments.map((pos) => withLadder(pos, positionAfterTax({
         basis: Number(pos.cost_basis),
         currentValue: Number(pos.current_value),
         purchaseDate: pos.purchase_date,
@@ -191,8 +227,8 @@ export default function Leaps() {
 
     function withLadder(pos, calc) {
       if (!calc) return { pos, calc, ladder: [], ladderLongTerm: null, custom: [], customLongTerm: null, runner: null }
-      const isStock = pos.instrument_type === 'stock'
-      // Targets split whole contracts — or whole shares for stock.
+      const isStock = isQuantity(pos.instrument_type)
+      // Targets split whole contracts — or whole shares / coins.
       const contracts = wholeUnits(isStock ? pos.shares : pos.contracts)
       const units = isStock ? Number(pos.shares) : contracts
       const own = Array.isArray(pos.exit_targets) && pos.exit_targets.length ? pos.exit_targets : null
@@ -223,7 +259,7 @@ export default function Leaps() {
           currentValue: calc.current_value, trailPct: plan.runnerTrailPct }),
       }
     }
-  }, [positions, rateForGain, asOf, selectedPct, ladderFor, customFor, plan])
+  }, [positions, investments, rateForGain, asOf, selectedPct, ladderFor, customFor, plan])
 
   const summary = useMemo(() => {
     if (!rateForGain || results.length === 0) return null
@@ -257,7 +293,7 @@ export default function Leaps() {
   async function savePosition(row, id) {
     // Track the highest value per contract (or share) — the runner's
     // trail is measured from it.
-    const units = row.instrument_type === 'stock' ? Number(row.shares) : Number(row.contracts)
+    const units = isQuantity(row.instrument_type) ? Number(row.shares) : Number(row.contracts)
     if (units > 0) {
       const prev = id ? Number(positions.find((x) => x.id === id)?.peak_unit_value) || 0 : 0
       row = { ...row, peak_unit_value: Math.max(prev, Number(row.current_value) / units) }
@@ -294,7 +330,14 @@ export default function Leaps() {
   }
 
   const has1256 = (positions ?? []).some((x) => x.instrument_type === 'index_option_1256')
-  const allOpen = results.length > 0 && results.every((r) => openIds.has(r.pos.id))
+  const allIds = [...results, ...cashResults, ...realEstateResults].map((r) => r.pos.id)
+  const allOpen = allIds.length > 0 && allIds.every((id) => openIds.has(id))
+  const others = {
+    cash: cashResults.reduce((sum, r) => sum + r.cash.after_tax_value, 0),
+    realEstate: realEstateResults.reduce((sum, r) => sum + (r.re?.after_tax_equity ?? 0), 0),
+    cashCount: cashResults.length,
+    realEstateCount: realEstateResults.length,
+  }
 
   async function deletePosition(id) {
     if (!window.confirm('Remove this position from tracking?')) return
@@ -334,7 +377,9 @@ export default function Leaps() {
             <Banner tone="amber">Pick your residency in Settings (or enter both CPA rates) to see after-tax figures.</Banner>
           )}
 
-          {ready && summary && <PortfolioTotals summary={summary} count={results.length} />}
+          {ready && (summary || others.cashCount || others.realEstateCount) && (
+            <PortfolioTotals summary={summary} count={results.length} others={others} />
+          )}
 
           {ready && table && (
             <TargetTable table={table} selected={Number(p.selected_target_pct)} onSelect={selectTarget} show1256={has1256} />
@@ -344,9 +389,9 @@ export default function Leaps() {
             <section className="mb-6">
               <div className="flex items-center gap-2 mb-3">
                 <h2 className="text-lg font-semibold flex-1">Holdings</h2>
-                {results.length > 1 && (
+                {allIds.length > 1 && (
                   <button type="button"
-                    onClick={() => setOpen(allOpen ? new Set() : new Set(results.map((r) => r.pos.id)))}
+                    onClick={() => setOpen(allOpen ? new Set() : new Set(allIds))}
                     className="min-h-[44px] px-3 rounded-lg text-sm text-subtle hover:text-fg transition">
                     {allOpen ? 'Collapse all' : 'Expand all'}
                   </button>
@@ -355,7 +400,7 @@ export default function Leaps() {
                   <button
                     type="button"
                     onClick={() => setAdding(true)}
-                    aria-label="Add a position"
+                    aria-label="Add a holding"
                     className="min-h-[44px] px-4 inline-flex items-center gap-1.5 rounded-lg bg-amber-400/10 border border-amber-400/40 text-amber-300 text-sm font-semibold hover:bg-amber-400/20 transition"
                   >
                     Add <Plus size={15} strokeWidth={2.5} />
@@ -376,9 +421,9 @@ export default function Leaps() {
                 />
               )}
 
-              {results.length === 0 && !adding && (
+              {allIds.length === 0 && !adding && (
                 <div className="text-sm text-muted py-8 px-6 text-center border border-dashed border-border rounded-2xl">
-                  No positions yet. Tap Add + to enter one and generate its Exit Targets.
+                  No holdings yet. Tap Add + to enter options, shares, crypto, cash or real estate.
                 </div>
               )}
 
@@ -402,6 +447,22 @@ export default function Leaps() {
                   onDelete={() => deletePosition(pos.id)}
                 />
               ))}
+
+              {cashResults.map(({ pos, cash }) => (
+                <CashCard key={pos.id} pos={pos} cash={cash}
+                  open={openIds.has(pos.id)} onToggle={() => toggleOpen(pos.id)}
+                  onSave={(row) => savePosition(row, pos.id)} onDelete={() => deletePosition(pos.id)} />
+              ))}
+
+              {realEstateResults.map(({ pos, re }) => (
+                <RealEstateCard key={pos.id} pos={pos} re={re}
+                  open={openIds.has(pos.id)} onToggle={() => toggleOpen(pos.id)}
+                  onSave={(row) => savePosition(row, pos.id)} onDelete={() => deletePosition(pos.id)} />
+              ))}
+
+              {cashResults.length > 0 && rateForGain && (
+                <CashYieldCard cashResults={cashResults} rateForGain={rateForGain} />
+              )}
 
             </section>
           )}
@@ -583,9 +644,26 @@ const usdExact = (n) => (Number.isFinite(n)
 function emptyForm(initial) {
   const own = Array.isArray(initial?.exit_targets) && initial.exit_targets.length > 0
   const str = (v) => (v == null ? '' : String(v))
+  const d = initial?.details ?? {}
+  const t = initial?.instrument_type
   return {
-    asset: initial?.instrument_type === 'stock' ? 'shares' : 'option',
+    asset: t === 'stock' ? 'shares' : t === 'crypto' ? 'crypto' : t === 'cash' ? 'cash'
+      : t === 'real_estate' ? 'real_estate' : 'option',
     ticker: initial?.ticker ?? '',
+    name: initial?.name ?? '',
+    // Cash
+    balance: t === 'cash' ? str(initial?.current_value) : '',
+    apy: d.apy != null ? String(+(Number(d.apy) * 100).toFixed(4)) : '',
+    account_kind: d.account_kind ?? 'savings',
+    // Real estate
+    re_kind: d.kind ?? 'primary',
+    purchase_price: d.purchase_price != null ? String(d.purchase_price) : (t === 'real_estate' ? str(initial?.cost_basis) : ''),
+    improvements: d.improvements != null ? String(d.improvements) : '',
+    re_value: t === 'real_estate' ? str(initial?.current_value) : '',
+    mortgage: d.mortgage != null ? String(d.mortgage) : '',
+    selling_cost_pct: String(+((d.selling_cost_pct ?? DEFAULT_SELLING_COST_PCT) * 100).toFixed(2)),
+    depreciation: d.depreciation != null ? String(d.depreciation) : '',
+    exclusion_eligible: d.exclusion_eligible ?? true,
     shares: str(initial?.shares),
     option_type: initial?.option_type ?? 'C',
     strike: str(initial?.strike),
@@ -606,7 +684,7 @@ function emptyForm(initial) {
 
 // Units the per-share prices multiply by: shares, or contracts × 100.
 function unitsOf(f) {
-  if (f.asset === 'shares') return num(f.shares)
+  if (f.asset === 'shares' || f.asset === 'crypto') return num(f.shares)
   const c = num(f.contracts)
   return c > 0 ? c * OPTION_MULTIPLIER : null
 }
@@ -629,14 +707,20 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
   const [saving, setSaving] = useState(false)
   const setV = (k) => (v) => { setError(''); setF((x) => ({ ...x, [k]: v })) }
   const setTicker = (e) => {
-    const v = e.target.value.toUpperCase().replace(/[^A-Z.]/g, '')
+    const v = e.target.value.toUpperCase().replace(/[^A-Z0-9.]/g, '')
     setError('')
     setF((x) => ({ ...x, ticker: v }))
   }
-  const isShares = f.asset === 'shares'
+  const isCrypto = f.asset === 'crypto'
+  const isCash = f.asset === 'cash'
+  const isRE = f.asset === 'real_estate'
+  // "Shares" below means any quantity holding (shares or coins).
+  const isShares = f.asset === 'shares' || isCrypto
+  const qtyWord = isCrypto ? 'coin' : 'share'
   // Index options (SPX, XSP, NDX, RUT, VIX …) are §1256 contracts —
   // detected from the ticker, never asked.
-  const instrumentType = isShares ? 'stock' : suggestInstrumentType(f.ticker)
+  const instrumentType = isCash ? 'cash' : isRE ? 'real_estate' : isCrypto ? 'crypto'
+    : f.asset === 'shares' ? 'stock' : suggestInstrumentType(f.ticker)
   const is1256 = instrumentType === 'index_option_1256'
   const runwayDays = entryRunwayDays(f.purchase_date, f.expiration)
   const shortRunway = runwayDays != null && runwayDays > 0 && runwayDays < EXIT_PLAYBOOK.minEntryDays
@@ -656,26 +740,82 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
     })
   }
 
+  async function finish(row, keepOpen, label) {
+    setSaving(true)
+    const err = await onSave(row, { keepOpen })
+    setSaving(false)
+    setError(err ?? '')
+    if (!err && keepOpen) {
+      setSavedNote(`${label} saved — add the next one.`)
+      setF((x) => ({ ...emptyForm(null), asset: x.asset, price_mode: x.price_mode }))
+    }
+  }
+
+  async function submitCash(keepOpen) {
+    const balance = num(f.balance)
+    const apy = num(f.apy)
+    if (!f.name.trim()) return setError('Name this account (e.g. "Ally savings").')
+    if (!(balance > 0)) return setError('Enter the balance.')
+    if (apy != null && (apy < 0 || apy > 50)) return setError('Enter the yield as a % between 0 and 50.')
+    return finish({
+      ticker: null, name: f.name.trim(), instrument_type: 'cash', option_type: null, strike: null,
+      expiration: null, contracts: null, shares: null,
+      cost_basis: exact(balance), current_value: exact(balance), value_as_of: new Date().toISOString(),
+      purchase_date: initial?.purchase_date ?? todayYmd(), exit_targets: null,
+      details: { apy: apy == null ? 0 : exact(apy / 100), account_kind: f.account_kind },
+    }, keepOpen, f.name.trim())
+  }
+
+  async function submitRealEstate(keepOpen) {
+    const price = num(f.purchase_price)
+    const improvements = num(f.improvements) ?? 0
+    const value = num(f.re_value)
+    const mortgage = num(f.mortgage) ?? 0
+    const selling = num(f.selling_cost_pct)
+    const dep = num(f.depreciation) ?? 0
+    if (!f.name.trim()) return setError('Name this property (e.g. "Home").')
+    if (!f.purchase_date) return setError('Enter the purchase date.')
+    if (f.purchase_date > todayYmd()) return setError('Purchase date can’t be in the future.')
+    if (!(price > 0)) return setError('Enter the purchase price.')
+    if (value == null || value < 0) return setError('Enter what the property is worth today.')
+    if (selling == null || selling < 0 || selling > 20) return setError('Selling costs should be between 0% and 20%.')
+    return finish({
+      ticker: null, name: f.name.trim(), instrument_type: 'real_estate', option_type: null, strike: null,
+      expiration: null, contracts: null, shares: null,
+      cost_basis: exact(price + improvements), current_value: exact(value), value_as_of: new Date().toISOString(),
+      purchase_date: f.purchase_date, exit_targets: null,
+      details: {
+        kind: f.re_kind, purchase_price: price, improvements, mortgage,
+        selling_cost_pct: exact(selling / 100),
+        depreciation: f.re_kind === 'rental' ? dep : 0,
+        exclusion_eligible: f.re_kind === 'primary' ? !!f.exclusion_eligible : false,
+      },
+    }, keepOpen, f.name.trim())
+  }
+
   async function submit({ keepOpen = false } = {}) {
-    if (!/^[A-Z.]{1,10}$/.test(f.ticker)) return setError('Enter a ticker.')
-    if (isShares && !(num(f.shares) > 0)) return setError('Enter how many shares you own.')
+    if (isCash) return submitCash(keepOpen)
+    if (isRE) return submitRealEstate(keepOpen)
+    if (!/^[A-Z0-9.]{1,12}$/.test(f.ticker)) return setError(isCrypto ? 'Enter the coin (e.g. BTC).' : 'Enter a ticker.')
+    if (isShares && !(num(f.shares) > 0)) return setError(`Enter how many ${qtyWord}s you own.`)
     if (!isShares && f.price_mode === 'per_share' && !(num(f.contracts) > 0)) return setError('Enter how many contracts you own.')
     if (!isShares && f.contracts !== '' && !Number.isInteger(num(f.contracts))) return setError('Contracts must be a whole number.')
     if (!f.purchase_date) return setError('Enter the purchase date.')
     if (f.purchase_date > todayYmd()) return setError('Purchase date can’t be in the future.')
     if (!isShares && !f.expiration) return setError('Enter the expiration date.')
     if (!isShares && f.expiration <= f.purchase_date) return setError('Expiration must be after the purchase date.')
-    if (!(basis > 0)) return setError(f.price_mode === 'per_share' ? 'Enter what you paid per share.' : 'Total cost must be greater than $0.')
-    if (value == null || value < 0) return setError(f.price_mode === 'per_share' ? 'Enter the current price per share.' : 'Enter the current value (0 or more).')
+    if (!(basis > 0)) return setError(f.price_mode === 'per_share' ? `Enter what you paid per ${isShares ? qtyWord : 'share'}.` : 'Total cost must be greater than $0.')
+    if (value == null || value < 0) return setError(f.price_mode === 'per_share' ? `Enter the current price per ${isShares ? qtyWord : 'share'}.` : 'Enter the current value (0 or more).')
     let exitTargets = null
     if (f.own_targets) {
       exitTargets = f.targets.map(rowToTarget)
       const bad = validateCustomTargets(exitTargets, basis)
       if (bad) return setError(bad)
     }
-    setSaving(true)
-    const err = await onSave({
+    return finish({
       ticker: f.ticker,
+      name: null,
+      details: null,
       instrument_type: instrumentType,
       option_type: isShares ? null : f.option_type,
       strike: isShares ? null : num(f.strike),
@@ -687,13 +827,7 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
       value_as_of: new Date().toISOString(),
       purchase_date: f.purchase_date,
       exit_targets: exitTargets,
-    }, { keepOpen })
-    setSaving(false)
-    setError(err ?? '')
-    if (!err && keepOpen) {
-      setSavedNote(`${f.ticker} saved — add the next one.`)
-      setF((x) => ({ ...emptyForm(null), asset: x.asset, price_mode: x.price_mode }))
-    }
+    }, keepOpen, f.ticker)
   }
 
   const setRow = (i, k, v) => { setError(''); setF((x) => ({ ...x, targets: x.targets.map((r, j) => (j === i ? { ...r, [k]: v } : r)) })) }
@@ -717,7 +851,7 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
   return (
     <div className="bg-card border border-amber-400/40 rounded-2xl p-5 mb-4">
       <div className="flex items-center mb-4">
-        <h3 className="text-base font-semibold flex-1">{initial ? `Edit ${initial.ticker}` : 'Add a position'}</h3>
+        <h3 className="text-base font-semibold flex-1">{initial ? `Edit ${initial.ticker ?? initial.name}` : 'Add a holding'}</h3>
         <button type="button" onClick={onCancel} aria-label="Close"
           className="-mr-2 min-h-[44px] min-w-[44px] flex items-center justify-center rounded text-subtle hover:text-fg">
           <X size={16} />
@@ -728,18 +862,93 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
         label="What do you own?"
         value={f.asset}
         onChange={(v) => { setError(''); setF((x) => ({ ...x, asset: v })) }}
-        options={[{ value: 'option', label: 'Options' }, { value: 'shares', label: 'Shares' }]}
+        columns={3}
+        options={[
+          { value: 'option', label: 'Options' }, { value: 'shares', label: 'Shares' }, { value: 'crypto', label: 'Crypto' },
+          { value: 'cash', label: 'Cash' }, { value: 'real_estate', label: 'Real estate' },
+        ]}
       />
 
-      <FormSection title={isShares ? 'Shares' : 'Contract'}>
+      {isCash && (
+        <FormSection title="Cash account">
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Name" wide>
+              <input value={f.name} onChange={(e) => setV('name')(e.target.value)} maxLength={60} placeholder="Ally savings" className={inputCls} />
+            </Field>
+            <Field label="Account type" wide>
+              <select value={f.account_kind} onChange={(e) => setV('account_kind')(e.target.value)} className={inputCls}>
+                {CASH_KINDS.map((k) => <option key={k.value} value={k.value}>{k.long}</option>)}
+              </select>
+            </Field>
+            <Field label="Balance">
+              <Affix prefix="$"><NumberInput value={f.balance} onChange={setV('balance')} placeholder="25,000" className={clsx(inputCls, 'pl-7')} /></Affix>
+            </Field>
+            <Field label="Yield (APY)" hint="optional">
+              <Affix suffix="%"><NumberInput decimals={4} value={f.apy} onChange={setV('apy')} placeholder="4.00" className={clsx(inputCls, 'pr-8')} /></Affix>
+            </Field>
+          </div>
+        </FormSection>
+      )}
+
+      {isRE && (
+        <FormSection title="Property">
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Name" wide>
+              <input value={f.name} onChange={(e) => setV('name')(e.target.value)} maxLength={60} placeholder="Home" className={inputCls} />
+            </Field>
+            <Field label="Type" wide>
+              <Segmented compact value={f.re_kind} onChange={setV('re_kind')}
+                options={[{ value: 'primary', label: 'Primary home' }, { value: 'rental', label: 'Rental' }]} />
+            </Field>
+            <Field label="Purchase date">
+              <input type="date" value={f.purchase_date} max={todayYmd()} onChange={(e) => setV('purchase_date')(e.target.value)} className={dateCls} />
+            </Field>
+            <Field label="Purchase price">
+              <Affix prefix="$"><NumberInput value={f.purchase_price} onChange={setV('purchase_price')} placeholder="400,000" className={clsx(inputCls, 'pl-7')} /></Affix>
+            </Field>
+            <Field label="Improvements" hint="optional">
+              <Affix prefix="$"><NumberInput value={f.improvements} onChange={setV('improvements')} placeholder="0" className={clsx(inputCls, 'pl-7')} /></Affix>
+            </Field>
+            <Field label="Current Value">
+              <Affix prefix="$"><NumberInput value={f.re_value} onChange={setV('re_value')} placeholder="550,000" className={clsx(inputCls, 'pl-7')} /></Affix>
+            </Field>
+            <Field label="Mortgage owed" hint="optional">
+              <Affix prefix="$"><NumberInput value={f.mortgage} onChange={setV('mortgage')} placeholder="0" className={clsx(inputCls, 'pl-7')} /></Affix>
+            </Field>
+            <Field label="Selling costs">
+              <Affix suffix="%"><NumberInput value={f.selling_cost_pct} onChange={setV('selling_cost_pct')} placeholder="6" className={clsx(inputCls, 'pr-8')} /></Affix>
+            </Field>
+            {f.re_kind === 'rental' && (
+              <Field label="Depreciation taken" hint="optional" wide>
+                <Affix prefix="$"><NumberInput value={f.depreciation} onChange={setV('depreciation')} placeholder="0" className={clsx(inputCls, 'pl-7')} /></Affix>
+              </Field>
+            )}
+          </div>
+          {f.re_kind === 'primary' && (
+            <label className="mt-4 flex items-start gap-3 min-h-[44px] cursor-pointer">
+              <span className="relative mt-0.5 h-5 w-5 shrink-0">
+                <input type="checkbox" checked={!!f.exclusion_eligible}
+                  onChange={(e) => setV('exclusion_eligible')(e.target.checked)}
+                  className="peer appearance-none h-5 w-5 rounded-md border border-border bg-bg checked:bg-amber-400 checked:border-amber-400 transition cursor-pointer" />
+                <Check size={14} strokeWidth={3} className="pointer-events-none absolute inset-0 m-auto text-bg opacity-0 peer-checked:opacity-100" />
+              </span>
+              <span className="text-sm text-fg">I've lived here 2 of the last 5 years</span>
+            </label>
+          )}
+        </FormSection>
+      )}
+
+      {!isCash && !isRE && (<>
+
+      <FormSection title={isCrypto ? 'Crypto' : isShares ? 'Shares' : 'Contract'}>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Ticker">
-            <input value={f.ticker} onChange={setTicker} maxLength={10} placeholder={isShares ? 'AAPL' : 'XLK'}
+          <Field label={isCrypto ? 'Coin' : 'Ticker'}>
+            <input value={f.ticker} onChange={setTicker} maxLength={12} placeholder={isCrypto ? 'BTC' : isShares ? 'AAPL' : 'XLK'}
               autoCapitalize="characters" autoComplete="off" spellCheck={false} className={inputCls} />
           </Field>
           {isShares ? (
-            <Field label="Shares">
-              <NumberInput decimals={4} value={f.shares} onChange={setV('shares')} placeholder="100" className={inputCls} />
+            <Field label={isCrypto ? 'Quantity' : 'Shares'}>
+              <NumberInput decimals={isCrypto ? 8 : 4} value={f.shares} onChange={setV('shares')} placeholder={isCrypto ? '0.5' : '100'} className={inputCls} />
             </Field>
           ) : (
             <Field label="Type">
@@ -783,16 +992,16 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
 
       <FormSection title="Cost & value" aside={
         <Segmented compact value={f.price_mode} onChange={setPriceMode}
-          options={[{ value: 'per_share', label: 'Per share' }, { value: 'total', label: 'Total' }]} />
+          options={[{ value: 'per_share', label: isCrypto ? 'Per coin' : 'Per share' }, { value: 'total', label: 'Total' }]} />
       }>
         <div className="grid grid-cols-2 gap-3">
           {perShare ? (
             <>
-              <Field label={isShares ? 'Paid per share' : 'Premium paid'}>
-                <Affix prefix="$"><NumberInput decimals={PRICE_DECIMALS} value={f.cost_each} onChange={setV('cost_each')} placeholder={isShares ? '180.00' : '12.50'} className={clsx(inputCls, 'pl-7')} /></Affix>
+              <Field label={isShares ? `Paid per ${qtyWord}` : 'Premium paid'}>
+                <Affix prefix="$"><NumberInput decimals={PRICE_DECIMALS} value={f.cost_each} onChange={setV('cost_each')} placeholder={isCrypto ? '60,000.00' : isShares ? '180.00' : '12.50'} className={clsx(inputCls, 'pl-7')} /></Affix>
               </Field>
               <Field label={isShares ? 'Price now' : 'Premium now'}>
-                <Affix prefix="$"><NumberInput decimals={PRICE_DECIMALS} value={f.price_each} onChange={setV('price_each')} placeholder={isShares ? '210.00' : '18.00'} className={clsx(inputCls, 'pl-7')} /></Affix>
+                <Affix prefix="$"><NumberInput decimals={PRICE_DECIMALS} value={f.price_each} onChange={setV('price_each')} placeholder={isCrypto ? '65,000.00' : isShares ? '210.00' : '18.00'} className={clsx(inputCls, 'pl-7')} /></Affix>
               </Field>
             </>
           ) : (
@@ -830,8 +1039,9 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
           onAdd={addRow}
           onRemove={removeRow}
         />
-        {previewRows && previewRows.length > 0 && <CustomTargetsPreview rows={previewRows} isStock={isShares} units={isShares ? num(f.shares) : num(f.contracts)} />}
+        {previewRows && previewRows.length > 0 && <CustomTargetsPreview rows={previewRows} isStock={isShares ? qtyWord : false} units={isShares ? num(f.shares) : num(f.contracts)} />}
       </FormSection>
+      </>)}
 
       {error && (
         <div role="alert" className="mt-4 rounded-lg border border-rose-500/40 bg-rose-500/5 px-3 py-2 text-xs text-rose-200">{error}</div>
@@ -843,7 +1053,7 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
       <div className="mt-4 space-y-2">
         <button type="button" disabled={saving} onClick={() => submit()}
           className="tap-spring w-full min-h-[48px] rounded-lg bg-amber-400 hover:bg-amber-300 text-bg text-sm font-semibold transition disabled:opacity-50">
-          {saving ? 'Saving…' : initial ? 'Save changes' : 'Save position'}
+          {saving ? 'Saving…' : initial ? 'Save changes' : 'Save holding'}
         </button>
         <div className={clsx('grid gap-2', allowAddAnother ? 'grid-cols-[2fr_3fr]' : 'grid-cols-1')}>
           <button type="button" onClick={onCancel}
@@ -876,13 +1086,13 @@ function FormSection({ title, info, aside, children }) {
   )
 }
 
-function Segmented({ label, value, onChange, options, compact }) {
+function Segmented({ label, value, onChange, options, compact, columns }) {
   return (
     <div>
       {label && <div className="text-[11px] text-subtle mb-1.5">{label}</div>}
       <div role="radiogroup" aria-label={label}
         className={clsx('grid rounded-lg border border-border bg-bg p-0.5', compact ? 'gap-0.5' : 'gap-1')}
-        style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
+        style={{ gridTemplateColumns: `repeat(${columns ?? options.length}, minmax(0, 1fr))` }}>
         {options.map((o) => (
           <button key={o.value} type="button" role="radio" aria-checked={value === o.value}
             onClick={() => onChange(o.value)}
@@ -921,7 +1131,7 @@ const shortDate = (ymd, withYear = true) => {
 function positionMeta(pos) {
   const contract = []
   // Title is "RXRX • 50 contracts"; this line is "$5 Call • Exp Jan 21, 2028".
-  if (pos.instrument_type !== 'stock') {
+  if (!isQuantity(pos.instrument_type)) {
     contract.push([pos.strike && `$${Number(pos.strike).toLocaleString('en-US', { maximumFractionDigits: 2 })}`,
       pos.option_type === 'P' ? 'Put' : 'Call'].filter(Boolean).join(' '))
     if (pos.expiration) contract.push(`Exp ${shortDate(pos.expiration)}`)
@@ -954,9 +1164,11 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
   }
   if (!calc) return null
   const is1256 = calc.tax_character === 'section_1256'
-  const isStock = pos.instrument_type === 'stock'
+  const isStock = isQuantity(pos.instrument_type)
+  const unit = unitWord(pos.instrument_type)
+  const qty = Number(pos.shares)
   const label = isStock
-    ? `${pos.ticker} • ${Number(pos.shares).toLocaleString()} shares`
+    ? `${pos.ticker} • ${qty.toLocaleString('en-US', { maximumFractionDigits: 8 })} ${unit}${qty === 1 ? '' : 's'}`
     : [pos.ticker,
       Number(pos.contracts) > 0 && `${Number(pos.contracts).toLocaleString('en-US')} contract${Number(pos.contracts) === 1 ? '' : 's'}`,
     ].filter(Boolean).join(' • ')
@@ -1061,7 +1273,7 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
       <CustomExitTargets
         rows={custom?.length > 0 ? custom : ladder}
         runner={custom?.length > 0 ? null : runner}
-        isStock={isStock}
+        isStock={unit}
         units={isStock ? Number(pos.shares) : Number(pos.contracts)} />
 
       {calc.target_progress != null && (
@@ -1103,6 +1315,190 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
       </div>
       )}
     </div>
+  )
+}
+
+// ── Cash + real estate holdings ──────────────────────────────────
+
+// Collapsible card frame shared by cash and real estate (same header as
+// PositionCard: title, meta lines, badge, and the value when collapsed).
+function HoldingShell({ pos, open, onToggle, title, meta, badge, value, valueLabel, editing, form, onEdit, onDelete, children }) {
+  if (editing) return form
+  return (
+    <div className="bg-card border border-border rounded-2xl mb-4">
+      <button type="button" onClick={onToggle} aria-expanded={open} aria-controls={`holding-${pos.id}`}
+        className="w-full text-left flex items-start gap-3 p-5 rounded-2xl hover:bg-card-hover/40 transition">
+        <div className="flex-1 min-w-0">
+          <div className="text-base font-semibold break-words">{title}</div>
+          {meta.filter(Boolean).map((line) => <div key={line} className="text-xs text-muted mt-0.5">{line}</div>)}
+          <span className="inline-block mt-2 text-[10px] uppercase tracking-wider px-2 py-1 rounded-md border font-semibold bg-bg/40 text-subtle border-border">
+            {badge}
+          </span>
+        </div>
+        <div className="shrink-0 flex items-start gap-2">
+          {!open && (
+            <div className="text-right">
+              <div className="text-base font-semibold font-mono-tab text-green-400">{value}</div>
+              <div className="text-xs text-muted mt-0.5">{valueLabel}</div>
+            </div>
+          )}
+          <ChevronDown size={18} className={clsx('mt-1 text-muted transition-transform', open && 'rotate-180')} aria-hidden />
+        </div>
+      </button>
+      {open && (
+        <div id={`holding-${pos.id}`} className="px-5 pb-5">
+          {children}
+          <div className="flex gap-2 justify-end mt-4">
+            <button type="button" onClick={onEdit} aria-label="Edit holding"
+              className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded border border-border text-subtle hover:text-fg hover:border-amber-400/40 transition">
+              <Pencil size={14} />
+            </button>
+            <button type="button" onClick={onDelete} aria-label="Remove holding"
+              className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded border border-border text-subtle hover:text-rose-300 hover:border-rose-400/40 transition">
+              <Trash2 size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+const cashKindLabel = (k) => CASH_KINDS.find((x) => x.value === k)?.label ?? 'Cash'
+
+function CashCard({ pos, cash, open, onToggle, onSave, onDelete }) {
+  const [editing, setEditing] = useState(false)
+  const kind = pos.details?.account_kind ?? 'savings'
+  return (
+    <HoldingShell
+      pos={pos} open={open} onToggle={onToggle} editing={editing} onEdit={() => setEditing(true)} onDelete={onDelete}
+      form={<PositionForm initial={pos} onCancel={() => setEditing(false)}
+        onSave={async (row) => { const err = await onSave(row); if (!err) setEditing(false); return err }} />}
+      title={`${pos.name} • ${cashKindLabel(kind)}`}
+      meta={[cash.apy > 0 ? `${ratePct(cash.apy)} APY` : 'No yield entered']}
+      badge="Cash"
+      value={usd(cash.balance)} valueLabel="balance"
+    >
+      <div className="mb-4">
+        <div className="text-[10px] uppercase tracking-wider text-muted mb-1">Balance</div>
+        <div className="text-2xl font-semibold font-mono-tab text-green-400">{usd(cash.balance)}</div>
+      </div>
+      <div className="grid grid-cols-3 gap-3 py-3 border-y border-hairline">
+        <Stat label="Interest / yr" value={usd(cash.interest)} />
+        <Stat label="After tax / yr" value={usd(cash.after_tax_interest)} />
+        <Stat label="After-tax yield" value={ratePct(cash.after_tax_yield)} />
+      </div>
+      <p className="mt-3 text-xs text-muted">
+        Interest is taxed as ordinary income ({ratePct(cash.rate)}){kind === 't_bills' ? ' — T-bills skip state tax' : ''}.
+      </p>
+    </HoldingShell>
+  )
+}
+
+function RealEstateCard({ pos, re, open, onToggle, onSave, onDelete }) {
+  const [editing, setEditing] = useState(false)
+  if (!re) return null
+  const rental = pos.details?.kind === 'rental'
+  return (
+    <HoldingShell
+      pos={pos} open={open} onToggle={onToggle} editing={editing} onEdit={() => setEditing(true)} onDelete={onDelete}
+      form={<PositionForm initial={pos} onCancel={() => setEditing(false)}
+        onSave={async (row) => { const err = await onSave(row); if (!err) setEditing(false); return err }} />}
+      title={`${pos.name} • ${rental ? 'Rental' : 'Primary home'}`}
+      meta={[`Bought ${shortDate(pos.purchase_date)}`]}
+      badge={re.is_long_term ? 'Long-term' : 'Short-term'}
+      value={usd(re.after_tax_equity)} valueLabel="after tax"
+    >
+      <div className="mb-4">
+        <div className="text-[10px] uppercase tracking-wider text-muted mb-1">After-tax equity if sold today</div>
+        <div className={clsx('text-2xl font-semibold font-mono-tab', re.after_tax_equity >= 0 ? 'text-green-400' : 'text-rose-300')}>
+          {usd(re.after_tax_equity)}
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-3 py-3 border-y border-hairline">
+        <Stat label="Current Value" value={usd(re.value)} />
+        <Stat label="Mortgage" value={usd(re.mortgage)} />
+        <Stat label="Equity" value={usd(re.equity)} />
+      </div>
+      <ol className="mt-4 space-y-2 text-sm">
+        <SaleRow label="Selling costs" value={`−${usd(re.selling_costs)}`} />
+        <SaleRow label="Gain" value={usd(Math.max(0, re.gain))} />
+        {re.excluded > 0 && <SaleRow label="Home-sale exclusion" value={`−${usd(re.excluded)}`} />}
+        {re.recapture_gain > 0 && <SaleRow label={`Depreciation recapture at ${ratePct(re.recapture_rate)}`} value={usd(re.recapture_gain)} />}
+        <SaleRow label="Estimated tax" value={re.estimated_tax > 0 ? `−${usd(re.estimated_tax)}` : usd(0)} strong />
+      </ol>
+      {!rental && re.exclusion === 0 && (
+        <p className="mt-3 text-xs text-muted">No home-sale exclusion: you haven't lived here 2 of the last 5 years.</p>
+      )}
+    </HoldingShell>
+  )
+}
+
+function SaleRow({ label, value, strong }) {
+  return (
+    <li className="flex items-baseline gap-3">
+      <span className={clsx('flex-1', strong ? 'text-fg' : 'text-subtle')}>{label}</span>
+      <span className={clsx('font-mono-tab', strong ? 'text-fg font-semibold' : 'text-fg')}>{value}</span>
+    </li>
+  )
+}
+
+// Where idle cash earns the most AFTER TAX for this user. Categories only
+// (no named products). Rates are what the user types — prefilled with
+// example rates and remembered on this device.
+const YIELD_OPTIONS = [
+  { kind: 'savings', label: 'High-yield savings', example: 4.0 },
+  { kind: 'money_market', label: 'Money market', example: 4.1 },
+  { kind: 't_bills', label: 'T-bills', example: 4.0 },
+  { kind: 'cd', label: '1-year CD', example: 4.1 },
+]
+const YIELD_KEY = 'cm:cash-yield-apys'
+
+function CashYieldCard({ cashResults, rateForGain }) {
+  const balance = cashResults.reduce((sum, r) => sum + r.cash.balance, 0)
+  const earningNow = cashResults.reduce((sum, r) => sum + r.cash.after_tax_interest, 0)
+  const [apys, setApys] = useState(() => {
+    try { return { ...Object.fromEntries(YIELD_OPTIONS.map((o) => [o.kind, String(o.example)])), ...JSON.parse(localStorage.getItem(YIELD_KEY) ?? '{}') } }
+    catch { return Object.fromEntries(YIELD_OPTIONS.map((o) => [o.kind, String(o.example)])) }
+  })
+  const setApy = (kind, v) => {
+    const next = { ...apys, [kind]: v }
+    setApys(next)
+    try { localStorage.setItem(YIELD_KEY, JSON.stringify(next)) } catch { /* per-visit only */ }
+  }
+  const rows = cashYieldComparison({
+    balance, rateForGain,
+    options: YIELD_OPTIONS.map((o) => ({ ...o, apy: (num(apys[o.kind]) ?? 0) / 100 })),
+  })
+  const best = rows[0]
+  return (
+    <section className="bg-card border border-border rounded-2xl p-5 mb-4">
+      <h2 className="text-sm font-semibold mb-1">Cash yield, after tax</h2>
+      <p className="text-xs text-muted mb-4">
+        On your {usd(balance)} in cash. Your cash earns {usd(earningNow)}/yr after tax today.
+      </p>
+      <div className="grid grid-cols-[minmax(0,1fr)_5.5rem_4.5rem] gap-x-3 text-[10px] uppercase tracking-wider text-muted mb-2">
+        <span>Option</span><span>Rate</span><span className="text-right">After tax</span>
+      </div>
+      <ol className="space-y-2">
+        {rows.map((r) => (
+          <li key={r.kind} className="grid grid-cols-[minmax(0,1fr)_5.5rem_4.5rem] gap-x-3 items-center">
+            <div className="min-w-0">
+              <div className="text-sm text-fg truncate">{r.label}</div>
+              <div className="text-xs text-muted">{usd(r.after_tax_interest)}/yr{r === best ? ' · best' : ''}</div>
+            </div>
+            <Affix suffix="%">
+              <NumberInput decimals={3} value={apys[r.kind]} onChange={(v) => setApy(r.kind, v)}
+                aria-label={`${r.label} rate`} className={clsx(inputCls, 'pr-7')} />
+            </Affix>
+            <div className={clsx('text-sm font-mono-tab text-right', r === best ? 'text-green-400 font-semibold' : 'text-fg')}>
+              {ratePct(r.after_tax_yield)}
+            </div>
+          </li>
+        ))}
+      </ol>
+      <p className="mt-3 text-xs text-muted">Example rates — enter what you're offered. T-bills skip state tax.</p>
+    </section>
   )
 }
 
@@ -1205,7 +1601,7 @@ function previewTargets(f, own, ladderFor, customFor) {
   const character = f.instrument_type === 'index_option_1256'
     ? 'section_1256'
     : (holdingPeriod(f.purchase_date, todayYmd())?.is_long_term ? 'long_term' : 'short_term')
-  const contracts = wholeUnits(f.instrument_type === 'stock' ? num(f.shares) : num(f.contracts))
+  const contracts = wholeUnits(isQuantity(f.instrument_type) ? num(f.shares) : num(f.contracts))
   if (own) {
     const usable = own.filter((t) => Number.isFinite(t.value) && t.value > 0 && Number.isFinite(t.sell) && t.sell > 0)
     return customFor(basis, value, character, contracts, usable)
@@ -1285,8 +1681,9 @@ function TargetsEditor({ own, rows, contracts, onOwn, onRow, onAdd, onRemove }) 
 
 // "sell 35 contracts" / "sell 1,050 shares" — always a count, never a
 // fraction. Fractional share holdings get a share count to 2 dp.
+// `isStock` is true for shares, or the unit word itself ('coin').
 const soldLabel = (r, isStock, units = null) => {
-  const unit = isStock ? 'share' : 'contract'
+  const unit = typeof isStock === 'string' ? isStock : isStock ? 'share' : 'contract'
   if (r.contracts == null) {
     const n = units > 0 ? +(units * r.fraction).toFixed(2) : null
     return n == null ? `sell ${pct(r.fraction, 0)}` : `sell ${n.toLocaleString('en-US')} ${unit}${n === 1 ? '' : 's'}`
@@ -1335,7 +1732,7 @@ function CustomTargetsPreview({ rows, isStock, units }) {
 
 function CustomExitTargets({ title = 'Exit Targets', rows, runner, isStock, units }) {
   if (!rows?.length) return null
-  const unit = isStock ? 'share' : 'contract'
+  const unit = typeof isStock === 'string' ? isStock : isStock ? 'share' : 'contract'
   return (
     <TargetsPanel
       title={title}
@@ -1425,25 +1822,43 @@ function holdingStart(date) {
 }
 
 // The portfolio is the sum of the open positions — nothing else.
-function PortfolioTotals({ summary, count }) {
-  const up = summary.after_tax_gain >= 0
+// The portfolio is the sum of the holdings. With cash or real estate it
+// leads with after-tax net worth and breaks it down by type; the cost /
+// gain / return stats cover investments only (options, shares, crypto).
+function PortfolioTotals({ summary, count, others }) {
+  const hasOthers = others && (others.cashCount > 0 || others.realEstateCount > 0)
+  const invested = summary?.after_tax_value ?? 0
+  const total = invested + (others?.cash ?? 0) + (others?.realEstate ?? 0)
+  const up = hasOthers ? total >= 0 : (summary?.after_tax_gain ?? 0) >= 0
+  const holdings = count + (others?.cashCount ?? 0) + (others?.realEstateCount ?? 0)
   return (
     <section className="bg-card border border-amber-400/30 rounded-2xl p-5 mb-5">
       <div className="flex items-center gap-2 mb-4">
         <h2 className="text-sm font-semibold">Portfolio</h2>
         <span className="flex-1" />
-        <span className="text-xs text-muted">{count} position{count === 1 ? '' : 's'}</span>
+        <span className="text-xs text-muted">{holdings} holding{holdings === 1 ? '' : 's'}</span>
       </div>
-      <div className="text-[10px] uppercase tracking-wider text-muted mb-1">After-tax value if all sold today</div>
+      <div className="text-[10px] uppercase tracking-wider text-muted mb-1">
+        {hasOthers ? 'After-tax net worth' : 'After-tax value if all sold today'}
+      </div>
       <div className={clsx('text-3xl font-semibold font-mono-tab mb-5', up ? 'text-green-400' : 'text-rose-300')}>
-        {usd(summary.after_tax_value)}
+        {usd(hasOthers ? total : invested)}
       </div>
-      <div className="grid grid-cols-2 gap-x-4 gap-y-4 pt-4 border-t border-hairline">
-        <Stat label="Total cost" value={usd(summary.basis)} />
-        <Stat label="Current Value" value={usd(summary.current_value)} />
-        <Stat label="After-tax gain" value={usd(summary.after_tax_gain)} />
-        <Stat label="After-tax return" value={pct(summary.after_tax_return_pct)} />
-      </div>
+      {hasOthers && (
+        <div className="grid grid-cols-3 gap-3 pt-4 border-t border-hairline mb-4">
+          <Stat label="Investments" value={usd(invested)} />
+          <Stat label="Cash" value={usd(others.cash)} />
+          <Stat label="Real estate" value={usd(others.realEstate)} />
+        </div>
+      )}
+      {summary && (
+        <div className="grid grid-cols-2 gap-x-4 gap-y-4 pt-4 border-t border-hairline">
+          <Stat label={hasOthers ? 'Investments cost' : 'Total cost'} value={usd(summary.basis)} />
+          <Stat label="Current Value" value={usd(summary.current_value)} />
+          <Stat label="After-tax gain" value={usd(summary.after_tax_gain)} />
+          <Stat label="After-tax return" value={pct(summary.after_tax_return_pct)} />
+        </div>
+      )}
     </section>
   )
 }
