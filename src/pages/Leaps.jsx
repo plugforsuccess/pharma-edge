@@ -706,6 +706,7 @@ function totalsOf(f) {
 }
 
 function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
+  const { defaultGoal } = useContext(RatesContext)
   const [f, setF] = useState(() => emptyForm(initial))
   const [error, setError] = useState('')
   const [savedNote, setSavedNote] = useState('')
@@ -835,7 +836,9 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
       details: isIncome
         ? { dividend_yield: exact(divYield / 100), dividend_kind: f.div_kind }
         : null,
-      goal_pct: !rocIncome && goal > 0 ? exact(goal / 100) : null,
+      // Left at the default (and never set) → NULL, so it keeps following Settings.
+      goal_pct: rocIncome || !(goal > 0) || (initial?.goal_pct == null && defaultGoal != null && Math.abs(goal / 100 - defaultGoal) < 1e-9)
+        ? null : exact(goal / 100),
       instrument_type: instrumentType,
       option_type: isShares ? null : f.option_type,
       strike: isShares ? null : num(f.strike),
@@ -1569,6 +1572,14 @@ function YieldRows({ rows, apys, setApy, best }) {
 function GoalSection({ goal, onGoal, basis, is1256 }) {
   const { rateForGain, defaultGoal } = useContext(RatesContext)
   const [showAll, setShowAll] = useState(false)
+  // An empty field shows the default goal (Settings), so there's always a number.
+  const defaultStr = defaultGoal ? String(+(defaultGoal * 100).toFixed(2)) : ''
+  // Fill once when the editor opens (and on blur, below) — not while typing,
+  // so the field can be cleared to type a new number.
+  useEffect(() => {
+    if (goal === '' && defaultStr) onGoal(defaultStr)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultStr])
   const g = num(goal)
   const active = g > 0 ? g / 100 : defaultGoal
   const table = rateForGain && basis > 0
@@ -1577,8 +1588,9 @@ function GoalSection({ goal, onGoal, basis, is1256 }) {
   const row = table?.rows.find((r) => Math.abs(r.target_pct - active) < 1e-9)
   return (
     <FormSection title="After-tax goal">
-      <Field wide label="Goal for this holding" hint={defaultGoal ? `blank = default ${pct(defaultGoal, 0)}` : 'optional'}>
+      <Field wide label="Goal for this holding">
         <Affix suffix="%"><NumberInput decimals={2} value={goal} onChange={onGoal}
+          onBlur={() => { if (goal === '' && defaultStr) onGoal(defaultStr) }}
           placeholder={defaultGoal ? String(+(defaultGoal * 100).toFixed(2)) : '50'} className={clsx(inputCls, 'pr-8')} /></Affix>
       </Field>
       {row && (

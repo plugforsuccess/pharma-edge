@@ -854,7 +854,10 @@ value, holding period) and must pass before any edit to that file lands.
   (owner, 2026-10-02). Each holding has its own after-tax goal,
   `leaps_positions.goal_pct` (fraction of cost; NULL = the default in
   Settings → Goals, `leaps_tax_profiles.selected_target_pct`), set in the
-  holding editor's **After-tax goal** section: one % field, the line
+  holding editor's **After-tax goal** section: one % field (no hint; an
+  empty field fills with the default when the editor opens or on blur,
+  and saving the untouched default stores NULL so it keeps following
+  Settings), the line
   "Keeps $X after tax" / "Needs 1.37x long-term" / "Needs 1.42x
   short-term" (one per row), and a
   "Show all targets" tap that expands the full 50%–20% table on that
