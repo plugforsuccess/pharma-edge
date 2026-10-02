@@ -794,6 +794,27 @@ dxLink keeps feeding HeatPulse for now.
 
 ---
 
+## Home (`/`) — the LEAPS dashboard
+
+Built 2026-10-02; the old GEX "The Tape" (`Dashboard.jsx`) moved to
+`/tape` behind `FEATURES.tape` (off). Home reads the same numbers as
+Positions through **`src/hooks/useHoldings.js`** (load + every after-tax
+figure; `Leaps.jsx` uses it too — change the math there, not in a page).
+Top to bottom: net worth after tax / before tax (links to Positions,
+investments' after-tax return under it); **Needs action**, most urgent
+first — time stop (act), targets the current value has reached ("PLTR
+hit 100% gain · Sell 7 contracts · +$4,971 after taxes"), runner trail
+hit (only once every target has hit), roll window open, long-term within
+60 days and worth waiting for, prices older than 7 days; **Next exit
+targets** (closest unhit target per holding, top 3, "Needs +36% from
+here"); after-tax goals reached + income after tax; quick actions (Add
+holding, Update prices, Simulator). ROC holdings have no targets/goals
+here either. Nothing on Home edits; every row links to Positions. Hits
+come from the last entered price until Tradier sync lands. With no
+holdings, Home shows a welcome card with "Add your first holding".
+
+---
+
 ## Settings (`/settings`) — where users edit their LEAPS setup
 
 Settings is the single place to edit: account name, risk profile

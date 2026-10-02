@@ -15,6 +15,8 @@
 //   legacyBot    — the old whale-tail bot's settings card in Settings
 //   tastytradeBroker — the Tastytrade "test connection" card in Settings
 //                  (LEAPS execution moves to Tradier)
+//   tape         — /tape, the old GEX "The Tape" dashboard (Home is the
+//                  LEAPS dashboard since 2026-10-02)
 export const FEATURES = Object.freeze({
   wheel: false,
   logMove: false,
@@ -24,4 +26,5 @@ export const FEATURES = Object.freeze({
   leaderboard: false,
   legacyBot: false,
   tastytradeBroker: false,
+  tape: false,
 })
