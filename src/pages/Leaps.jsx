@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Landmark, Plus, Pencil, Trash2, Check, X, AlertTriangle, ArrowRightLeft, ChevronDown } from 'lucide-react'
 import clsx from 'clsx'
@@ -6,7 +6,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import {
   FILING_STATUSES, DEFAULT_TARGET_PCTS, makeRateResolver, deriveRates,
-  applyRateOverride, targetTable, targetRow, positionAfterTax, portfolioSummary,
+  applyRateOverride, targetRow, positionAfterTax, portfolioSummary,
   todayYmd, holdingPeriod, suggestInstrumentType, exerciseCall,
   blended1256Rate, rateAtGainFor, EXIT_PLAYBOOK, playbookTargets, runnerPlan, timeStop,
   longTermFitsPlan, entryRunwayDays,
@@ -173,12 +173,7 @@ export default function Leaps() {
     () => investments.reduce((sum, x) => sum + (Number(x.cost_basis) || 0), 0),
     [investments],
   )
-  const targetPcts = useMemo(() => (p.target_pcts ?? DEFAULT_TARGET_PCTS).map(Number), [p.target_pcts])
   const selectedPct = Number(p.selected_target_pct)
-  const table = useMemo(() => {
-    if (!rateForGain || !(totalCost > 0)) return null
-    return targetTable({ basis: totalCost, targetPcts, rateForGain })
-  }, [rateForGain, totalCost, targetPcts])
   const asOf = todayYmd()
 
   // The exit plan (playbook by default) on one position: pre-tax targets
@@ -222,22 +217,27 @@ export default function Leaps() {
 
   const results = useMemo(() => {
     if (!rateForGain || !positions) return []
-    return investments.map((pos) => withLadder(pos, positionAfterTax({
+    return investments.map((pos) => {
+      const goal = goalRow(Number(pos.cost_basis))
+      const is1256 = pos.instrument_type === 'index_option_1256'
+      const calc = positionAfterTax({
         basis: Number(pos.cost_basis),
         currentValue: Number(pos.current_value),
         purchaseDate: pos.purchase_date,
         asOf,
         rateForGain,
         instrumentType: pos.instrument_type,
-        targetMultiple: ownTarget(Number(pos.cost_basis), pos.instrument_type),
-      })))
+        targetMultiple: goal ? (is1256 ? goal.section_1256.required_multiple : goal.long_term.required_multiple) : null,
+      })
+      // The goal bar shows both multiples: long-term and short-term.
+      if (calc && goal) calc.goal_st_multiple = goal.short_term.required_multiple
+      return withLadder(pos, calc)
+    })
 
-    // The selected after-tax return, solved on this position's own cost.
-    function ownTarget(basis, instrumentType) {
+    // The after-tax return goal (Settings), solved on this position's own cost.
+    function goalRow(basis) {
       if (!(selectedPct > 0)) return null
-      const row = targetRow({ portfolio: basis, basis, targetPct: selectedPct, rateForGain })
-      if (!row) return null
-      return instrumentType === 'index_option_1256' ? row.section_1256.required_multiple : row.long_term.required_multiple
+      return targetRow({ portfolio: basis, basis, targetPct: selectedPct, rateForGain })
     }
 
     function withLadder(pos, calc) {
@@ -306,11 +306,6 @@ export default function Leaps() {
     return null
   }, [profile, user?.id])
 
-  async function selectTarget(targetPct) {
-    setProfile((cur) => ({ ...(cur ?? DEFAULT_PROFILE), selected_target_pct: targetPct }))
-    if (profile) await saveProfile({ selected_target_pct: targetPct })
-  }
-
   async function savePosition(row, id) {
     // Track the highest value per contract (or share) — the runner's
     // trail is measured from it.
@@ -369,6 +364,7 @@ export default function Leaps() {
   }
 
   return (
+    <RatesContext.Provider value={rateForGain}>
     <div className="px-4 py-4 pb-24 max-w-2xl mx-auto">
       <header className="mb-5">
         <div className="flex items-center gap-2 mb-1">
@@ -403,9 +399,6 @@ export default function Leaps() {
             <PortfolioTotals summary={summary} count={results.length} others={others} />
           )}
 
-          {ready && table && (
-            <TargetTable table={table} selected={Number(p.selected_target_pct)} onSelect={selectTarget} show1256={has1256} />
-          )}
 
           {ready && (
             <section className="mb-6">
@@ -483,9 +476,6 @@ export default function Leaps() {
                   onSave={(row) => savePosition(row, pos.id)} onDelete={() => deletePosition(pos.id)} />
               ))}
 
-              {cashResults.length > 0 && rateForGain && (
-                <CashYieldCard cashResults={cashResults} rateForGain={rateForGain} />
-              )}
 
             </section>
           )}
@@ -496,8 +486,13 @@ export default function Leaps() {
         </>
       )}
     </div>
+    </RatesContext.Provider>
   )
 }
+
+// The user's rate resolver, for the yield comparisons inside the
+// holding editor (cash / income).
+const RatesContext = createContext(null)
 
 const OPEN_KEY = 'cm:holdings-open'
 function readOpenIds() {
@@ -604,48 +599,6 @@ function RateBreakdown({ rates, state, taxYear, show1256, onClose }) {
         </p>
       )}
     </div>
-  )
-}
-
-// ── Target table ──────────────────────────────────────────────────
-
-function TargetTable({ table, selected, onSelect, show1256 }) {
-  return (
-    <section className={CARD}>
-      <div className="flex items-center gap-2 mb-1">
-        <h2 className="text-sm font-semibold">After-tax return targets</h2>
-      </div>
-      <p className="text-xs text-muted mb-4">On {usd(table.basis)} total cost · tap a row to track it</p>
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-[10px] uppercase tracking-wider text-muted">
-            <th className="text-left font-medium pb-3">Target</th>
-            <th className="text-right font-medium pb-3">After-tax</th>
-            <th className="text-right font-medium pb-3">Long-term</th>
-            <th className="text-right font-medium pb-3">Short-term</th>
-            {show1256 && <th className="text-right font-medium pb-3">§1256</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {table.rows.map((row) => (
-            <tr
-              key={row.target_pct}
-              onClick={() => onSelect(row.target_pct)}
-              className={clsx(
-                'cursor-pointer border-t border-hairline',
-                row.target_pct === selected ? 'text-amber-300 bg-amber-400/5' : 'hover:bg-card-hover',
-              )}
-            >
-              <td className="py-3.5 font-mono-tab">{pct(row.target_pct, 0)}</td>
-              <td className="py-3.5 text-right font-mono-tab">{usd(row.after_tax_target)}</td>
-              <td className="py-3.5 text-right font-mono-tab font-semibold">{mult(row.long_term.required_multiple)}</td>
-              <td className="py-3.5 text-right font-mono-tab">{mult(row.short_term.required_multiple)}</td>
-              {show1256 && <td className="py-3.5 text-right font-mono-tab">{mult(row.section_1256.required_multiple)}</td>}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </section>
   )
 }
 
@@ -948,6 +901,8 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
         </FormSection>
       )}
 
+      {isCash && <YieldCompare group="cash" amount={num(f.balance)} />}
+
       {isRE && (
         <FormSection title="Property">
           <div className="grid grid-cols-2 gap-3">
@@ -1098,6 +1053,8 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
           </div>
         )}
       </FormSection>
+
+      {isIncome && <YieldCompare group="income" amount={value} />}
 
       {!rocIncome && (
       <FormSection title="Exit Targets">
@@ -1371,14 +1328,18 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
           units={isStock ? Number(pos.shares) : Number(pos.contracts)} />
       )}
 
-      {calc.target_progress != null && (
+      {!noExitPlan && calc.target_progress != null && (
         <div className="mb-4">
           <div className="flex text-xs text-muted mb-1.5">
-            <span className="flex-1">Progress to {pct(selectedTargetPct, 0)} after-tax return</span>
-            <span className="font-mono-tab">{mult(calc.current_multiple)} / {mult(calc.target_multiple)} {is1256 ? '60/40' : 'LT'}</span>
+            <span className="flex-1">{pct(selectedTargetPct, 0)} after-tax goal</span>
+            <span className="font-mono-tab">now {mult(calc.current_multiple)}</span>
           </div>
           <div className="h-1.5 rounded bg-faint overflow-hidden">
             <div className="h-full bg-amber-400" style={{ width: `${calc.target_progress * 100}%` }} />
+          </div>
+          <div className="mt-1.5 text-xs text-muted">
+            Needs <span className="font-mono-tab text-fg">{mult(calc.target_multiple)}</span> {is1256 ? '(§1256 60/40)' : 'long-term'}
+            {!is1256 && calc.goal_st_multiple != null && <> · <span className="font-mono-tab text-fg">{mult(calc.goal_st_multiple)}</span> short-term</>}
           </div>
         </div>
       )}
@@ -1592,46 +1553,40 @@ function YieldRows({ rows, apys, setApy, best }) {
   )
 }
 
-function CashYieldCard({ cashResults, rateForGain }) {
-  const balance = cashResults.reduce((sum, r) => sum + r.cash.balance, 0)
-  const earningNow = cashResults.reduce((sum, r) => sum + r.cash.after_tax_interest, 0)
+// Inside the cash / income editor: what this amount would keep after
+// tax in each category, at rates the user enters (saved on the device).
+function YieldCompare({ group, amount }) {
+  const rateForGain = useContext(RatesContext)
   const [apys, setApys] = useState(() => {
     try { return { ...exampleApys(), ...JSON.parse(localStorage.getItem(YIELD_KEY) ?? '{}') } }
     catch { return exampleApys() }
   })
+  if (!rateForGain) return null
   const setApy = (key, v) => {
     const next = { ...apys, [key]: v }
     setApys(next)
     try { localStorage.setItem(YIELD_KEY, JSON.stringify(next)) } catch { /* per-visit only */ }
   }
-  const cashRows = cashYieldComparison({
-    balance, rateForGain,
-    options: YIELD_OPTIONS.map((o) => ({ ...o, apy: (num(apys[o.kind]) ?? 0) / 100 })),
-  })
-  const incomeRows = incomeYieldComparison({
-    balance, rateForGain,
-    options: INCOME_OPTIONS.map((o) => ({ ...o, apy: (num(apys[o.key]) ?? 0) / 100 })),
-  })
+  const balance = Math.max(0, Number(amount) || 0)
+  const cash = group === 'cash'
+  const rows = cash
+    ? cashYieldComparison({ balance, rateForGain, options: YIELD_OPTIONS.map((o) => ({ ...o, apy: (num(apys[o.kind]) ?? 0) / 100 })) })
+    : incomeYieldComparison({ balance, rateForGain, options: INCOME_OPTIONS.map((o) => ({ ...o, apy: (num(apys[o.key]) ?? 0) / 100 })) })
   return (
-    <section className="bg-card border border-border rounded-2xl p-5 mb-4">
-      <h2 className="text-sm font-semibold mb-1">Yield on your cash, after tax</h2>
-      <p className="text-xs text-muted mb-4">
-        On your {usd(balance)} in cash. It earns {usd(earningNow)}/yr after tax today.
+    <FormSection title="Compare after tax">
+      <p className="text-xs text-muted mb-3">
+        {balance > 0 ? `On ${usd(balance)}. ` : ''}Example rates — enter what you're offered.
       </p>
       <div className="grid grid-cols-[minmax(0,1fr)_5.5rem_4.5rem] gap-x-3 text-[10px] uppercase tracking-wider text-muted mb-2">
-        <span>Cash · principal stays put</span><span>Rate</span><span className="text-right">After tax</span>
+        <span>{cash ? 'Principal stays put' : 'Prices can move'}</span><span>{cash ? 'Rate' : 'Yield'}</span><span className="text-right">After tax</span>
       </div>
-      <YieldRows rows={cashRows} apys={apys} setApy={setApy} best={cashRows[0]} />
-      <div className="grid grid-cols-[minmax(0,1fr)_5.5rem_4.5rem] gap-x-3 text-[10px] uppercase tracking-wider text-muted mt-5 mb-2 pt-4 border-t border-hairline">
-        <span>Income investments · prices can move</span><span>Yield</span><span className="text-right">After tax</span>
-      </div>
-      <YieldRows rows={incomeRows} apys={apys} setApy={setApy} best={incomeRows[0]} />
+      <YieldRows rows={rows} apys={apys} setApy={setApy} best={rows[0]} />
       <p className="mt-3 text-xs text-muted">
-        Example rates — enter what you're offered. T-bills and Treasury funds skip state tax; muni funds skip federal tax;
-        qualified dividends get long-term rates; return of capital (some preferreds) isn't taxed until you sell, because it
-        lowers your cost basis. Not a recommendation.
+        {cash
+          ? 'T-bills skip state tax. Not a recommendation.'
+          : "Treasury funds skip state tax; muni funds skip federal tax; qualified dividends get long-term rates; return of capital is taxed when you sell. Not a recommendation."}
       </p>
-    </section>
+    </FormSection>
   )
 }
 

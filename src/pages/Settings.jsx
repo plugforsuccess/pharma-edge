@@ -98,9 +98,12 @@ const ACT60_OPTIONS = [
   { value: '0.04', label: '4% — decree from 2027' },
 ]
 
+// One after-tax return goal; each holding's goal bar solves it on that
+// holding's own cost. (target_pcts keeps just this one value.)
 function goalsFrom(t) {
+  const sel = Number(t?.selected_target_pct)
   return {
-    target_pcts: (t?.target_pcts ?? DEFAULT_TARGET_PCTS).map((x) => pctStr(x)).join(', '),
+    goal: pctStr(sel > 0 ? sel : (t?.target_pcts?.[0] ?? DEFAULT_TARGET_PCTS[0])),
   }
 }
 
@@ -241,8 +244,8 @@ export default function Settings() {
         const v = num(tax[k])
         if (v != null && !isValidTaxRate(v / 100)) errs.push(`Tax profile: CPA ${label} rate must be between 0% and 99%.`)
       }
-      const targets = goals.target_pcts.split(',').map((x) => num(x)).filter((x) => x != null && x > 0)
-      if (targets.length === 0) errs.push('Goals: enter at least one target return.')
+      const goal = num(goals.goal)
+      if (!(goal > 0 && goal <= 1000)) errs.push('Goals: enter an after-tax return goal above 0%.')
       if (!(num(risk.account_size) > 0) && !taxRow) errs.push('Risk profile: enter your account size (used as your portfolio size).')
     }
     if (dirty.ladder) {
@@ -311,9 +314,7 @@ export default function Settings() {
 
     // 2. Tax profile + goals (+ account size as portfolio size).
     if (dirty.tax || dirty.goals || dirty.accountSize) {
-      const targets = [...new Set(goals.target_pcts.split(',').map((x) => num(x)).filter((x) => x != null && x > 0)
-        .map((x) => x / 100))].sort((a, b) => b - a)
-      const prevSel = Number(taxRow?.selected_target_pct)
+      const goal = num(goals.goal) / 100
       const lt = num(tax.lt_rate_override)
       const st = num(tax.st_rate_override)
       const size = num(risk.account_size)
@@ -325,8 +326,8 @@ export default function Settings() {
         lt_rate_override: lt == null ? null : lt / 100,
         st_rate_override: st == null ? null : st / 100,
         pr_act60_rate: tax.state_code === 'PR' && tax.pr_act60_rate !== 'none' ? Number(tax.pr_act60_rate) : null,
-        target_pcts: targets,
-        selected_target_pct: targets.includes(prevSel) ? prevSel : targets[0],
+        target_pcts: [goal],
+        selected_target_pct: goal,
         ...(size > 0 ? { portfolio_size: size } : {}),
       }
       const { data, error } = await supabase.from('leaps_tax_profiles').upsert(row).select().single()
@@ -437,8 +438,8 @@ export default function Settings() {
       </Section>
 
       <Section title="Goals" id="goals">
-        <Input label="Target after-tax returns (% of what you paid, comma-separated)"
-          value={goals.target_pcts} onChange={(v) => setG('target_pcts', v)} />
+        <Input label="After-tax return goal (% of what you paid)" suffix="%" inputMode="decimal"
+          value={goals.goal} onChange={(v) => setG('goal', v)} placeholder="50" />
       </Section>
 
       <Section title="Exit Targets" id="exit-targets">
