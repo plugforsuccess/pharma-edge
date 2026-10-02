@@ -15,7 +15,7 @@
 import {
   deriveRates, applyRateOverride, makeRateResolver, targetTable,
   positionAfterTax, holdingPeriod, portfolioSummary, marginalRate,
-  isValidTaxRate, isValidBasis,
+  isValidTaxRate, isValidBasis, exerciseCall, blended1256Rate, suggestInstrumentType, bracketTax,
 } from '../src/utils/afterTax.js'
 
 const federal = {
@@ -68,12 +68,31 @@ const round2 = (x) => Math.round(x * 100) / 100
   const mfs = deriveRates({ federal, state: TX, filingStatus: 'mfs', income: 130000 })
   eq('mfs NIIT at $130k', mfs.long_term.niit, 0.038)
 
-  // Washington: LTCG tax applies to the gain itself above its deduction.
+  // Washington: LTCG tax applies to the gain itself above its deduction,
+  // as an EFFECTIVE rate on the whole gain — not 7% on all of it.
   const waSmall = deriveRates({ federal, state: WA, filingStatus: 'single', income: 800000, gain: 100000 })
+  const waMid = deriveRates({ federal, state: WA, filingStatus: 'single', income: 800000, gain: 300000 })
   const waBig = deriveRates({ federal, state: WA, filingStatus: 'single', income: 800000, gain: 500000 })
-  eq('WA small gain state LT', waSmall.long_term.state, 0)
-  eq('WA big gain state LT', waBig.long_term.state, 0.07)
+  const waHuge = deriveRates({ federal, state: WA, filingStatus: 'single', income: 800000, gain: 2000000 })
+  eq('WA gain under deduction → 0', waSmall.long_term.state, 0)
+  eq('WA $300k gain → 7% × 22k / 300k', waMid.long_term.state, 0.0051)
+  eq('WA $500k gain → 7% × 222k / 500k', waBig.long_term.state, 0.0311)
+  eq('WA $2M gain → (70k + 9.9% × 722k) / 2M', waHuge.long_term.state, 0.0707)
   eq('WA ST state (no income tax)', waBig.short_term.state, 0)
+  eq('WA $300k after-tax value uses effective rate', Math.round(positionAfterTax({
+    basis: 100000, currentValue: 400000, purchaseDate: '2024-01-01', asOf: '2026-10-02',
+    rateForGain: makeRateResolver({ federal, state: WA, filingStatus: 'single', income: 800000 }),
+  }).after_tax_value), Math.round(400000 - 300000 * (0.238 + 0.0051)))
+
+  // Progressive state, gain straddling brackets: effective, not marginal.
+  const PR = { state_code: 'XX', ordinary: { single: [[0, 0.02], [100000, 0.06]] }, ltcg: null }
+  const pr = deriveRates({ federal, state: PR, filingStatus: 'single', income: 50000, gain: 100000 })
+  eq('progressive effective on gain slice (50k@2% + 50k@6%)/100k', pr.long_term.state, 0.04)
+  eq('progressive no-gain falls back to marginal', deriveRates({ federal, state: PR, filingStatus: 'single', income: 50000 }).long_term.state, 0.02)
+  eq('bracketTax', bracketTax([[0, 0.1], [10000, 0.2]], 15000), 2000)
+  // Exclusion applied to the effective rate: 44% off a progressive slice.
+  const SCp = { ...PR, ltcg_exclusion_pct: 0.44 }
+  eq('exclusion on effective rate', deriveRates({ federal, state: SCp, filingStatus: 'single', income: 50000, gain: 100000 }).long_term.state, 0.0224)
 
   // Massachusetts: LT at the 5% ordinary rate, ST at 8.5%.
   const MA = { state_code: 'MA', ordinary: { single: [[0, 0.05], [1107750, 0.09]] }, ltcg: null, stcg: { single: [[0, 0.085], [1107750, 0.125]] } }
@@ -156,12 +175,73 @@ const round2 = (x) => Math.round(x * 100) / 100
   eq('netted estimate tax ($20k net LT × 23.8%)', Math.round(sum.netted.estimated_tax), 4760)
 }
 
+// ── §1256 index options (60/40, no countdown) ────────────────────
+{
+  const rateForGain = makeRateResolver({ federal, state: TX, filingStatus: 'single', income: 800000 })
+  const blend = 0.6 * 0.238 + 0.4 * 0.408
+  eq('1256 blended rate', blended1256Rate(rateForGain(0)), 0.306)
+  // Held 10 days or 3 years — same tax.
+  for (const purchaseDate of ['2026-09-22', '2023-01-01']) {
+    const r = positionAfterTax({ basis: 30000, currentValue: 60000, purchaseDate, asOf: '2026-10-02', rateForGain, instrumentType: 'index_option_1256' })
+    eq(`1256 after-tax value (bought ${purchaseDate})`, Math.round(r.after_tax_value), Math.round(60000 - 30000 * blend))
+    eq(`1256 character (bought ${purchaseDate})`, r.tax_character, 'section_1256')
+    eq(`1256 no countdown (bought ${purchaseDate})`, r.days_until_long_term, null)
+    eq(`1256 no tax-saved-by-waiting (bought ${purchaseDate})`, r.tax_saved_by_waiting, null)
+    eq(`1256 is_long_term null (bought ${purchaseDate})`, r.is_long_term, null)
+  }
+  const fixed = makeRateResolver({ federal, state: TX, filingStatus: 'single', income: 0, override: { long_term: 0.238, short_term: 0.408 } })
+  const row = targetTable({ portfolio: 100000, allocationPct: 0.3, targetPcts: [0.5], rateForGain: fixed }).rows[0]
+  eq('1256 target multiple (50% → 50000 / 0.694 + 30000) / 30000', round2(row.section_1256.required_multiple), 3.40)
+  eq('suggest SPX → 1256', suggestInstrumentType('spx'), 'index_option_1256')
+  eq('suggest XSP → 1256', suggestInstrumentType('XSP'), 'index_option_1256')
+  eq('suggest SPY → equity (ETF options are not 1256)', suggestInstrumentType('SPY'), 'equity_option')
+
+  // Netted estimate splits 1256 gains 60/40.
+  const a = positionAfterTax({ basis: 10000, currentValue: 20000, purchaseDate: '2026-09-01', asOf: '2026-10-02', rateForGain, instrumentType: 'index_option_1256' })
+  eq('1256 netting', Math.round(portfolioSummary([a], 100000, rateForGain).netted.estimated_tax), Math.round(6000 * 0.238 + 4000 * 0.408))
+}
+
+// ── Exercise: premium rolls into stock basis, clock restarts ────
+{
+  const option = { id: 'opt1', ticker: 'NVDA', instrument_type: 'equity_option', option_type: 'C', strike: 150, contracts: 5, cost_basis: 30000, purchase_date: '2024-01-10' }
+  const stock = exerciseCall({ option, exerciseDate: '2026-10-02' })
+  eq('exercise → stock', stock.instrument_type, 'stock')
+  eq('exercise shares default contracts × 100', stock.shares, 500)
+  eq('exercise basis = premium + strike × shares', stock.cost_basis, 30000 + 150 * 500)
+  eq('exercise purchase date = exercise date (not option date)', stock.purchase_date, '2026-10-02')
+  eq('exercise links back', stock.exercised_from_id, 'opt1')
+  // Option held 2+ years, but the stock starts short-term on its own clock.
+  const hp = holdingPeriod(stock.purchase_date, '2026-10-03')
+  eq('exercised stock starts short-term', hp.is_long_term, false)
+  eq('exercised stock LT date = exercise anniversary + 1', hp.long_term_date, '2027-10-03')
+  eq('exercise rejects puts', exerciseCall({ option: { ...option, option_type: 'P' }, exerciseDate: '2026-10-02' }), null)
+  eq('exercise rejects 1256 (cash-settled)', exerciseCall({ option: { ...option, instrument_type: 'index_option_1256' }, exerciseDate: '2026-10-02' }), null)
+  eq('exercise needs strike', exerciseCall({ option: { ...option, strike: null }, exerciseDate: '2026-10-02' }), null)
+  eq('exercise share override', exerciseCall({ option, exerciseDate: '2026-10-02', shares: 510 }).shares, 510)
+  // Stock bought at $105k and now worth $120k, held short-term → ST rate.
+  const rateForGain = makeRateResolver({ federal, state: TX, filingStatus: 'single', income: 800000 })
+  const live = positionAfterTax({ basis: stock.cost_basis, currentValue: 120000, purchaseDate: stock.purchase_date, asOf: '2026-12-01', rateForGain, instrumentType: 'stock' })
+  eq('exercised stock after-tax (ST)', Math.round(live.after_tax_value), Math.round(120000 - 15000 * 0.408))
+}
+
 // ── Holding period ───────────────────────────────────────────────
 {
   eq('anniversary day is still short-term', holdingPeriod('2025-10-02', '2026-10-02').is_long_term, false)
   eq('day after anniversary is long-term', holdingPeriod('2025-10-02', '2026-10-03').is_long_term, true)
   eq('days until long-term', holdingPeriod('2026-06-01', '2026-10-02').days_until_long_term, 243)
-  eq('leap-day purchase goes LT Mar 1', holdingPeriod('2024-02-29', '2025-03-01').long_term_date, '2025-03-01')
+  // Days until long-term = (anniversary + 1 day) − today.
+  eq('days until LT on the anniversary itself = 1', holdingPeriod('2025-10-02', '2026-10-02').days_until_long_term, 1)
+  eq('days until LT once long-term = 0', holdingPeriod('2025-10-02', '2026-10-03').days_until_long_term, 0)
+  // February 29 purchase: anniversary is Feb 28 in a non-leap year → LT Mar 1.
+  eq('Feb 29 purchase: LT date', holdingPeriod('2024-02-29', '2024-03-01').long_term_date, '2025-03-01')
+  eq('Feb 29 purchase: Feb 28 2025 still short-term', holdingPeriod('2024-02-29', '2025-02-28').is_long_term, false)
+  eq('Feb 29 purchase: 1 day left on Feb 28 2025', holdingPeriod('2024-02-29', '2025-02-28').days_until_long_term, 1)
+  eq('Feb 29 purchase: Mar 1 2025 is long-term', holdingPeriod('2024-02-29', '2025-03-01').is_long_term, true)
+  eq('Feb 29 purchase: days from purchase day', holdingPeriod('2024-02-29', '2024-02-29').days_until_long_term, 366)
+  // Feb 28 purchase whose anniversary year is a leap year → LT Feb 29.
+  eq('Feb 28 2027 purchase → LT Feb 29 2028', holdingPeriod('2027-02-28', '2027-03-01').long_term_date, '2028-02-29')
+  // Year-end purchase crosses the year boundary cleanly.
+  eq('Dec 31 purchase → LT Jan 1 two years on', holdingPeriod('2025-12-31', '2026-06-01').long_term_date, '2027-01-01')
 }
 
 // ── Validation ───────────────────────────────────────────────────

@@ -100,6 +100,8 @@ CREATE POLICY state_tax_rates_service_writes
 
 COMMENT ON TABLE public.state_tax_rates IS
   'State income-tax brackets per tax year for the after-tax LEAPS feature. Update yearly from state revenue departments. confidence flags rows that need owner verification.';
+COMMENT ON COLUMN public.state_tax_rates.ltcg IS
+  'Optional LTCG schedule. The app computes the state long-term rate as the EFFECTIVE rate on the gain slice from this schedule (or ordinary × (1 − ltcg_exclusion_pct)), never a single flat number: exclusions and WA''s deduction-then-7%/9.9% make the rate depend on the gain size.';
 
 -- ── 3. leaps_tax_profiles ─────────────────────────────────────────
 
@@ -145,19 +147,37 @@ CREATE TABLE IF NOT EXISTS public.leaps_positions (
   id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id        uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   ticker         text NOT NULL CHECK (ticker ~ '^[A-Z.]{1,10}$'),
-  option_type    text NOT NULL DEFAULT 'C' CHECK (option_type IN ('C', 'P')),
+  -- equity_option     = stock/ETF options, normal > 1 year long-term rule
+  -- index_option_1256 = SPX/XSP/NDX/RUT/VIX…: IRC §1256 60% LT / 40% ST
+  --                     regardless of holding period (no countdown)
+  -- stock             = shares, incl. stock acquired by exercising a call
+  instrument_type text NOT NULL DEFAULT 'equity_option'
+                 CHECK (instrument_type IN ('equity_option', 'index_option_1256', 'stock')),
+  option_type    text CHECK (option_type IN ('C', 'P')),
   strike         numeric CHECK (strike IS NULL OR strike > 0),
   expiration     date,
   contracts      integer CHECK (contracts IS NULL OR contracts > 0),
+  shares         numeric CHECK (shares IS NULL OR shares > 0),
   cost_basis     numeric NOT NULL CHECK (cost_basis > 0),
   current_value  numeric NOT NULL CHECK (current_value >= 0),
   value_as_of    timestamptz NOT NULL DEFAULT now(),
   purchase_date  date NOT NULL,
   source         text NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'broker')),
   closed_at      timestamptz,
+  close_reason   text CHECK (close_reason IN ('sold', 'exercised', 'expired')),
+  -- Exercise lineage: the stock row points at the call it came from.
+  -- The stock carries its OWN purchase_date (= exercise date); the
+  -- option's holding period does not carry forward.
+  exercised_from_id uuid REFERENCES public.leaps_positions(id) ON DELETE SET NULL,
   notes          text,
   created_at     timestamptz NOT NULL DEFAULT now(),
-  updated_at     timestamptz NOT NULL DEFAULT now()
+  updated_at     timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT leaps_positions_option_type_chk CHECK (
+    (instrument_type = 'stock') = (option_type IS NULL)
+  ),
+  CONSTRAINT leaps_positions_close_reason_chk CHECK (
+    close_reason IS NULL OR closed_at IS NOT NULL
+  )
 );
 
 CREATE INDEX IF NOT EXISTS leaps_positions_user_open_idx
@@ -182,6 +202,73 @@ CREATE POLICY leaps_positions_update_own ON public.leaps_positions
 DROP POLICY IF EXISTS leaps_positions_delete_own ON public.leaps_positions;
 CREATE POLICY leaps_positions_delete_own ON public.leaps_positions
   FOR DELETE TO authenticated USING ((select auth.uid()) = user_id);
+
+-- Exercise a long call atomically: close the option row and open a
+-- stock row whose basis = premium + strike × shares and whose holding
+-- clock starts at the exercise date. SECURITY INVOKER so RLS applies —
+-- a user can only exercise their own option. Mirrors exerciseCall() in
+-- src/utils/afterTax.js; keep the basis formula in sync.
+CREATE OR REPLACE FUNCTION public.exercise_leaps_position(
+  p_option_id      uuid,
+  p_exercise_date  date,
+  p_current_value  numeric,
+  p_shares         numeric DEFAULT NULL
+) RETURNS public.leaps_positions
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public
+AS $$
+DECLARE
+  opt    public.leaps_positions;
+  n      numeric;
+  stock  public.leaps_positions;
+BEGIN
+  SELECT * INTO opt FROM public.leaps_positions
+   WHERE id = p_option_id AND user_id = (select auth.uid())
+   FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'position not found' USING ERRCODE = 'P0002';
+  END IF;
+  IF opt.closed_at IS NOT NULL THEN
+    RAISE EXCEPTION 'position already closed';
+  END IF;
+  IF opt.instrument_type <> 'equity_option' OR opt.option_type <> 'C' THEN
+    RAISE EXCEPTION 'only long stock/ETF calls can be exercised into stock';
+  END IF;
+  IF opt.strike IS NULL THEN
+    RAISE EXCEPTION 'strike is required to exercise';
+  END IF;
+  IF p_exercise_date < opt.purchase_date OR p_exercise_date > current_date + 1 THEN
+    RAISE EXCEPTION 'exercise date must be between purchase date and today';
+  END IF;
+  IF p_current_value IS NULL OR p_current_value < 0 THEN
+    RAISE EXCEPTION 'current value is required';
+  END IF;
+  n := COALESCE(p_shares, opt.contracts * 100);
+  IF n IS NULL OR n <= 0 THEN
+    RAISE EXCEPTION 'shares (or contracts) are required to exercise';
+  END IF;
+
+  INSERT INTO public.leaps_positions
+    (user_id, ticker, instrument_type, option_type, shares, cost_basis,
+     current_value, purchase_date, source, exercised_from_id, notes)
+  VALUES
+    (opt.user_id, opt.ticker, 'stock', NULL, n, opt.cost_basis + opt.strike * n,
+     p_current_value, p_exercise_date, opt.source, opt.id,
+     format('Exercised %s $%s call (premium $%s) on %s',
+            opt.ticker, opt.strike, round(opt.cost_basis), p_exercise_date))
+  RETURNING * INTO stock;
+
+  UPDATE public.leaps_positions
+     SET closed_at = p_exercise_date::timestamptz, close_reason = 'exercised'
+   WHERE id = opt.id;
+
+  RETURN stock;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.exercise_leaps_position(uuid, date, numeric, numeric) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.exercise_leaps_position(uuid, date, numeric, numeric) TO authenticated;
 
 COMMENT ON TABLE public.leaps_positions IS
   'User LEAPS positions for after-tax tracking. Per-position, never netted. source=manual today; source=broker once automated LEAPS execution lands.';

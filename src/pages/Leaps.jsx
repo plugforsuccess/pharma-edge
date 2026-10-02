@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Landmark, Plus, Pencil, Trash2, Check, X, AlertTriangle, Info } from 'lucide-react'
+import { Landmark, Plus, Pencil, Trash2, Check, X, AlertTriangle, Info, ArrowRightLeft } from 'lucide-react'
 import clsx from 'clsx'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import {
   FILING_STATUSES, DEFAULT_TARGET_PCTS, makeRateResolver, deriveRates,
   applyRateOverride, targetTable, positionAfterTax, portfolioSummary,
-  isValidTaxRate, todayYmd,
+  isValidTaxRate, todayYmd, holdingPeriod, INSTRUMENT_TYPES, suggestInstrumentType, exerciseCall,
+  blended1256Rate,
 } from '../utils/afterTax'
 
 // LEAPS — after-tax targets + live after-tax value.
@@ -126,7 +127,10 @@ export default function Leaps() {
         purchaseDate: pos.purchase_date,
         asOf,
         rateForGain,
-        targetMultiple: selectedRow?.long_term.required_multiple,
+        instrumentType: pos.instrument_type,
+        targetMultiple: pos.instrument_type === 'index_option_1256'
+          ? selectedRow?.section_1256.required_multiple
+          : selectedRow?.long_term.required_multiple,
       }),
     }))
   }, [positions, rateForGain, asOf, selectedRow])
@@ -169,6 +173,22 @@ export default function Leaps() {
     setPositions((cur) => (id ? cur.map((x) => (x.id === id ? data : x)) : [...cur, data]))
     return null
   }
+
+  // Atomic server-side: closes the call, opens the stock row with
+  // basis = premium + strike × shares and a fresh holding clock.
+  async function exercisePosition(pos, { exerciseDate, shares, currentValue }) {
+    const { data, error } = await supabase.rpc('exercise_leaps_position', {
+      p_option_id: pos.id,
+      p_exercise_date: exerciseDate,
+      p_current_value: currentValue,
+      p_shares: shares,
+    })
+    if (error) return error.message
+    setPositions((cur) => [...cur.filter((x) => x.id !== pos.id), data])
+    return null
+  }
+
+  const has1256 = (positions ?? []).some((x) => x.instrument_type === 'index_option_1256')
 
   async function deletePosition(id) {
     if (!window.confirm('Remove this position from tracking?')) return
@@ -216,14 +236,14 @@ export default function Leaps() {
             }}
           />
 
-          {breakdown && ready && !editingProfile && <RateBreakdown rates={breakdown} state={state} taxYear={federal.tax_year} />}
+          {breakdown && ready && !editingProfile && <RateBreakdown rates={breakdown} state={state} taxYear={federal.tax_year} show1256={has1256} />}
 
           {!ready && !editingProfile && (
             <Banner tone="amber">Pick your state (or enter both CPA rates) to see after-tax figures.</Banner>
           )}
 
           {ready && table && (
-            <TargetTable table={table} selected={Number(p.selected_target_pct)} onSelect={selectTarget} />
+            <TargetTable table={table} selected={Number(p.selected_target_pct)} onSelect={selectTarget} show1256={has1256} />
           )}
 
           {ready && (
@@ -265,6 +285,7 @@ export default function Leaps() {
                   calc={calc}
                   selectedTargetPct={Number(p.selected_target_pct)}
                   onSave={(row) => savePosition(row, pos.id)}
+                  onExercise={(args) => exercisePosition(pos, args)}
                   onDelete={() => deletePosition(pos.id)}
                 />
               ))}
@@ -424,11 +445,12 @@ function toForm(p) {
 
 // ── Rate breakdown ────────────────────────────────────────────────
 
-function RateBreakdown({ rates, state, taxYear }) {
+function RateBreakdown({ rates, state, taxYear, show1256 }) {
   const rows = [
     ['Long-term (held > 1 yr)', rates.long_term],
     ['Short-term', rates.short_term],
   ]
+  const blend = blended1256Rate(rates)
   return (
     <div className="bg-card border border-border rounded-xl p-4 mb-4">
       <div className="flex items-center gap-2 mb-2">
@@ -449,11 +471,23 @@ function RateBreakdown({ rates, state, taxYear }) {
             </div>
           </div>
         ))}
+        {show1256 && (
+          <div className="text-xs">
+            <div className="flex items-baseline gap-2">
+              <span className="text-subtle flex-1">Index options (§1256)</span>
+              <span className="font-mono-tab text-fg font-semibold">{ratePct(blend)}</span>
+            </div>
+            <div className="text-[10px] text-muted font-mono-tab">
+              60% × {ratePct(rates.long_term.total)} + 40% × {ratePct(rates.short_term.total)} = {ratePct(blend)} · any holding period
+            </div>
+          </div>
+        )}
       </div>
       <p className="mt-2 text-[10px] text-muted leading-relaxed">
         Brackets use your income plus your current unrealized LEAPS gain,
-        so these update as position values change. Each target row below
-        uses the rate at that target's gain.
+        so these update as position values change. The state part is the
+        effective rate on the gain (after any capital-gains exclusion or
+        threshold). Each target row below uses the rate at that target's gain.
         {state?.confidence === 'low' && ' Your state’s figures are flagged for review — consider entering a CPA rate.'}
       </p>
     </div>
@@ -462,13 +496,14 @@ function RateBreakdown({ rates, state, taxYear }) {
 
 // ── Target table ──────────────────────────────────────────────────
 
-function TargetTable({ table, selected, onSelect }) {
+function TargetTable({ table, selected, onSelect, show1256 }) {
   return (
     <section className="bg-card border border-border rounded-xl p-4 mb-4">
       <h2 className="text-sm font-semibold mb-1">After-tax targets</h2>
       <p className="text-[10px] text-muted mb-3">
         Multiple your {usd(table.basis)} LEAPS basis must reach to keep each
         after-tax goal. Tap a row to track progress toward it.
+        {show1256 && ' §1256 = index options taxed 60/40 regardless of holding period.'}
       </p>
       <table className="w-full text-xs">
         <thead>
@@ -477,6 +512,7 @@ function TargetTable({ table, selected, onSelect }) {
             <th className="text-right font-medium pb-2">After-tax</th>
             <th className="text-right font-medium pb-2">Long-term</th>
             <th className="text-right font-medium pb-2">Short-term</th>
+            {show1256 && <th className="text-right font-medium pb-2">§1256</th>}
           </tr>
         </thead>
         <tbody>
@@ -493,6 +529,7 @@ function TargetTable({ table, selected, onSelect }) {
               <td className="py-3 text-right font-mono-tab">{usd(row.after_tax_target)}</td>
               <td className="py-3 text-right font-mono-tab font-semibold">{mult(row.long_term.required_multiple)}</td>
               <td className="py-3 text-right font-mono-tab">{mult(row.short_term.required_multiple)}</td>
+              {show1256 && <td className="py-3 text-right font-mono-tab">{mult(row.section_1256.required_multiple)}</td>}
             </tr>
           ))}
         </tbody>
@@ -508,6 +545,8 @@ const inputCls = 'w-full min-h-[44px] bg-bg border border-border rounded px-3 py
 function PositionForm({ initial, onSave, onCancel }) {
   const [f, setF] = useState(() => ({
     ticker: initial?.ticker ?? '',
+    instrument_type: initial?.instrument_type ?? 'equity_option',
+    shares: initial?.shares ?? '',
     option_type: initial?.option_type ?? 'C',
     strike: initial?.strike ?? '',
     expiration: initial?.expiration ?? '',
@@ -517,7 +556,16 @@ function PositionForm({ initial, onSave, onCancel }) {
     purchase_date: initial?.purchase_date ?? '',
   }))
   const [error, setError] = useState('')
-  const set = (k) => (e) => setF((x) => ({ ...x, [k]: k === 'ticker' ? e.target.value.toUpperCase() : e.target.value }))
+  // Pre-select §1256 for index roots (SPX, XSP, NDX …) until the user
+  // picks a type themselves.
+  const [typeTouched, setTypeTouched] = useState(!!initial)
+  const set = (k) => (e) => setF((x) => {
+    const v = k === 'ticker' ? e.target.value.toUpperCase() : e.target.value
+    const next = { ...x, [k]: v }
+    if (k === 'ticker' && !typeTouched && x.instrument_type !== 'stock') next.instrument_type = suggestInstrumentType(v)
+    return next
+  })
+  const isStock = f.instrument_type === 'stock'
 
   async function submit() {
     const basis = num(f.cost_basis)
@@ -527,12 +575,15 @@ function PositionForm({ initial, onSave, onCancel }) {
     if (value == null || value < 0) return setError('Enter the current value (0 or more).')
     if (!f.purchase_date) return setError('Enter the purchase date.')
     if (f.purchase_date > todayYmd()) return setError('Purchase date can’t be in the future.')
+    if (isStock && !(num(f.shares) > 0)) return setError('Enter the number of shares.')
     const err = await onSave({
       ticker: f.ticker,
-      option_type: f.option_type,
-      strike: num(f.strike),
-      expiration: f.expiration || null,
-      contracts: num(f.contracts),
+      instrument_type: f.instrument_type,
+      option_type: isStock ? null : f.option_type,
+      strike: isStock ? null : num(f.strike),
+      expiration: isStock ? null : f.expiration || null,
+      contracts: isStock ? null : num(f.contracts),
+      shares: isStock ? num(f.shares) : null,
       cost_basis: basis,
       current_value: value,
       value_as_of: new Date().toISOString(),
@@ -545,19 +596,41 @@ function PositionForm({ initial, onSave, onCancel }) {
     <div className="bg-card border border-amber-400/40 rounded-xl p-4 mb-3">
       <div className="grid grid-cols-2 gap-3">
         <Field label="Ticker"><input value={f.ticker} onChange={set('ticker')} maxLength={10} className={inputCls} /></Field>
-        <Field label="Type">
-          <select value={f.option_type} onChange={set('option_type')} className={inputCls}>
-            <option value="C">Call</option>
-            <option value="P">Put</option>
+        <Field label="Instrument">
+          <select
+            value={f.instrument_type}
+            onChange={(e) => { setTypeTouched(true); set('instrument_type')(e) }}
+            className={inputCls}
+          >
+            {INSTRUMENT_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
           </select>
         </Field>
-        <Field label="Strike (optional)"><input inputMode="decimal" value={f.strike} onChange={set('strike')} className={inputCls} /></Field>
-        <Field label="Expiration (optional)"><input type="date" value={f.expiration} onChange={set('expiration')} className={inputCls} /></Field>
-        <Field label="Contracts (optional)"><input inputMode="numeric" value={f.contracts} onChange={set('contracts')} className={inputCls} /></Field>
+        {isStock ? (
+          <Field label="Shares"><input inputMode="decimal" value={f.shares} onChange={set('shares')} className={inputCls} /></Field>
+        ) : (
+          <>
+            <Field label="Call / put">
+              <select value={f.option_type} onChange={set('option_type')} className={inputCls}>
+                <option value="C">Call</option>
+                <option value="P">Put</option>
+              </select>
+            </Field>
+            <Field label="Strike (needed to exercise)"><input inputMode="decimal" value={f.strike} onChange={set('strike')} className={inputCls} /></Field>
+            <Field label="Expiration (optional)"><input type="date" value={f.expiration} onChange={set('expiration')} className={inputCls} /></Field>
+            <Field label="Contracts (needed to exercise)"><input inputMode="numeric" value={f.contracts} onChange={set('contracts')} className={inputCls} /></Field>
+          </>
+        )}
         <Field label="Purchase date"><input type="date" value={f.purchase_date} onChange={set('purchase_date')} className={inputCls} /></Field>
         <Field label="Total cost basis ($)"><input inputMode="decimal" value={f.cost_basis} onChange={set('cost_basis')} className={inputCls} /></Field>
         <Field label="Current value ($)"><input inputMode="decimal" value={f.current_value} onChange={set('current_value')} className={inputCls} /></Field>
       </div>
+      {f.instrument_type === 'index_option_1256' && (
+        <p className="mt-3 text-[10px] text-muted leading-relaxed">
+          §1256 contracts are taxed 60% long-term / 40% short-term however long
+          you hold them, and open positions are marked to market at year-end
+          (taxed as if sold on Dec 31). ETF options like SPY and QQQ are not §1256.
+        </p>
+      )}
       {error && <div className="mt-3 text-xs text-rose-300">{error}</div>}
       <div className="mt-4 flex gap-2 justify-end">
         <button type="button" onClick={onCancel} className="min-h-[44px] px-4 rounded border border-border text-sm text-subtle hover:text-fg">
@@ -571,8 +644,9 @@ function PositionForm({ initial, onSave, onCancel }) {
   )
 }
 
-function PositionCard({ pos, calc, selectedTargetPct, onSave, onDelete }) {
+function PositionCard({ pos, calc, selectedTargetPct, onSave, onDelete, onExercise }) {
   const [editing, setEditing] = useState(false)
+  const [exercising, setExercising] = useState(false)
   if (editing) {
     return (
       <PositionForm
@@ -587,8 +661,13 @@ function PositionCard({ pos, calc, selectedTargetPct, onSave, onDelete }) {
     )
   }
   if (!calc) return null
-  const label = [pos.ticker, pos.strike && `$${Number(pos.strike)}`, pos.option_type === 'P' ? 'Put' : 'Call', pos.expiration]
-    .filter(Boolean).join(' ')
+  const is1256 = calc.tax_character === 'section_1256'
+  const isStock = pos.instrument_type === 'stock'
+  const label = isStock
+    ? `${pos.ticker} · ${Number(pos.shares).toLocaleString()} shares`
+    : [pos.ticker, pos.strike && `$${Number(pos.strike)}`, pos.option_type === 'P' ? 'Put' : 'Call', pos.expiration]
+      .filter(Boolean).join(' ')
+  const canExercise = exerciseCall({ option: pos, exerciseDate: todayYmd() }) != null
   const up = calc.gain >= 0
   return (
     <div className="bg-card border border-border rounded-xl p-4 mb-3">
@@ -596,21 +675,24 @@ function PositionCard({ pos, calc, selectedTargetPct, onSave, onDelete }) {
         <div className="flex-1 min-w-0">
           <div className="text-sm font-semibold break-words">{label}</div>
           <div className="text-[10px] text-muted">
-            Bought {pos.purchase_date}{pos.contracts ? ` · ${pos.contracts} contracts` : ''}
+            {pos.exercised_from_id ? 'Acquired by exercise' : 'Bought'} {pos.purchase_date}{pos.contracts ? ` · ${pos.contracts} contract${Number(pos.contracts) === 1 ? '' : 's'}` : ''}
             {' · '}value as of {new Date(pos.value_as_of).toLocaleDateString()}
           </div>
         </div>
         <span
           className={clsx(
             'text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border font-semibold shrink-0',
-            calc.is_long_term
-              ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
-              : 'bg-amber-500/15 text-amber-300 border-amber-500/40',
+            is1256
+              ? 'bg-sky-500/15 text-sky-300 border-sky-500/40'
+              : calc.is_long_term
+                ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
+                : 'bg-amber-500/15 text-amber-300 border-amber-500/40',
           )}
         >
-          {calc.is_long_term ? 'Long-term' : `Short-term · ${calc.days_until_long_term}d to LT`}
+          {is1256 ? '§1256 · 60/40' : calc.is_long_term ? 'Long-term' : `Short-term · ${calc.days_until_long_term}d to LT`}
         </span>
       </div>
+      {pos.notes && <div className="text-[10px] text-subtle -mt-2 mb-3">{pos.notes}</div>}
 
       <div className="mb-3">
         <div className="text-[10px] uppercase tracking-wider text-muted">After-tax value if sold today</div>
@@ -641,7 +723,7 @@ function PositionCard({ pos, calc, selectedTargetPct, onSave, onDelete }) {
         <div className="mb-3">
           <div className="flex text-[10px] text-muted mb-1">
             <span className="flex-1">Progress to {pct(selectedTargetPct, 0)} after-tax target</span>
-            <span className="font-mono-tab">{mult(calc.current_multiple)} / {mult(calc.target_multiple)} LT</span>
+            <span className="font-mono-tab">{mult(calc.current_multiple)} / {mult(calc.target_multiple)} {is1256 ? '60/40' : 'LT'}</span>
           </div>
           <div className="h-1.5 rounded bg-faint overflow-hidden">
             <div className="h-full bg-amber-400" style={{ width: `${calc.target_progress * 100}%` }} />
@@ -649,7 +731,21 @@ function PositionCard({ pos, calc, selectedTargetPct, onSave, onDelete }) {
         </div>
       )}
 
+      {exercising && (
+        <ExerciseForm pos={pos} onCancel={() => setExercising(false)} onExercise={async (args) => {
+          const err = await onExercise(args)
+          if (!err) setExercising(false)
+          return err
+        }} />
+      )}
+
       <div className="flex gap-2 justify-end">
+        {canExercise && !exercising && (
+          <button type="button" onClick={() => setExercising(true)}
+            className="min-h-[44px] px-3 flex items-center gap-1.5 rounded border border-border text-xs text-subtle hover:text-fg hover:border-amber-400/40 transition">
+            <ArrowRightLeft size={14} /> Exercise
+          </button>
+        )}
         <button type="button" onClick={() => setEditing(true)} aria-label="Edit position"
           className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded border border-border text-subtle hover:text-fg hover:border-amber-400/40 transition">
           <Pencil size={14} />
@@ -661,6 +757,56 @@ function PositionCard({ pos, calc, selectedTargetPct, onSave, onDelete }) {
       </div>
     </div>
   )
+}
+
+function ExerciseForm({ pos, onExercise, onCancel }) {
+  const [date, setDate] = useState(todayYmd())
+  const [shares, setShares] = useState(String(Number(pos.contracts) * 100))
+  const [value, setValue] = useState('')
+  const [error, setError] = useState('')
+  const preview = exerciseCall({ option: pos, exerciseDate: date, shares: num(shares) })
+
+  async function submit() {
+    const v = num(value)
+    if (!preview) return setError('Check the exercise date and share count.')
+    if (date < pos.purchase_date || date > todayYmd()) return setError('Exercise date must be between the purchase date and today.')
+    if (v == null || v < 0) return setError('Enter the current value of the shares.')
+    const err = await onExercise({ exerciseDate: date, shares: preview.shares, currentValue: v })
+    setError(err ?? '')
+  }
+
+  return (
+    <div className="rounded-xl border border-amber-400/40 p-3 mb-3">
+      <div className="text-xs font-semibold mb-1">Exercise into stock</div>
+      <p className="text-[10px] text-muted leading-relaxed mb-3">
+        The premium you paid rolls into the stock's cost basis. The stock
+        starts its own holding period from the exercise date — the call's
+        holding time does not carry over.
+      </p>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Exercise date"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} /></Field>
+        <Field label="Shares received"><input inputMode="decimal" value={shares} onChange={(e) => setShares(e.target.value)} className={inputCls} /></Field>
+        <Field label="Current value of shares ($)" wide><input inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value)} className={inputCls} /></Field>
+      </div>
+      {preview && (
+        <div className="mt-3 text-[10px] text-subtle font-mono-tab">
+          New basis {usd(Number(pos.cost_basis))} premium + {usd(Number(pos.strike) * preview.shares)} strike = {usd(preview.cost_basis)}
+          {' · '}long-term from {holdingStart(date)}
+        </div>
+      )}
+      {error && <div className="mt-2 text-xs text-rose-300">{error}</div>}
+      <div className="mt-3 flex gap-2 justify-end">
+        <button type="button" onClick={onCancel} className="min-h-[44px] px-4 rounded border border-border text-sm text-subtle hover:text-fg">Cancel</button>
+        <button type="button" onClick={submit} className="min-h-[44px] px-4 rounded bg-amber-400/10 border border-amber-400/40 text-amber-300 text-sm font-semibold hover:bg-amber-400/20 transition">
+          Exercise
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function holdingStart(date) {
+  return holdingPeriod(date, date)?.long_term_date ?? '—'
 }
 
 function PortfolioTotals({ summary, count }) {

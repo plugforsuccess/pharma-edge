@@ -24,6 +24,16 @@
 // bound is always 0. Missing filing statuses on a state fall back to
 // `single` (true for flat-rate states; documented per row otherwise).
 //
+// Instrument types (leaps_positions.instrument_type):
+//   equity_option     — options on stocks/ETFs (SPY, QQQ, NVDA …). Normal
+//                       holding-period rules: > 1 year = long-term.
+//   index_option_1256 — broad-based index options (SPX, XSP, NDX, RUT …).
+//                       IRC §1256: 60% long-term / 40% short-term no matter
+//                       how long they're held, so there is no countdown.
+//   stock             — shares, including stock acquired by exercising a
+//                       call. Exercise rolls the call premium into the
+//                       stock's basis and the clock restarts.
+//
 // Every number this module produces is an ESTIMATE. It uses combined
 // marginal rates on the whole gain, which is how the Cash Moves spec
 // defines the after-tax figures — it is not a tax return.
@@ -38,6 +48,33 @@ export const FILING_STATUSES = [
 export const DEFAULT_TARGET_PCTS = [0.5, 0.45, 0.4, 0.35, 0.3, 0.25, 0.2]
 
 export const MAX_TAX_RATE = 0.99
+
+export const INSTRUMENT_TYPES = [
+  { value: 'equity_option', label: 'Stock / ETF option' },
+  { value: 'index_option_1256', label: 'Index option (§1256, 60/40)' },
+  { value: 'stock', label: 'Stock' },
+]
+
+// §1256 split.
+export const SECTION_1256_LT_SHARE = 0.6
+
+// Broad-based index option roots that are §1256 contracts. ETF options
+// on the same indexes (SPY, QQQ, IWM, DIA) are NOT — they're equity
+// options with normal holding-period rules. Used only to pre-select the
+// instrument type in the form; the user's choice is what's stored.
+export const SECTION_1256_ROOTS = new Set([
+  'SPX', 'SPXW', 'XSP', 'NDX', 'NDXP', 'XND', 'RUT', 'RUTW', 'MRUT',
+  'VIX', 'VIXW', 'DJX', 'OEX', 'XEO',
+])
+
+export function suggestInstrumentType(ticker) {
+  return SECTION_1256_ROOTS.has(String(ticker ?? '').toUpperCase()) ? 'index_option_1256' : 'equity_option'
+}
+
+// 60% × long-term rate + 40% × short-term rate.
+export function blended1256Rate(rates) {
+  return r4(SECTION_1256_LT_SHARE * rates.long_term.total + (1 - SECTION_1256_LT_SHARE) * rates.short_term.total)
+}
 
 // Strip float noise (0.2 + 0.038 + 0.0499 → 0.2879, not 0.28790000000000004).
 const r4 = (x) => Math.round(x * 1e4) / 1e4
@@ -61,15 +98,45 @@ export function marginalRate(brackets, amount) {
   return rate
 }
 
+// Total tax a bracket schedule charges on `amount`.
+export function bracketTax(brackets, amount) {
+  if (!Array.isArray(brackets) || brackets.length === 0 || !(amount > 0)) return 0
+  let tax = 0
+  for (let i = 0; i < brackets.length; i++) {
+    const [lo, rate] = brackets[i]
+    const hi = i + 1 < brackets.length ? brackets[i + 1][0] : Infinity
+    if (amount <= lo) break
+    tax += (Math.min(amount, hi) - lo) * rate
+  }
+  return tax
+}
+
+// Effective rate a schedule charges on the gain slice. With no gain
+// (the breakdown before any position is up) fall back to the marginal
+// rate the first dollar of gain would pay.
+//   base 'income': gain stacked on income → (T(income+gain) − T(income)) / gain
+//   base 'gain':   schedule applies to the gain alone (WA) → T(gain) / gain
+function effectiveOnGain(brackets, income, gain, appliesTo) {
+  const floor = appliesTo === 'gain' ? 0 : income
+  if (!(gain > 0)) return marginalRate(brackets, floor)
+  return (bracketTax(brackets, floor + gain) - bracketTax(brackets, floor)) / gain
+}
+
 function forStatus(table, filingStatus) {
   if (!table) return null
   return table[filingStatus] ?? table.single ?? null
 }
 
-// Combined marginal long-term + short-term rates for a user, with the
-// federal / NIIT / state breakdown. `gain` is the projected LEAPS gain:
-// it is stacked on top of `income` to pick brackets, so a big gain can
-// push the user into a higher bracket or over the NIIT threshold.
+// Combined long-term + short-term rates for a user, with the federal /
+// NIIT / state breakdown. `gain` is the projected LEAPS gain: it is
+// stacked on top of `income` to pick brackets, so a big gain can push
+// the user into a higher bracket or over the NIIT threshold.
+//
+// Federal + NIIT are MARGINAL (per the spec). The state component is the
+// EFFECTIVE rate on the gain: partial LTCG exclusions (SC 44%, ND 40%,
+// AR 50% …) and Washington's gain-only tax above its deduction can't be
+// expressed as one flat number — a $300k WA gain pays 7% on only the
+// $22k above $278k (≈0.5% effective), not 7% on all of it.
 export function deriveRates({ federal, state, filingStatus, income, gain = 0 }) {
   const g = Math.max(0, Number(gain) || 0)
   const stacked = Math.max(0, Number(income) || 0) + g
@@ -80,16 +147,16 @@ export function deriveRates({ federal, state, filingStatus, income, gain = 0 }) 
   const niitThreshold = federal?.niit?.thresholds?.[filingStatus]
   const niit = niitThreshold != null && stacked > niitThreshold ? federal.niit.rate : 0
 
-  const stateOrdinary = state ? marginalRate(forStatus(state.ordinary, filingStatus), stacked) : 0
-  let stateLt = stateOrdinary * (1 - (Number(state?.ltcg_exclusion_pct) || 0))
-  if (state?.ltcg) {
-    const base = state.ltcg_applies_to === 'gain' ? g : stacked
-    stateLt = marginalRate(forStatus(state.ltcg, filingStatus), base)
+  const inc = stacked - g
+  let stateLt = 0
+  let stateSt = 0
+  if (state) {
+    const ordinary = forStatus(state.ordinary, filingStatus)
+    stateLt = state.ltcg
+      ? effectiveOnGain(forStatus(state.ltcg, filingStatus), inc, g, state.ltcg_applies_to)
+      : effectiveOnGain(ordinary, inc, g, 'income') * (1 - (Number(state.ltcg_exclusion_pct) || 0))
+    stateSt = effectiveOnGain(state.stcg ? forStatus(state.stcg, filingStatus) : ordinary, inc, g, 'income')
   }
-
-  const stateSt = state?.stcg
-    ? marginalRate(forStatus(state.stcg, filingStatus), stacked)
-    : stateOrdinary
 
   return {
     stacked_income: stacked,
@@ -98,7 +165,7 @@ export function deriveRates({ federal, state, filingStatus, income, gain = 0 }) 
       total: r4(fedLt + niit + stateLt),
     },
     short_term: {
-      federal: fedSt, niit, state: stateSt,
+      federal: fedSt, niit, state: r4(stateSt),
       total: r4(fedSt + niit + stateSt),
     },
   }
@@ -154,6 +221,7 @@ export function targetRow({ portfolio, basis, targetPct, rateForGain }) {
   const afterTax = portfolio * targetPct
   const lt = solveRequiredGain(afterTax, (g) => rateForGain(g).long_term.total)
   const st = solveRequiredGain(afterTax, (g) => rateForGain(g).short_term.total)
+  const ix = solveRequiredGain(afterTax, (g) => blended1256Rate(rateForGain(g)))
   return {
     target_pct: targetPct,
     after_tax_target: afterTax,
@@ -168,6 +236,12 @@ export function targetRow({ portfolio, basis, targetPct, rateForGain }) {
       required_gain: st.gain,
       required_proceeds: basis + st.gain,
       required_multiple: (basis + st.gain) / basis,
+    },
+    section_1256: {
+      rate: ix.rate,
+      required_gain: ix.gain,
+      required_proceeds: basis + ix.gain,
+      required_multiple: (basis + ix.gain) / basis,
     },
   }
 }
@@ -228,17 +302,24 @@ export function holdingPeriod(purchaseDate, asOf) {
 // ── Part 2 — live after-tax value ────────────────────────────────
 
 //   gain = current_value − basis
-//   tax  = gain × (LT rate if held > 1 year, else ST rate), only if gain > 0
-export function positionAfterTax({ basis, currentValue, purchaseDate, asOf, rateForGain, targetMultiple }) {
+//   tax  = gain × rate, only if gain > 0, where rate is
+//          long-term   if sold today would be held > 1 year,
+//          short-term  otherwise,
+//          60% LT + 40% ST for §1256 index options (any holding period).
+export function positionAfterTax({
+  basis, currentValue, purchaseDate, asOf, rateForGain, targetMultiple,
+  instrumentType = 'equity_option',
+}) {
   if (!isValidBasis(basis)) return null
   const value = Number(currentValue) || 0
   const gain = value - basis
-  const hp = holdingPeriod(purchaseDate, asOf)
+  const is1256 = instrumentType === 'index_option_1256'
+  const hp = is1256 ? null : holdingPeriod(purchaseDate, asOf)
   const rates = rateForGain(Math.max(0, gain))
   const ltRate = rates.long_term.total
   const stRate = rates.short_term.total
-  const isLongTerm = hp?.is_long_term ?? false
-  const rate = isLongTerm ? ltRate : stRate
+  const isLongTerm = is1256 ? null : (hp?.is_long_term ?? false)
+  const rate = is1256 ? blended1256Rate(rates) : isLongTerm ? ltRate : stRate
   const tax = gain > 0 ? gain * rate : 0
   const afterTaxValue = value - tax
   const currentMultiple = value / basis
@@ -253,7 +334,10 @@ export function positionAfterTax({ basis, currentValue, purchaseDate, asOf, rate
     current_value: value,
     gain,
     current_multiple: currentMultiple,
+    instrument_type: instrumentType,
+    tax_character: is1256 ? 'section_1256' : isLongTerm ? 'long_term' : 'short_term',
     is_long_term: isLongTerm,
+    // No countdown for §1256 — waiting never changes the 60/40 split.
     long_term_date: hp?.long_term_date ?? null,
     days_until_long_term: hp?.days_until_long_term ?? null,
     tax_rate: rate,
@@ -262,10 +346,34 @@ export function positionAfterTax({ basis, currentValue, purchaseDate, asOf, rate
     estimated_tax: tax,
     after_tax_value: afterTaxValue,
     after_tax_gain: afterTaxValue - basis,
-    // Only meaningful while short-term and in profit.
-    tax_saved_by_waiting: !isLongTerm && gain > 0 ? gain * (stRate - ltRate) : null,
+    // Only meaningful while short-term (non-§1256) and in profit.
+    tax_saved_by_waiting: isLongTerm === false && gain > 0 ? gain * (stRate - ltRate) : null,
     target_multiple: targetMultiple ?? null,
     target_progress: targetProgress,
+  }
+}
+
+// Exercising a long call: the premium paid rolls into the stock's cost
+// basis, and the stock gets its own holding clock starting the day after
+// exercise (the option's purchase date does NOT carry forward). The
+// returned row is a new `stock` position; the option row is closed with
+// close_reason='exercised'. Mirrored by public.exercise_leaps_position()
+// in SQL, which performs the write atomically — keep the two in sync.
+//   stock basis = option premium (cost_basis) + strike × shares
+export function exerciseCall({ option, exerciseDate, shares }) {
+  const strike = Number(option?.strike)
+  const n = shares != null ? Number(shares) : Number(option?.contracts) * 100
+  if (option?.instrument_type !== 'equity_option' || option?.option_type !== 'C') return null
+  if (!(strike > 0) || !(n > 0) || !isValidBasis(Number(option?.cost_basis))) return null
+  if (parseYmd(exerciseDate) == null) return null
+  return {
+    ticker: option.ticker,
+    instrument_type: 'stock',
+    option_type: null,
+    shares: n,
+    cost_basis: Number(option.cost_basis) + strike * n,
+    purchase_date: exerciseDate,
+    exercised_from_id: option.id ?? null,
   }
 }
 
@@ -283,7 +391,10 @@ export function portfolioSummary(results, portfolioSize, rateForGain) {
   let st = 0
   let lt = 0
   for (const r of rows) {
-    if (r.is_long_term) lt += r.gain
+    if (r.tax_character === 'section_1256') {
+      lt += r.gain * SECTION_1256_LT_SHARE
+      st += r.gain * (1 - SECTION_1256_LT_SHARE)
+    } else if (r.is_long_term) lt += r.gain
     else st += r.gain
   }
   if (st < 0 && lt > 0) { const off = Math.min(-st, lt); lt -= off; st += off }

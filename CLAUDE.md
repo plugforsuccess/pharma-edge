@@ -702,7 +702,23 @@ value, holding period) and must pass before any edit to that file lands.
   HoH, $250k MFJ, $125k MFS) are statutory and do not inflate.
 - Rates are combined marginal: federal LTCG or ordinary + NIIT + state,
   with brackets picked at income **plus** the projected gain.
-- Long-term = sold after the 1-year anniversary of purchase.
+- State component is the **effective** rate on the gain slice, derived
+  from the stored schedule + `ltcg_exclusion_pct` + `ltcg_applies_to`
+  (never a single flat number — WA's gain-only tax above its deduction
+  and partial exclusions depend on the gain size). Federal + NIIT stay
+  marginal.
+- Long-term = sold on or after anniversary + 1 day. Days until
+  long-term = (anniversary + 1) − today. A Feb 29 purchase anniversaries
+  on Feb 28, so it goes long-term Mar 1 (tested).
+- `leaps_positions.instrument_type`: `equity_option` (normal holding
+  period), `index_option_1256` (SPX/XSP/NDX/RUT/VIX… — §1256 60% LT /
+  40% ST at any holding period, no countdown; ETF options like SPY are
+  NOT §1256), `stock`.
+- Exercise (`exercise_leaps_position()` RPC, atomic, security invoker)
+  closes the call (`close_reason='exercised'`) and opens a `stock` row:
+  basis = premium + strike × shares, `purchase_date` = exercise date,
+  `exercised_from_id` → the call. The option's clock never carries
+  forward. Mirrors `exerciseCall()` in `afterTax.js` — keep in sync.
 - Per-position values are never netted; the portfolio card shows a
   netted figure labeled as an estimate.
 - Every tax figure in the UI is labeled an estimate with a
