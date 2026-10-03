@@ -53,7 +53,7 @@ export default function PeersView({ netWorth, profile, homeowner }) {
             {head.rank.startsWith('Top') && head.pctLabel ? `${head.pctLabel} · ` : ''}households {age}
           </div>
           <PercentileBar row={head} netWorth={netWorth} />
-          <div className="mt-4 grid grid-cols-2 gap-2">
+          <div className="mt-5 grid grid-cols-2 gap-2">
             <Stat label="Your net worth" value={compact(netWorth)} strong />
             {head.mean != null && <Stat label="Average" value={compact(head.mean)} />}
           </div>
@@ -65,7 +65,7 @@ export default function PeersView({ netWorth, profile, homeowner }) {
         </div>
       )}
 
-      <ul className="space-y-4">
+      <ul className="space-y-5">
         {rest.map((r) => (
           <li key={r.key}>
             <div className="flex items-baseline gap-3">
@@ -76,7 +76,7 @@ export default function PeersView({ netWorth, profile, homeowner }) {
               <div className={clsx('shrink-0 text-sm font-semibold font-mono-tab', (r.pct ?? 0) >= 50 ? 'text-green-400' : 'text-subtle')}>{r.rank}</div>
             </div>
             <MiniBar pct={r.pct} />
-            <div className="mt-1 text-xs text-muted font-mono-tab">
+            <div className="mt-1.5 text-xs text-muted font-mono-tab">
               Median {compact(r.median)}{r.mean != null && ` · Avg ${compact(r.mean)}`}
             </div>
           </li>
@@ -85,7 +85,7 @@ export default function PeersView({ netWorth, profile, homeowner }) {
 
       {head && (
         <button type="button" onClick={() => setShareOpen(true)}
-          className="mt-5 w-full min-h-[44px] rounded-xl bg-bg-elev text-sm font-semibold text-fg inline-flex items-center justify-center gap-2 hover:bg-card-hover transition">
+          className="mt-6 w-full min-h-[44px] rounded-xl bg-bg-elev text-sm font-semibold text-fg inline-flex items-center justify-center gap-2 hover:bg-card-hover transition">
           <Share2 size={15} aria-hidden /> Share your rank
         </button>
       )}

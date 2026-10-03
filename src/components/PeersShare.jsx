@@ -24,76 +24,82 @@ export async function drawShareCard(canvas, { head, rows, age, netWorth = null, 
   const ctx = canvas.getContext('2d')
   canvas.width = SIZE
   canvas.height = SIZE
-  try { await Promise.all(['800 170px', '600 44px', '500 36px'].map((f) => document.fonts.load(`${f} "Inter Tight"`))) } catch { /* system font */ }
+  try { await Promise.all(['800 168px', '600 40px', '500 34px'].map((f) => document.fonts.load(`${f} "Inter Tight"`))) } catch { /* system font */ }
   const font = (w, px) => `${w} ${px}px "Inter Tight", system-ui, sans-serif`
+  // Grid: 64px outer margin, 72px inner padding, everything on an 8px rhythm.
+  const M = 64
+  const P = 72
+  const x0 = M + P
+  const x1 = SIZE - M - P
   ctx.fillStyle = C.bg
   ctx.fillRect(0, 0, SIZE, SIZE)
-  // Card
-  const pad = 72
-  const r = 48
   ctx.fillStyle = C.card
   ctx.beginPath()
-  ctx.roundRect(pad, pad, SIZE - pad * 2, SIZE - pad * 2, r)
+  ctx.roundRect(M, M, SIZE - M * 2, SIZE - M * 2, 40)
   ctx.fill()
   ctx.strokeStyle = 'rgba(240, 180, 76, 0.35)'
   ctx.lineWidth = 2
   ctx.stroke()
-  const x = pad + 72
-  let y = pad + 110
-  // Wordmark
+  ctx.textBaseline = 'alphabetic'
+
+  // Header row (baseline 176): wordmark left, site right.
   ctx.fillStyle = C.gold
-  ctx.font = font(700, 34)
-  ctx.letterSpacing = '6px'
-  ctx.fillText('CASH MOVES', x, y)
+  ctx.font = font(700, 30)
+  ctx.letterSpacing = '5px'
+  ctx.fillText('CASH MOVES', x0, M + P + 40)
   ctx.letterSpacing = '0px'
   ctx.textAlign = 'right'
   ctx.fillStyle = C.muted
-  ctx.font = font(500, 30)
-  ctx.fillText('cashmoves.io', SIZE - x, y)
+  ctx.font = font(500, 28)
+  ctx.fillText('cashmoves.io', x1, M + P + 40)
   ctx.textAlign = 'left'
-  // Eyebrow
-  y += 120
+
+  // Hero block: eyebrow, rank, who it's against, optional net worth.
+  let y = 312
   ctx.fillStyle = C.subtle
-  ctx.font = font(500, 36)
-  ctx.fillText('Net worth vs. US households', x, y)
-  // Rank
-  y += 170
+  ctx.font = font(500, 34)
+  ctx.fillText('Net worth vs. US households', x0, y)
+  y += 168
   ctx.fillStyle = C.green
-  ctx.font = font(800, 170)
+  ctx.font = font(800, 168)
   ctx.letterSpacing = '-6px'
-  ctx.fillText(head.rank, x, y)
+  ctx.fillText(head.rank, x0, y)
   ctx.letterSpacing = '0px'
   y += 64
   ctx.fillStyle = C.fg
   ctx.font = font(500, 40)
-  ctx.fillText(age ? `of households ${age}` : 'of all US households', x, y)
+  ctx.fillText(age ? `of households ${age}` : 'of all US households', x0, y)
   if (netWorth != null) {
-    y += 56
+    y += 52
     ctx.fillStyle = C.subtle
-    ctx.font = font(500, 34)
-    ctx.fillText(`Net worth before tax ${compact(netWorth)}`, x, y)
+    ctx.font = font(500, 32)
+    ctx.fillText(`Net worth before tax ${compact(netWorth)}`, x0, y)
   }
-  // Rows
-  y += 90
+
+  // Rows: anchored above the footer so the card never ends in dead space.
+  const footerY = SIZE - M - P
+  const rowH = 80
+  const list = rows.slice(0, 3)
+  let ry = footerY - 72 - (list.length - 1) * rowH
   ctx.strokeStyle = C.hair
   ctx.lineWidth = 2
-  for (const row of rows.slice(0, 3)) {
-    ctx.beginPath(); ctx.moveTo(x, y - 48); ctx.lineTo(SIZE - x, y - 48); ctx.stroke()
+  for (const row of list) {
+    ctx.beginPath(); ctx.moveTo(x0, ry - 50); ctx.lineTo(x1, ry - 50); ctx.stroke()
     ctx.fillStyle = C.fg
-    ctx.font = font(500, 36)
-    const label = row.withinAge && age ? `${row.name} · ${age}` : row.name
-    ctx.fillText(label, x, y)
+    ctx.font = font(500, 34)
+    ctx.fillText(row.withinAge && age ? `${row.name} · ${age}` : row.name, x0, ry)
     ctx.textAlign = 'right'
     ctx.fillStyle = (row.pct ?? 0) >= 50 ? C.green : C.subtle
-    ctx.font = font(700, 36)
-    ctx.fillText(row.rank, SIZE - x, y)
+    ctx.font = font(700, 34)
+    ctx.fillText(row.rank, x1, ry)
     ctx.textAlign = 'left'
-    y += 84
+    ry += rowH
   }
-  // Footer
+
+  // Footer.
   ctx.fillStyle = C.muted
-  ctx.font = font(500, 26)
-  ctx.fillText(source, x, SIZE - pad - 64)
+  ctx.font = font(500, 24)
+  ctx.fillText(source, x0, footerY)
 }
 
 export default function PeersShare({ open, onClose, head, rows, age, netWorth, source }) {
