@@ -1,0 +1,311 @@
+// Replay (owner, 2026-10-03: "how can the app suggest this trade and signal
+// the exit" — NOW +84%). Walks a ticker's history one day at a time, acting
+// only on what was known at each close, and trades a LEAPS call the way the
+// app would: enter on a buy signal, exit by the exit targets, the sell
+// signals, or both. Pure functions; `npm run replay:check` runs
+// scripts/check-replay.mjs (which also proves the signals carry no
+// look-ahead: each day's flags match a model built on the bars up to that
+// day only).
+//
+// The option is priced, not quoted: Black-Scholes on the stock, a strike at
+// the target delta, and the stock's trailing 60-day volatility standing in
+// for IV (floored at 15%), with a slippage haircut on every fill. History
+// with real option quotes isn't in the app, so these are estimates — they
+// show whether the signals line up with the moves, not exact fills.
+//
+// Hindsight is used only to grade: big moves (a swing low followed by a
+// ≥ minGain rise) are found after the fact and checked against the entries
+// the replay took live.
+
+import { COMPONENTS, DEFAULT_WINDOW, MIN_SCORE, confluenceFlags, confluenceSeries, swingPoints } from './confluence.js'
+import { EXIT_PLAYBOOK } from './afterTax.js'
+
+export const OPTION_MODEL = Object.freeze({
+  dte: 730,          // calendar days to expiry at entry (playbook: 18–24+ months)
+  delta: 0.75,       // the LDP core sleeve's target delta
+  rate: 0.04,
+  volBars: 60,       // trailing volatility window (trading days)
+  volFloor: 0.15,
+  slippage: 0.02,    // 2% of the premium against you on every fill
+})
+
+export const ENTRY_RULES = [
+  ['confluence', 'Confluence 2+'],
+  ['zone', 'Buy zone YES'],
+  ['bravo', 'Bravo ◆'],
+]
+export const EXIT_RULES = [
+  ['targets', 'Exit targets'],
+  ['signals', 'Sell signals'],
+  ['both', 'Targets + signals'],
+]
+export const MOVE = Object.freeze({ minGain: 0.3, horizon: 126, early: 10 })
+
+const DAY_MS = 86400000
+const dayMs = (t) => Date.parse(`${t}T00:00:00Z`)
+
+// ── Black-Scholes ──────────────────────────────────────────────────
+
+export function normCdf(x) {
+  // Abramowitz–Stegun 7.1.26
+  const t = 1 / (1 + 0.3275911 * Math.abs(x) / Math.SQRT2)
+  const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-(x * x) / 2)
+  return x >= 0 ? (1 + y) / 2 : (1 - y) / 2
+}
+
+// Inverse normal CDF (Acklam).
+export function normInv(p) {
+  const a = [-39.69683028665376, 220.9460984245205, -275.9285104469687, 138.357751867269, -30.66479806614716, 2.506628277459239]
+  const b = [-54.47609879822406, 161.5858368580409, -155.6989798598866, 66.80131188771972, -13.28068155288572]
+  const c = [-0.007784894002430293, -0.3223964580411365, -2.400758277161838, -2.549732539343734, 4.374664141464968, 2.938163982698783]
+  const d = [0.007784695709041462, 0.3224671290700398, 2.445134137142996, 3.754408661907416]
+  const lo = 0.02425
+  if (p < lo) {
+    const q = Math.sqrt(-2 * Math.log(p))
+    return (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1)
+  }
+  if (p > 1 - lo) return -normInv(1 - p)
+  const q = p - 0.5
+  const r = q * q
+  return (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q / (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1)
+}
+
+export function bsCall(S, K, T, vol, r = OPTION_MODEL.rate) {
+  if (!(S > 0 && K > 0)) return 0
+  if (!(T > 0) || !(vol > 0)) return Math.max(0, S - K)
+  const sd = vol * Math.sqrt(T)
+  const d1 = (Math.log(S / K) + (r + vol * vol / 2) * T) / sd
+  return S * normCdf(d1) - K * Math.exp(-r * T) * normCdf(d1 - sd)
+}
+
+// The strike whose call delta is `delta`.
+export function strikeForDelta(S, T, vol, delta, r = OPTION_MODEL.rate) {
+  const d1 = normInv(delta)
+  return S * Math.exp(-(d1 * vol * Math.sqrt(T) - (r + vol * vol / 2) * T))
+}
+
+// Trailing annualised volatility of log returns (null until n returns).
+export function trailingVol(closes, n = OPTION_MODEL.volBars) {
+  const out = new Array(closes.length).fill(null)
+  const lr = closes.map((c, i) => (i > 0 && closes[i - 1] > 0 && c > 0 ? Math.log(c / closes[i - 1]) : null))
+  for (let i = n; i < closes.length; i++) {
+    const w = lr.slice(i - n + 1, i + 1)
+    if (w.some((x) => x == null)) continue
+    const m = w.reduce((s, x) => s + x, 0) / n
+    const v = w.reduce((s, x) => s + (x - m) ** 2, 0) / (n - 1)
+    out[i] = Math.sqrt(v * 252)
+  }
+  return out
+}
+
+// ── Signals the replay acts on (all known at each bar's close) ─────
+
+// entry[rule][i] — a new buy at bar i; sell[i] — a sell signal at bar i.
+//   confluence  the buy score reaching MIN_SCORE (from below), 200-day rising
+//   zone        the buy zone turning YES
+//   bravo       a Bravo bull diamond, 200-day rising
+//   sell        the sell score at MIN_SCORE or more (one signal alone isn't
+//               a setup, on either side)
+export function replaySignals(bars, model, suite, window = DEFAULT_WINDOW) {
+  const n = bars.length
+  const flags = confluenceFlags(model, suite)
+  const buy = confluenceSeries(flags.buy, n, window, COMPONENTS.buy.map(([k]) => k))
+  const sellS = confluenceSeries(flags.sell, n, window, COMPONENTS.sell.map(([k]) => k))
+  const rising = model.slope200.map((s) => s != null && s > 0)
+  const zone = model.cond.map((c) => !!c?.all)
+  return {
+    buyScore: buy.map((s) => s.score),
+    buyKey: buy.map((s) => s.key),
+    sellScore: sellS.map((s) => s.score),
+    rising,
+    entry: {
+      confluence: buy.map((s, i) => rising[i] && s.score >= MIN_SCORE && (i === 0 || buy[i - 1].score < MIN_SCORE)),
+      zone: zone.map((z, i) => z && !zone[i - 1]),
+      bravo: suite.bravo.bullOn.map((x, i) => !!x && rising[i]),
+    },
+    sell: sellS.map((s) => s.score >= MIN_SCORE),
+  }
+}
+
+// ── The replay ─────────────────────────────────────────────────────
+
+// Trades, one at a time: a signal at bar i's close buys at bar i+1's open;
+// every later close is checked for exits in this order — time stop (expiry
+// within the playbook's rollDays), then targets (sell each target's
+// fraction once the call is worth 1 + target × cost), then the runner trail
+// (only once every target has hit, as in the app), then the sell signal:
+// `signals` sells everything on it; `both` lets it close only what's left
+// after target 1 (the targets bank the gain, the signal guards the rest). No hard stop: the playbook cuts on the thesis, which a
+// replay can't see. A trade still open on the last bar is marked there.
+export function replayTrades(bars, sig, { entryRule = 'confluence', exitRule = 'targets', plan = EXIT_PLAYBOOK, opt = OPTION_MODEL, vol = null } = {}) {
+  const n = bars.length
+  const closes = bars.map((b) => b.c)
+  const sigma = vol ?? trailingVol(closes, opt.volBars)
+  const entries = sig.entry[entryRule]
+  const useTargets = exitRule === 'targets' || exitRule === 'both'
+  const useSignals = exitRule === 'signals' || exitRule === 'both'
+  const trades = []
+  let i = 0
+  while (i < n - 1) {
+    if (!entries[i] || sigma[i] == null) { i++; continue }
+    const e = i + 1
+    const S0 = bars[e].o || bars[e].c
+    const v0 = Math.max(opt.volFloor, sigma[i])
+    const T0 = opt.dte / 365
+    const K = strikeForDelta(S0, T0, v0, opt.delta, opt.rate)
+    const cost = bsCall(S0, K, T0, v0, opt.rate) * (1 + opt.slippage)
+    const expiry = dayMs(bars[e].t) + opt.dte * DAY_MS
+    let left = 1
+    let proceeds = 0
+    let stockOut = 0
+    let peak = 0
+    let maxHigh = bars[e].h
+    const hit = plan.targets.map(() => false)
+    const exits = []
+    const sell = (j, frac, value, reason) => {
+      const f = Math.min(frac, left)
+      if (f <= 1e-9) return
+      proceeds += f * value * (1 - opt.slippage)
+      stockOut += f * closes[j]
+      left -= f
+      exits.push({ i: j, t: bars[j].t, frac: f, value, mult: value / cost, reason })
+    }
+    let j = e
+    for (; j < n && left > 1e-9; j++) {
+      maxHigh = Math.max(maxHigh, bars[j].h)
+      const daysLeft = (expiry - dayMs(bars[j].t)) / DAY_MS
+      const v = bsCall(closes[j], K, daysLeft / 365, Math.max(opt.volFloor, sigma[j] ?? v0), opt.rate)
+      peak = Math.max(peak, v)
+      if (daysLeft < plan.rollDays) { sell(j, left, v, 'time'); break }
+      if (useTargets) {
+        plan.targets.forEach((t, k) => {
+          if (!hit[k] && v >= cost * (1 + t)) { hit[k] = true; sell(j, plan.fractions[k], v, `t${k + 1}`) }
+        })
+        if (hit.every(Boolean) && left > 1e-9 && v <= peak * (1 - plan.runnerTrailPct)) { sell(j, left, v, 'trail'); break }
+      }
+      if (useSignals && j > e && sig.sell[j] && left > 1e-9 && (exitRule === 'signals' || hit[0])) { sell(j, left, v, 'signal'); break }
+    }
+    const last = Math.min(j, n - 1)
+    let open = false
+    if (left > 1e-9) {
+      // Still open on the last bar: mark it there (no slippage on a mark).
+      const daysLeft = (expiry - dayMs(bars[n - 1].t)) / DAY_MS
+      const v = bsCall(closes[n - 1], K, daysLeft / 365, Math.max(opt.volFloor, sigma[n - 1] ?? v0), opt.rate)
+      proceeds += left * v
+      stockOut += left * closes[n - 1]
+      open = true
+    }
+    const end = open ? n - 1 : exits[exits.length - 1].i
+    trades.push({
+      signalI: i, signalT: bars[i].t, i: e, t: bars[e].t, stock: S0, strike: K, cost, vol: v0,
+      exits, open, endI: end, endT: bars[end].t,
+      optionReturn: proceeds / cost - 1,
+      stockReturn: stockOut / S0 - 1,
+      bestStock: maxHigh / S0 - 1,
+      days: Math.round((dayMs(bars[end].t) - dayMs(bars[e].t)) / DAY_MS),
+      key: sig.buyKey?.[i] ?? null,
+    })
+    i = Math.max(last, e) + 1
+  }
+  return trades
+}
+
+export function tradeStats(trades) {
+  const done = trades.filter((t) => !t.open)
+  const r = done.map((t) => t.optionReturn).sort((a, b) => a - b)
+  const avg = (xs) => (xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : null)
+  return {
+    n: trades.length, closed: done.length,
+    winRate: r.length ? r.filter((x) => x > 0).length / r.length : null,
+    avg: avg(r),
+    median: r.length ? (r.length % 2 ? r[(r.length - 1) / 2] : (r[r.length / 2 - 1] + r[r.length / 2]) / 2) : null,
+    bigLoss: r.length ? r.filter((x) => x <= -0.5).length / r.length : null,
+    avgStock: avg(done.map((t) => t.stockReturn)),
+    avgDays: avg(done.map((t) => t.days)),
+    // How much of the best stock move inside each trade the exit kept.
+    capture: avg(done.filter((t) => t.bestStock > 0.05).map((t) => Math.max(-1, Math.min(1, t.stockReturn / t.bestStock)))),
+  }
+}
+
+// ── Grading against hindsight ──────────────────────────────────────
+
+// Big moves: a swing low followed by a rise of at least minGain within
+// `horizon` bars (to the highest high in that span). Moves don't overlap.
+export function bigMoves(bars, { minGain = MOVE.minGain, horizon = MOVE.horizon, swing = 10 } = {}) {
+  const { lows } = swingPoints(bars, swing)
+  const moves = []
+  let after = -1
+  for (const L of lows) {
+    if (L <= after) continue
+    let p = L
+    for (let k = L + 1; k <= Math.min(bars.length - 1, L + horizon); k++) if (bars[k].h > bars[p].h) p = k
+    const gain = bars[p].h / bars[L].l - 1
+    if (gain < minGain) continue
+    let half = p
+    for (let k = L + 1; k <= p; k++) if (bars[k].h >= bars[L].l * (1 + gain / 2)) { half = k; break }
+    moves.push({ lowI: L, lowT: bars[L].t, low: bars[L].l, peakI: p, peakT: bars[p].t, peak: bars[p].h, gain, halfI: half, halfT: bars[half].t })
+    after = p
+  }
+  return moves
+}
+
+// Each move: caught when an entry signal fired from `early` bars before the
+// low up to the bar half the move was done; the first such trade, how much
+// of the move it kept, and — when missed — what the signals looked like.
+export function gradeMoves(moves, trades, sig, bars, { early = MOVE.early } = {}) {
+  return moves.map((m) => {
+    const tr = trades.find((t) => t.signalI >= m.lowI - early && t.signalI <= m.halfI)
+    if (tr) {
+      const range = m.peak - m.low
+      const exitStock = tr.stock * (1 + tr.stockReturn)
+      return { ...m, caught: true, trade: tr, entryLag: tr.signalI - m.lowI, kept: range > 0 ? (exitStock - tr.stock) / range : null }
+    }
+    let best = 0
+    let bestKey = ''
+    let rising = false
+    for (let k = Math.max(0, m.lowI - early); k <= m.halfI; k++) {
+      if (sig.buyScore[k] > best) { best = sig.buyScore[k]; bestKey = sig.buyKey[k] }
+      if (sig.rising[k]) rising = true
+    }
+    // A trade already open through the move counts as held, not missed.
+    const held = trades.some((t) => t.i <= m.lowI && t.endI >= m.halfI)
+    const why = held ? 'already holding'
+      : !rising ? '200-day falling'
+      : best < MIN_SCORE ? (best ? `only ${best} signal` : 'no buy signals')
+      : 'signals came late'
+    return { ...m, caught: false, held, bestScore: best, bestKey, why, lowClose: bars[m.lowI].c }
+  })
+}
+
+export function moveStats(graded) {
+  const open = graded.filter((g) => !g.held)
+  const caught = open.filter((g) => g.caught)
+  const kept = caught.map((g) => g.kept).filter((x) => x != null)
+  return {
+    moves: graded.length, held: graded.length - open.length, caught: caught.length,
+    catchRate: open.length ? caught.length / open.length : null,
+    avgKept: kept.length ? kept.reduce((s, x) => s + x, 0) / kept.length : null,
+    avgGain: graded.length ? graded.reduce((s, g) => s + g.gain, 0) / graded.length : null,
+  }
+}
+
+// One ticker, every entry × exit rule: trades, stats, and the move grading.
+export function replayModel({ bars, model, suite, opt = OPTION_MODEL, plan = EXIT_PLAYBOOK }) {
+  const sig = replaySignals(bars, model, suite)
+  const vol = trailingVol(bars.map((b) => b.c), opt.volBars)
+  const moves = bigMoves(bars)
+  const runs = {}
+  for (const [entryRule] of ENTRY_RULES) {
+    for (const [exitRule] of EXIT_RULES) {
+      const trades = replayTrades(bars, sig, { entryRule, exitRule, plan, opt, vol })
+      runs[`${entryRule}:${exitRule}`] = { entryRule, exitRule, trades, stats: tradeStats(trades) }
+    }
+  }
+  // Moves are graded on entries, which don't depend on the exit — except
+  // "already holding"; grade with the targets exit (the app's default).
+  const graded = Object.fromEntries(ENTRY_RULES.map(([entryRule]) => {
+    const g = gradeMoves(moves, runs[`${entryRule}:targets`].trades, sig, bars)
+    return [entryRule, { graded: g, stats: moveStats(g) }]
+  }))
+  return { sig, moves, runs, graded }
+}
