@@ -64,7 +64,7 @@ export default function PriceChart({ bars, levels = [], fitLevels = true, height
       autoSize: true,
       layout: {
         background: { type: ColorType.Solid, color: 'transparent' },
-        textColor: t.muted,
+        textColor: t.subtle, // axis numbers: secondary-text grey (muted was too dim)
         fontSize: 11,
         fontFamily: getComputedStyle(el).fontFamily,
         attributionLogo: false,

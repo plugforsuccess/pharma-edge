@@ -93,7 +93,8 @@ export default function EntryChart({ bars, model, suite, panes, layers = [], onH
       autoSize: true,
       layout: {
         background: { type: ColorType.Solid, color: 'transparent' },
-        textColor: t.muted, fontSize: 10, fontFamily: getComputedStyle(el).fontFamily,
+        // Axis numbers in the secondary-text grey (muted was too dim on phones).
+        textColor: t.subtle, fontSize: 11, fontFamily: getComputedStyle(el).fontFamily,
         attributionLogo: false,
         panes: { separatorColor: t.border, separatorHoverColor: alpha(t.gold, 0.3), enableResize: false },
       },
