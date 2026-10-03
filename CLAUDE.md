@@ -1001,6 +1001,22 @@ value, holding period) and must pass before any edit to that file lands.
   entered (`YieldCompare`), both at the user's after-tax rate — categories only, no named
   products (named partners wait on counsel); rates are user-entered,
   prefilled with example rates (`cm:cash-yield-apys`).
+- **Retirement, vehicles, debts** (owner, 2026-10-03 — net worth should
+  count what public wealth surveys count). Three more add-form types
+  (`instrument_type` `retirement` / `vehicle` / `debt`; `name`, no ticker):
+  retirement = balance + `details.account_kind` (`RETIREMENT_KINDS`:
+  401(k) / 403(b) and traditional / SEP IRA are pre-tax — after tax =
+  balance × (1 − federal − state ordinary rate) as if withdrawn today, no
+  NIIT, CPA override uses its ordinary total; Roth and HSA tax-free; the
+  10% before-59½ penalty is shown on the card, never taken off net worth);
+  vehicle = value + `details.loan` (equity, no tax); debt = balance owed +
+  `details.debt_kind` / `apr` (subtracted from net worth; the Total card
+  adds a "Debt interest / yr" row). Mortgages stay on the property and car
+  loans on the vehicle. `retirementAfterTax`, `vehicleEquity`, `debtCost`
+  in `afterTax.js`; `useHoldings` exposes `others.after` / `others.before`
+  (everything outside investments) and the Total card lists only the
+  types the user has. Prices-older-than-7-days skips cash, vehicles and
+  debts.
 - **Dividend income.** The add form's 6th type, **Income** (Options ·
   Shares · Income / Crypto · Cash · Real estate), is a `stock` row with
   the income type and a required yield; a stock row with a yield or ROC

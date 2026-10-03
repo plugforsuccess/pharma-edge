@@ -13,6 +13,7 @@ import {
   CASH_KINDS, DEFAULT_SELLING_COST_PCT, cashAfterTax, cashYieldComparison, realEstateAfterTax,
   INCOME_KINDS, dividendAfterTax, incomeYieldComparison,
   customExitTargets, validateCustomTargets, MAX_CUSTOM_TARGETS,
+  RETIREMENT_KINDS, DEBT_KINDS,
 } from '../utils/afterTax'
 import NumberInput from '../components/NumberInput'
 import Modal from '../components/Modal'
@@ -163,7 +164,8 @@ export default function Leaps() {
   const {
     federal, states, profile, setProfile, positions, setPositions, loadError, plan,
     p, state, override, ready, rateForGain, totalCost, selectedPct,
-    ladderFor, customFor, cashResults, realEstateResults, results, summary, breakdown, has1256, others,
+    ladderFor, customFor, cashResults, realEstateResults, retirementResults, vehicleResults, debtResults,
+    results, summary, breakdown, has1256, others,
   } = useHoldings()
   const [searchParams, setSearchParams] = useSearchParams()
   const [adding, setAdding] = useState(searchParams.get('add') === '1')
@@ -230,7 +232,7 @@ export default function Leaps() {
     }
   }
 
-  const allIds = [...results, ...cashResults, ...realEstateResults].map((r) => r.pos.id)
+  const allIds = [...results, ...retirementResults, ...cashResults, ...realEstateResults, ...vehicleResults, ...debtResults].map((r) => r.pos.id)
 
   // /leaps?open=<id> (from Home, Charts or the LEAPS bot): expand that
   // holding and scroll to it, then drop the param.
@@ -286,7 +288,7 @@ export default function Leaps() {
             <Banner tone="amber">Pick your residency in Settings (or enter both CPA rates) to see after-tax figures.</Banner>
           )}
 
-          {ready && (summary || others.cashCount > 0 || others.realEstateCount > 0) && (
+          {ready && (summary || others.count > 0) && (
             <PortfolioTotals summary={summary} count={results.length} others={others} />
           )}
 
@@ -329,7 +331,7 @@ export default function Leaps() {
 
               {allIds.length === 0 && !adding && (
                 <div className="text-sm text-muted py-8 px-6 text-center border border-dashed border-border rounded-2xl">
-                  No holdings yet. Tap Add + to enter options, shares, crypto, cash or real estate.
+                  No holdings yet. Tap Add + to enter investments, retirement accounts, cash, real estate, vehicles or debts.
                 </div>
               )}
 
@@ -356,6 +358,12 @@ export default function Leaps() {
                 />
               ))}
 
+              {retirementResults.map(({ pos, ret }) => (
+                <RetirementCard key={pos.id} pos={pos} ret={ret}
+                  open={openIds.has(pos.id)} onToggle={() => toggleOpen(pos.id)}
+                  onSave={(row) => savePosition(row, pos.id)} onDelete={() => deletePosition(pos.id)} />
+              ))}
+
               {cashResults.map(({ pos, cash }) => (
                 <CashCard key={pos.id} pos={pos} cash={cash}
                   open={openIds.has(pos.id)} onToggle={() => toggleOpen(pos.id)}
@@ -364,6 +372,18 @@ export default function Leaps() {
 
               {realEstateResults.map(({ pos, re }) => (
                 <RealEstateCard key={pos.id} pos={pos} re={re}
+                  open={openIds.has(pos.id)} onToggle={() => toggleOpen(pos.id)}
+                  onSave={(row) => savePosition(row, pos.id)} onDelete={() => deletePosition(pos.id)} />
+              ))}
+
+              {vehicleResults.map(({ pos, car }) => (
+                <VehicleCard key={pos.id} pos={pos} car={car}
+                  open={openIds.has(pos.id)} onToggle={() => toggleOpen(pos.id)}
+                  onSave={(row) => savePosition(row, pos.id)} onDelete={() => deletePosition(pos.id)} />
+              ))}
+
+              {debtResults.map(({ pos, debt }) => (
+                <DebtCard key={pos.id} pos={pos} debt={debt}
                   open={openIds.has(pos.id)} onToggle={() => toggleOpen(pos.id)}
                   onSave={(row) => savePosition(row, pos.id)} onDelete={() => deletePosition(pos.id)} />
               ))}
@@ -492,7 +512,7 @@ function emptyForm(initial) {
   return {
     // Shares paying an income (a yield, or return of capital) open as Income.
     asset: t === 'stock' ? (Number(d.dividend_yield) > 0 || d.dividend_kind === 'roc' ? 'income' : 'shares') : t === 'crypto' ? 'crypto' : t === 'cash' ? 'cash'
-      : t === 'real_estate' ? 'real_estate' : 'option',
+      : t === 'real_estate' ? 'real_estate' : t === 'retirement' ? 'retirement' : t === 'vehicle' ? 'vehicle' : t === 'debt' ? 'debt' : 'option',
     ticker: initial?.ticker ?? '',
     name: initial?.name ?? '',
     // Income (shares with a yield)
@@ -505,6 +525,16 @@ function emptyForm(initial) {
     balance: t === 'cash' ? str(initial?.current_value) : '',
     apy: d.apy != null ? String(+(Number(d.apy) * 100).toFixed(4)) : '',
     account_kind: d.account_kind ?? 'savings',
+    // Retirement account
+    ret_kind: d.account_kind && t === 'retirement' ? d.account_kind : 'traditional_401k',
+    ret_balance: t === 'retirement' ? str(initial?.current_value) : '',
+    // Vehicle
+    car_value: t === 'vehicle' ? str(initial?.current_value) : '',
+    car_loan: d.loan != null ? String(d.loan) : '',
+    // Debt
+    debt_kind: d.debt_kind ?? 'credit_card',
+    debt_balance: t === 'debt' ? str(initial?.current_value) : '',
+    debt_apr: d.apr != null ? String(+(Number(d.apr) * 100).toFixed(4)) : '',
     // Real estate
     re_kind: d.kind ?? 'primary',
     purchase_price: d.purchase_price != null ? String(d.purchase_price) : (t === 'real_estate' ? str(initial?.cost_basis) : ''),
@@ -576,6 +606,11 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
   const isCrypto = f.asset === 'crypto'
   const isCash = f.asset === 'cash'
   const isRE = f.asset === 'real_estate'
+  const isRet = f.asset === 'retirement'
+  const isCar = f.asset === 'vehicle'
+  const isDebt = f.asset === 'debt'
+  // Net-worth-only types: their own section, no ticker / targets / goal.
+  const isOther = isCash || isRE || isRet || isCar || isDebt
   // Income = shares bought for their yield (dividend stocks, preferreds,
   // income ETFs); saved as stock with the yield in details.
   const isIncome = f.asset === 'income'
@@ -661,7 +696,40 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
     }, keepOpen, f.name.trim())
   }
 
+  // Retirement, vehicles and debts: a name and a balance (+ a few details).
+  const plainRow = (type, amount, details, basis = amount) => ({
+    ticker: null, name: f.name.trim(), instrument_type: type, option_type: null, strike: null,
+    expiration: null, contracts: null, shares: null,
+    cost_basis: exact(basis), current_value: exact(amount), value_as_of: new Date().toISOString(),
+    purchase_date: initial?.purchase_date ?? todayYmd(), exit_targets: null, details,
+  })
+  async function submitRetirement(keepOpen) {
+    const balance = num(f.ret_balance)
+    if (!f.name.trim()) return setError('Name this account (e.g. "Fidelity 401(k)").')
+    if (!(balance > 0)) return setError('Enter the balance.')
+    return finish(plainRow('retirement', balance, { account_kind: f.ret_kind }), keepOpen, f.name.trim())
+  }
+  async function submitVehicle(keepOpen) {
+    const value = num(f.car_value)
+    const loan = num(f.car_loan) ?? 0
+    if (!f.name.trim()) return setError('Name this vehicle (e.g. "2022 Tesla Model Y").')
+    if (!(value > 0)) return setError('Enter what the vehicle is worth today.')
+    if (loan < 0) return setError('The loan can’t be negative.')
+    return finish(plainRow('vehicle', value, { loan }, initial?.instrument_type === 'vehicle' ? Number(initial.cost_basis) : value), keepOpen, f.name.trim())
+  }
+  async function submitDebt(keepOpen) {
+    const balance = num(f.debt_balance)
+    const apr = num(f.debt_apr)
+    if (!f.name.trim()) return setError('Name this debt (e.g. "Chase Sapphire").')
+    if (!(balance > 0)) return setError('Enter the balance owed.')
+    if (apr != null && (apr < 0 || apr > 100)) return setError('Enter the APR as a % between 0 and 100.')
+    return finish(plainRow('debt', balance, { debt_kind: f.debt_kind, apr: apr == null ? 0 : exact(apr / 100) }), keepOpen, f.name.trim())
+  }
+
   async function submit({ keepOpen = false } = {}) {
+    if (isRet) return submitRetirement(keepOpen)
+    if (isCar) return submitVehicle(keepOpen)
+    if (isDebt) return submitDebt(keepOpen)
     if (isCash) return submitCash(keepOpen)
     if (isRE) return submitRealEstate(keepOpen)
     if (!/^[A-Z0-9.]{1,12}$/.test(f.ticker)) return setError(isCrypto ? 'Enter the coin (e.g. BTC).' : 'Enter a ticker.')
@@ -765,15 +833,72 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
       </div>
 
       <Segmented
-        label="What do you own?"
+        label="What are you adding?"
         value={f.asset}
         onChange={(v) => { setError(''); setF((x) => ({ ...x, asset: v })) }}
         columns={3}
         options={[
           { value: 'option', label: 'Options' }, { value: 'shares', label: 'Shares' }, { value: 'income', label: 'Income' },
           { value: 'crypto', label: 'Crypto' }, { value: 'cash', label: 'Cash' }, { value: 'real_estate', label: 'Real Estate' },
+          { value: 'retirement', label: 'Retirement' }, { value: 'vehicle', label: 'Vehicle' }, { value: 'debt', label: 'Debt' },
         ]}
       />
+
+      {isRet && (
+        <FormSection title="Retirement account">
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Name" wide>
+              <input value={f.name} onChange={(e) => setV('name')(e.target.value)} maxLength={60} placeholder="Fidelity 401(k)" className={inputCls} />
+            </Field>
+            <Field label="Account type" wide>
+              <select value={f.ret_kind} onChange={(e) => setV('ret_kind')(e.target.value)} className={inputCls}>
+                {RETIREMENT_KINDS.map((k) => <option key={k.value} value={k.value}>{k.long}</option>)}
+              </select>
+            </Field>
+            <Field label="Balance" wide>
+              <Affix prefix="$"><NumberInput value={f.ret_balance} onChange={setV('ret_balance')} placeholder="150,000" className={clsx(inputCls, 'pl-7')} /></Affix>
+            </Field>
+          </div>
+        </FormSection>
+      )}
+
+      {isCar && (
+        <FormSection title="Vehicle">
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Name" wide>
+              <input value={f.name} onChange={(e) => setV('name')(e.target.value)} maxLength={60} placeholder="2022 Tesla Model Y" className={inputCls} />
+            </Field>
+            <Field label="Value today">
+              <Affix prefix="$"><NumberInput value={f.car_value} onChange={setV('car_value')} placeholder="32,000" className={clsx(inputCls, 'pl-7')} /></Affix>
+            </Field>
+            <Field label="Loan owed" hint="optional">
+              <Affix prefix="$"><NumberInput value={f.car_loan} onChange={setV('car_loan')} placeholder="0" className={clsx(inputCls, 'pl-7')} /></Affix>
+            </Field>
+          </div>
+        </FormSection>
+      )}
+
+      {isDebt && (
+        <FormSection title="Debt">
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Name" wide>
+              <input value={f.name} onChange={(e) => setV('name')(e.target.value)} maxLength={60} placeholder="Chase Sapphire" className={inputCls} />
+            </Field>
+            <Field label="Type" wide>
+              <select value={f.debt_kind} onChange={(e) => setV('debt_kind')(e.target.value)} className={inputCls}>
+                {DEBT_KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
+              </select>
+            </Field>
+            <Field label="Balance owed">
+              <Affix prefix="$"><NumberInput value={f.debt_balance} onChange={setV('debt_balance')} placeholder="4,500" className={clsx(inputCls, 'pl-7')} /></Affix>
+            </Field>
+            <Field label="APR" hint="optional">
+              <Affix suffix="%"><NumberInput decimals={4} value={f.debt_apr} onChange={setV('debt_apr')} placeholder="22.9" className={clsx(inputCls, 'pr-8')} /></Affix>
+            </Field>
+          </div>
+          <p className="mt-3 text-xs text-muted">Mortgages go on the property and car loans on the vehicle, so they aren't counted twice.</p>
+        </FormSection>
+      )}
 
       {isCash && (
         <FormSection title="Cash account">
@@ -846,7 +971,7 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
         </FormSection>
       )}
 
-      {!isCash && !isRE && (<>
+      {!isOther && (<>
 
       <FormSection title={isCrypto ? 'Crypto' : isIncome ? 'Income' : isShares ? 'Shares' : 'Contract'}>
         <div className="grid grid-cols-2 gap-3">
@@ -1301,6 +1426,9 @@ const BADGE_TONE = {
   neutral: 'bg-bg/40 text-subtle border-border',
   cash: 'bg-blue-400/10 text-blue-300 border-blue-400/40',
   realEstate: 'bg-orange-400/10 text-orange-300 border-orange-400/35',
+  retirement: 'bg-teal-400/10 text-teal-300 border-teal-400/35',
+  vehicle: 'bg-bg/40 text-fg border-border-hover',
+  debt: 'bg-rose-400/10 text-rose-300 border-rose-400/35',
 }
 
 function HoldingShell({ pos, open, onToggle, title, meta, badge, badgeTone = 'neutral', value, valueLabel, valueUp = true, editing, form, onEdit, onDelete, children }) {
@@ -1418,6 +1546,93 @@ function RealEstateCard({ pos, re, open, onToggle, onSave, onDelete }) {
       {!rental && re.exclusion === 0 && (
         <p className="mt-3 text-xs text-muted">No home-sale exclusion: you haven't lived here 2 of the last 5 years.</p>
       )}
+    </HoldingShell>
+  )
+}
+
+const retirementKind = (k) => RETIREMENT_KINDS.find((x) => x.value === k) ?? RETIREMENT_KINDS[0]
+const debtKindLabel = (k) => DEBT_KINDS.find((x) => x.value === k)?.label ?? 'Debt'
+// "Chase • Credit card", but not "Fidelity 401(k) • 401(k)".
+const withKind = (name, label) => (String(name).toLowerCase().includes(label.toLowerCase()) ? name : `${name} • ${label}`)
+
+// Retirement account: pre-tax balances shown after the tax on withdrawal.
+function RetirementCard({ pos, ret, open, onToggle, onSave, onDelete }) {
+  const [editing, setEditing] = useState(false)
+  const kind = retirementKind(pos.details?.account_kind)
+  return (
+    <HoldingShell
+      pos={pos} open={open} onToggle={onToggle} editing={editing} onEdit={() => setEditing(true)} onDelete={onDelete}
+      form={<PositionForm initial={pos} onCancel={() => setEditing(false)}
+        onSave={async (row) => { const err = await onSave(row); if (!err) setEditing(false); return err }} />}
+      title={withKind(pos.name, kind.label)}
+      meta={[ret.pretax ? 'Taxed when withdrawn' : 'Tax-free withdrawals']}
+      badge="Retirement" badgeTone="retirement"
+      value={usd(ret.after_tax_value)} valueLabel={ret.pretax ? 'after tax' : 'balance'}
+    >
+      <div className="mb-4">
+        <div className="text-[10px] uppercase tracking-wider text-muted mb-1">{ret.pretax ? 'After tax if withdrawn' : 'Balance'}</div>
+        <div className="text-2xl font-semibold font-mono-tab text-green-400">{usd(ret.after_tax_value)}</div>
+      </div>
+      <div className="grid grid-cols-3 gap-3 py-3 border-y border-hairline">
+        <Stat label="Balance" value={usd(ret.balance)} />
+        <Stat label="Tax on withdrawal" value={ret.pretax ? usd(ret.estimated_tax) : usd(0)} />
+        <Stat label="Tax rate" value={ret.pretax ? ratePct(ret.rate) : '0%'} />
+      </div>
+      <p className="mt-3 text-xs text-muted">
+        {ret.pretax
+          ? `Withdrawals are ordinary income (federal + state, as if it all came out today). Before 59½, add a 10% penalty: ${usd(ret.early_penalty)}.`
+          : kind.value === 'hsa' ? 'Tax-free for medical costs.' : 'Qualified Roth withdrawals are tax-free.'}
+      </p>
+    </HoldingShell>
+  )
+}
+
+function VehicleCard({ pos, car, open, onToggle, onSave, onDelete }) {
+  const [editing, setEditing] = useState(false)
+  return (
+    <HoldingShell
+      pos={pos} open={open} onToggle={onToggle} editing={editing} onEdit={() => setEditing(true)} onDelete={onDelete}
+      form={<PositionForm initial={pos} onCancel={() => setEditing(false)}
+        onSave={async (row) => { const err = await onSave(row); if (!err) setEditing(false); return err }} />}
+      title={pos.name}
+      meta={[car.loan > 0 ? `${usd(car.loan)} loan` : 'Paid off']}
+      badge="Vehicle" badgeTone="vehicle"
+      value={usd(car.equity)} valueLabel="equity" valueUp={car.equity >= 0}
+    >
+      <div className="mb-4">
+        <div className="text-[10px] uppercase tracking-wider text-muted mb-1">Equity</div>
+        <div className={clsx('text-2xl font-semibold font-mono-tab', car.equity >= 0 ? 'text-green-400' : 'text-rose-300')}>{usd(car.equity)}</div>
+      </div>
+      <div className="grid grid-cols-3 gap-3 py-3 border-y border-hairline">
+        <Stat label="Value" value={usd(car.value)} />
+        <Stat label="Loan" value={usd(car.loan)} />
+        <Stat label="Equity" value={usd(car.equity)} />
+      </div>
+    </HoldingShell>
+  )
+}
+
+function DebtCard({ pos, debt, open, onToggle, onSave, onDelete }) {
+  const [editing, setEditing] = useState(false)
+  const kind = debtKindLabel(pos.details?.debt_kind)
+  return (
+    <HoldingShell
+      pos={pos} open={open} onToggle={onToggle} editing={editing} onEdit={() => setEditing(true)} onDelete={onDelete}
+      form={<PositionForm initial={pos} onCancel={() => setEditing(false)}
+        onSave={async (row) => { const err = await onSave(row); if (!err) setEditing(false); return err }} />}
+      title={withKind(pos.name, kind)}
+      meta={[debt.apr > 0 ? `${ratePct(debt.apr)} APR` : 'No rate entered']}
+      badge="Debt" badgeTone="debt"
+      value={`−${usd(debt.balance)}`} valueLabel="owed" valueUp={false}
+    >
+      <div className="mb-4">
+        <div className="text-[10px] uppercase tracking-wider text-muted mb-1">Owed</div>
+        <div className="text-2xl font-semibold font-mono-tab text-rose-300">−{usd(debt.balance)}</div>
+      </div>
+      <div className="grid grid-cols-2 gap-3 py-3 border-y border-hairline">
+        <Stat label="APR" value={debt.apr > 0 ? ratePct(debt.apr) : '—'} />
+        <Stat label="Interest / yr" value={debt.apr > 0 ? usd(debt.interest) : '—'} />
+      </div>
     </HoldingShell>
   )
 }
@@ -1966,13 +2181,22 @@ function holdingStart(date) {
 // gain / return stats cover investments only (options, shares, crypto).
 function PortfolioTotals({ summary, count, others }) {
   const [showCost, setShowCost] = useState(false)
-  const hasOthers = others && (others.cashCount > 0 || others.realEstateCount > 0)
+  const hasOthers = (others?.count ?? 0) > 0
   const invested = summary?.after_tax_value ?? 0
-  const total = invested + (others?.cash ?? 0) + (others?.realEstate ?? 0)
+  const total = invested + (others?.after ?? 0)
   const up = hasOthers ? total >= 0 : (summary?.after_tax_gain ?? 0) >= 0
-  const holdings = count + (others?.cashCount ?? 0) + (others?.realEstateCount ?? 0)
+  const holdings = count + (others?.count ?? 0)
   // What it's all worth today, before tax (and before selling costs).
-  const before = (summary?.current_value ?? 0) + (hasOthers ? (others.cashBefore ?? 0) + (others.realEstateBefore ?? 0) : 0)
+  const before = (summary?.current_value ?? 0) + (hasOthers ? others.before ?? 0 : 0)
+  // Net worth by type: only the ones the user has (debts subtract).
+  const parts = hasOthers ? [
+    (summary || count > 0) && { label: 'Investments', value: usd(invested) },
+    others.retirementCount > 0 && { label: 'Retirement', value: usd(others.retirement) },
+    others.cashCount > 0 && { label: 'Cash', value: usd(others.cash) },
+    others.realEstateCount > 0 && { label: 'Real Estate', value: usd(others.realEstate) },
+    others.vehicleCount > 0 && { label: 'Vehicles', value: usd(others.vehicles) },
+    others.debtCount > 0 && { label: 'Debts', value: `−${usd(others.debts)}`, debt: true },
+  ].filter(Boolean) : []
   const after = hasOthers ? total : invested
   const cost = before - after
   const costLabel = others?.realEstateCount > 0 ? 'tax & selling costs' : 'tax'
@@ -2009,17 +2233,26 @@ function PortfolioTotals({ summary, count, others }) {
           <span className="font-mono-tab">−{usd(cost)}</span> {costLabel} if everything sold today
         </div>
       )}
-      {hasOthers && (
-        <div className="grid grid-cols-3 gap-3 pt-4 border-t border-hairline mb-4">
-          <Stat label="Investments" value={usd(invested)} />
-          <Stat label="Cash" value={usd(others.cash)} />
-          <Stat label="Real Estate" value={usd(others.realEstate)} />
+      {parts.length > 0 && (
+        <div className="grid grid-cols-3 gap-x-3 gap-y-4 pt-4 border-t border-hairline mb-4">
+          {parts.map((x) => (
+            <div key={x.label} className="min-w-0">
+              <div className="text-xs text-muted truncate mb-1">{x.label}</div>
+              <div className={clsx('text-sm truncate font-mono-tab', x.debt ? 'text-rose-300' : 'text-fg')}>{x.value}</div>
+            </div>
+          ))}
         </div>
       )}
       {others?.income > 0 && (
         <div className="flex items-baseline gap-3 pt-4 border-t border-hairline mb-4">
           <span className="flex-1 text-sm text-subtle">Income after tax</span>
           <span className="text-sm font-mono-tab text-green-400 font-semibold">{usd(others.income)}/yr</span>
+        </div>
+      )}
+      {others?.debtInterest > 0 && (
+        <div className="flex items-baseline gap-3 pt-4 border-t border-hairline mb-4">
+          <span className="flex-1 text-sm text-subtle">Debt interest</span>
+          <span className="text-sm font-mono-tab text-rose-300 font-semibold">−{usd(others.debtInterest)}/yr</span>
         </div>
       )}
       {summary && (

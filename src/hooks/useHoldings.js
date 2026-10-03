@@ -5,6 +5,7 @@ import {
   DEFAULT_TARGET_PCTS, makeRateResolver, deriveRates, applyRateOverride, targetRow, positionAfterTax,
   portfolioSummary, todayYmd, rateAtGainFor, EXIT_PLAYBOOK, playbookTargets, runnerPlan, runnerAfterTax,
   DEFAULT_SELLING_COST_PCT, cashAfterTax, realEstateAfterTax, dividendAfterTax, incomeHoldingReturn, customExitTargets,
+  retirementAfterTax, vehicleEquity, debtCost,
 } from '../utils/afterTax'
 
 // The user's holdings with every after-tax figure worked out — shared by
@@ -159,6 +160,21 @@ export function useHoldings() {
     })
   }, [positions, rateForGain, p.filing_status, asOf])
 
+  // Retirement accounts, vehicles and debts: net worth only (no targets).
+  const retirementResults = useMemo(() => {
+    if (!rateForGain || !positions) return []
+    return positions.filter((x) => x.instrument_type === 'retirement').map((pos) => ({
+      pos,
+      ret: retirementAfterTax({ balance: Number(pos.current_value), kind: pos.details?.account_kind ?? 'traditional_401k', rateForGain }),
+    }))
+  }, [positions, rateForGain])
+  const vehicleResults = useMemo(() => (positions ?? []).filter((x) => x.instrument_type === 'vehicle').map((pos) => ({
+    pos, car: vehicleEquity({ value: Number(pos.current_value), loan: Number(pos.details?.loan) || 0 }),
+  })), [positions])
+  const debtResults = useMemo(() => (positions ?? []).filter((x) => x.instrument_type === 'debt').map((pos) => ({
+    pos, debt: debtCost({ balance: Number(pos.current_value), apr: Number(pos.details?.apr) || 0 }),
+  })), [positions])
+
   const results = useMemo(() => {
     if (!rateForGain || !positions) return []
     return investments.map((pos) => {
@@ -285,11 +301,24 @@ export function useHoldings() {
     realEstateBefore: realEstateResults.reduce((sum, r) => sum + (r.re?.equity ?? 0), 0),
     cashCount: cashResults.length,
     realEstateCount: realEstateResults.length,
+    retirement: retirementResults.reduce((sum, r) => sum + r.ret.after_tax_value, 0),
+    retirementBefore: retirementResults.reduce((sum, r) => sum + r.ret.balance, 0),
+    vehicles: vehicleResults.reduce((sum, r) => sum + r.car.equity, 0),
+    debts: debtResults.reduce((sum, r) => sum + r.debt.balance, 0),
+    debtInterest: debtResults.reduce((sum, r) => sum + r.debt.interest, 0),
+    retirementCount: retirementResults.length,
+    vehicleCount: vehicleResults.length,
+    debtCount: debtResults.length,
   }
+  // Everything outside investments, after and before tax (debts subtract).
+  others.count = others.cashCount + others.realEstateCount + others.retirementCount + others.vehicleCount + others.debtCount
+  others.after = others.cash + others.realEstate + others.retirement + others.vehicles - others.debts
+  others.before = others.cashBefore + others.realEstateBefore + others.retirementBefore + others.vehicles - others.debts
 
   return {
     federal, states, profile, setProfile, positions, setPositions, loadError, plan,
     p, state, override, ready, rateForGain, investments, totalCost, selectedPct, asOf,
-    ladderFor, customFor, cashResults, realEstateResults, results, summary, breakdown, has1256, others,
+    ladderFor, customFor, cashResults, realEstateResults, retirementResults, vehicleResults, debtResults,
+    results, summary, breakdown, has1256, others,
   }
 }

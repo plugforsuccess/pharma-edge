@@ -25,8 +25,8 @@ export default function Home() {
 
   // ── Net worth ────────────────────────────────────────────────
   const invested = summary?.after_tax_value ?? 0
-  const after = invested + (others.cash ?? 0) + (others.realEstate ?? 0)
-  const before = (summary?.current_value ?? 0) + (others.cashBefore ?? 0) + (others.realEstateBefore ?? 0)
+  const after = invested + (others.after ?? 0)
+  const before = (summary?.current_value ?? 0) + (others.before ?? 0)
 
   // ── Needs action, most urgent first (same checks as the Bot view) ──
   const actions = useMemo(() => needsAction(results, positions, plan, today), [results, positions, plan, today])

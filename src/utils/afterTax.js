@@ -1078,3 +1078,69 @@ export function portfolioProjection({ sleeves = [], monthly = 0, years, priceGro
     return row
   })
 }
+
+// ── Retirement accounts, vehicles, debts ──────────────────────────
+//
+// They count toward net worth (owner, 2026-10-03), each on its own math:
+//   Retirement — pre-tax accounts (401(k), 403(b), traditional / SEP IRA)
+//     are taxed as ordinary income when withdrawn: federal + state at the
+//     user's short-term (ordinary) rate on the whole balance, as if it all
+//     came out today (the same "if everything sold today" view as the rest
+//     of net worth). No NIIT — retirement distributions are exempt. Roth
+//     and HSA withdrawals are treated as qualified (tax-free). The 10%
+//     early-withdrawal penalty (before 59½) is shown separately, never
+//     taken off net worth. A CPA override uses its ordinary total.
+//   Vehicles — no tax (a personal car's gain is rare and its loss isn't
+//     deductible); equity = value − loan.
+//   Debts — subtract the balance owed; interest / yr = balance × APR.
+
+export const RETIREMENT_KINDS = [
+  { value: 'traditional_401k', label: '401(k)', long: '401(k) / 403(b)', pretax: true },
+  { value: 'traditional_ira', label: 'IRA', long: 'Traditional / SEP IRA', pretax: true },
+  { value: 'roth_401k', label: 'Roth 401(k)', long: 'Roth 401(k)', pretax: false },
+  { value: 'roth_ira', label: 'Roth IRA', long: 'Roth IRA', pretax: false },
+  { value: 'hsa', label: 'HSA', long: 'HSA (medical withdrawals)', pretax: false },
+]
+export const EARLY_WITHDRAWAL_PENALTY = 0.10
+
+export function retirementAfterTax({ balance, kind = 'traditional_401k', rateForGain }) {
+  const b = Math.max(0, Number(balance) || 0)
+  const pretax = RETIREMENT_KINDS.find((k) => k.value === kind)?.pretax ?? true
+  let rate = 0
+  if (pretax && b > 0) {
+    const st = rateForGain(b).short_term
+    rate = st.overridden ? st.total : Math.min(MAX_TAX_RATE, st.federal + st.state)
+  }
+  const tax = b * rate
+  return {
+    balance: b,
+    kind,
+    pretax,
+    rate,
+    estimated_tax: tax,
+    after_tax_value: b - tax,
+    early_penalty: pretax ? b * EARLY_WITHDRAWAL_PENALTY : 0,
+  }
+}
+
+export function vehicleEquity({ value, loan = 0 }) {
+  const v = Math.max(0, Number(value) || 0)
+  const l = Math.max(0, Number(loan) || 0)
+  return { value: v, loan: l, equity: v - l }
+}
+
+export const DEBT_KINDS = [
+  { value: 'credit_card', label: 'Credit card' },
+  { value: 'student_loan', label: 'Student loan' },
+  { value: 'personal_loan', label: 'Personal loan' },
+  { value: 'heloc', label: 'Home equity loan' },
+  { value: 'medical', label: 'Medical' },
+  { value: 'taxes', label: 'Taxes owed' },
+  { value: 'other', label: 'Other' },
+]
+
+export function debtCost({ balance, apr = 0 }) {
+  const b = Math.max(0, Number(balance) || 0)
+  const a = Math.max(0, Number(apr) || 0)
+  return { balance: b, apr: a, interest: b * a }
+}

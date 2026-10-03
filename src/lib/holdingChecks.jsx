@@ -70,7 +70,8 @@ function checksFor(r, plan, today) {
 // Home: everything that needs action today, plus stale prices.
 export function needsAction(results, positions, plan, today, now = Date.now()) {
   const out = results.flatMap((r) => checksFor(r, plan, today))
-  const stale = (positions ?? []).filter((x) => x.instrument_type !== 'cash' && x.value_as_of
+  // Cash, car values and debt balances don't move with the market.
+  const stale = (positions ?? []).filter((x) => !['cash', 'vehicle', 'debt'].includes(x.instrument_type) && x.value_as_of
     && (now - new Date(x.value_as_of).getTime()) / DAY_MS > STALE_DAYS)
   if (stale.length) {
     out.push({ rank: 4, kind: 'stale', tone: 'neutral', title: `Update ${stale.length} price${stale.length === 1 ? '' : 's'}`,

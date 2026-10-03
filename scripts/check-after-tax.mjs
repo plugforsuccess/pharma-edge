@@ -19,6 +19,7 @@ import {
   exitLadder, allocateContracts, rateAtGainFor, customExitTargets, validateCustomTargets,
   cashAfterTax, cashYieldComparison, realEstateAfterTax, interestTaxRate,
   dividendAfterTax, incomeTaxRate, incomeYieldComparison, growthProjection, runnerAfterTax, annualizedReturn, portfolioProjection, incomeHoldingReturn, rocAdjustedBasis,
+  retirementAfterTax, vehicleEquity, debtCost,
   EXIT_PLAYBOOK, allocateWithRunner, playbookTargets, runnerPlan, timeStop, longTermFitsPlan, entryRunwayDays,
 } from '../src/utils/afterTax.js'
 
@@ -572,6 +573,26 @@ const round2 = (x) => Math.round(x * 100) / 100
   const loss = realEstateAfterTax({ value: 250000, basis: 300000, primary: false,
     purchaseDate: '2015-06-01', asOf: '2026-10-02', rateForGain: flatRE(0.288, 0.458) })
   eq('loss → no tax', loss.estimated_tax, 0)
+}
+
+// ── Retirement, vehicles, debts ──────────────────────────────────
+{
+  // Fixture GA single at $800k: ordinary 37% + GA 4.99%, no NIIT on retirement money.
+  const gaRates = makeRateResolver({ federal, state: GA, filingStatus: 'single', income: 800000 })
+  const k = retirementAfterTax({ balance: 200000, kind: 'traditional_401k', rateForGain: gaRates })
+  eq('401(k) rate = federal + state, no NIIT', k.rate, 0.37 + 0.0499, 1e-9)
+  eq('401(k) after tax', k.after_tax_value, 200000 * (1 - 0.4199), 1e-6)
+  eq('401(k) early penalty shown', k.early_penalty, 20000)
+  const roth = retirementAfterTax({ balance: 50000, kind: 'roth_ira', rateForGain: gaRates })
+  eq('Roth is tax-free', roth.after_tax_value, 50000)
+  eq('Roth has no penalty line', roth.early_penalty, 0)
+  eq('HSA tax-free', retirementAfterTax({ balance: 9000, kind: 'hsa', rateForGain: gaRates }).rate, 0)
+  const cpa = retirementAfterTax({ balance: 1000, kind: 'traditional_ira',
+    rateForGain: () => ({ short_term: { total: 0.3, federal: 0.2, state: 0.05, overridden: true } }) })
+  eq('CPA override uses its ordinary total', cpa.rate, 0.3)
+  eq('vehicle equity', vehicleEquity({ value: 30000, loan: 12000 }).equity, 18000)
+  eq('underwater vehicle', vehicleEquity({ value: 10000, loan: 14000 }).equity, -4000)
+  eq('debt interest / yr', debtCost({ balance: 5000, apr: 0.24 }).interest, 1200)
 }
 
 // ── Validation ───────────────────────────────────────────────────
