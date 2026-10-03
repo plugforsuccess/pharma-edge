@@ -1027,8 +1027,10 @@ value, holding period) and must pass before any edit to that file lands.
   mortgages stay on the property). Both count in net worth (debts
   subtract) on Portfolio and Home (`others.after` / `others.before` in
   `useHoldings`); the Total card lists only the parts the user has.
-- **Peers** (owner, 2026-10-03; **free**): the Total card's **Totals |
-  Peers** switch (`cm:totals-view`) shows net worth **before tax** against
+- **Peers** (owner, 2026-10-03; **free**): the Total card has two pages,
+  Totals and Peers — swipe it sideways or tap one of the **two dots above
+  "N holdings"** (top right; owner chose dots over pills), remembered in
+  `cm:totals-view`. Peers shows net worth **before tax** against
   US households from the Federal Reserve's **Survey of Consumer Finances
   2022** (summary-extract microdata, CPI-U adjusted). The tables are
   **data built by a script, never typed in**: `scraper/build_net_worth_benchmarks.py`

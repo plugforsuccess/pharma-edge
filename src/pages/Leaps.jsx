@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Landmark, Plus, Pencil, Trash2, Check, X, AlertTriangle, ArrowRightLeft, ChevronDown } from 'lucide-react'
 import clsx from 'clsx'
@@ -2015,6 +2015,7 @@ function PortfolioTotals({ summary, count, others, profile, homeowner }) {
   const [view, setView] = useState(() => {
     try { return localStorage.getItem(TOTALS_VIEW_KEY) === 'peers' ? 'peers' : 'totals' } catch { return 'totals' }
   })
+  const swipe = useRef(null)
   const pickView = (v) => {
     setView(v)
     try { localStorage.setItem(TOTALS_VIEW_KEY, v) } catch { /* this visit only */ }
@@ -2038,14 +2039,33 @@ function PortfolioTotals({ summary, count, others, profile, homeowner }) {
   const cost = before - after
   const costLabel = others?.realEstateCount > 0 ? 'tax & selling costs' : 'tax'
   return (
-    <section className="bg-card border border-amber-400/30 rounded-2xl p-5 mb-5">
-      <div className="flex items-center gap-2 mb-4">
-        <h2 className="text-sm font-semibold">{view === 'peers' ? 'Vs. US households' : 'Total'}</h2>
-        {view === 'totals' && <span className="text-xs text-muted">· {holdings} holding{holdings === 1 ? '' : 's'}</span>}
-        <span className="flex-1" />
-        <div className="w-[148px] -my-1">
-          <Segmented compact value={view} onChange={pickView}
-            options={[{ value: 'totals', label: 'Totals' }, { value: 'peers', label: 'Peers' }]} />
+    // Two pages, Totals and Peers: swipe the card sideways, or tap a dot
+    // (the dots sit above "N holdings", top right — owner, 2026-10-03).
+    <section className="bg-card border border-amber-400/30 rounded-2xl p-5 mb-5 touch-pan-y"
+      onTouchStart={(e) => { const t = e.touches[0]; swipe.current = { x: t.clientX, y: t.clientY } }}
+      onTouchEnd={(e) => {
+        const s0 = swipe.current
+        swipe.current = null
+        const t = e.changedTouches[0]
+        if (!s0 || !t) return
+        const dx = t.clientX - s0.x
+        if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(t.clientY - s0.y) * 1.5) return
+        pickView(dx < 0 ? 'peers' : 'totals')
+      }}>
+      <div className="flex items-start gap-2 mb-4">
+        <h2 className="flex-1 text-sm font-semibold pt-[18px]">{view === 'peers' ? 'Vs. US households' : 'Total'}</h2>
+        <div className="text-right">
+          <div className="flex justify-end -mr-2" role="tablist" aria-label="Total card page">
+            {[['totals', 'Totals'], ['peers', 'Peers']].map(([v, label]) => (
+              <button key={v} type="button" role="tab" aria-selected={view === v} aria-label={label} onClick={() => pickView(v)}
+                className="h-11 w-7 -my-[13px] flex items-center justify-center">
+                <span className={clsx('block rounded-full transition-all', view === v ? 'h-2 w-2 bg-fg' : 'h-1.5 w-1.5 bg-muted')} aria-hidden />
+              </button>
+            ))}
+          </div>
+          <div className="text-xs text-muted">
+            {view === 'totals' ? `${holdings} holding${holdings === 1 ? '' : 's'}` : 'Peers'}
+          </div>
         </div>
       </div>
       {view === 'peers' ? <PeersView netWorth={before} profile={profile} homeowner={homeowner} /> : (<>

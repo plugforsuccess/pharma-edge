@@ -12,8 +12,11 @@
 // within the user's age band when the survey has ≥ 100 such households,
 // else across all ages.
 
+// No line breaks inside an age band ("ages 35–44" stays on one line).
+const NB = '\u00a0'
+const J = '\u2060'
 export const AGE_LABELS = {
-  under_35: 'under 35', '35_44': '35–44', '45_54': '45–54', '55_64': '55–64', '65_74': '65–74', '75_plus': '75+',
+  under_35: `under${NB}35`, '35_44': `35–${J}44`, '45_54': `45–${J}54`, '55_64': `55–${J}64`, '65_74': `65–${J}74`, '75_plus': '75+',
 }
 export const SEX_OPTIONS = [{ value: 'female', label: 'Female' }, { value: 'male', label: 'Male' }]
 export const RACE_OPTIONS = [
@@ -106,7 +109,7 @@ export function peerComparisons({
   const at = (vals, p) => vals[ps.indexOf(p)]
   const age = ageOn(birthDate, today)
   const band = ageBand(age)
-  const ageText = band ? `ages ${AGE_LABELS[band]}` : null
+  const ageText = band ? `ages${NB}${AGE_LABELS[band]}` : null
   const couple = filingStatus === 'mfj' || filingStatus === 'mfs'
 
   const rows = []
