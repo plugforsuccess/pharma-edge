@@ -17,7 +17,11 @@ const ORDINARY_LOSS_LIMIT = 3000
 const rate = (n) => (Number.isFinite(n) ? `${+(n * 100).toFixed(1)}%` : '—')
 
 export default function Taxes() {
-  const { federal, state, positions, ready, results, cashResults, realEstateResults, summary, breakdown, has1256 } = useHoldings()
+  const { federal, state, positions, ready, results: allResults, cashResults: allCash, realEstateResults, summary, breakdown, has1256 } = useHoldings()
+  // Retirement accounts owe nothing on a sale or a payout inside them, and
+  // their losses can't offset anything: this page covers taxable holdings.
+  const results = useMemo(() => allResults.filter((r) => !r.calc?.sheltered), [allResults])
+  const cashResults = useMemo(() => allCash.filter((r) => (r.cash.account_type ?? 'taxable') === 'taxable'), [allCash])
 
   const sale = useMemo(() => {
     let st = 0

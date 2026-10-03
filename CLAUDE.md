@@ -1001,22 +1001,30 @@ value, holding period) and must pass before any edit to that file lands.
   entered (`YieldCompare`), both at the user's after-tax rate — categories only, no named
   products (named partners wait on counsel); rates are user-entered,
   prefilled with example rates (`cm:cash-yield-apys`).
-- **Retirement, vehicles, debts** (owner, 2026-10-03 — net worth should
-  count what public wealth surveys count). Three more add-form types
-  (`instrument_type` `retirement` / `vehicle` / `debt`; `name`, no ticker):
-  retirement = balance + `details.account_kind` (`RETIREMENT_KINDS`:
-  401(k) / 403(b) and traditional / SEP IRA are pre-tax — after tax =
-  balance × (1 − federal − state ordinary rate) as if withdrawn today, no
-  NIIT, CPA override uses its ordinary total; Roth and HSA tax-free; the
-  10% before-59½ penalty is shown on the card, never taken off net worth);
-  vehicle = value + `details.loan` (equity, no tax); debt = balance owed +
-  `details.debt_kind` / `apr` (subtracted from net worth; the Total card
-  adds a "Debt interest / yr" row). Mortgages stay on the property and car
-  loans on the vehicle. `retirementAfterTax`, `vehicleEquity`, `debtCost`
-  in `afterTax.js`; `useHoldings` exposes `others.after` / `others.before`
-  (everything outside investments) and the Total card lists only the
-  types the user has. Prices-older-than-7-days skips cash, vehicles and
-  debts.
+- **Retirement accounts are an account, not a holding type** (owner,
+  2026-10-03: "the 6 we have now are sufficient"). Options, Shares,
+  Income, Crypto and Cash carry `leaps_positions.account_type`
+  (`ACCOUNT_TYPES`: taxable — default — / traditional / roth / hsa; the
+  add form's **Account** row; real estate is always taxable). The tax
+  follows the account, not the asset: **traditional** (401(k) / 403(b) /
+  traditional or SEP IRA) — nothing taxed inside (sales, dividends,
+  interest); after tax = value × (1 − federal − state ordinary rate), as
+  if withdrawn today, no NIIT (CPA override → its ordinary total); its
+  cost went in pre-tax, so `after_tax_basis` = cost × (1 − rate) and the
+  card's after-tax % uses it; the 10% before-59½ penalty shows in the tax
+  detail line, never taken off. **Roth / HSA** — tax-free. No long /
+  short-term countdown, wait-for-long-term notices or capital-gains
+  netting for any of them; badges read Traditional / Roth / HSA (teal).
+  `accountRates` (the rate resolver per account), `shelteredPosition`,
+  `withdrawalRate` in `afterTax.js`; `useHoldings` runs every holding
+  on its account's rates (goals, exit targets, runner, payouts too).
+  Taxes and the Simulator cover taxable holdings only.
+- **Cars and debts** (owner, 2026-10-03) aren't holdings: Settings →
+  **Net worth** has two optional totals, `leaps_tax_profiles.other_assets`
+  (cars, etc.) and `other_debts` (cards, student / car / personal loans;
+  mortgages stay on the property). Both count in net worth (debts
+  subtract) on Portfolio and Home (`others.after` / `others.before` in
+  `useHoldings`); the Total card lists only the parts the user has.
 - **Dividend income.** The add form's 6th type, **Income** (Options ·
   Shares · Income / Crypto · Cash · Real estate), is a `stock` row with
   the income type and a required yield; a stock row with a yield or ROC

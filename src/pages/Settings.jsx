@@ -100,6 +100,14 @@ const ACT60_OPTIONS = [
 
 // One after-tax return goal; each holding's goal bar solves it on that
 // holding's own cost. (target_pcts keeps just this one value.)
+// Net worth outside the holdings: cars etc. and debts (not mortgages).
+function worthFrom(t) {
+  return {
+    other_assets: t?.other_assets != null ? String(t.other_assets) : '',
+    other_debts: t?.other_debts != null ? String(t.other_debts) : '',
+  }
+}
+
 function goalsFrom(t) {
   const sel = Number(t?.selected_target_pct)
   return {
@@ -137,6 +145,7 @@ export default function Settings() {
   const [risk, setRisk] = useState(riskFrom(null, profile))
   const [tax, setTax] = useState(taxFrom(null))
   const [goals, setGoals] = useState(goalsFrom(null))
+  const [worth, setWorth] = useState(worthFrom(null))
   const [ladder, setLadder] = useState(ladderFrom(null))
   const [baseline, setBaseline] = useState(null)
   const [accepted, setAccepted] = useState({})
@@ -176,9 +185,10 @@ export default function Settings() {
       risk: riskFrom(riskRow, profile),
       tax: taxFrom(taxRow),
       goals: goalsFrom(taxRow),
+      worth: worthFrom(taxRow),
       ladder: ladderFrom(riskRow),
     }
-    setNames(b.names); setRisk(b.risk); setTax(b.tax); setGoals(b.goals); setLadder(b.ladder)
+    setNames(b.names); setRisk(b.risk); setTax(b.tax); setGoals(b.goals); setWorth(b.worth); setLadder(b.ladder)
     setBaseline(b)
   }, [loaded, taxRow, riskRow, profile?.id, profile?.display_name, profile?.public_slug, profile?.is_public])
 
@@ -196,8 +206,9 @@ export default function Settings() {
     accountSize: risk.account_size !== baseline.risk.account_size,
     tax: !same(tax, baseline.tax),
     goals: !same(goals, baseline.goals),
+    worth: !same(worth, baseline.worth),
     ladder: !same(ladder, baseline.ladder),
-  }, [baseline, names, risk, tax, goals, ladder])
+  }, [baseline, names, risk, tax, goals, worth, ladder])
   const anyDirty = !!dirty && Object.values(dirty).some(Boolean)
 
   const disclosuresOnFile = riskRow?.disclosures_version === LDP_DISCLOSURES_VERSION
@@ -236,7 +247,13 @@ export default function Settings() {
       if (years == null || years < 0 || years > 100) errs.push('Risk profile: enter your time horizon in years.')
       if (needsDisclosures && !DISCLOSURES.every((d) => accepted[d.id])) errs.push('Risk profile: accept each statement to save new answers.')
     }
-    if (dirty.tax || dirty.goals || dirty.accountSize) {
+    if (dirty.worth) {
+      for (const [k, label] of [['other_assets', 'other assets'], ['other_debts', 'debts']]) {
+        const v = num(worth[k])
+        if (v != null && v < 0) errs.push(`Net worth: ${label} can't be negative.`)
+      }
+    }
+    if (dirty.tax || dirty.goals || dirty.accountSize || dirty.worth) {
       const income = num(tax.annual_income)
       if (income == null || income < 0) errs.push('Tax profile: enter your expected taxable income (0 or more).')
       if (!tax.state_code) errs.push('Tax profile: pick your residency.')
@@ -313,7 +330,7 @@ export default function Settings() {
     }
 
     // 2. Tax profile + goals (+ account size as portfolio size).
-    if (dirty.tax || dirty.goals || dirty.accountSize) {
+    if (dirty.tax || dirty.goals || dirty.accountSize || dirty.worth) {
       const goal = num(goals.goal) / 100
       const lt = num(tax.lt_rate_override)
       const st = num(tax.st_rate_override)
@@ -328,6 +345,8 @@ export default function Settings() {
         pr_act60_rate: tax.state_code === 'PR' && tax.pr_act60_rate !== 'none' ? Number(tax.pr_act60_rate) : null,
         target_pcts: [goal],
         selected_target_pct: goal,
+        other_assets: num(worth.other_assets),
+        other_debts: num(worth.other_debts),
         ...(size > 0 ? { portfolio_size: size } : {}),
       }
       const { data, error } = await supabase.from('leaps_tax_profiles').upsert(row).select().single()
@@ -354,6 +373,7 @@ export default function Settings() {
   const setR = (k, v) => setRisk((x) => ({ ...x, [k]: v }))
   const setT = (k, v) => setTax((x) => ({ ...x, [k]: v }))
   const setG = (k, v) => setGoals((x) => ({ ...x, [k]: v }))
+  const setW = (k, v) => setWorth((x) => ({ ...x, [k]: v }))
 
   return (
     <div className="px-4 lg:px-6 pt-6 pb-28 space-y-4 mx-auto lg:max-w-2xl w-full">
@@ -440,6 +460,18 @@ export default function Settings() {
       <Section title="Goals" id="goals">
         <Input label="Default after-tax return goal (% of what you paid)" suffix="%" inputMode="decimal"
           value={goals.goal} onChange={(v) => setG('goal', v)} placeholder="50" />
+      </Section>
+
+      <Section title="Net worth" id="net-worth">
+        <div className="grid grid-cols-2 gap-3">
+          <Input label="Other assets (cars, etc.)" prefix="$" inputMode="numeric"
+            value={worth.other_assets} onChange={(v) => setW('other_assets', v)} placeholder="0" />
+          <Input label="Debts" prefix="$" inputMode="numeric"
+            value={worth.other_debts} onChange={(v) => setW('other_debts', v)} placeholder="0" />
+        </div>
+        <p className="text-xs text-muted mt-2">
+          Counted in your net worth. Debts are cards, student, car and personal loans; mortgages go on the property.
+        </p>
       </Section>
 
       <Section title="Exit Targets" id="exit-targets">

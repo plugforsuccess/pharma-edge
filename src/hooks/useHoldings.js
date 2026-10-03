@@ -5,7 +5,7 @@ import {
   DEFAULT_TARGET_PCTS, makeRateResolver, deriveRates, applyRateOverride, targetRow, positionAfterTax,
   portfolioSummary, todayYmd, rateAtGainFor, EXIT_PLAYBOOK, playbookTargets, runnerPlan, runnerAfterTax,
   DEFAULT_SELLING_COST_PCT, cashAfterTax, realEstateAfterTax, dividendAfterTax, incomeHoldingReturn, customExitTargets,
-  retirementAfterTax, vehicleEquity, debtCost,
+  accountRates, shelteredPosition, withdrawalRate,
 } from '../utils/afterTax'
 
 // The user's holdings with every after-tax figure worked out — shared by
@@ -123,25 +123,32 @@ export function useHoldings() {
 
   // The exit plan (playbook by default) on one position: pre-tax targets
   // with the after-tax dollars each sale keeps.
-  const ladderFor = useCallback((basis, currentValue, character, contracts) => {
+  // `rates` = the holding's account rates (retirement accounts differ).
+  const ladderFor = useCallback((basis, currentValue, character, contracts, rates = rateForGain) => {
     if (!rateForGain) return []
     return customExitTargets({ basis, currentValue, contracts, targets: playbookTargets(plan),
-      rateAtGain: rateAtGainFor(character, rateForGain) })
+      rateAtGain: rateAtGainFor(character, rates) })
   }, [rateForGain, plan])
 
   // User-set % / $ targets on a single position (leaps_positions.exit_targets).
-  const customFor = useCallback((basis, currentValue, character, contracts, targets) => {
+  const customFor = useCallback((basis, currentValue, character, contracts, targets, rates = rateForGain) => {
     if (!rateForGain || !targets?.length) return []
-    return customExitTargets({ basis, currentValue, contracts, targets, rateAtGain: rateAtGainFor(character, rateForGain) })
+    return customExitTargets({ basis, currentValue, contracts, targets, rateAtGain: rateAtGainFor(character, rates) })
   }, [rateForGain])
 
   const cashResults = useMemo(() => {
     if (!rateForGain || !positions) return []
-    return positions.filter((x) => x.instrument_type === 'cash').map((pos) => ({
-      pos,
-      cash: cashAfterTax({ balance: Number(pos.current_value), apy: Number(pos.details?.apy) || 0,
-        kind: pos.details?.account_kind ?? 'savings', rateForGain }),
-    }))
+    return positions.filter((x) => x.instrument_type === 'cash').map((pos) => {
+      const acct = pos.account_type ?? 'taxable'
+      const cash = cashAfterTax({ balance: Number(pos.current_value), apy: Number(pos.details?.apy) || 0,
+        kind: pos.details?.account_kind ?? 'savings', rateForGain: accountRates(acct, rateForGain) })
+      // Cash in a traditional account is taxed when it comes out.
+      if (acct === 'traditional') {
+        const r = withdrawalRate(rateForGain, cash.balance)
+        return { pos, cash: { ...cash, account_type: acct, withdrawal_rate: r, after_tax_value: cash.balance * (1 - r) } }
+      }
+      return { pos, cash: { ...cash, account_type: acct } }
+    })
   }, [positions, rateForGain])
 
   const realEstateResults = useMemo(() => {
@@ -160,58 +167,46 @@ export function useHoldings() {
     })
   }, [positions, rateForGain, p.filing_status, asOf])
 
-  // Retirement accounts, vehicles and debts: net worth only (no targets).
-  const retirementResults = useMemo(() => {
-    if (!rateForGain || !positions) return []
-    return positions.filter((x) => x.instrument_type === 'retirement').map((pos) => ({
-      pos,
-      ret: retirementAfterTax({ balance: Number(pos.current_value), kind: pos.details?.account_kind ?? 'traditional_401k', rateForGain }),
-    }))
-  }, [positions, rateForGain])
-  const vehicleResults = useMemo(() => (positions ?? []).filter((x) => x.instrument_type === 'vehicle').map((pos) => ({
-    pos, car: vehicleEquity({ value: Number(pos.current_value), loan: Number(pos.details?.loan) || 0 }),
-  })), [positions])
-  const debtResults = useMemo(() => (positions ?? []).filter((x) => x.instrument_type === 'debt').map((pos) => ({
-    pos, debt: debtCost({ balance: Number(pos.current_value), apr: Number(pos.details?.apr) || 0 }),
-  })), [positions])
-
   const results = useMemo(() => {
     if (!rateForGain || !positions) return []
     return investments.map((pos) => {
+      // Retirement accounts: their own rates, no holding period.
+      const acct = pos.account_type ?? 'taxable'
+      const rates = accountRates(acct, rateForGain)
       const goalPct = Number(pos.goal_pct) > 0 ? Number(pos.goal_pct) : selectedPct
-      const goal = goalRow(Number(pos.cost_basis), goalPct)
+      const goal = goalRow(Number(pos.cost_basis), goalPct, rates)
       const is1256 = pos.instrument_type === 'index_option_1256'
-      const calc = positionAfterTax({
+      const calc = shelteredPosition(positionAfterTax({
         basis: Number(pos.cost_basis),
         currentValue: Number(pos.current_value),
         purchaseDate: pos.purchase_date,
         asOf,
-        rateForGain,
+        rateForGain: rates,
         instrumentType: pos.instrument_type,
         targetMultiple: goal ? (is1256 ? goal.section_1256.required_multiple : goal.long_term.required_multiple) : null,
-      })
+      }), acct, rateForGain)
       // The goal bar shows both multiples: long-term and short-term.
       if (calc && goal) {
         calc.goal_st_multiple = goal.short_term.required_multiple
         calc.goal_pct = goalPct
       }
-      return withLadder(pos, calc)
+      return withLadder(pos, calc, rates)
     })
 
     // The runner's after-tax gain (or loss) if its trail fired today.
-    function withRunnerTax(runner, calc, units) {
+    function withRunnerTax(runner, calc, units, rates) {
       if (!runner || runner.exit_value == null) return runner
-      const after = runnerAfterTax({ runner, basis: calc.basis, units, rateAtGain: rateAtGainFor(calc.tax_character, rateForGain) })
+      const after = runnerAfterTax({ runner, basis: calc.basis, units, rateAtGain: rateAtGainFor(calc.tax_character, rates) })
       return after ? { ...runner, after_tax_gain: after.after_tax_gain } : runner
     }
 
     // The after-tax return goal (Settings), solved on this position's own cost.
-    function goalRow(basis, goalPct) {
+    function goalRow(basis, goalPct, rates) {
       if (!(goalPct > 0)) return null
-      return targetRow({ portfolio: basis, basis, targetPct: goalPct, rateForGain })
+      return targetRow({ portfolio: basis, basis, targetPct: goalPct, rateForGain: rates })
     }
 
-    function withLadder(pos, calcIn) {
+    function withLadder(pos, calcIn, rates) {
       let calc = calcIn
       if (!calc) return { pos, calc, ladder: [], ladderLongTerm: null, custom: [], customLongTerm: null, runner: null }
       const isStock = isQuantity(pos.instrument_type)
@@ -221,12 +216,12 @@ export function useHoldings() {
       const own = Array.isArray(pos.exit_targets) && pos.exit_targets.length ? pos.exit_targets : null
       const dy = Number(pos.details?.dividend_yield)
       const dividend = pos.instrument_type === 'stock' && dy > 0
-        ? dividendAfterTax({ value: calc.current_value, yieldPct: dy, kind: pos.details?.dividend_kind ?? 'qualified', rateForGain })
+        ? dividendAfterTax({ value: calc.current_value, yieldPct: dy, kind: pos.details?.dividend_kind ?? 'qualified', rateForGain: rates })
         : null
       // Payouts since purchase: in the return, and (ROC) off the basis.
       const income = dividend
         ? incomeHoldingReturn({ cost: calc.basis, value: calc.current_value, yieldPct: dy, kind: dividend.kind,
-          purchaseDate: pos.purchase_date, asOf, payoutsReceived: pos.details?.payouts_received, rateForGain })
+          purchaseDate: pos.purchase_date, asOf, payoutsReceived: pos.details?.payouts_received, rateForGain: rates })
         : null
       if (income && income.kind === 'roc') {
         // The sale is taxed on the lowered basis.
@@ -240,14 +235,14 @@ export function useHoldings() {
           calc,
           ladder: [],
           ladderLongTerm: null,
-          custom: customFor(calc.basis, calc.current_value, calc.tax_character, contracts, own),
+          custom: customFor(calc.basis, calc.current_value, calc.tax_character, contracts, own, rates),
           customLongTerm: calc.tax_character === 'short_term'
-            ? customFor(calc.basis, calc.current_value, 'long_term', contracts, own)
+            ? customFor(calc.basis, calc.current_value, 'long_term', contracts, own, rates)
             : null,
           // Custom runner: what the targets don't sell, on its own trail.
           runner: Number(pos.runner_trail_pct) > 0
             ? withRunnerTax(runnerPlan({ fractions: own.map((t) => Number(t.sell) || 0), contracts, units,
-              peakUnitValue: pos.peak_unit_value, currentValue: calc.current_value, trailPct: Number(pos.runner_trail_pct) }), calc, units)
+              peakUnitValue: pos.peak_unit_value, currentValue: calc.current_value, trailPct: Number(pos.runner_trail_pct) }), calc, units, rates)
             : null,
           dividend,
           income,
@@ -258,13 +253,13 @@ export function useHoldings() {
         calc,
         custom: [],
         customLongTerm: null,
-        ladder: ladderFor(calc.basis, calc.current_value, calc.tax_character, contracts),
+        ladder: ladderFor(calc.basis, calc.current_value, calc.tax_character, contracts, rates),
         // While short-term, show where each rung sits once it goes long-term.
         ladderLongTerm: calc.tax_character === 'short_term'
-          ? ladderFor(calc.basis, calc.current_value, 'long_term', contracts)
+          ? ladderFor(calc.basis, calc.current_value, 'long_term', contracts, rates)
           : null,
         runner: withRunnerTax(runnerPlan({ fractions: plan.fractions, contracts, units, peakUnitValue: pos.peak_unit_value,
-          currentValue: calc.current_value, trailPct: plan.runnerTrailPct }), calc, units),
+          currentValue: calc.current_value, trailPct: plan.runnerTrailPct }), calc, units, rates),
         dividend,
         income,
       }
@@ -301,24 +296,18 @@ export function useHoldings() {
     realEstateBefore: realEstateResults.reduce((sum, r) => sum + (r.re?.equity ?? 0), 0),
     cashCount: cashResults.length,
     realEstateCount: realEstateResults.length,
-    retirement: retirementResults.reduce((sum, r) => sum + r.ret.after_tax_value, 0),
-    retirementBefore: retirementResults.reduce((sum, r) => sum + r.ret.balance, 0),
-    vehicles: vehicleResults.reduce((sum, r) => sum + r.car.equity, 0),
-    debts: debtResults.reduce((sum, r) => sum + r.debt.balance, 0),
-    debtInterest: debtResults.reduce((sum, r) => sum + r.debt.interest, 0),
-    retirementCount: retirementResults.length,
-    vehicleCount: vehicleResults.length,
-    debtCount: debtResults.length,
+    // Settings → Net worth: cars etc. and debts (not holdings).
+    otherAssets: Number(p.other_assets) || 0,
+    otherDebts: Number(p.other_debts) || 0,
   }
   // Everything outside investments, after and before tax (debts subtract).
-  others.count = others.cashCount + others.realEstateCount + others.retirementCount + others.vehicleCount + others.debtCount
-  others.after = others.cash + others.realEstate + others.retirement + others.vehicles - others.debts
-  others.before = others.cashBefore + others.realEstateBefore + others.retirementBefore + others.vehicles - others.debts
+  others.after = others.cash + others.realEstate + others.otherAssets - others.otherDebts
+  others.before = others.cashBefore + others.realEstateBefore + others.otherAssets - others.otherDebts
+  others.any = others.cashCount > 0 || others.realEstateCount > 0 || others.otherAssets > 0 || others.otherDebts > 0
 
   return {
     federal, states, profile, setProfile, positions, setPositions, loadError, plan,
     p, state, override, ready, rateForGain, investments, totalCost, selectedPct, asOf,
-    ladderFor, customFor, cashResults, realEstateResults, retirementResults, vehicleResults, debtResults,
-    results, summary, breakdown, has1256, others,
+    ladderFor, customFor, cashResults, realEstateResults, results, summary, breakdown, has1256, others,
   }
 }

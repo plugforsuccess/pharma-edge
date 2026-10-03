@@ -13,7 +13,7 @@ import {
   CASH_KINDS, DEFAULT_SELLING_COST_PCT, cashAfterTax, cashYieldComparison, realEstateAfterTax,
   INCOME_KINDS, dividendAfterTax, incomeYieldComparison,
   customExitTargets, validateCustomTargets, MAX_CUSTOM_TARGETS,
-  RETIREMENT_KINDS, DEBT_KINDS,
+  ACCOUNT_TYPES, accountRates, isSheltered,
 } from '../utils/afterTax'
 import NumberInput from '../components/NumberInput'
 import Modal from '../components/Modal'
@@ -109,14 +109,16 @@ function BoughtLine({ verb = 'Bought', date, suffix }) {
   )
 }
 
-function GainLine({ afterGain, beforeGain, cost, purchaseDate }) {
+// afterCost: the cost after tax when it differs (traditional-account money
+// went in pre-tax).
+function GainLine({ afterGain, beforeGain, cost, afterCost = cost, purchaseDate }) {
   const [mode, flip] = useGainMode()
   const asOf = todayYmd()
-  const a = annualizedReturn({ gain: afterGain, cost, purchaseDate, asOf })
+  const a = annualizedReturn({ gain: afterGain, cost: afterCost, purchaseDate, asOf })
   const b = annualizedReturn({ gain: beforeGain, cost, purchaseDate, asOf })
   const annual = mode === 'annual'
   const tone = (n, gainTone) => (n < 0 ? 'text-rose-300' : gainTone)
-  let after = gainPct(afterGain, cost)
+  let after = gainPct(afterGain, afterCost)
   let before = gainPct(beforeGain, cost)
   // Under a year the total is the return — nothing to annualize.
   if (annual && a?.annualized != null && b?.annualized != null) {
@@ -164,8 +166,7 @@ export default function Leaps() {
   const {
     federal, states, profile, setProfile, positions, setPositions, loadError, plan,
     p, state, override, ready, rateForGain, totalCost, selectedPct,
-    ladderFor, customFor, cashResults, realEstateResults, retirementResults, vehicleResults, debtResults,
-    results, summary, breakdown, has1256, others,
+    ladderFor, customFor, cashResults, realEstateResults, results, summary, breakdown, has1256, others,
   } = useHoldings()
   const [searchParams, setSearchParams] = useSearchParams()
   const [adding, setAdding] = useState(searchParams.get('add') === '1')
@@ -232,7 +233,7 @@ export default function Leaps() {
     }
   }
 
-  const allIds = [...results, ...retirementResults, ...cashResults, ...realEstateResults, ...vehicleResults, ...debtResults].map((r) => r.pos.id)
+  const allIds = [...results, ...cashResults, ...realEstateResults].map((r) => r.pos.id)
 
   // /leaps?open=<id> (from Home, Charts or the LEAPS bot): expand that
   // holding and scroll to it, then drop the param.
@@ -288,7 +289,7 @@ export default function Leaps() {
             <Banner tone="amber">Pick your residency in Settings (or enter both CPA rates) to see after-tax figures.</Banner>
           )}
 
-          {ready && (summary || others.count > 0) && (
+          {ready && (summary || others.any) && (
             <PortfolioTotals summary={summary} count={results.length} others={others} />
           )}
 
@@ -318,7 +319,7 @@ export default function Leaps() {
 
               {adding && (
                 <PositionForm
-                  preview={(f, own) => previewTargets(f, own, ladderFor, customFor)}
+                  preview={(f, own) => previewTargets(f, own, ladderFor, customFor, rateForGain)}
                   onCancel={() => { setAdding(false); dropAddParam() }}
                   allowAddAnother
                   onSave={async (row, { keepOpen } = {}) => {
@@ -331,7 +332,7 @@ export default function Leaps() {
 
               {allIds.length === 0 && !adding && (
                 <div className="text-sm text-muted py-8 px-6 text-center border border-dashed border-border rounded-2xl">
-                  No holdings yet. Tap Add + to enter investments, retirement accounts, cash, real estate, vehicles or debts.
+                  No holdings yet. Tap Add + to enter options, shares, crypto, cash or real estate.
                 </div>
               )}
 
@@ -350,18 +351,12 @@ export default function Leaps() {
                   plan={plan}
                   open={openIds.has(pos.id)}
                   onToggle={() => toggleOpen(pos.id)}
-                  previewFor={(f, own) => previewTargets(f, own, ladderFor, customFor)}
+                  previewFor={(f, own) => previewTargets(f, own, ladderFor, customFor, rateForGain)}
                   selectedTargetPct={Number(p.selected_target_pct)}
                   onSave={(row) => savePosition(row, pos.id)}
                   onExercise={(args) => exercisePosition(pos, args)}
                   onDelete={() => deletePosition(pos.id)}
                 />
-              ))}
-
-              {retirementResults.map(({ pos, ret }) => (
-                <RetirementCard key={pos.id} pos={pos} ret={ret}
-                  open={openIds.has(pos.id)} onToggle={() => toggleOpen(pos.id)}
-                  onSave={(row) => savePosition(row, pos.id)} onDelete={() => deletePosition(pos.id)} />
               ))}
 
               {cashResults.map(({ pos, cash }) => (
@@ -372,18 +367,6 @@ export default function Leaps() {
 
               {realEstateResults.map(({ pos, re }) => (
                 <RealEstateCard key={pos.id} pos={pos} re={re}
-                  open={openIds.has(pos.id)} onToggle={() => toggleOpen(pos.id)}
-                  onSave={(row) => savePosition(row, pos.id)} onDelete={() => deletePosition(pos.id)} />
-              ))}
-
-              {vehicleResults.map(({ pos, car }) => (
-                <VehicleCard key={pos.id} pos={pos} car={car}
-                  open={openIds.has(pos.id)} onToggle={() => toggleOpen(pos.id)}
-                  onSave={(row) => savePosition(row, pos.id)} onDelete={() => deletePosition(pos.id)} />
-              ))}
-
-              {debtResults.map(({ pos, debt }) => (
-                <DebtCard key={pos.id} pos={pos} debt={debt}
                   open={openIds.has(pos.id)} onToggle={() => toggleOpen(pos.id)}
                   onSave={(row) => savePosition(row, pos.id)} onDelete={() => deletePosition(pos.id)} />
               ))}
@@ -512,9 +495,11 @@ function emptyForm(initial) {
   return {
     // Shares paying an income (a yield, or return of capital) open as Income.
     asset: t === 'stock' ? (Number(d.dividend_yield) > 0 || d.dividend_kind === 'roc' ? 'income' : 'shares') : t === 'crypto' ? 'crypto' : t === 'cash' ? 'cash'
-      : t === 'real_estate' ? 'real_estate' : t === 'retirement' ? 'retirement' : t === 'vehicle' ? 'vehicle' : t === 'debt' ? 'debt' : 'option',
+      : t === 'real_estate' ? 'real_estate' : 'option',
     ticker: initial?.ticker ?? '',
     name: initial?.name ?? '',
+    // Where it's held: taxable, or a retirement account (changes the tax math).
+    account_type: initial?.account_type ?? 'taxable',
     // Income (shares with a yield)
     div_yield: d.dividend_yield != null ? String(+(Number(d.dividend_yield) * 100).toFixed(4)) : '',
     div_kind: d.dividend_kind ?? 'qualified',
@@ -525,16 +510,6 @@ function emptyForm(initial) {
     balance: t === 'cash' ? str(initial?.current_value) : '',
     apy: d.apy != null ? String(+(Number(d.apy) * 100).toFixed(4)) : '',
     account_kind: d.account_kind ?? 'savings',
-    // Retirement account
-    ret_kind: d.account_kind && t === 'retirement' ? d.account_kind : 'traditional_401k',
-    ret_balance: t === 'retirement' ? str(initial?.current_value) : '',
-    // Vehicle
-    car_value: t === 'vehicle' ? str(initial?.current_value) : '',
-    car_loan: d.loan != null ? String(d.loan) : '',
-    // Debt
-    debt_kind: d.debt_kind ?? 'credit_card',
-    debt_balance: t === 'debt' ? str(initial?.current_value) : '',
-    debt_apr: d.apr != null ? String(+(Number(d.apr) * 100).toFixed(4)) : '',
     // Real estate
     re_kind: d.kind ?? 'primary',
     purchase_price: d.purchase_price != null ? String(d.purchase_price) : (t === 'real_estate' ? str(initial?.cost_basis) : ''),
@@ -606,11 +581,6 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
   const isCrypto = f.asset === 'crypto'
   const isCash = f.asset === 'cash'
   const isRE = f.asset === 'real_estate'
-  const isRet = f.asset === 'retirement'
-  const isCar = f.asset === 'vehicle'
-  const isDebt = f.asset === 'debt'
-  // Net-worth-only types: their own section, no ticker / targets / goal.
-  const isOther = isCash || isRE || isRet || isCar || isDebt
   // Income = shares bought for their yield (dividend stocks, preferreds,
   // income ETFs); saved as stock with the yield in details.
   const isIncome = f.asset === 'income'
@@ -666,6 +636,7 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
       cost_basis: exact(balance), current_value: exact(balance), value_as_of: new Date().toISOString(),
       purchase_date: initial?.purchase_date ?? todayYmd(), exit_targets: null,
       details: { apy: apy == null ? 0 : exact(apy / 100), account_kind: f.account_kind },
+      account_type: f.account_type,
     }, keepOpen, f.name.trim())
   }
 
@@ -693,43 +664,11 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
         depreciation: f.re_kind === 'rental' ? dep : 0,
         exclusion_eligible: f.re_kind === 'primary' ? !!f.exclusion_eligible : false,
       },
+      account_type: 'taxable',
     }, keepOpen, f.name.trim())
   }
 
-  // Retirement, vehicles and debts: a name and a balance (+ a few details).
-  const plainRow = (type, amount, details, basis = amount) => ({
-    ticker: null, name: f.name.trim(), instrument_type: type, option_type: null, strike: null,
-    expiration: null, contracts: null, shares: null,
-    cost_basis: exact(basis), current_value: exact(amount), value_as_of: new Date().toISOString(),
-    purchase_date: initial?.purchase_date ?? todayYmd(), exit_targets: null, details,
-  })
-  async function submitRetirement(keepOpen) {
-    const balance = num(f.ret_balance)
-    if (!f.name.trim()) return setError('Name this account (e.g. "Fidelity 401(k)").')
-    if (!(balance > 0)) return setError('Enter the balance.')
-    return finish(plainRow('retirement', balance, { account_kind: f.ret_kind }), keepOpen, f.name.trim())
-  }
-  async function submitVehicle(keepOpen) {
-    const value = num(f.car_value)
-    const loan = num(f.car_loan) ?? 0
-    if (!f.name.trim()) return setError('Name this vehicle (e.g. "2022 Tesla Model Y").')
-    if (!(value > 0)) return setError('Enter what the vehicle is worth today.')
-    if (loan < 0) return setError('The loan can’t be negative.')
-    return finish(plainRow('vehicle', value, { loan }, initial?.instrument_type === 'vehicle' ? Number(initial.cost_basis) : value), keepOpen, f.name.trim())
-  }
-  async function submitDebt(keepOpen) {
-    const balance = num(f.debt_balance)
-    const apr = num(f.debt_apr)
-    if (!f.name.trim()) return setError('Name this debt (e.g. "Chase Sapphire").')
-    if (!(balance > 0)) return setError('Enter the balance owed.')
-    if (apr != null && (apr < 0 || apr > 100)) return setError('Enter the APR as a % between 0 and 100.')
-    return finish(plainRow('debt', balance, { debt_kind: f.debt_kind, apr: apr == null ? 0 : exact(apr / 100) }), keepOpen, f.name.trim())
-  }
-
   async function submit({ keepOpen = false } = {}) {
-    if (isRet) return submitRetirement(keepOpen)
-    if (isCar) return submitVehicle(keepOpen)
-    if (isDebt) return submitDebt(keepOpen)
     if (isCash) return submitCash(keepOpen)
     if (isRE) return submitRealEstate(keepOpen)
     if (!/^[A-Z0-9.]{1,12}$/.test(f.ticker)) return setError(isCrypto ? 'Enter the coin (e.g. BTC).' : 'Enter a ticker.')
@@ -785,6 +724,7 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
       purchase_date: f.purchase_date,
       exit_targets: exitTargets,
       runner_trail_pct: exitTargets ? runnerTrail : null,
+      account_type: f.account_type,
     }, keepOpen, f.ticker)
   }
 
@@ -833,71 +773,30 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
       </div>
 
       <Segmented
-        label="What are you adding?"
+        label="What do you own?"
         value={f.asset}
         onChange={(v) => { setError(''); setF((x) => ({ ...x, asset: v })) }}
         columns={3}
         options={[
           { value: 'option', label: 'Options' }, { value: 'shares', label: 'Shares' }, { value: 'income', label: 'Income' },
           { value: 'crypto', label: 'Crypto' }, { value: 'cash', label: 'Cash' }, { value: 'real_estate', label: 'Real Estate' },
-          { value: 'retirement', label: 'Retirement' }, { value: 'vehicle', label: 'Vehicle' }, { value: 'debt', label: 'Debt' },
         ]}
       />
 
-      {isRet && (
-        <FormSection title="Retirement account">
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Name" wide>
-              <input value={f.name} onChange={(e) => setV('name')(e.target.value)} maxLength={60} placeholder="Fidelity 401(k)" className={inputCls} />
-            </Field>
-            <Field label="Account type" wide>
-              <select value={f.ret_kind} onChange={(e) => setV('ret_kind')(e.target.value)} className={inputCls}>
-                {RETIREMENT_KINDS.map((k) => <option key={k.value} value={k.value}>{k.long}</option>)}
-              </select>
-            </Field>
-            <Field label="Balance" wide>
-              <Affix prefix="$"><NumberInput value={f.ret_balance} onChange={setV('ret_balance')} placeholder="150,000" className={clsx(inputCls, 'pl-7')} /></Affix>
-            </Field>
-          </div>
-        </FormSection>
-      )}
-
-      {isCar && (
-        <FormSection title="Vehicle">
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Name" wide>
-              <input value={f.name} onChange={(e) => setV('name')(e.target.value)} maxLength={60} placeholder="2022 Tesla Model Y" className={inputCls} />
-            </Field>
-            <Field label="Value today">
-              <Affix prefix="$"><NumberInput value={f.car_value} onChange={setV('car_value')} placeholder="32,000" className={clsx(inputCls, 'pl-7')} /></Affix>
-            </Field>
-            <Field label="Loan owed" hint="optional">
-              <Affix prefix="$"><NumberInput value={f.car_loan} onChange={setV('car_loan')} placeholder="0" className={clsx(inputCls, 'pl-7')} /></Affix>
-            </Field>
-          </div>
-        </FormSection>
-      )}
-
-      {isDebt && (
-        <FormSection title="Debt">
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Name" wide>
-              <input value={f.name} onChange={(e) => setV('name')(e.target.value)} maxLength={60} placeholder="Chase Sapphire" className={inputCls} />
-            </Field>
-            <Field label="Type" wide>
-              <select value={f.debt_kind} onChange={(e) => setV('debt_kind')(e.target.value)} className={inputCls}>
-                {DEBT_KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
-              </select>
-            </Field>
-            <Field label="Balance owed">
-              <Affix prefix="$"><NumberInput value={f.debt_balance} onChange={setV('debt_balance')} placeholder="4,500" className={clsx(inputCls, 'pl-7')} /></Affix>
-            </Field>
-            <Field label="APR" hint="optional">
-              <Affix suffix="%"><NumberInput decimals={4} value={f.debt_apr} onChange={setV('debt_apr')} placeholder="22.9" className={clsx(inputCls, 'pr-8')} /></Affix>
-            </Field>
-          </div>
-          <p className="mt-3 text-xs text-muted">Mortgages go on the property and car loans on the vehicle, so they aren't counted twice.</p>
-        </FormSection>
+      {/* Where it's held — the tax follows the account, not the asset. */}
+      {!isRE && (
+        <div className="mt-4">
+          <Segmented label="Account" value={f.account_type} onChange={setV('account_type')} columns={4}
+            options={ACCOUNT_TYPES.map((a) => ({ value: a.value, label: a.label }))} />
+          {f.account_type !== 'taxable' && (
+            <p className="mt-2 text-xs text-muted">
+              {f.account_type === 'traditional'
+                ? '401(k) / 403(b) / IRA: no tax inside; withdrawals are taxed as ordinary income.'
+                : f.account_type === 'roth' ? 'Roth 401(k) / Roth IRA: qualified withdrawals are tax-free.'
+                  : 'HSA: tax-free for medical costs.'}
+            </p>
+          )}
+        </div>
       )}
 
       {isCash && (
@@ -971,7 +870,7 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
         </FormSection>
       )}
 
-      {!isOther && (<>
+      {!isCash && !isRE && (<>
 
       <FormSection title={isCrypto ? 'Crypto' : isIncome ? 'Income' : isShares ? 'Shares' : 'Contract'}>
         <div className="grid grid-cols-2 gap-3">
@@ -1078,7 +977,7 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
         )}
       </FormSection>
 
-      {!rocIncome && <GoalSection goal={f.goal} onGoal={setV('goal')} basis={basis} is1256={is1256} />}
+      {!rocIncome && <GoalSection goal={f.goal} onGoal={setV('goal')} basis={basis} is1256={is1256} accountType={f.account_type} />}
 
       {isIncome && <YieldCompare group="income" amount={value} />}
 
@@ -1257,14 +1156,16 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
           <span
             className={clsx(
               'inline-block mt-2 text-[10px] uppercase tracking-wider px-2 py-1 rounded-md border font-semibold',
-              is1256
+              calc.sheltered
+                ? BADGE_TONE.retirement
+                : is1256
                 ? 'bg-violet-400/15 text-violet-300 border-violet-400/40'
                 : calc.is_long_term
                   ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
                   : 'bg-amber-500/15 text-amber-300 border-amber-500/40',
             )}
           >
-            {is1256 ? '§1256 · 60/40' : calc.is_long_term ? 'Long-term' : 'Short-term'}
+            {calc.sheltered ? accountLabel(calc.account_type) : is1256 ? '§1256 · 60/40' : calc.is_long_term ? 'Long-term' : 'Short-term'}
           </span>
         </div>
         <div className="shrink-0 flex items-start gap-2">
@@ -1273,7 +1174,7 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
               <div className={clsx('text-base font-semibold font-mono-tab', up ? 'text-green-400' : 'text-rose-300')}>
                 {usd(calc.after_tax_value)}
               </div>
-              <div className="text-xs text-muted mt-0.5">{gainPct(income?.after_tax_gain ?? calc.after_tax_gain, calc.basis)} after tax</div>
+              <div className="text-xs text-muted mt-0.5">{gainPct(income?.after_tax_gain ?? calc.after_tax_gain, calc.after_tax_basis ?? calc.basis)} after tax</div>
               {stop && stop.level !== 'ok' && (
                 <div className={clsx('text-xs mt-1 font-semibold', stop.level === 'act' ? 'text-rose-300' : 'text-amber-300')}>
                   {stop.level === 'act' ? 'Time stop' : 'Roll window'}
@@ -1304,10 +1205,14 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
           </span>
           <ChevronDown size={14} className={clsx('text-muted transition-transform', showTaxDetail && 'rotate-180')} />
         </button>
-        <GainLine afterGain={income?.after_tax_gain ?? calc.after_tax_gain} beforeGain={income?.gain ?? calc.gain} cost={calc.basis} purchaseDate={pos.purchase_date} />
+        <GainLine afterGain={income?.after_tax_gain ?? calc.after_tax_gain} beforeGain={income?.gain ?? calc.gain} cost={calc.basis}
+          afterCost={calc.after_tax_basis} purchaseDate={pos.purchase_date} />
         {showTaxDetail && (
           <div className="mt-1 text-xs text-muted font-mono-tab">
-            {calc.gain > 0
+            {calc.account_type === 'traditional'
+              ? `No tax inside the account · est. ${usd(calc.estimated_tax)} at ${ratePct(calc.tax_rate)} when withdrawn · before 59½ +${usd(calc.early_penalty)} penalty`
+              : calc.sheltered ? `No tax inside a ${accountLabel(calc.account_type)}`
+              : calc.gain > 0
               ? `${usd(income?.after_tax_gain ?? calc.after_tax_gain)} after-tax gain · est. tax ${usd(calc.estimated_tax)} at ${ratePct(calc.tax_rate)}`
               : 'Loss — no tax on sale'}
           </div>
@@ -1426,10 +1331,10 @@ const BADGE_TONE = {
   neutral: 'bg-bg/40 text-subtle border-border',
   cash: 'bg-blue-400/10 text-blue-300 border-blue-400/40',
   realEstate: 'bg-orange-400/10 text-orange-300 border-orange-400/35',
+  // Holdings in a retirement account (Traditional / Roth / HSA).
   retirement: 'bg-teal-400/10 text-teal-300 border-teal-400/35',
-  vehicle: 'bg-bg/40 text-fg border-border-hover',
-  debt: 'bg-rose-400/10 text-rose-300 border-rose-400/35',
 }
+const accountLabel = (a) => ACCOUNT_TYPES.find((x) => x.value === a)?.label ?? 'Taxable'
 
 function HoldingShell({ pos, open, onToggle, title, meta, badge, badgeTone = 'neutral', value, valueLabel, valueUp = true, editing, form, onEdit, onDelete, children }) {
   if (editing) return form
@@ -1487,9 +1392,10 @@ function CashCard({ pos, cash, open, onToggle, onSave, onDelete }) {
       form={<PositionForm initial={pos} onCancel={() => setEditing(false)}
         onSave={async (row) => { const err = await onSave(row); if (!err) setEditing(false); return err }} />}
       title={`${pos.name} • ${cashKindLabel(kind)}`}
-      meta={[cash.apy > 0 ? `${ratePct(cash.apy)} APY` : 'No yield entered']}
+      meta={[cash.apy > 0 ? `${ratePct(cash.apy)} APY` : 'No yield entered',
+        isSheltered(cash.account_type) && `In a ${accountLabel(cash.account_type)} account`]}
       badge="Cash" badgeTone="cash"
-      value={usd(cash.balance)} valueLabel="balance"
+      value={usd(cash.after_tax_value)} valueLabel={cash.account_type === 'traditional' ? 'after tax' : 'balance'}
     >
       <div className="mb-4">
         <div className="text-[10px] uppercase tracking-wider text-muted mb-1">Balance</div>
@@ -1501,7 +1407,10 @@ function CashCard({ pos, cash, open, onToggle, onSave, onDelete }) {
         <Stat label="After-tax yield" value={yieldPct(cash.after_tax_yield)} />
       </div>
       <p className="mt-3 text-xs text-muted">
-        Interest is taxed as ordinary income ({ratePct(cash.rate)}){kind === 't_bills' ? ' — T-bills skip state tax' : ''}.
+        {cash.account_type === 'traditional'
+          ? `No tax on interest inside the account; withdrawals are ordinary income (${ratePct(cash.withdrawal_rate)}).`
+          : isSheltered(cash.account_type) ? 'No tax on interest inside the account.'
+            : `Interest is taxed as ordinary income (${ratePct(cash.rate)})${kind === 't_bills' ? ' — T-bills skip state tax' : ''}.`}
       </p>
     </HoldingShell>
   )
@@ -1546,93 +1455,6 @@ function RealEstateCard({ pos, re, open, onToggle, onSave, onDelete }) {
       {!rental && re.exclusion === 0 && (
         <p className="mt-3 text-xs text-muted">No home-sale exclusion: you haven't lived here 2 of the last 5 years.</p>
       )}
-    </HoldingShell>
-  )
-}
-
-const retirementKind = (k) => RETIREMENT_KINDS.find((x) => x.value === k) ?? RETIREMENT_KINDS[0]
-const debtKindLabel = (k) => DEBT_KINDS.find((x) => x.value === k)?.label ?? 'Debt'
-// "Chase • Credit card", but not "Fidelity 401(k) • 401(k)".
-const withKind = (name, label) => (String(name).toLowerCase().includes(label.toLowerCase()) ? name : `${name} • ${label}`)
-
-// Retirement account: pre-tax balances shown after the tax on withdrawal.
-function RetirementCard({ pos, ret, open, onToggle, onSave, onDelete }) {
-  const [editing, setEditing] = useState(false)
-  const kind = retirementKind(pos.details?.account_kind)
-  return (
-    <HoldingShell
-      pos={pos} open={open} onToggle={onToggle} editing={editing} onEdit={() => setEditing(true)} onDelete={onDelete}
-      form={<PositionForm initial={pos} onCancel={() => setEditing(false)}
-        onSave={async (row) => { const err = await onSave(row); if (!err) setEditing(false); return err }} />}
-      title={withKind(pos.name, kind.label)}
-      meta={[ret.pretax ? 'Taxed when withdrawn' : 'Tax-free withdrawals']}
-      badge="Retirement" badgeTone="retirement"
-      value={usd(ret.after_tax_value)} valueLabel={ret.pretax ? 'after tax' : 'balance'}
-    >
-      <div className="mb-4">
-        <div className="text-[10px] uppercase tracking-wider text-muted mb-1">{ret.pretax ? 'After tax if withdrawn' : 'Balance'}</div>
-        <div className="text-2xl font-semibold font-mono-tab text-green-400">{usd(ret.after_tax_value)}</div>
-      </div>
-      <div className="grid grid-cols-3 gap-3 py-3 border-y border-hairline">
-        <Stat label="Balance" value={usd(ret.balance)} />
-        <Stat label="Tax on withdrawal" value={ret.pretax ? usd(ret.estimated_tax) : usd(0)} />
-        <Stat label="Tax rate" value={ret.pretax ? ratePct(ret.rate) : '0%'} />
-      </div>
-      <p className="mt-3 text-xs text-muted">
-        {ret.pretax
-          ? `Withdrawals are ordinary income (federal + state, as if it all came out today). Before 59½, add a 10% penalty: ${usd(ret.early_penalty)}.`
-          : kind.value === 'hsa' ? 'Tax-free for medical costs.' : 'Qualified Roth withdrawals are tax-free.'}
-      </p>
-    </HoldingShell>
-  )
-}
-
-function VehicleCard({ pos, car, open, onToggle, onSave, onDelete }) {
-  const [editing, setEditing] = useState(false)
-  return (
-    <HoldingShell
-      pos={pos} open={open} onToggle={onToggle} editing={editing} onEdit={() => setEditing(true)} onDelete={onDelete}
-      form={<PositionForm initial={pos} onCancel={() => setEditing(false)}
-        onSave={async (row) => { const err = await onSave(row); if (!err) setEditing(false); return err }} />}
-      title={pos.name}
-      meta={[car.loan > 0 ? `${usd(car.loan)} loan` : 'Paid off']}
-      badge="Vehicle" badgeTone="vehicle"
-      value={usd(car.equity)} valueLabel="equity" valueUp={car.equity >= 0}
-    >
-      <div className="mb-4">
-        <div className="text-[10px] uppercase tracking-wider text-muted mb-1">Equity</div>
-        <div className={clsx('text-2xl font-semibold font-mono-tab', car.equity >= 0 ? 'text-green-400' : 'text-rose-300')}>{usd(car.equity)}</div>
-      </div>
-      <div className="grid grid-cols-3 gap-3 py-3 border-y border-hairline">
-        <Stat label="Value" value={usd(car.value)} />
-        <Stat label="Loan" value={usd(car.loan)} />
-        <Stat label="Equity" value={usd(car.equity)} />
-      </div>
-    </HoldingShell>
-  )
-}
-
-function DebtCard({ pos, debt, open, onToggle, onSave, onDelete }) {
-  const [editing, setEditing] = useState(false)
-  const kind = debtKindLabel(pos.details?.debt_kind)
-  return (
-    <HoldingShell
-      pos={pos} open={open} onToggle={onToggle} editing={editing} onEdit={() => setEditing(true)} onDelete={onDelete}
-      form={<PositionForm initial={pos} onCancel={() => setEditing(false)}
-        onSave={async (row) => { const err = await onSave(row); if (!err) setEditing(false); return err }} />}
-      title={withKind(pos.name, kind)}
-      meta={[debt.apr > 0 ? `${ratePct(debt.apr)} APR` : 'No rate entered']}
-      badge="Debt" badgeTone="debt"
-      value={`−${usd(debt.balance)}`} valueLabel="owed" valueUp={false}
-    >
-      <div className="mb-4">
-        <div className="text-[10px] uppercase tracking-wider text-muted mb-1">Owed</div>
-        <div className="text-2xl font-semibold font-mono-tab text-rose-300">−{usd(debt.balance)}</div>
-      </div>
-      <div className="grid grid-cols-2 gap-3 py-3 border-y border-hairline">
-        <Stat label="APR" value={debt.apr > 0 ? ratePct(debt.apr) : '—'} />
-        <Stat label="Interest / yr" value={debt.apr > 0 ? usd(debt.interest) : '—'} />
-      </div>
     </HoldingShell>
   )
 }
@@ -1697,8 +1519,10 @@ function YieldRows({ rows, apys, setApy, best }) {
 
 // This holding's after-tax return goal, with the full targets table a tap
 // away (solved on the cost entered above). Blank = the Settings default.
-function GoalSection({ goal, onGoal, basis, is1256 }) {
-  const { rateForGain, defaultGoal } = useContext(RatesContext)
+function GoalSection({ goal, onGoal, basis, is1256, accountType = 'taxable' }) {
+  const { rateForGain: userRates, defaultGoal } = useContext(RatesContext)
+  // Goals inside a retirement account solve on that account's rates.
+  const rateForGain = userRates ? accountRates(accountType, userRates) : userRates
   const [showAll, setShowAll] = useState(false)
   // An empty field shows the default goal (Settings), so there's always a number.
   const defaultStr = defaultGoal ? String(+(defaultGoal * 100).toFixed(2)) : ''
@@ -1900,19 +1724,21 @@ function RungProgress({ hit, progress }) {
 
 // Live preview while the user is typing a position in the form:
 // the account ladder, or the user's own % / $ targets when set.
-function previewTargets(f, own, ladderFor, customFor) {
+function previewTargets(f, own, ladderFor, customFor, rateForGain) {
   const basis = num(f.cost_basis)
   if (!(basis > 0) || !f.purchase_date) return []
   const value = num(f.current_value) ?? basis
-  const character = f.instrument_type === 'index_option_1256'
+  // A retirement account's rates (no tax inside Roth / HSA; ordinary at withdrawal for traditional).
+  const rates = rateForGain ? accountRates(f.account_type ?? 'taxable', rateForGain) : undefined
+  const character = isSheltered(f.account_type) ? 'short_term' : f.instrument_type === 'index_option_1256'
     ? 'section_1256'
     : (holdingPeriod(f.purchase_date, todayYmd())?.is_long_term ? 'long_term' : 'short_term')
   const contracts = wholeUnits(isQuantity(f.instrument_type) ? num(f.shares) : num(f.contracts))
   if (own) {
     const usable = own.filter((t) => Number.isFinite(t.value) && t.value > 0 && Number.isFinite(t.sell) && t.sell > 0)
-    return customFor(basis, value, character, contracts, usable)
+    return customFor(basis, value, character, contracts, usable, rates)
   }
-  return ladderFor(basis, value, character, contracts)
+  return ladderFor(basis, value, character, contracts, rates)
 }
 
 // ── User-set Exit Targets (% or $) ───────────────────────────────
@@ -2181,21 +2007,20 @@ function holdingStart(date) {
 // gain / return stats cover investments only (options, shares, crypto).
 function PortfolioTotals({ summary, count, others }) {
   const [showCost, setShowCost] = useState(false)
-  const hasOthers = (others?.count ?? 0) > 0
+  const hasOthers = !!others?.any
   const invested = summary?.after_tax_value ?? 0
   const total = invested + (others?.after ?? 0)
   const up = hasOthers ? total >= 0 : (summary?.after_tax_gain ?? 0) >= 0
-  const holdings = count + (others?.count ?? 0)
+  const holdings = count + (others?.cashCount ?? 0) + (others?.realEstateCount ?? 0)
   // What it's all worth today, before tax (and before selling costs).
   const before = (summary?.current_value ?? 0) + (hasOthers ? others.before ?? 0 : 0)
   // Net worth by type: only the ones the user has (debts subtract).
   const parts = hasOthers ? [
-    (summary || count > 0) && { label: 'Investments', value: usd(invested) },
-    others.retirementCount > 0 && { label: 'Retirement', value: usd(others.retirement) },
+    { label: 'Investments', value: usd(invested) },
     others.cashCount > 0 && { label: 'Cash', value: usd(others.cash) },
     others.realEstateCount > 0 && { label: 'Real Estate', value: usd(others.realEstate) },
-    others.vehicleCount > 0 && { label: 'Vehicles', value: usd(others.vehicles) },
-    others.debtCount > 0 && { label: 'Debts', value: `−${usd(others.debts)}`, debt: true },
+    others.otherAssets > 0 && { label: 'Other assets', value: usd(others.otherAssets) },
+    others.otherDebts > 0 && { label: 'Debts', value: `−${usd(others.otherDebts)}`, debt: true },
   ].filter(Boolean) : []
   const after = hasOthers ? total : invested
   const cost = before - after
@@ -2247,12 +2072,6 @@ function PortfolioTotals({ summary, count, others }) {
         <div className="flex items-baseline gap-3 pt-4 border-t border-hairline mb-4">
           <span className="flex-1 text-sm text-subtle">Income after tax</span>
           <span className="text-sm font-mono-tab text-green-400 font-semibold">{usd(others.income)}/yr</span>
-        </div>
-      )}
-      {others?.debtInterest > 0 && (
-        <div className="flex items-baseline gap-3 pt-4 border-t border-hairline mb-4">
-          <span className="flex-1 text-sm text-subtle">Debt interest</span>
-          <span className="text-sm font-mono-tab text-rose-300 font-semibold">−{usd(others.debtInterest)}/yr</span>
         </div>
       )}
       {summary && (
