@@ -48,7 +48,8 @@ export async function yahooBars(symbol: string, range: string): Promise<Bar[]> {
 }
 
 export async function yahooChart(symbol: string, range: string, interval: string): Promise<{ bars: Bar[]; prevClose: number | null }> {
-  const intraday = interval !== '1d'
+  // Minute / hour bars carry a time; day, week and month bars a date.
+  const intraday = /m$|h$/.test(interval)
   const path = `/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=${interval}&includePrePost=false`
   let last = 'no response'
   for (const host of HOSTS) {

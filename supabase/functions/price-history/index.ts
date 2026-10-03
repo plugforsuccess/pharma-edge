@@ -1,9 +1,10 @@
 // price-history — daily bars for one ticker, for /charts.
 //
-// POST { ticker: "AAPL", range: "1d" | "5d" | "1mo" | "3mo" | "6mo" | "1y" | "2y", crypto?: true }
+// POST { ticker: "AAPL", range: "1d" | "5d" | "1mo" | "3mo" | "6mo" | "1y" | "2y" | "5y" | "max", crypto?: true }
 //   crypto: ticker is the coin ("BTC"), priced in USD.
 //   → { success, ticker, range, interval, source: "yahoo", prev_close, bars: [{ t, o, h, l, c, v }] }
-//     Daily ranges: t = the bar's exchange day, YYYY-MM-DD.
+//     Daily ranges (and 5y weekly / max monthly bars): t = the bar's
+//     exchange day, YYYY-MM-DD.
 //     1d (5-minute bars) and 5d (30-minute bars): t = unix seconds of the
 //     New York wall-clock time read as UTC, so charts label ET times.
 //
@@ -25,7 +26,10 @@ function json(body: unknown, status = 200): Response {
 }
 
 // Range → bar interval. Intraday ranges refresh faster.
-const INTERVAL: Record<string, string> = { '1d': '5m', '5d': '30m', '1mo': '1d', '3mo': '1d', '6mo': '1d', '1y': '1d', '2y': '1d' }
+const INTERVAL: Record<string, string> = {
+  '1d': '5m', '5d': '30m', '1mo': '1d', '3mo': '1d', '6mo': '1d', '1y': '1d', '2y': '1d', '5y': '1wk', max: '1mo',
+}
+const INTRADAY = new Set(['5m', '30m'])
 const CACHE_MS = 15 * 60 * 1000
 const INTRADAY_CACHE_MS = 2 * 60 * 1000
 const TICKER_RE = /^[A-Z][A-Z0-9.\-]{0,9}$/
@@ -43,7 +47,7 @@ serve(async (req) => {
   if (!TICKER_RE.test(ticker)) return json({ success: false, error: 'invalid ticker' }, 400)
   const interval = INTERVAL[range]
   if (!interval) return json({ success: false, error: 'invalid range' }, 400)
-  const ttl = interval === '1d' ? CACHE_MS : INTRADAY_CACHE_MS
+  const ttl = INTRADAY.has(interval) ? INTRADAY_CACHE_MS : CACHE_MS
 
   const symbol = crypto ? `${ticker}-USD` : ticker
   const key = `${symbol}:${range}`
