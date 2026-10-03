@@ -1009,6 +1009,16 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
 - **Charts** (owner, 2026-10-03) = **price charts of the stocks where
   the app suggests a LEAPS trade**, the trade drawn on the chart. **No
   GEX plays here — they live on Pulse** (owner). Groups, ideas first:
+  **Search** (owner, 2026-10-03): the header's Search opens the same
+  `TickerDrawer` as Pulse (with `feedLabels={false}` — no "real-time /
+  15-min delayed" labels, since Charts reads daily prices for every
+  ticker; the 11 sector ETFs first, then the app's ticker list, the
+  user's Tracking list, and "Use XYZ" for any other symbol). Any ticker
+  gets a chart with the drawing tools; a ticker that already has an idea
+  or holding call opens that item. Other searches show as **Searched**
+  ("No suggested trade"), the last 8 kept on this device
+  (`cm:chart-recent`, Clear). `price-history` maps share classes to
+  Yahoo's form (BRK.B → BRK-B).
   **LEAPS ideas** — buys from the **`suggest-leaps`** edge function, and
   LEAPS bot suggestions (`ldp_audit_log` kind `suggestion`, last 30
   days, newest per ticker, skipped where an idea covers the ticker;
@@ -1077,6 +1087,28 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   charts are hidden for now** (owner); `leaps_position_marks` (one value
   per holding per day, SECURITY DEFINER trigger on `leaps_positions`,
   SELECT own) keeps collecting history for when they return.
+- **LEAPS entry chart** (`/charts/entry/:ticker`, "Entry chart" on the
+  Charts card; owner, 2026-10-03). Data: the **`leaps-entry`** edge function
+  (`verify_jwt`; 5 years of Yahoo daily bars, stored `iv_history.iv_30d`
+  with values outside 2%–300% dropped, and today's ATM IV from the
+  expiry nearest 30 days out; 15-min cache). The math is
+  `src/utils/indicators.js` (`entryModel`; `npm run indicators:check`),
+  run in the browser so thresholds apply live. `components/EntryChart.jsx`
+  draws one chart with stacked panes: candles + 200 SMA (bold, green
+  while its 20-day slope is up, red while down) + 50 SMA + weekly 50 EMA
+  (no look-ahead), golden / death crosses, buy triangles, lighter MACD
+  confirmation dots, buy-zone shading; then % from the 200 (±band), RSI 14
+  (30 / level / 70), MACD 12-26-9, IV Rank 252 (cutoff line), IV vs HV20.
+  Panes toggle (`cm:entry-panes`). **Buy zone** = every condition on the
+  same day: within ±band of the 200, 200 rising, 50 > 200, RSI below the
+  level within the lookback and up today, IV Rank below the cutoff.
+  MACD cross up within 5 days = optional confirmation. Thresholds (band,
+  RSI level, IV Rank cutoff, lookback) are inputs saved on the device
+  (`cm:entry-params`). **IV Rank falls back to the 20-day HV rank** until
+  200 of the last 252 days have real IV (labelled "HV rank stand-in").
+  Backtest: one trade per cluster (a signal counts when none fired in
+  the previous 20 trading days), stock returns after 63 / 126 / 252 days,
+  win rate and average per horizon — stock, not option, returns.
 - **LEAPS bot.** Mode (places trades only on managed accounts, else
   suggests), risk tier, **Today's checks** — one decision per holding
   from `dailyDecisions` in `src/lib/holdingChecks.jsx` (time stop →

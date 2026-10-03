@@ -6,7 +6,9 @@ import { useAuth } from '../context/AuthContext'
 import { useHoldings, isQuantity } from '../hooks/useHoldings'
 import { todayYmd } from '../utils/afterTax'
 import { dailyDecisions, exitRows } from '../lib/holdingChecks'
-import { Ruler, Sparkles, X } from 'lucide-react'
+import { Crosshair, Ruler, Search, Sparkles, X } from 'lucide-react'
+import TickerDrawer from '../components/TickerDrawer'
+import { CHART_TICKERS } from '../lib/chartTickers'
 import PriceChart from '../components/PriceChart'
 import { placePins, measure, fibLevels, autoSwing } from '../utils/chartTools'
 
@@ -161,7 +163,38 @@ export default function Charts() {
   // positions); wait for that so the first pick doesn't jump.
   const holdingsPending = positions === null || (positions.length > 0 && !!federal && !!profile?.state_code && !ready)
   const loading = holdingsPending || botRows === null || ideas === undefined
-  const current = items.find((x) => x.id === selected) ?? items[0] ?? null
+  // Search: any ticker gets a chart (and the drawing tools), even with no
+  // suggested trade. Recent searches are kept on this device.
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [watchlist, setWatchlist] = useState([])
+  const [recent, setRecent] = useState(() => {
+    try { const r = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]'); return Array.isArray(r) ? r.slice(0, RECENT_MAX) : [] } catch { return [] }
+  })
+  useEffect(() => {
+    if (!user) return
+    supabase.from('watchlist').select('ticker').then(({ data }) => setWatchlist((data ?? []).map((r) => String(r.ticker).toUpperCase())))
+  }, [user])
+  const saveRecent = (list) => {
+    setRecent(list)
+    try { localStorage.setItem(RECENT_KEY, JSON.stringify(list)) } catch { /* this visit only */ }
+  }
+  const searchItems = useMemo(() => recent.map((sym) => ({
+    id: `q:${sym}`, group: 'search', ticker: sym, title: 'No suggested trade', body: '',
+    verdict: 'Chart', tone: 'neutral', lines: [], from: 'Search',
+  })), [recent])
+  const allItems = useMemo(() => [...items, ...searchItems.filter((q) => !items.some((x) => x.ticker === q.ticker))], [items, searchItems])
+  const pickTicker = (raw) => {
+    const sym = String(raw ?? '').trim().toUpperCase()
+    if (!sym) return
+    setSearchOpen(false)
+    setHover(null)
+    const existing = items.find((x) => x.ticker === sym)
+    if (existing) { setSelected(existing.id); return }
+    saveRecent([sym, ...recent.filter((x) => x !== sym)].slice(0, RECENT_MAX))
+    setSelected(`q:${sym}`)
+  }
+
+  const current = allItems.find((x) => x.id === selected) ?? allItems[0] ?? null
   const key = current ? `${current.crypto ? 'X:' : ''}${current.ticker}:${range}` : null
 
   // One request per ticker + range; results stay cached for the visit.
@@ -235,21 +268,26 @@ export default function Charts() {
 
   const ideaItems = items.filter((x) => x.group === 'ideas')
   const holdingItems = items.filter((x) => x.group === 'holdings')
+  const searchedItems = allItems.filter((x) => x.group === 'search')
 
   return (
     <div className="px-4 py-4 pb-24 max-w-md mx-auto">
       <header className="flex items-center justify-between mb-5">
         <h1 className="text-lg font-semibold">Charts</h1>
+        <button type="button" onClick={() => setSearchOpen(true)} aria-label="Search tickers"
+          className="min-h-[44px] px-3 inline-flex items-center gap-2 rounded-xl bg-card border border-border text-sm text-subtle hover:text-fg transition">
+          <Search size={15} aria-hidden /> Search
+        </button>
       </header>
 
       {loading ? (
         <div className="text-xs text-muted py-8 text-center">Loading…</div>
-      ) : items.length === 0 ? (
+      ) : allItems.length === 0 ? (
         <section className="bg-card border border-border rounded-2xl p-5">
           <h2 className="text-sm font-semibold mb-1">No suggested trades right now</h2>
           <p className="text-sm text-subtle">
             A chart shows up here when a sector ETF ranks for a LEAPS buy, when the LEAPS bot suggests a trade,
-            or when your exit plan calls for a sell or roll.
+            or when your exit plan calls for a sell or roll. Search any ticker to chart it.
           </p>
           <Link to="/bot" className="mt-4 min-h-[44px] inline-flex items-center text-sm text-amber-300">See today's checks</Link>
         </section>
@@ -327,6 +365,12 @@ export default function Charts() {
                   label="Auto" icon={Sparkles} disabled={!ohlc} />
                 <ToolButton active={tools.fib} onClick={() => saveTools({ ...tools, ticker, fib: !tools.fib })} label="Fib" disabled={!placed} />
                 <span className="flex-1" />
+                {!current.crypto && (
+                  <Link to={`/charts/entry/${encodeURIComponent(current.ticker)}`}
+                    className="min-h-[36px] px-2.5 inline-flex items-center gap-1.5 rounded-md text-xs font-semibold text-amber-300 hover:text-amber-200">
+                    <Crosshair size={13} aria-hidden /> Entry chart
+                  </Link>
+                )}
                 {(tools.pins.length > 0 || tools.fib) && (
                   <button type="button" onClick={() => { saveTools({ ticker, pins: [], fib: false }); setPicking(false) }} aria-label="Clear drawings"
                     className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-md text-muted hover:text-fg">
@@ -401,15 +445,35 @@ export default function Charts() {
           {holdingItems.length > 0 && (
             <TradeList title="Your holdings" items={holdingItems} current={current} onPick={setSelected} />
           )}
+          {searchedItems.length > 0 && (
+            <TradeList title="Searched" items={searchedItems} current={current} onPick={setSelected}
+              onClear={() => { saveRecent([]); if (current?.group === 'search') setSelected(null) }} />
+          )}
 
           <p className="text-xs text-muted">
             Suggestions, not advice. Prices are daily closes and may be delayed.
           </p>
         </>
       )}
+
+      <TickerDrawer
+        open={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        curated={CHART_TICKERS}
+        watchlist={watchlist}
+        gatedSet={NO_GATES}
+        selected={current?.ticker}
+        onSelect={pickTicker}
+        allowCustom
+        feedLabels={false}
+      />
     </div>
   )
 }
+
+const NO_GATES = new Set()
+const RECENT_KEY = 'cm:chart-recent'
+const RECENT_MAX = 8
 
 const VERDICT_TONE = {
   red: 'text-rose-300 border-rose-400/40 bg-rose-400/10',
@@ -445,11 +509,14 @@ function ToolButton({ active, onClick, label, icon: Icon, disabled }) {
   )
 }
 
-function TradeList({ title, items, current, onPick }) {
+function TradeList({ title, items, current, onPick, onClear }) {
   return (
     <section className="bg-card border border-border rounded-2xl p-5 mb-5">
       <div className="flex items-center gap-2 mb-3">
-        <h2 className="text-sm font-semibold">{title}</h2>
+        <h2 className="flex-1 text-sm font-semibold">{title}</h2>
+        {onClear && (
+          <button type="button" onClick={onClear} className="-my-2 min-h-[44px] px-2 text-xs text-muted hover:text-fg">Clear</button>
+        )}
       </div>
       <ul className="space-y-1">
         {items.map((it) => (

@@ -28,6 +28,9 @@ export default function TickerDrawer({
   // this on; Markets leaves it off because the curated universe is
   // its actual subscription list.
   allowCustom = false,
+  // Pulse labels its lists by feed (real-time stream vs 15-min delayed).
+  // Charts reads daily prices for every ticker, so it turns that off.
+  feedLabels = true,
 }) {
   const [query, setQuery] = useState('')
 
@@ -166,7 +169,7 @@ export default function TickerDrawer({
               they get a green pulse dot. Anything else falls back to
               Yahoo's 15-min delayed feed. */}
           {filteredCurated.filter((t) => t.isHot).length > 0 && (
-            <Section label="Live · Real-time stream">
+            <Section label={feedLabels ? 'Live · Real-time stream' : 'Popular'}>
               {filteredCurated
                 .filter((t) => t.isHot)
                 .map((t) => {
@@ -176,7 +179,7 @@ export default function TickerDrawer({
                       key={t.symbol}
                       symbol={t.symbol}
                       label={t.label}
-                      live
+                      live={feedLabels}
                       locked={gated}
                       active={selected === t.symbol}
                       onClick={() => {
@@ -191,7 +194,7 @@ export default function TickerDrawer({
           )}
 
           {filteredCurated.filter((t) => !t.isHot).length > 0 && (
-            <Section label="S&P 500 · 15-min delayed">
+            <Section label={feedLabels ? 'S&P 500 · 15-min delayed' : 'S&P 500'}>
               {filteredCurated
                 .filter((t) => !t.isHot)
                 .map((t) => {

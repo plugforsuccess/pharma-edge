@@ -49,7 +49,8 @@ serve(async (req) => {
   if (!interval) return json({ success: false, error: 'invalid range' }, 400)
   const ttl = INTRADAY.has(interval) ? INTRADAY_CACHE_MS : CACHE_MS
 
-  const symbol = crypto ? `${ticker}-USD` : ticker
+  // Yahoo writes share classes with a dash (BRK.B → BRK-B).
+  const symbol = crypto ? `${ticker}-USD` : ticker.replace(/\./g, '-')
   const key = `${symbol}:${range}`
   const hit = cache.get(key)
   if (hit && Date.now() - hit.at < ttl) {
