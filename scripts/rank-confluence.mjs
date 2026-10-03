@@ -52,10 +52,10 @@ export async function yahooDaily(ticker, fetchImpl = fetch) {
   const symbol = ticker.replace(/\./g, '-')
   const path = `/v8/finance/chart/${encodeURIComponent(symbol)}?range=5y&interval=1d&includePrePost=false`
   let last = 'no response'
-  for (let attempt = 0; attempt < 4; attempt++) {
+  for (let attempt = 0; attempt < 3; attempt++) {
     for (const host of HOSTS) {
       try {
-        const resp = await fetchImpl(`https://${host}${path}`, { headers: { 'User-Agent': UA, Accept: 'application/json' }, signal: AbortSignal.timeout(15000) })
+        const resp = await fetchImpl(`https://${host}${path}`, { headers: { 'User-Agent': UA, Accept: 'application/json' }, signal: AbortSignal.timeout(10000) })
         if (resp.status === 404) throw new Error('not found')
         if (!resp.ok) { last = String(resp.status); continue }
         const body = await resp.json()
@@ -168,8 +168,14 @@ const pct = (x) => (x == null ? '—' : `${x >= 0 ? '+' : ''}${(x * 100).toFixed
 async function main() {
   const t0 = Date.now()
   const failed = []
+  let done = 0
   const results = (await mapLimit(universe, CONCURRENCY, async (ticker) => {
-    try { return analyze(ticker, await yahooDaily(ticker)) } catch (e) { failed.push(`${ticker}: ${e.message}`); return null }
+    try { return analyze(ticker, await yahooDaily(ticker)) } catch (e) { failed.push(`${ticker}: ${e.message}`); return null } finally {
+      done++
+      if (done % 50 === 0) console.log(`  ${done}/${universe.length} · ${failed.length} failed · ${((Date.now() - t0) / 1000).toFixed(0)}s`)
+      // Yahoo blocking this runner: stop instead of retrying for hours.
+      if (done === 30 && failed.length >= 24) { console.error(`Yahoo is failing (${failed.slice(0, 3).join('; ')}) — aborting.`); process.exit(1) }
+    }
   })).filter(Boolean)
   if (!results.length) throw new Error(`no tickers analyzed (${failed.slice(0, 5).join('; ')})`)
   const asOf = results.map((r) => r.asOf).sort().pop()
