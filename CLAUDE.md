@@ -1145,6 +1145,16 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   Every pane has a **violet title** (`PANE_TITLES`) and a small violet
   maximize button at its top right that opens that pane alone full
   screen (`FullPane` in `LeapsEntry.jsx`; Esc or X closes).
+  **Where the suite applies** (owner, 2026-10-03): its exits suit **GEX
+  spreads and share holdings**, not LEAPS. The Signal suite card lists the
+  user's open positions in the ticker: shares → "the sell signals apply";
+  LEAPS → "your exit plan decides". Charts' share-holding rows add a
+  violet "Signals" link to the entry chart. **Hardening is a
+  confirmation, not a buy-zone condition** (advised, owner asked): a
+  status row "Hardening confirmation (optional)" when a Hardening bull
+  fired within 10 trading days, and the Buy zone backtest splits trades
+  into with / without Hardening (avg 3M / 6M / 12M) — promote it to a
+  condition only if confirmed trades clearly do better across tickers.
   **Advisory only:** sell signals don't change the LEAPS exit playbook
   or the bot's decisions. With the Pine gates (ATR expansion ≥ 1.1× in 5
   bars, Echo ≥ 15 points in 5 bars) daily Hardening signals are rare.

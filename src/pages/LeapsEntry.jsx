@@ -21,8 +21,10 @@ const PARAMS_KEY = 'cm:entry-params'
 const PANES_KEY = 'cm:entry-panes:v2'
 const LAYERS_KEY = 'cm:entry-layers'
 const DEFAULT_LAYERS = ['hardening', 'exits']
-// A signal-suite event counts as current for this many trading days.
+// A signal-suite event counts as current for this many trading days, and a
+// Hardening bull this close to a buy-zone signal (either side) confirms it.
 const RECENT_DAYS = 10
+const HARDENING_CONFIRM_DAYS = 10
 // [key, label, min, max, decimals, suffix]
 const FIELDS = [
   ['bandPct', '200-day band', 0.5, 50, 1, '±%'],
@@ -80,6 +82,22 @@ export default function LeapsEntry() {
       if (cancelled) return
       setData(error || !d?.success ? { error: d?.error || error?.message || 'failed' } : d)
     })
+    return () => { cancelled = true }
+  }, [ticker])
+
+  // The user's open positions in this ticker (shares get the sell signals;
+  // LEAPS follow their exit plan).
+  const [holdings, setHoldings] = useState([])
+  useEffect(() => {
+    let cancelled = false
+    supabase.from('leaps_positions').select('id, ticker, instrument_type, shares, contracts, option_type')
+      .eq('ticker', ticker).is('closed_at', null)
+      .then(({ data: rows }) => {
+        if (cancelled) return
+        setHoldings((rows ?? []).filter((r) => r.ticker === ticker && ['stock', 'equity_option', 'index_option_1256'].includes(r.instrument_type)).map((r) => (r.instrument_type === 'stock'
+          ? { id: r.id, kind: 'shares', qty: `${Number(r.shares).toLocaleString('en-US', { maximumFractionDigits: 2 })} shares` }
+          : { id: r.id, kind: 'leaps', qty: `${Number(r.contracts).toLocaleString('en-US')} ${r.option_type === 'P' ? 'put' : 'call'}${Number(r.contracts) === 1 ? '' : 's'}` })))
+      })
     return () => { cancelled = true }
   }, [ticker])
 
@@ -153,8 +171,8 @@ export default function LeapsEntry() {
       ) : (
         <div className="md:grid md:grid-cols-[1fr_280px] md:gap-x-5 md:items-start">
           <div className="min-w-0 md:order-1">
-            <StatusPanel s={s} model={model} params={params} />
-            {suite && <SuitePanel suite={suite} bars={bars} />}
+            <StatusPanel s={s} model={model} params={params} suite={suite} />
+            {suite && <SuitePanel suite={suite} bars={bars} holdings={holdings} />}
           </div>
 
           {/* Chart */}
@@ -284,7 +302,7 @@ function Key({ glyph, className, children }) {
   )
 }
 
-function StatusPanel({ s, model, params }) {
+function StatusPanel({ s, model, params, suite }) {
   const c = s.cond
   const yes = c.all
   const met = countMet(c)
@@ -292,6 +310,9 @@ function StatusPanel({ s, model, params }) {
   const lastIdx = model.closes.length - 1
   const macdAgo = lastConfirm == null ? null : lastIdx - lastConfirm
   const lastTrade = model.trades[model.trades.length - 1]
+  const hBull = suite?.bulls[suite.bulls.length - 1] ?? null
+  const hAgo = hBull ? lastIdx - hBull.i : null
+  const hOk = hAgo != null && hAgo <= HARDENING_CONFIRM_DAYS
   const rows = [
     {
       ok: c.band, label: `Within ±${params.bandPct}% of the 200-day`,
@@ -360,6 +381,20 @@ function StatusPanel({ s, model, params }) {
             {macdAgo == null ? 'no cross' : macdAgo === 0 ? 'crossed up today' : `crossed up ${macdAgo}d ago`}
           </span>
         </li>
+        {suite && (
+          <li className="px-5 py-2.5 flex items-center gap-3 min-h-[48px]">
+            <span className={clsx('shrink-0 h-6 w-6 rounded-full flex items-center justify-center border border-dashed',
+              hOk ? 'border-amber-400/60 text-amber-300' : 'border-border text-muted')} aria-hidden>
+              {hOk ? <Check size={12} strokeWidth={3} /> : <span className="text-[10px]">—</span>}
+            </span>
+            <span className="flex-1 min-w-0 text-sm text-subtle leading-snug">
+              Hardening confirmation <span className="text-muted">(optional)</span>
+            </span>
+            <span className="text-right shrink-0 text-[11px] text-muted font-mono-tab">
+              {!hBull ? 'no bull signal' : hOk ? `${'★'.repeat(hBull.stars)} ${hAgo === 0 ? 'today' : `${hAgo}d ago`}` : `none in ${HARDENING_CONFIRM_DAYS}d`}
+            </span>
+          </li>
+        )}
       </ul>
     </section>
   )
@@ -419,8 +454,17 @@ function Backtest({ model, suite }) {
   const [all, setAll] = useState(false)
   const view = useMemo(() => {
     if (tab === 'zone' || !suite) {
+      const hNear = (i) => suite?.bulls.find((b) => Math.abs(b.i - i) <= HARDENING_CONFIRM_DAYS) ?? null
+      const trades = model.trades.map((tr) => {
+        const h = hNear(tr.i)
+        return { ...tr, hardening: !!h, tag: [tr.confirmed && 'MACD', h && `Hardening ${'★'.repeat(h.stars)}`].filter(Boolean).join(' · ') }
+      })
+      const split = suite ? [
+        { label: 'With Hardening', stats: horizonStats(trades.filter((x) => x.hardening), HORIZONS), n: trades.filter((x) => x.hardening).length },
+        { label: 'Without', stats: horizonStats(trades.filter((x) => !x.hardening), HORIZONS), n: trades.filter((x) => !x.hardening).length },
+      ] : null
       return {
-        trades: model.trades.map((tr) => ({ ...tr, tag: tr.confirmed ? 'MACD' : '' })), stats: model.stats, sell: false,
+        trades, stats: model.stats, sell: false, split,
         sub: `${model.trades.length} trade${model.trades.length === 1 ? '' : 's'} in 5 years (${model.signals.length} signal days)`,
         empty: 'No buy-zone signals in this history with these thresholds.',
       }
@@ -488,6 +532,26 @@ function Backtest({ model, suite }) {
           </div>
         ))}
       </div>
+      {view.split && rows.length > 0 && (
+        <div className="px-5 pb-4 -mt-1">
+          <div className="rounded-xl border border-hairline overflow-hidden text-xs font-mono-tab">
+            <div className="grid grid-cols-[1fr_repeat(3,auto)] gap-x-3 px-3 py-2 text-[11px] text-muted bg-bg-elev/60">
+              <span className="font-sans">Confirmed by Hardening?</span>
+              {HORIZONS.map(([l]) => <span key={l} className="w-14 text-right">{l} avg</span>)}
+            </div>
+            {view.split.map((g) => (
+              <div key={g.label} className="grid grid-cols-[1fr_repeat(3,auto)] gap-x-3 px-3 py-2 border-t border-hairline items-baseline">
+                <span className="font-sans text-subtle">{g.label} <span className="text-muted">· {g.n}</span></span>
+                {g.stats.map((st) => (
+                  <span key={st.label} className={clsx('w-14 text-right', st.avg == null ? 'text-muted' : st.avg < 0 ? 'text-rose-300' : 'text-green-400')}>
+                    {st.avg == null ? '—' : signed(st.avg * 100)}
+                  </span>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {rows.length === 0 ? (
         <div className="px-5 pb-5 text-sm text-subtle">{view.empty}</div>
       ) : (
@@ -533,7 +597,7 @@ function Backtest({ model, suite }) {
 
 // Signal suite today: the latest entry (Hardening bull) and sell (Hardening
 // bear, or an Exit Meta exit) with how long ago, then each pillar's state.
-function SuitePanel({ suite, bars }) {
+function SuitePanel({ suite, bars, holdings }) {
   const last = bars.length - 1
   const ago = (i) => (i == null ? null : last - i)
   const agoText = (n) => (n === 0 ? 'today' : n === 1 ? '1 day ago' : `${n} days ago`)
@@ -584,6 +648,21 @@ function SuitePanel({ suite, bars }) {
         <PillarRow name="Tango" state={tango.v == null ? '—' : tango.v.toFixed(1)} tone={tango.v == null ? 'flat' : tango.v >= 0 ? 'up' : 'down'}
           detail={[tango.zone, tango.latest && `${tango.latest.side} ${agoText(tango.latest.n)}`].filter(Boolean).join(' · ')} />
       </ul>
+      {holdings?.length > 0 && (
+        <div className="px-5 py-3 border-t border-hairline text-xs text-subtle leading-5">
+          {holdings.map((h) => (
+            <div key={h.id} className="flex items-start gap-2">
+              <span className={clsx('mt-1.5 h-1.5 w-1.5 rounded-full shrink-0', h.kind === 'shares' ? 'bg-amber-400' : 'bg-subtle')} aria-hidden />
+              <span className="flex-1">
+                {h.kind === 'shares'
+                  ? <>You own <span className="text-fg font-mono-tab">{h.qty}</span> — the sell signals apply to these shares.</>
+                  : <>You hold <span className="text-fg font-mono-tab">{h.qty}</span> — your exit plan decides these; the sell signals are for shares and spreads.</>}
+              </span>
+              <Link to={`/leaps?open=${h.id}`} className="shrink-0 text-amber-300 hover:text-amber-200 font-semibold">Portfolio</Link>
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   )
 }
