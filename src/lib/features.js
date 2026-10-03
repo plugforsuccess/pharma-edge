@@ -17,6 +17,11 @@
 //                  (LEAPS execution moves to Tradier)
 //   tape         — /tape, the old GEX "The Tape" dashboard (Home is the
 //                  LEAPS dashboard since 2026-10-02)
+//   hardening    — the Hardening ★ confluence signal on the entry chart
+//                  (layer, Signal suite tiles, buy-zone confirmation row,
+//                  backtest tab) and its entry alert (owner, 2026-10-03:
+//                  "prevents trades and isn't helpful" — maybe rebuilt;
+//                  the alert has its own switch, HARDENING_ALERTS)
 export const FEATURES = Object.freeze({
   wheel: false,
   logMove: false,
@@ -27,4 +32,5 @@ export const FEATURES = Object.freeze({
   legacyBot: false,
   tastytradeBroker: false,
   tape: false,
+  hardening: false,
 })

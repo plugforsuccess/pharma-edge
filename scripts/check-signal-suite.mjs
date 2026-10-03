@@ -73,7 +73,11 @@ const gaps = (list) => list.slice(1).map((x, k) => x - list[k])
 eq('bravo fires', idx(m.bravo.bull).length > 0 && idx(m.bravo.bear).length > 0, true)
 eq('bravo diamonds only where the condition turns on', idx(m.bravo.bullOn).every((i) => !idx(m.bravo.bullOn).includes(i - 1)), true)
 eq('bravo diamonds are a subset of up-closes above the basis', idx(m.bravo.bullOn).every((i) => bars[i].c > bars[i - 1].c && m.bravo.regime[i] === 1), true)
-eq('bravo diamonds at least a cooldown apart', gaps(idx(m.bravo.bullOn)).every((g) => g >= SUITE_PARAMS.bravoCooldown), true)
+// Exactly the Pine's visual event: raw on now, off the bar before — no cooldown.
+const bravoRawBull = bars.map((b, i) => i > 0 && m.bravo.basis[i] != null && b.c > m.bravo.basis[i] && m.bravo.fast[i] > m.bravo.basis[i]
+  && m.bravo.fast[i - SUITE_PARAMS.slopeLookback] != null && m.bravo.fast[i] - m.bravo.fast[i - SUITE_PARAMS.slopeLookback] > 0 && b.c > bars[i - 1].c)
+eq('bravo diamonds = every turn-on (Pine visual)', idx(m.bravo.bullOn), idx(bravoRawBull.map((x, i) => x && !bravoRawBull[i - 1])))
+eq('daily periods are the days', normalizePeriods([{ t: '2026-10-01' }, { t: '2026-10-02' }], '1d').map((x) => x.k), ['2026-10-01', '2026-10-02'])
 eq('bravo cooldown ≥ 5', gaps(idx(m.bravo.bull)).every((g) => g >= 5), true)
 eq('echo cooldown ≥ 5', gaps(idx(m.echo.bull)).every((g) => g >= 5), true)
 eq('tango cooldown ≥ 8', gaps(idx(m.tango.bull)).every((g) => g >= 8), true)

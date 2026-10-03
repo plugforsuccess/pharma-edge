@@ -294,7 +294,10 @@ export default function PriceChart({ bars, levels = [], fitLevels = true, height
       const edge = l.kind === 'retracement' && (l.ratio === 0 || l.ratio === 1)
       const color = l.kind === 'extension' ? (l.up ? t.up : t.down) : strong ? t.gold : edge ? t.muted : t.subtle
       L.fibLines.push(price.createPriceLine({
-        price: l.price, title: `Fib ${l.label}`, color, lineWidth: 1,
+        // Say which end each level hangs from: retracements pull back from B
+        // (0% = B, 100% = A), extensions run past B.
+        price: l.price, title: l.kind === 'extension' ? `Ext ${l.label}` : `Fib ${l.label}${l.ratio === 0 ? ' · B' : l.ratio === 1 ? ' · A' : ''}`,
+        color, lineWidth: 1,
         lineStyle: l.kind === 'extension' ? LineStyle.SparseDotted : LineStyle.Dotted,
         axisLabelVisible: true, axisLabelColor: alpha(color, 0.9), axisLabelTextColor: t.card,
       }))

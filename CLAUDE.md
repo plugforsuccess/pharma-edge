@@ -1027,8 +1027,10 @@ value, holding period) and must pass before any edit to that file lands.
   mortgages stay on the property). Both count in net worth (debts
   subtract) on Portfolio and Home (`others.after` / `others.before` in
   `useHoldings`); the Total card lists only the parts the user has.
-- **Peers** (owner, 2026-10-03; **free**): the Total card's **Totals |
-  Peers** switch (`cm:totals-view`) shows net worth **before tax** against
+- **Peers** (owner, 2026-10-03; **free**): the Total card has two pages,
+  Totals and Peers — swipe it sideways or tap one of the **two dots above
+  "N holdings"** (top right; owner chose dots over pills), remembered in
+  `cm:totals-view`. Peers shows net worth **before tax** against
   US households from the Federal Reserve's **Survey of Consumer Finances
   2022** (summary-extract microdata, CPI-U adjusted). The tables are
   **data built by a script, never typed in**: `scraper/build_net_worth_benchmarks.py`
@@ -1180,7 +1182,12 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   from B toward A, extensions 127.2 / 161.8 / 261.8% past B (green on an
   up swing, red on a down swing; 50 and 61.8 in gold), as price lines
   with axis tags and a list under the chart; the scale fits the
-  retracements and 127.2%. **X** clears. Pins + Fib are saved **on this
+  retracements and 127.2%. Labels say which end a level hangs from
+  (owner, 2026-10-03 — B read as A): axis tags "Fib 0% · B" … "Fib 100%
+  · A" and "Ext 127.2%", and the list splits into "Pullback from B
+  toward A" and "Targets past B" (the trading convention: retracements
+  measure the pullback from B, extensions run past B as multiples of
+  A→B). **X** clears. Pins + Fib are saved **on this
   device only**, per ticker (`cm:chart-tools:TICKER`); pins land on the
   nearest candle of any range (by calendar day across intraday / daily)
   and show "Your pins are outside this range" when they don't fit. Pins
@@ -1230,6 +1237,32 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   Backtest: one trade per cluster (a signal counts when none fired in
   the previous 20 trading days), stock returns after 63 / 126 / 252 days,
   win rate and average per horizon — stock, not option, returns.
+- **Confluence** (owner, 2026-10-03: lows should line up with the suite;
+  confluence across panels; history should inform entries). Math in
+  `src/utils/confluence.js` (`npm run confluence:check`), always on the
+  **daily** signals: the score = how many of five fired within the last
+  **5 trading days** (look-back only, today included) — buy zone (all 5
+  conditions), Bravo bull ◆, Echo bull, Tango bull, MACD cross up. It sits
+  **beside** the YES / NO (advised, owner agreed — YES / NO stays the rule
+  and drives alerts): a "Confluence · last 5 days — N of 5" block in the
+  status card with the five chips and this setup's record on this ticker
+  ("This setup: 7× in 5 years · 50% near a low · 12M +31% avg, 83% win";
+  under 5 exact matches it falls back to every setup with at least today's
+  score and says so; one signal alone isn't a setup). **Swing lows /
+  highs** (lowest low / highest high 10 bars either side) are hindsight:
+  they only grade history (a setup is "at a low" with a swing low within
+  ±5 bars), never feed the live score. Setups = each cluster of
+  score ≥ 2 bars counts every distinct combination once, at its first bar.
+  Chart: a **Confluence** pane (0–5 bars, 3+ in violet / 4+ green, daily
+  only; panes key `cm:entry-panes:v3`) and a **Swing lows** price layer
+  (violet dots under lows, grey over highs). Backtest → **Confluence**:
+  every combination, how often it sat at a low, 3M / 6M / 12M averages;
+  plus the **agreement window** comparison (±3 / ±5 / ±10 days, all graded
+  on the same ±5 so a wider window can't win by being wider). Single-ticker
+  history is small — the card flags "few cases". Colour token
+  `--color-confluence` (hex — the chart canvas needs it). **The Bravo
+  band is gone** (owner: not needed); the suite card's Bravo row jumps to
+  the latest Bravo diamond.
 - **Signal suite on the entry chart** (owner, 2026-10-03: "for better
   entries and sell signals"). A JS port of the TradingView suite in
   `plugforsuccess/wiley-indicator-suite` (Bravo trend, Echo momentum,
@@ -1273,9 +1306,41 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   Every pane has a **violet title** (`PANE_TITLES`) and a small violet
   maximize button at its top right that opens that pane alone full
   screen (`FullPane` in `LeapsEntry.jsx`; Esc or X closes).
-  **Timeframe: weekly or monthly, never daily** (owner, 2026-10-03: daily
-  Hardening isn't needed). The card's Weekly | Monthly switch
-  (`cm:suite-tf`, default weekly) runs the whole suite on that interval:
+  **Hardening is hidden** (owner, 2026-10-03: "prevents trades and isn't
+  helpful" — maybe rebuilt later): `FEATURES.hardening = false` hides its
+  layer, the buy-zone confirmation row, the backtest tab / with-without
+  table, and the Signal suite tiles fall back to the **Bravo diamonds**
+  (Entry = latest Bravo bull, Sell = fresh Bravo bear or exit); the
+  backtest tabs read Buy zone · Bravo ◆ · Sell signals (Bravo bears +
+  exits). The Hardening entry alert is off too (`HARDENING_ALERTS` in
+  `entryEvents.js`; entry-scan v2 is deployed with a buy-zone-only subset
+  of the shared files — redeploy from the full `_shared` copies to bring
+  it back). The Hardening code and checks stay.
+  **Bravo diamonds = TradingView's** (owner, 2026-10-03: "extremely
+  important"): exactly the Pine's plotted event — the bar the raw
+  condition turns on, **no cooldown** (`bravo.bullOn` / `bearOn`); the
+  layer setting moved to `cm:entry-layers:v2` (default Bravo ◆ + Exits),
+  since choices saved before the layer existed left it off. **Panes:**
+  Echo and Tango sit right under the price (`SUB_PANES` order);
+  `EntryChart` creates every pane up front (`chart.addPane(true)`) — the
+  library appends a pane when a series asks for an index past the last,
+  so out-of-order series landed in the wrong pane.
+  **Timeframe: Daily (default) · Weekly · Monthly** (owner, 2026-10-03;
+  daily = the chart's own bars, like TradingView on a daily chart — no
+  extra fetch; Daily came back once Hardening was hidden). The card's
+  switch (`cm:suite-tf:v2`) runs the whole suite on that interval, and
+  **the candles follow it** (owner, 2026-10-03): Weekly / Monthly draw
+  those bars with the same indicator math run on them (200W / 50W
+  averages, "% vs 200-week", weekly RSI / MACD, the suite on its own bars;
+  `INTERVALS` / `paneTitle` in `EntryChart.jsx`) and drop what only exists
+  daily — buy-zone shading and arrows, MACD-confirm dots, the IV Rank /
+  IV vs HV panes, the W50 line; the status card stays daily. Tiles and
+  backtest rows jump to their bar on whichever chart is shown (daily rows
+  map to their week / month). **Every pane has a date row** under it
+  (owner: dates missing on the minimized view) — years always, months in
+  the gaps under a two-year view, ≥ 56px apart; Echo / Tango lanes sit
+  above it (`laneOffset`); the last pane keeps the chart's own axis.
+  Older notes on the interval:
   `leaps-entry` with `suite: '1wk' | '1mo'` returns the ticker's full
   Yahoo history ("max") plus SPY / ^VIX on the same interval (the
   200-bar warm-ups need it). `normalizePeriods` merges Yahoo's live

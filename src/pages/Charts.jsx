@@ -443,12 +443,24 @@ export default function Charts() {
                 </div>
               )}
               {fib.length > 0 && (
-                <div className="px-5 pb-3 shrink-0 grid grid-cols-2 gap-x-4 gap-y-1 text-xs font-mono-tab">
-                  {fib.map((l) => (
-                    <div key={`${l.kind}-${l.ratio}`} className="flex items-baseline gap-2">
-                      <span className={clsx('w-12', l.kind === 'extension' ? (l.up ? 'text-green-400' : 'text-rose-300')
-                        : l.ratio === 0.5 || l.ratio === 0.618 ? 'text-amber-300' : 'text-muted')}>{l.label}</span>
-                      <span className="text-subtle">{num(l.price)}</span>
+                // Retracements = how far price pulls back from B toward A (the
+                // trading convention: 0% at B, 100% at A); extensions = targets
+                // past B, as multiples of the A→B move.
+                <div className="px-5 pb-3 shrink-0 space-y-3 text-xs">
+                  {[['retracement', 'Pullback from B toward A'], ['extension', 'Targets past B']].map(([kind, title]) => (
+                    <div key={kind}>
+                      <div className="text-[11px] text-muted mb-1">{title}</div>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 font-mono-tab">
+                        {fib.filter((l) => l.kind === kind).map((l) => (
+                          <div key={`${l.kind}-${l.ratio}`} className="flex items-baseline gap-2">
+                            <span className={clsx('w-16', l.kind === 'extension' ? (l.up ? 'text-green-400' : 'text-rose-300')
+                              : l.ratio === 0.5 || l.ratio === 0.618 ? 'text-amber-300' : 'text-muted')}>
+                              {l.label}{l.ratio === 0 && l.kind === 'retracement' ? ' · B' : l.ratio === 1 ? ' · A' : ''}
+                            </span>
+                            <span className="text-subtle">{num(l.price)}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   ))}
                 </div>

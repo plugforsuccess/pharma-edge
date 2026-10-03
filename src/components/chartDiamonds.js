@@ -41,9 +41,11 @@ function diamond(ctx, x, y, r) {
 }
 
 export class DiamondMarkers {
-  constructor({ outline, lane = false, size = 8 } = {}) {
+  constructor({ outline, lane = false, size = 8, laneOffset = 0 } = {}) {
     this._outline = outline
     this._lane = lane
+    // px left free under the lane (the pane's date row).
+    this._laneOffset = laneOffset
     this._r = size
     this._points = []
     this._chart = null
@@ -57,7 +59,7 @@ export class DiamondMarkers {
           if (!self._lane) return
           target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
             ctx.fillStyle = 'rgba(255, 255, 255, 0.025)'
-            ctx.fillRect(0, mediaSize.height - LANE_PX, mediaSize.width, LANE_PX)
+            ctx.fillRect(0, mediaSize.height - LANE_PX - self._laneOffset, mediaSize.width, LANE_PX)
           })
         },
         draw(target) {
@@ -75,7 +77,7 @@ export class DiamondMarkers {
               const x = ts.timeToCoordinate(p.time)
               if (x == null) continue
               let y
-              if (self._lane) y = mediaSize.height - LANE_PX / 2
+              if (self._lane) y = mediaSize.height - self._laneOffset - LANE_PX / 2
               else {
                 const yBase = series.priceToCoordinate(p.price)
                 if (yBase == null) continue
