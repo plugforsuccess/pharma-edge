@@ -1006,19 +1006,25 @@ value, holding period) and must pass before any edit to that file lands.
 ## Charts (`/charts`), LEAPS bot (`/bot`), Taxes (`/taxes`)
 
 Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
-- **Charts.** Price history is `leaps_position_marks` (PK position +
-  day; a SECURITY DEFINER trigger on `leaps_positions` upserts the day's
-  mark on every insert / value change; users SELECT own rows only).
-  Each holding's history starts at its cost on its purchase date. After-
-  tax values are figured as of each date (holding period then). Cards:
-  **Gain over time** (investments, before / after tax, vs break-even —
-  gain, not value, so new money doesn't read as growth); one holding at a
-  time (chips) with cost, hit targets and the next target as flat lines
-  (a target over 1.6× the chart's high is named under it instead), and
-  long-term / roll window / exit-or-roll dates as markers (within ~18
-  months); **Where it sits, after tax** (by type); **Gain after tax, by
-  holding**. Charts are plain SVG (`components/LineChart.jsx`, no chart
-  library) — tap or drag to read a date.
+- **Charts** (owner, 2026-10-03) = **price charts of the stocks where
+  the app suggests a trade**, the trade drawn on the chart. Groups:
+  **LEAPS** — today's sell / roll / exit calls on your holdings
+  (`dailyDecisions`; options show strike + break-even, shares / crypto
+  your cost + the target's price per unit) and LEAPS bot suggestions
+  (`ldp_audit_log` kind `suggestion`, last 30 days, newest per ticker;
+  strike parsed from the OCC `payload.contract`); **Spread plays**
+  (Elite badge — no tier gating exists yet) — the latest
+  `top_plays_feed` within 2 days, top 8, legs as lines, the target king
+  node in gold, an iron condor's profit zone shaded, expiry marked when
+  close. 3M / 6M / 1Y. Prices: the **`price-history`** edge function
+  (`verify_jwt`; Polygon/Massive daily bars with `MASSIVE_API_KEY`,
+  Yahoo chart fallback; `crypto: true` prices the coin in USD; 15-min
+  in-instance cache, no table). Charts are plain SVG
+  (`components/LineChart.jsx`: series, flat lines with haloed labels,
+  date markers, shaded bands; tap or drag to read a date). **Holding
+  charts are hidden for now** (owner); `leaps_position_marks` (one value
+  per holding per day, SECURITY DEFINER trigger on `leaps_positions`,
+  SELECT own) keeps collecting history for when they return.
 - **LEAPS bot.** Mode (places trades only on managed accounts, else
   suggests), risk tier, **Today's checks** — one decision per holding
   from `dailyDecisions` in `src/lib/holdingChecks.jsx` (time stop →

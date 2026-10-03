@@ -10,6 +10,7 @@ import clsx from 'clsx'
 //   series: [{ id, label, points: [{ t: ms, v }], stroke, text, dashed? }]
 //   hLines: [{ v, label, stroke, text }]
 //   vLines: [{ t, label }]
+//   bands:  [{ from, to, fill }] — a shaded price range (e.g. a spread's profit zone)
 
 const DAY_MS = 86400000
 const PAD = { top: 10, right: 8, bottom: 22, left: 8 }
@@ -17,7 +18,7 @@ const PAD = { top: 10, right: 8, bottom: 22, left: 8 }
 const shortDate = (t) => new Date(t).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
 const axisDate = (t) => new Date(t).toLocaleDateString('en-US', { month: 'short', year: '2-digit', timeZone: 'UTC' }).replace(' ', " '")
 
-export default function LineChart({ series, hLines = [], vLines = [], height = 180, format = String, empty }) {
+export default function LineChart({ series, hLines = [], vLines = [], bands = [], height = 180, format = String, empty }) {
   const wrap = useRef(null)
   const [width, setWidth] = useState(320)
   const [hover, setHover] = useState(null)
@@ -97,18 +98,23 @@ export default function LineChart({ series, hLines = [], vLines = [], height = 1
         aria-label={series.map((s) => s.label).join(' and ') + ' over time'}
         className="block touch-pan-y select-none"
         onPointerMove={onPointer} onPointerDown={onPointer} onPointerLeave={() => setHover(null)}>
+        {bands.map((b) => (
+          <rect key={`b-${b.from}-${b.to}`} x={PAD.left} width={width - PAD.left - PAD.right}
+            y={y(Math.max(b.from, b.to))} height={Math.abs(y(b.from) - y(b.to))} className={b.fill} />
+        ))}
         {hLines.map((l) => (
-          <g key={`h-${l.label}-${l.v}`}>
-            <line x1={PAD.left} x2={width - PAD.right} y1={y(l.v)} y2={y(l.v)} className={clsx(l.stroke ?? 'stroke-border')} strokeDasharray="4 4" strokeWidth="1" />
-            <text x={width - PAD.right} y={y(l.v) - 4} textAnchor="end" className={clsx('text-[10px]', l.text ?? 'fill-muted')}>{l.label}</text>
-          </g>
+          <line key={`h-${l.label}-${l.v}`} x1={PAD.left} x2={width - PAD.right} y1={y(l.v)} y2={y(l.v)} className={clsx(l.stroke ?? 'stroke-border')} strokeDasharray="4 4" strokeWidth="1" />
         ))}
-        {vLines.map((l) => (
-          <g key={`v-${l.label}`}>
-            <line x1={x(l.t)} x2={x(l.t)} y1={PAD.top} y2={height - PAD.bottom} className="stroke-faint" strokeDasharray="3 3" strokeWidth="1" />
-            <text x={x(l.t) + 3} y={PAD.top + 9} className="fill-muted text-[10px]">{l.label}</text>
-          </g>
-        ))}
+        {vLines.map((l) => {
+          // Near the right edge the label sits left of its line.
+          const flip = x(l.t) > width - 70
+          return (
+            <g key={`v-${l.label}`}>
+              <line x1={x(l.t)} x2={x(l.t)} y1={PAD.top} y2={height - PAD.bottom} className="stroke-faint" strokeDasharray="3 3" strokeWidth="1" />
+              <text x={x(l.t) + (flip ? -3 : 3)} y={height - PAD.bottom - 4} textAnchor={flip ? 'end' : 'start'} className="fill-muted text-[10px]">{l.label}</text>
+            </g>
+          )
+        })}
         {series.map((s) => (
           <g key={s.id}>
             <path d={path(s.points)} fill="none" className={s.stroke} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" strokeDasharray={s.dashed ? '5 4' : undefined} />
@@ -116,6 +122,10 @@ export default function LineChart({ series, hLines = [], vLines = [], height = 1
               <circle key={p.t} cx={x(p.t)} cy={y(p.v)} r="2.5" className={clsx(s.stroke, 'fill-card')} strokeWidth="1.5" />
             ))}
           </g>
+        ))}
+        {hLines.map((l) => (
+          <text key={`ht-${l.label}-${l.v}`} x={width - PAD.right} y={y(l.v) - 4} textAnchor="end"
+            className={clsx('text-[10px] stroke-card', l.text ?? 'fill-muted')} strokeWidth="3" style={{ paintOrder: 'stroke' }}>{l.label}</text>
         ))}
         {hover != null && (
           <line x1={x(hover)} x2={x(hover)} y1={PAD.top} y2={height - PAD.bottom} className="stroke-subtle" strokeWidth="1" />
