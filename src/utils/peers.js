@@ -27,9 +27,9 @@ export const RACE_OPTIONS = [
 ]
 export const EDUCATION_OPTIONS = [
   { value: 'no_hs', label: 'No high school diploma', group: 'No high school diploma' },
-  { value: 'hs', label: 'High school diploma', group: 'High school graduates' },
+  { value: 'hs', label: 'High school diploma', group: 'High school grads' },
   { value: 'some_college', label: 'Some college or associate degree', group: 'Some college' },
-  { value: 'bachelors', label: "Bachelor's degree or higher", group: 'College graduates' },
+  { value: 'bachelors', label: "Bachelor's degree or higher", group: 'College grads' },
 ]
 
 // Whole years old on `today` ('YYYY-MM-DD').
@@ -142,6 +142,7 @@ export function peerComparisons({
     rows.push({
       key: crossed ? `age:${band}|${key}` : key,
       label: crossed ? `${label}, ${ageText}` : label,
+      name: label,
       rank: rankLabel(r),
       pctLabel: percentileLabel(r),
       pct: r?.pct ?? null,
@@ -158,12 +159,12 @@ export function peerComparisons({
   if (band && benchmarks.groups[`age:${band}`]) {
     const g = benchmarks.groups[`age:${band}`]
     const r = percentileOf(g.values, ps, netWorth)
-    rows.push({ key: `age:${band}`, label: `Households, ${ageText}`, rank: rankLabel(r), pctLabel: percentileLabel(r), pct: r?.pct ?? null,
+    rows.push({ key: `age:${band}`, label: `Households, ${ageText}`, name: 'Households', rank: rankLabel(r), pctLabel: percentileLabel(r), pct: r?.pct ?? null,
       top: r ? 100 - r.pct : null, median: at(g.values, 50), p75: at(g.values, 75), p90: at(g.values, 90),
       mean: g.mean ?? null, households: g.households, withinAge: true, headline: true })
   }
   add('all', 'All US households', { cross: false })
-  add(couple ? 'household:couple' : 'household:single', couple ? 'Couples' : 'Single households')
+  add(couple ? 'household:couple' : 'household:single', couple ? 'Couples' : 'Singles')
   if (homeowner === true) add('home:owner', 'Homeowners')
   const ib = incomeBand(Number(income), benchmarks.income_bands)
   if (ib) add(`income:${ib}`, incomeRangeLabel(Number(income), benchmarks.income_bands))

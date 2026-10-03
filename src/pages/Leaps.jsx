@@ -2053,7 +2053,7 @@ function PortfolioTotals({ summary, count, others, profile, homeowner }) {
         pickView(dx < 0 ? 'peers' : 'totals')
       }}>
       <div className="flex items-start gap-2 mb-4">
-        <h2 className="flex-1 text-sm font-semibold pt-[18px]">{view === 'peers' ? 'Vs. US households' : 'Total'}</h2>
+        <h2 className="flex-1 text-sm font-semibold pt-[18px]">{view === 'peers' ? 'You vs. US households' : 'Total'}</h2>
         <div className="text-right">
           <div className="flex justify-end -mr-2" role="tablist" aria-label="Total card page">
             {[['totals', 'Totals'], ['peers', 'Peers']].map(([v, label]) => (
@@ -2064,7 +2064,7 @@ function PortfolioTotals({ summary, count, others, profile, homeowner }) {
             ))}
           </div>
           <div className="text-xs text-muted">
-            {view === 'totals' ? `${holdings} holding${holdings === 1 ? '' : 's'}` : 'Peers'}
+            {view === 'totals' ? `${holdings} holding${holdings === 1 ? '' : 's'}` : 'Net worth'}
           </div>
         </div>
       </div>
