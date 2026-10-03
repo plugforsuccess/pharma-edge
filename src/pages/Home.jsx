@@ -1,6 +1,6 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Calculator, ChevronRight, Plus, RefreshCw, Settings as SettingsIcon } from 'lucide-react'
+import { Calculator, ChevronRight, Plus, RefreshCw, Settings as SettingsIcon, X } from 'lucide-react'
 import clsx from 'clsx'
 import NotificationCenter from '../components/NotificationCenter'
 import { useHoldings, isQuantity } from '../hooks/useHoldings'
@@ -15,6 +15,8 @@ import { todayYmd, timeStop, longTermFitsPlan } from '../utils/afterTax'
 const usd = (n) => (Number.isFinite(n) ? `${n < 0 ? '−' : ''}$${Math.round(Math.abs(n)).toLocaleString('en-US')}` : '—')
 const pctSigned = (r) => (Number.isFinite(r) ? `${r > 0.00005 ? '+' : r < -0.00005 ? '−' : ''}${Math.abs(r * 100).toFixed(1)}%` : '—')
 const STALE_DAYS = 7
+// "Nothing today" can be closed; it stays closed until something needs action.
+const CLEAR_KEY = 'cm:home-clear-closed'
 const DAY_MS = 86400000
 
 const nameOf = (pos) => pos.ticker ?? pos.name ?? 'Holding'
@@ -97,6 +99,20 @@ export default function Home() {
     return out.sort((a, b) => a.rank - b.rank)
   }, [results, positions, plan, today])
 
+  const [clearClosed, setClearClosed] = useState(() => {
+    try { return localStorage.getItem(CLEAR_KEY) === '1' } catch { return false }
+  })
+  useEffect(() => {
+    if (actions.length > 0 && clearClosed) {
+      setClearClosed(false)
+      try { localStorage.removeItem(CLEAR_KEY) } catch { /* this visit only */ }
+    }
+  }, [actions.length, clearClosed])
+  const closeClear = () => {
+    setClearClosed(true)
+    try { localStorage.setItem(CLEAR_KEY, '1') } catch { /* this visit only */ }
+  }
+
   // ── Next exit targets: the closest unhit target per holding ──
   const nextUp = useMemo(() => results
     .filter((r) => r.calc && !isRoc(r.pos))
@@ -170,12 +186,21 @@ export default function Home() {
           {ready && (
             <>
               {/* Needs action */}
-              <section className="bg-card border border-border rounded-2xl p-5 mb-5">
-                <h2 className="text-sm font-semibold mb-3">Needs action</h2>
+              {!(actions.length === 0 && clearClosed) && (
+              <section className="bg-card border border-border rounded-2xl pl-5 pr-2 pt-2 pb-5 mb-5">
+                <div className="flex items-start gap-2">
+                  <h2 className="flex-1 pt-3 text-sm font-semibold mb-3">Needs action</h2>
+                  {actions.length === 0 && (
+                    <button type="button" onClick={closeClear} aria-label="Close"
+                      className="shrink-0 min-h-[44px] min-w-[44px] flex items-start justify-end pt-3.5 pr-3 rounded-lg text-muted hover:text-fg transition">
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
                 {actions.length === 0 ? (
-                  <p className="text-sm text-subtle">Nothing today. Your plan is on track.</p>
+                  <p className="pr-3 text-sm text-subtle">Nothing today. Your plan is on track.</p>
                 ) : (
-                  <ol className="space-y-3">
+                  <ol className="space-y-3 pr-3">
                     {actions.map((a, i) => (
                       <li key={i}>
                         <Link to="/leaps" className="flex items-start gap-3 min-h-[44px]">
@@ -194,6 +219,7 @@ export default function Home() {
                   </ol>
                 )}
               </section>
+              )}
 
               {/* Next exit targets */}
               {nextUp.length > 0 && (

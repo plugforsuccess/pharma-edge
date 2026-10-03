@@ -808,7 +808,7 @@ hit (only once every target has hit), roll window open, long-term within
 60 days and worth waiting for, prices older than 7 days; **Next exit
 targets** (closest unhit target per holding, top 3, "Needs +36% from
 here"); after-tax goals reached + income after tax; quick actions (Add
-holding, Update prices, Simulator). ROC holdings have no targets/goals
+holding, Update prices, Simulator). The empty "Nothing today" card has a small X; it stays closed (`cm:home-clear-closed`) until something needs action again. ROC holdings have no targets/goals
 here either. Nothing on Home edits; every row links to Positions. Hits
 come from the last entered price until Tradier sync lands. With no
 holdings, Home shows a welcome card with "Add your first holding".
