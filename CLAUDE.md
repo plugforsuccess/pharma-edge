@@ -1181,7 +1181,7 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   1D / 1W, weeks on 5Y, months on All). **Auto** — the biggest swing in
   view (largest % rise from a low to a later high, or fall from a high
   to a later low; ties → most recent) becomes the pins, Fib on.
-  **Fib** — retracements 0 / 23.6 / 38.2 / 50 / 61.8 / 78.6 / 100% back
+  **Fibonacci** (toolbar order Measure · Fibonacci · Auto, only Auto has an icon — owner, 2026-10-03) — retracements 0 / 23.6 / 38.2 / 50 / 61.8 / 78.6 / 100% back
   from B toward A, extensions 127.2 / 161.8 / 261.8% past B (green on an
   up swing, red on a down swing; 50 and 61.8 in gold), as price lines
   with axis tags and a list under the chart; the scale fits the
