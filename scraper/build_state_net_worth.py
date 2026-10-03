@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
@@ -26,7 +27,6 @@ from pathlib import Path
 
 SIPP_YEAR = 2023
 REF_YEAR = 2022  # the 2023 panel asks about calendar 2022
-API = f"https://api.census.gov/data/{SIPP_YEAR}/sipp"
 BLS_URL = "https://api.bls.gov/publicAPI/v2/timeseries/data/CUUR0000SA0?startyear={a}&endyear={b}"
 OUT = Path(__file__).resolve().parents[1] / "src" / "data" / "stateNetWorth.json"
 PERCENTILES = [float(p) for p in range(1, 100)] + [99.5, 99.9]
@@ -53,30 +53,63 @@ def fetch(url: str) -> bytes:
         return r.read()
 
 
-def load_sipp() -> list[tuple[str, int, float, float]]:
-    """(state FIPS, age, weight, household net worth) for every reference
-    person in December."""
-    params = {"get": "MONTHCODE,ERELRPE,TAGE,WPFINWGT,THNETWORTH,TEHC_ST", "MONTHCODE": "12"}
+def census_rows(year: int, with_predicate: bool) -> list | None:
+    """One API shape; None when the API answers with something other than
+    JSON (the message is printed so the next run says what changed)."""
+    get = "MONTHCODE,ERELRPE,TAGE,WPFINWGT,THNETWORTH,TEHC_ST"
+    params = {"get": get}
+    if with_predicate:
+        params["MONTHCODE"] = "12"
     key = os.environ.get("CENSUS_API_KEY")
     if key:
         params["key"] = key
-    rows = json.loads(fetch(f"{API}?{urllib.parse.urlencode(params)}"))
-    head = rows[0]
-    idx = {name: head.index(name) for name in params["get"].split(",")}
-    out = []
-    for r in rows[1:]:
-        try:
-            if r[idx["MONTHCODE"]] != "12" or r[idx["ERELRPE"]] not in ("1", "2"):
+    url = f"https://api.census.gov/data/{year}/sipp?{urllib.parse.urlencode(params)}"
+    try:
+        body = fetch(url)
+    except urllib.error.HTTPError as e:
+        print(f"SIPP {year} predicate={with_predicate}: HTTP {e.code} {e.read()[:300]!r}", file=sys.stderr)
+        return None
+    try:
+        rows = json.loads(body)
+    except json.JSONDecodeError:
+        print(f"SIPP {year} predicate={with_predicate}: not JSON: {body[:300]!r}", file=sys.stderr)
+        return None
+    if not rows or not isinstance(rows[0], list):
+        print(f"SIPP {year} predicate={with_predicate}: unexpected shape", file=sys.stderr)
+        return None
+    print(f"SIPP {year} predicate={with_predicate}: {len(rows) - 1} rows", file=sys.stderr)
+    return rows
+
+
+def load_sipp() -> tuple[int, list[tuple[str, int, float, float]]]:
+    """(panel year, [(state FIPS, age, weight, household net worth)]) for
+    every reference person in December. Tries the newest panel first and
+    the MONTHCODE predicate first (without it the API returns all months)."""
+    for year in (SIPP_YEAR, SIPP_YEAR - 1):
+        for with_predicate in (True, False):
+            rows = census_rows(year, with_predicate)
+            if rows:
+                break
+        else:
+            continue
+        head = rows[0]
+        idx = {name: head.index(name) for name in ("MONTHCODE", "ERELRPE", "TAGE", "WPFINWGT", "THNETWORTH", "TEHC_ST")}
+        out = []
+        for r in rows[1:]:
+            try:
+                if str(r[idx["MONTHCODE"]]) != "12" or str(r[idx["ERELRPE"]]) not in ("1", "2"):
+                    continue
+                w = float(r[idx["WPFINWGT"]])
+                nw = float(r[idx["THNETWORTH"]])
+                age = int(float(r[idx["TAGE"]]))
+            except (TypeError, ValueError):
                 continue
-            w = float(r[idx["WPFINWGT"]])
-            nw = float(r[idx["THNETWORTH"]])
-            age = int(r[idx["TAGE"]])
-        except (TypeError, ValueError):
-            continue
-        if w <= 0:
-            continue
-        out.append((str(r[idx["TEHC_ST"]]).zfill(2), age, w, nw))
-    return out
+            if w <= 0:
+                continue
+            out.append((str(r[idx["TEHC_ST"]]).zfill(2), age, w, nw))
+        if out:
+            return year, out
+    raise SystemExit("SIPP: no usable response from the Census API")
 
 
 def weighted_percentiles(pairs: list[tuple[float, float]], ps: list[float]) -> list[float]:
@@ -130,7 +163,7 @@ def group(recs: list[tuple[str, int, float, float]], factor: float) -> dict | No
     }
 
 
-def build(recs, factor: float, cpi_label: str) -> dict:
+def build(recs, factor: float, cpi_label: str, year: int = SIPP_YEAR, ref_year: int = REF_YEAR) -> dict:
     states = {}
     for fips, (code, name) in FIPS.items():
         mine = [r for r in recs if r[0] == fips]
@@ -145,10 +178,10 @@ def build(recs, factor: float, cpi_label: str) -> dict:
         states[code] = {"name": name, **g, "by_age": by_age}
     return {
         "source": {
-            "survey": f"Census Bureau Survey of Income and Program Participation {SIPP_YEAR}",
-            "reference_year": REF_YEAR,
-            "api": API,
-            "dollars": f"{REF_YEAR} dollars adjusted by CPI-U to {cpi_label}",
+            "survey": f"Census Bureau Survey of Income and Program Participation {year}",
+            "reference_year": ref_year,
+            "api": f"https://api.census.gov/data/{year}/sipp",
+            "dollars": f"{ref_year} dollars adjusted by CPI-U to {cpi_label}",
             "cpi_factor": round(factor, 6),
             "cpi_month": cpi_label,
             "built_at": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
@@ -161,11 +194,12 @@ def build(recs, factor: float, cpi_label: str) -> dict:
 
 
 def main() -> None:
-    recs = load_sipp()
+    year, recs = load_sipp()
     if len(recs) < 10000:
         raise SystemExit(f"SIPP: only {len(recs)} reference persons — the API shape may have changed")
-    factor, label = cpi_factor(REF_YEAR)
-    result = build(recs, factor, label)
+    ref_year = year - 1
+    factor, label = cpi_factor(ref_year)
+    result = build(recs, factor, label, year, ref_year)
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(result, separators=(",", ":")) + "\n")
     ga = result["states"].get("GA")
