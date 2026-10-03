@@ -594,6 +594,13 @@ and the stop-loss UI. Do not remove or soften them.
   of NLV). Manual override allowed in PlaceOrderPanel + LogSignal step
   2 with a visible % warning when exceeded
 - Max 20% of account in any single underlying
+- **GEX spread auto-trade minimum: $25,000 NLV** (owner, 2026-10-03).
+  The bot places no spread auto-trades below it, and live mode must read
+  NLV from the broker — a typed-in `profiles.account_size` can't unlock
+  live spread auto-trading. `MIN_AUTO_TRADE_NLV` / `accountMinimumBlock`
+  in `supabase/functions/_shared/risk_gate.ts`, checked in `evaluateRisk`
+  (multi-leg spreads). **Spreads only:** it does not apply to LEAPS (the
+  `ldp/` engine), single-leg entries, or manual orders.
 
 **Stop Loss:**
 - Spread mark down −50% from entry → exit immediately
@@ -808,7 +815,7 @@ hit (only once every target has hit), roll window open, long-term within
 60 days and worth waiting for, prices older than 7 days; **Next exit
 targets** (closest unhit target per holding, top 3, "Needs +36% from
 here"); after-tax goals reached + income after tax; quick actions (Add
-holding, Update prices, Simulator). ROC holdings have no targets/goals
+holding, Update prices, Simulator). The empty "Nothing today" card has a small X; it stays closed (`cm:home-clear-closed`) until something needs action again. ROC holdings have no targets/goals
 here either. Nothing on Home edits; every row links to Positions. Hits
 come from the last entered price until Tradier sync lands. With no
 holdings, Home shows a welcome card with "Add your first holding".
@@ -967,6 +974,20 @@ value, holding period) and must pass before any edit to that file lands.
   dividends). The income comparison lists categories (dividend ETF,
   REIT, covered-call, muni, Treasury fund, BTC preferred), marked
   "prices can move" — categories only, user-entered yields.
+- **Payouts received** (owner, 2026-10-03). Income holdings count what
+  they've paid since purchase: `details.payouts_received` (optional,
+  the 1099 total, Income editor's "Payouts received so far"), else an
+  estimate = yield × today's value × years held (shown "Received
+  (est.)"). The gain line is price change + payouts (after tax: sale
+  proceeds after tax + payouts after their tax − cost). Taxed kinds
+  keep basis at cost (card: Received / Tax paid / Kept). **ROC lowers
+  basis by the payouts** (floor 0; ROC past cost is a gain when paid),
+  so the sale gain, sale tax and after-tax value use the lowered basis
+  (card: Received / Cost basis now / Tax if sold). Portfolio and Home
+  after-tax return add payouts after tax; net worth doesn't (the cash
+  already went wherever it went). `incomeHoldingReturn`, `payoutsSoFar`,
+  `rocAdjustedBasis` in `afterTax.js`; the Simulator starts ROC
+  holdings from the lowered basis.
 - Per-position values are never netted; the portfolio card shows a
   netted figure labeled as an estimate.
 - Every tax figure in the UI is labeled an estimate with a

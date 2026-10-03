@@ -863,6 +863,86 @@ export function dividendAfterTax({ value, yieldPct, kind = 'qualified', rateForG
   }
 }
 
+// ── Payouts received (income holdings) ───────────────────────────
+//
+// What an income holding has paid since purchase, and what that does to
+// its return and its sale tax:
+//   payouts  = the actual total entered (1099s), else an estimate:
+//              yield × today's value × years held
+//   gain     = (value − cost) + payouts                  (before tax)
+//   taxed kinds (qualified, ordinary, REIT…): payouts were taxed when
+//              paid at the income rate; basis stays at cost
+//   roc      = no tax when paid; basis drops by the payouts (floor 0),
+//              so the sale gain is value − adjusted basis. ROC past the
+//              full cost is a capital gain when paid (LT rate here).
+//   after_tax_gain = (value − sale tax) + payouts after tax − cost
+// The sale is taxed long- or short-term by the holding period, as in
+// positionAfterTax. Estimated payouts assume the yield held all along.
+// Payouts since purchase: the actual total if entered, else estimated.
+export function payoutsSoFar({ value, yieldPct, purchaseDate, asOf, payoutsReceived }) {
+  const p = parseYmd(purchaseDate)
+  const t = parseYmd(asOf)
+  const days = p != null && t != null ? Math.max(0, Math.round((t - p) / DAY_MS)) : 0
+  const actual = payoutsReceived != null && payoutsReceived !== '' && Number(payoutsReceived) >= 0
+  const payouts = actual
+    ? Number(payoutsReceived)
+    : Math.max(0, Number(value) || 0) * Math.max(0, Number(yieldPct) || 0) * (days / 365.25)
+  return { days, payouts, estimated: !actual }
+}
+
+// Cost basis today: return of capital lowers it by the payouts (floor 0).
+export function rocAdjustedBasis(pos, asOf) {
+  const cost = Number(pos.cost_basis) || 0
+  const d = pos.details ?? {}
+  if (pos.instrument_type !== 'stock' || d.dividend_kind !== 'roc') return cost
+  const { payouts } = payoutsSoFar({ value: pos.current_value, yieldPct: d.dividend_yield, purchaseDate: pos.purchase_date,
+    asOf, payoutsReceived: d.payouts_received })
+  return Math.max(0, cost - payouts)
+}
+
+export function incomeHoldingReturn({
+  cost, value, yieldPct, kind = 'qualified', purchaseDate, asOf, payoutsReceived, rateForGain,
+}) {
+  if (!isValidBasis(cost)) return null
+  const v = Math.max(0, Number(value) || 0)
+  const y = Math.max(0, Number(yieldPct) || 0)
+  const { days, payouts, estimated } = payoutsSoFar({ value: v, yieldPct: y, purchaseDate, asOf, payoutsReceived })
+  const actual = !estimated
+  const isRoc = kind === 'roc'
+
+  const incomeRates = rateForGain(v * y)
+  let payoutTax = isRoc ? 0 : payouts * incomeTaxRate(incomeRates, kind)
+  const adjustedBasis = isRoc ? Math.max(0, cost - payouts) : cost
+  if (isRoc && payouts > cost) payoutTax = (payouts - cost) * incomeRates.long_term.total
+
+  const saleGain = v - adjustedBasis
+  const hp = holdingPeriod(purchaseDate, asOf)
+  const isLongTerm = hp?.is_long_term ?? false
+  const saleRates = rateForGain(Math.max(0, saleGain))
+  const saleRate = isLongTerm ? saleRates.long_term.total : saleRates.short_term.total
+  const saleTax = saleGain > 0 ? saleGain * saleRate : 0
+  const afterTaxValue = v - saleTax
+  const afterTaxPayouts = payouts - payoutTax
+  return {
+    kind,
+    days,
+    payouts,
+    payouts_estimated: !actual,
+    payout_tax: payoutTax,
+    after_tax_payouts: afterTaxPayouts,
+    adjusted_basis: adjustedBasis,
+    sale_gain: saleGain,
+    sale_rate: saleRate,
+    sale_tax: saleTax,
+    after_tax_value: afterTaxValue,
+    gain: v - cost + payouts,
+    after_tax_gain: afterTaxValue + afterTaxPayouts - cost,
+    // Waiting for long-term, on the sale gain (only while short-term and up).
+    tax_saved_by_waiting: !isLongTerm && saleGain > 0
+      ? saleGain * (saleRates.short_term.total - saleRates.long_term.total) : null,
+  }
+}
+
 // Income investments next to cash, on the same balance and the same
 // after-tax footing. Best after-tax yield first.
 export function incomeYieldComparison({ balance, options, rateForGain }) {
