@@ -10,6 +10,7 @@ import { ChartLine, ChevronLeft, ChevronRight, Crosshair, Maximize2, Minimize2, 
 import TickerDrawer from '../components/TickerDrawer'
 import { CHART_TICKERS } from '../lib/chartTickers'
 import PriceChart from '../components/PriceChart'
+import ConfluenceLeaders from '../components/ConfluenceLeaders'
 import { placePins, measure, fibLevels, autoSwing, stepPin } from '../utils/chartTools'
 
 // Charts — the stocks where the app suggests a LEAPS trade, with the trade
@@ -178,6 +179,8 @@ export default function Charts() {
   // suggested trade. Recent searches are kept on this device.
   const [searchOpen, setSearchOpen] = useState(false)
   const [watchlist, setWatchlist] = useState([])
+  // Tracking + holdings tickers, for the leaders' "Yours" view.
+  const myTickers = useMemo(() => [...new Set([...watchlist, ...(positions ?? []).map((x) => x.ticker).filter(Boolean)])].sort(), [watchlist, positions])
   const [recent, setRecent] = useState(() => {
     try { const r = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]'); return Array.isArray(r) ? r.slice(0, RECENT_MAX) : [] } catch { return [] }
   })
@@ -302,6 +305,9 @@ export default function Charts() {
           <Search size={15} aria-hidden /> Search
         </button>
       </header>
+
+      {/* The universe ranked on confluence (nightly), then this page's chart. */}
+      <ConfluenceLeaders mine={myTickers} />
 
       {loading ? (
         <div className="text-xs text-muted py-8 text-center">Loading…</div>

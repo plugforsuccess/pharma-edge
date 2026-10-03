@@ -187,6 +187,28 @@ export default function LeapsEntry() {
   // the suite runs on the daily bars here whatever the suite timeframe.
   const dailySuite = useMemo(() => (bars?.length ? (suiteTf === '1d' && suitePack ? suitePack.raw : suiteModel(bars)) : null), [bars, suiteTf, suitePack])
   const conf = useMemo(() => (model && dailySuite ? confluenceModel({ bars, model, suite: dailySuite, horizons: HORIZONS }) : null), [bars, model, dailySuite])
+  // The universe-wide record of each combination (confluence_pool, nightly):
+  // shown when this ticker has few cases of today's setup.
+  const [pool, setPool] = useState(null)
+  const todayKeys = [conf?.buy.today.now?.key, conf?.sell.today.now?.key].filter(Boolean).join('|')
+  useEffect(() => {
+    if (!todayKeys) { setPool(null); return undefined }
+    let cancelled = false
+    supabase.from('confluence_pool').select('side, combo, n, graded, at_turn, avg_3m, avg_6m, avg_12m, win_3m, win_6m, win_12m, tickers')
+      .in('combo', todayKeys.split('|')).then(({ data }) => {
+        if (cancelled) return
+        const out = { buy: {}, sell: {} }
+        for (const r of data ?? []) {
+          out[r.side][r.combo] = {
+            n: r.n, graded: r.graded, atTurn: r.at_turn == null ? null : Number(r.at_turn), tickers: r.tickers,
+            horizons: [['3M', 'avg_3m', 'win_3m'], ['6M', 'avg_6m', 'win_6m'], ['12M', 'avg_12m', 'win_12m']]
+              .map(([label, a, w]) => ({ label, avg: r[a] == null ? null : Number(r[a]), winRate: r[w] == null ? null : Number(r[w]) })),
+          }
+        }
+        setPool(out)
+      })
+    return () => { cancelled = true }
+  }, [todayKeys])
   // The chart's candles follow the suite timeframe (owner, 2026-10-03):
   // weekly / monthly draw those bars, with the indicator math run on them
   // and the suite on its own bars. The status card stays daily.
@@ -241,7 +263,7 @@ export default function LeapsEntry() {
       ) : (
         <div className="md:grid md:grid-cols-[1fr_280px] md:gap-x-5 md:items-start">
           <div className="min-w-0 md:order-1">
-            <StatusPanel s={s} model={model} params={params} suite={suite} confirmDays={confirmDays} tfLabel={SUITE_TIMEFRAMES[suiteTf].label.toLowerCase()} conf={conf} />
+            <StatusPanel s={s} model={model} params={params} suite={suite} confirmDays={confirmDays} tfLabel={SUITE_TIMEFRAMES[suiteTf].label.toLowerCase()} conf={conf} pool={pool} />
             {<SuitePanel pack={suitePack} failed={suiteData?.error && suiteData.tf === suiteTf} tf={suiteTf} onTf={pickSuiteTf} holdings={holdings} onJump={jumpPeriod} onOpenPane={setExpanded}
               />}
           </div>
@@ -387,7 +409,7 @@ function Key({ glyph, className, children }) {
   )
 }
 
-function StatusPanel({ s, model, params, suite, confirmDays, tfLabel, conf }) {
+function StatusPanel({ s, model, params, suite, confirmDays, tfLabel, conf, pool }) {
   const c = s.cond
   const yes = c.all
   const met = countMet(c)
@@ -455,7 +477,7 @@ function StatusPanel({ s, model, params, suite, confirmDays, tfLabel, conf }) {
         </div>
         <Meter met={met} yes={yes} />
       </div>
-      {conf && <ConfluenceLine conf={conf} />}
+      {conf && <ConfluenceLine conf={conf} pool={pool} />}
       <ul className="relative border-t border-hairline divide-y divide-hairline">
         {rows.map((r) => (
           <li key={r.label} className="px-5 py-2.5 flex items-center gap-3 min-h-[52px]">
@@ -999,7 +1021,7 @@ function ConfluenceSide({ side, conf, pool }) {
       <div className="mt-2 text-xs text-subtle leading-snug">
         {score === 0 ? 'No signals in the last few days.'
           : score === 1 ? `Only ${CONF_LABEL[side][now.lit[0]]} so far — a setup needs 2+ signals agreeing.`
-            : universe ? line(universe, <>This exact setup {exactN ? `${exactN}× here` : 'not seen here'} — across the universe: {universe.n}×</>)
+            : universe ? line(universe, <>This exact setup {exactN ? `${exactN}× here` : 'not seen here'} — across {universe.tickers} tickers: {universe.n}×</>)
               : !stats ? 'Not seen before on this ticker.'
                 : line(stats, basis === 'exact' ? <>This setup: {stats.n}× in 5 years</> : <>This exact setup {exactN ? `${exactN}×` : 'not seen'} — any {score}+ agreeing: {stats.n}×</>)}
       </div>

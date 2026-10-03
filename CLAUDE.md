@@ -1263,6 +1263,35 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   `--color-confluence` (hex — the chart canvas needs it). **The Bravo
   band is gone** (owner: not needed); the suite card's Bravo row jumps to
   the latest Bravo diamond.
+- **Two-sided confluence + the nightly ranking** (owner, 2026-10-03:
+  "identify lows (buy entries) and extended highs (exits)"). Confluence
+  has a **sell** side too: Extended (RSI ≥ 70, or % above the 200-day in
+  the top 10% of its last year), Bravo bear ◆, Echo / Tango bear, MACD
+  cross down — graded against swing **highs** (a sell "wins" when the stock
+  fell). The status card shows Buy · lows and Sell · extended highs; the
+  Confluence pane diverges (buy up, sell down); the backtest has a Buy /
+  Sell switch. **Ranking:** `scripts/rank-confluence.mjs` in
+  `.github/workflows/confluence-rank.yml` (21:40 UTC weekdays = full;
+  dispatch defaults to rank-only; a push to a feature branch touching it
+  re-ranks without alerts) runs the same `src/utils/` math on 5 years of
+  Yahoo bars for every ticker in `CHART_TICKERS` (~564), pools every
+  ticker's setups per side and combination (`confluence_pool`), blends
+  each ticker's own record of today's combination toward the pool
+  (`blendedEstimate`: (n·own + 10·pool) / (n + 10)) and ranks
+  (`confluence_ranks`, one row per side × ticker, rank NULL = not
+  eligible): **buy** = score ≥ 2, 200-day rising, blended 6M avg > 0, best
+  6M first; **sell** = score ≥ 2, blended 3M avg < 0, most negative first.
+  Both tables are shared market data (authenticated SELECT, service-role
+  write). Charts opens with **Confluence leaders** (Buy · lows / Sell ·
+  highs, Top 10 / Yours = Tracking + holdings; rows open the entry chart);
+  the entry card falls back to the pool's record ("across 564 tickers:
+  312×") when the ticker has < 5 cases. **Alerts** (full mode, users with
+  entry alerts on): a Tracking / holding ticker entering the buy top 10
+  (`confluence_top_buy`) or a holding entering the sell top 10
+  (`confluence_top_sell`) → an alerts row (bell) + one email per user via
+  **Resend — a placeholder**: skipped (logged) until the `RESEND_API_KEY`
+  Actions secret and a verified `RESEND_FROM` (Actions variable, default
+  `Cash Moves <alerts@cashmoves.io>`) exist. No push from this job yet.
 - **Signal suite on the entry chart** (owner, 2026-10-03: "for better
   entries and sell signals"). A JS port of the TradingView suite in
   `plugforsuccess/wiley-indicator-suite` (Bravo trend, Echo momentum,
@@ -1490,6 +1519,10 @@ Continuous — dxlink-worker (Fly.io)
 
 Periodic   — monitor-positions.yml
              Polls Tastytrade for fill status on open orders
+
+5:40pm ET  — confluence-rank.yml (weekdays, 21:40 UTC)
+             Ranks ~564 tickers on buy / sell confluence → confluence_ranks
+             + confluence_pool; top-10 alerts (bell + Resend email placeholder)
 
 5:20pm ET  — entry-scan.yml (weekdays, 21:20 UTC)
              Entry alerts: LEAPS buy zone YES / weekly Hardening bull
