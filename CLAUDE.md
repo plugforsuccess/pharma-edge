@@ -1142,6 +1142,9 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   tiles, "fresh" = within 10 trading days, plus each pillar's state; the
   backtest has tabs Buy zone / Hardening ▲ / Sell signals (sell "win" =
   the stock fell after), and the Hardening tab lists near-misses by gate.
+  Every pane has a **violet title** (`PANE_TITLES`) and a small violet
+  maximize button at its top right that opens that pane alone full
+  screen (`FullPane` in `LeapsEntry.jsx`; Esc or X closes).
   **Advisory only:** sell signals don't change the LEAPS exit playbook
   or the bot's decisions. With the Pine gates (ATR expansion ≥ 1.1× in 5
   bars, Echo ≥ 15 points in 5 bars) daily Hardening signals are rare.

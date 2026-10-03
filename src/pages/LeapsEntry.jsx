@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import clsx from 'clsx'
 import { ArrowDown, ArrowLeft, ArrowUp, Check, RotateCcw, Search, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { CHART_TICKERS } from '../lib/chartTickers'
 import { entryModel, DEFAULT_PARAMS, HORIZONS } from '../utils/indicators'
-import EntryChart, { LAYERS, SUB_PANES } from '../components/EntryChart'
+import EntryChart, { LAYERS, PANE_TITLES, SUB_PANES } from '../components/EntryChart'
 import { suiteModel, forwardReturns, horizonStats } from '../utils/signalSuite'
 import TickerDrawer from '../components/TickerDrawer'
 import NumberInput from '../components/NumberInput'
@@ -100,6 +100,7 @@ export default function LeapsEntry() {
     saveJson(PARAMS_KEY, DEFAULT_PARAMS)
   }
   const isDefault = FIELDS.every(([k]) => params[k] === DEFAULT_PARAMS[k])
+  const [expanded, setExpanded] = useState(null) // a pane key shown full screen
   const [layers, setLayers] = useState(() => {
     const saved = loadJson(LAYERS_KEY)
     return Array.isArray(saved) ? saved : DEFAULT_LAYERS
@@ -197,7 +198,7 @@ export default function LeapsEntry() {
                   </button>
                 ))}
               </div>
-              <EntryChart bars={bars} model={model} suite={suite} panes={panes} layers={layers} onHover={setHover} />
+              <EntryChart bars={bars} model={model} suite={suite} panes={panes} layers={layers} onHover={setHover} onExpand={setExpanded} />
               <div className="px-5 py-3 border-t border-hairline flex flex-wrap gap-x-4 gap-y-1.5 text-[11px] text-muted">
                 <Key className="text-green-400" glyph="▲">Buy signal</Key>
                 <Key className="text-green-400/50" glyph="●">MACD confirms</Key>
@@ -221,6 +222,12 @@ export default function LeapsEntry() {
         </div>
       )}
 
+      {expanded && model && (
+        <FullPane title={`${ticker} · ${PANE_TITLES[expanded]}`} onClose={() => setExpanded(null)}>
+          {(h) => <EntryChart bars={bars} model={model} suite={suite} panes={panes} layers={layers} focus={expanded} fill={h} />}
+        </FullPane>
+      )}
+
       <TickerDrawer
         open={searchOpen}
         onClose={() => setSearchOpen(false)}
@@ -236,6 +243,36 @@ export default function LeapsEntry() {
   )
 }
 const NO_GATES = new Set()
+
+// One pane full screen. Esc or X closes; the page doesn't scroll behind it.
+function FullPane({ title, onClose, children }) {
+  const body = useRef(null)
+  const close = useRef(onClose)
+  close.current = onClose
+  const [h, setH] = useState(null)
+  useEffect(() => {
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const key = (e) => { if (e.key === 'Escape') close.current() }
+    window.addEventListener('keydown', key)
+    const ro = new ResizeObserver(() => setH(body.current?.clientHeight ?? null))
+    if (body.current) ro.observe(body.current)
+    return () => { document.body.style.overflow = prev; window.removeEventListener('keydown', key); ro.disconnect() }
+  }, [])
+  return (
+    <div className="fixed inset-0 z-[70] bg-bg flex flex-col" role="dialog" aria-modal="true" aria-label={title}
+      style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}>
+      <div className="flex items-center gap-2 px-4 py-2 border-b border-hairline">
+        <h2 className="flex-1 min-w-0 truncate text-sm font-semibold text-violet-300">{title}</h2>
+        <button type="button" onClick={onClose} aria-label="Close"
+          className="min-h-[44px] min-w-[44px] -mr-2 flex items-center justify-center rounded-xl text-subtle hover:text-fg">
+          <X size={18} />
+        </button>
+      </div>
+      <div ref={body} className="flex-1 min-h-0">{h ? children(h) : null}</div>
+    </div>
+  )
+}
 
 const countMet = (c) => ['band', 'rising', 'trend', 'rsi', 'iv'].filter((k) => c[k]).length
 

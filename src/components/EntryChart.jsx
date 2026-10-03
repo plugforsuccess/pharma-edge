@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Maximize2 } from 'lucide-react'
 import {
   createChart, createSeriesMarkers, BaselineSeries, CandlestickSeries, HistogramSeries, LineSeries,
   ColorType, CrosshairMode, LineStyle, LineType,
@@ -26,7 +27,10 @@ import {
 // (small red squares, E / T / B).
 // `model` comes from entryModel() in utils/indicators.js, `suite` from
 // suiteModel() in utils/signalSuite.js; `panes` lists the sub-panes to
-// show. Colors are the theme tokens, read at runtime.
+// show. Each pane has a violet title and, when `onExpand` is passed, a
+// maximize button (top right) — `onExpand(key)`; the page then renders
+// <EntryChart focus={key} fill={px} /> full screen with that pane alone.
+// Colors are the theme tokens, read at runtime.
 
 function token(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim()
@@ -53,12 +57,16 @@ export const LAYERS = [
 ]
 const PRICE_H = 320
 const SUB_H = 96
+export const PANE_TITLES = {
+  price: 'Price', dist: '% vs 200-day', rsi: 'RSI 14', macd: 'MACD 12·26·9', ivr: 'IV Rank',
+  ivhv: 'IV vs HV 20', echo: 'Echo', tango: 'Tango',
+}
 const SHOW_DAYS = 504 // two years of trading days in view by default
 
 const fmt = (v, d = 2) => (v == null || !Number.isFinite(v) ? '—' : v.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }))
 const pct = (v, d = 1) => (v == null ? '—' : `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(d)}%`)
 
-export default function EntryChart({ bars, model, suite, panes, layers = [], onHover }) {
+export default function EntryChart({ bars, model, suite, panes, layers = [], onHover, onExpand, focus = null, fill = null }) {
   const box = useRef(null)
   const hoverRef = useRef(onHover)
   hoverRef.current = onHover
@@ -66,8 +74,9 @@ export default function EntryChart({ bars, model, suite, panes, layers = [], onH
   const chartRef = useRef(null)
   const [hover, setHover] = useState(null)
   const [tops, setTops] = useState([])
-  const shown = ['price', ...SUB_PANES.map(([k]) => k).filter((k) => panes.includes(k))]
-  const height = PRICE_H + (shown.length - 1) * SUB_H
+  const shown = focus ? [focus] : ['price', ...SUB_PANES.map(([k]) => k).filter((k) => panes.includes(k))]
+  const showPrice = shown[0] === 'price'
+  const height = fill ?? (showPrice ? PRICE_H : 0) + (shown.length - (showPrice ? 1 : 0)) * SUB_H
   const key = `${shown.join(',')}|${layers.join(',')}`
 
   useEffect(() => {
@@ -106,6 +115,7 @@ export default function EntryChart({ bars, model, suite, panes, layers = [], onH
     const paneOf = (k) => shown.indexOf(k)
 
     // Price pane ---------------------------------------------------------
+    if (showPrice) {
     // Buy-zone shading: full-height columns on signal days, its own scale.
     const zone = chart.addSeries(HistogramSeries, { ...quiet, priceScaleId: 'zone', base: 0 }, 0)
     chart.priceScale('zone', 0).applyOptions({ visible: false, scaleMargins: { top: 0, bottom: 0 } })
@@ -159,11 +169,12 @@ export default function EntryChart({ bars, model, suite, panes, layers = [], onH
     }
     markers.sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0))
     createSeriesMarkers(candles, markers)
+    }
 
     // Sub-panes ----------------------------------------------------------
     const fixed = (lo, hi) => () => ({ priceRange: { minValue: lo, maxValue: hi } })
     const p = model.params
-    if (paneOf('dist') > 0) {
+    if (paneOf('dist') >= 0) {
       const pi = paneOf('dist')
       // The ±band: a flat line at +band filled down to a baseline at −band.
       chart.addSeries(BaselineSeries, {
@@ -179,7 +190,7 @@ export default function EntryChart({ bars, model, suite, panes, layers = [], onH
       }, pi)
       d.setData(line(model.dist))
     }
-    if (paneOf('rsi') > 0) {
+    if (paneOf('rsi') >= 0) {
       const r = chart.addSeries(LineSeries, {
         ...quiet, lastValueVisible: true, color: t.fg, lineWidth: 1.5, autoscaleInfoProvider: fixed(0, 100),
         priceFormat: { type: 'custom', formatter: (v) => v.toFixed(0) },
@@ -189,7 +200,7 @@ export default function EntryChart({ bars, model, suite, panes, layers = [], onH
       r.createPriceLine({ price: 30, color: alpha(t.up, 0.6), lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: false })
       r.createPriceLine({ price: p.rsiLevel, color: t.gold, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, axisLabelColor: alpha(t.gold, 0.85), axisLabelTextColor: '#000' })
     }
-    if (paneOf('macd') > 0) {
+    if (paneOf('macd') >= 0) {
       const pi = paneOf('macd')
       chart.addSeries(HistogramSeries, { ...quiet, base: 0 }, pi)
         .setData(model.macd.hist.map((v, i) => (v == null ? { time: time[i] }
@@ -197,7 +208,7 @@ export default function EntryChart({ bars, model, suite, panes, layers = [], onH
       chart.addSeries(LineSeries, { ...quiet, lastValueVisible: true, color: t.gold, lineWidth: 1.5 }, pi).setData(line(model.macd.line))
       chart.addSeries(LineSeries, { ...quiet, color: t.subtle, lineWidth: 1 }, pi).setData(line(model.macd.signal))
     }
-    if (paneOf('ivr') > 0) {
+    if (paneOf('ivr') >= 0) {
       const s = chart.addSeries(LineSeries, {
         ...quiet, lastValueVisible: true, color: t.gold, lineWidth: 1.5, autoscaleInfoProvider: fixed(0, 100),
         priceFormat: { type: 'custom', formatter: (v) => v.toFixed(0) },
@@ -205,7 +216,7 @@ export default function EntryChart({ bars, model, suite, panes, layers = [], onH
       s.setData(line(model.ivRank))
       s.createPriceLine({ price: p.ivRankMax, color: t.up, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, axisLabelColor: alpha(t.up, 0.85), axisLabelTextColor: '#000' })
     }
-    if (paneOf('ivhv') > 0) {
+    if (paneOf('ivhv') >= 0) {
       const pi = paneOf('ivhv')
       const pf = { type: 'custom', formatter: (v) => `${(v * 100).toFixed(0)}%` }
       chart.addSeries(LineSeries, { ...quiet, lastValueVisible: true, color: t.subtle, lineWidth: 1.5, priceFormat: pf }, pi).setData(line(model.hv))
@@ -218,7 +229,7 @@ export default function EntryChart({ bars, model, suite, panes, layers = [], onH
     // Echo / Tango: the line around zero, the adaptive rails as steps, and
     // the pillar's diamonds (dots) on the rail they crossed.
     const osc = (k, o) => {
-      if (!suite || paneOf(k) <= 0) return
+      if (!suite || paneOf(k) < 0) return
       const pi = paneOf(k)
       const rail = { ...quiet, color: alpha(t.subtle, 0.55), lineWidth: 1, lineType: LineType.WithSteps, lineStyle: LineStyle.Dashed }
       chart.addSeries(LineSeries, rail, pi).setData(line(o.upper))
@@ -239,9 +250,12 @@ export default function EntryChart({ bars, model, suite, panes, layers = [], onH
     osc('echo', suite?.echo)
     osc('tango', suite?.tango)
 
+    // Indicator panes: little padding, so 0–100 scales stay 0–100 when tall.
+    shown.forEach((k, pi) => { if (k !== 'price') chart.priceScale('right', pi).applyOptions({ scaleMargins: { top: 0.1, bottom: 0.06 } }) })
+
     // Pane heights: price first, the rest equal.
     const all = chart.panes()
-    all.forEach((pane, i) => pane.setStretchFactor(i === 0 ? PRICE_H / SUB_H : 1))
+    all.forEach((pane, i) => pane.setStretchFactor(i === 0 && showPrice ? PRICE_H / SUB_H : 1))
 
     // Zoom: keep the last view on rebuilds; default to the last two years.
     const n = bars.length
@@ -291,20 +305,20 @@ export default function EntryChart({ bars, model, suite, panes, layers = [], onH
       { label: '50', value: fmt(v(model?.s50)), cls: 'text-amber-300', swatch: 'bg-amber-400' },
       { label: 'W50', value: fmt(v(model?.wema)), cls: 'text-subtle', swatch: 'bg-fg/70', dashed: true },
     ],
-    dist: [{ label: 'vs 200-day', value: pct(v(model?.dist)), cls: v(model?.dist) < 0 ? 'text-rose-300' : 'text-green-400' }, { label: `±${model?.params.bandPct}% band`, value: '', cls: 'text-muted' }],
-    rsi: [{ label: 'RSI 14', value: fmt(v(model?.rsi), 1), cls: 'text-fg' }],
+    dist: [{ label: '', value: pct(v(model?.dist)), cls: v(model?.dist) < 0 ? 'text-rose-300' : 'text-green-400' }, { label: `±${model?.params.bandPct}% band`, value: '', cls: 'text-muted' }],
+    rsi: [{ label: '', value: fmt(v(model?.rsi), 1), cls: 'text-fg' }],
     macd: [
       { label: 'MACD', value: fmt(v(model?.macd.line)), cls: 'text-amber-300', swatch: 'bg-amber-400' },
       { label: 'Signal', value: fmt(v(model?.macd.signal)), cls: 'text-subtle', swatch: 'bg-subtle' },
       { label: 'Hist', value: fmt(v(model?.macd.hist)), cls: v(model?.macd.hist) < 0 ? 'text-rose-300' : 'text-green-400' },
     ],
-    ivr: [{ label: model?.ivSource === 'iv' ? 'IV Rank' : 'IV Rank (HV)', value: fmt(v(model?.ivRank), 0), cls: v(model?.ivRank) < model?.params.ivRankMax ? 'text-green-400' : 'text-amber-300' }],
+    ivr: [{ label: model?.ivSource === 'iv' ? '' : 'HV stand-in', value: fmt(v(model?.ivRank), 0), cls: v(model?.ivRank) < model?.params.ivRankMax ? 'text-green-400' : 'text-amber-300' }],
     echo: [
-      { label: 'Echo', value: fmt(v(suite?.echo.line), 1), cls: v(suite?.echo.line) < 0 ? 'text-rose-300' : 'text-green-400' },
+      { label: '', value: fmt(v(suite?.echo.line), 1), cls: v(suite?.echo.line) < 0 ? 'text-rose-300' : 'text-green-400' },
       { label: 'rails', value: `${fmt(v(suite?.echo.upper), 0)} / ${fmt(v(suite?.echo.lower), 0)}`, cls: 'text-subtle' },
     ],
     tango: [
-      { label: 'Tango', value: fmt(v(suite?.tango.line), 1), cls: v(suite?.tango.line) < 0 ? 'text-rose-300' : 'text-green-400' },
+      { label: '', value: fmt(v(suite?.tango.line), 1), cls: v(suite?.tango.line) < 0 ? 'text-rose-300' : 'text-green-400' },
       { label: 'rails', value: `${fmt(v(suite?.tango.upper), 0)} / ${fmt(v(suite?.tango.lower), 0)}`, cls: 'text-subtle' },
     ],
     ivhv: [
@@ -317,15 +331,25 @@ export default function EntryChart({ bars, model, suite, panes, layers = [], onH
     <div className="relative" style={{ height }}>
       <div ref={box} className="absolute inset-0" />
       {shown.map((k, pi) => (
-        <div key={k} className="absolute left-3 right-16 pointer-events-none flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10.5px] leading-4 font-mono-tab"
-          style={{ top: (tops[pi] ?? 0) + 6 }}>
-          {legends[k].map((l) => (
-            <span key={l.label} className="inline-flex items-center gap-1.5 bg-bg/70 rounded px-1 -mx-1">
-              {l.swatch && <span className={`inline-block w-2.5 rounded-full ${l.thick ? 'h-[3px]' : 'h-[2px]'} ${l.swatch} ${l.dashed ? 'opacity-70' : ''}`} aria-hidden />}
-              <span className="text-muted">{l.label}</span>
-              {l.value !== '' && <span className={l.cls}>{l.value}</span>}
-            </span>
-          ))}
+        <div key={k}>
+          <div className="absolute left-3 right-[104px] pointer-events-none flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10.5px] leading-4 font-mono-tab"
+            style={{ top: (tops[pi] ?? 0) + 6 }}>
+            <span className="bg-bg/80 rounded px-1 -mx-1 font-sans text-[11px] font-semibold tracking-tight text-violet-300">{PANE_TITLES[k]}</span>
+            {legends[k].map((l, li) => (
+              <span key={li} className="inline-flex items-center gap-1.5 bg-bg/70 rounded px-1 -mx-1">
+                {l.swatch && <span className={`inline-block w-2.5 rounded-full ${l.thick ? 'h-[3px]' : 'h-[2px]'} ${l.swatch} ${l.dashed ? 'opacity-70' : ''}`} aria-hidden />}
+                {l.label && <span className="text-muted">{l.label}</span>}
+                {l.value !== '' && <span className={l.cls}>{l.value}</span>}
+              </span>
+            ))}
+          </div>
+          {onExpand && !focus && (
+            <button type="button" onClick={() => onExpand(k)} aria-label={`Expand ${PANE_TITLES[k]}`}
+              className="absolute right-[60px] z-10 h-7 w-7 flex items-center justify-center rounded-md bg-bg/80 border border-border text-violet-300 hover:text-violet-200 hover:border-violet-400/50 transition"
+              style={{ top: (tops[pi] ?? 0) + 4 }}>
+              <Maximize2 size={13} aria-hidden />
+            </button>
+          )}
         </div>
       ))}
     </div>
