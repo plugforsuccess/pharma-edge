@@ -179,6 +179,28 @@ variable to its full name; set `VITE_PUBLIC_RECORD_REPO` in Vercel env.
   and writes `ldp_risk_profiles` (service role) + `leaps_tax_profiles`.
   Never sets `account_tier` — new users default to self-directed.
   Requires the current `LDP_DISCLOSURES_VERSION` to be accepted.
+- `entry-scan` (`verify_jwt=true`, **service-role only**; owner,
+  2026-10-03: "ensure the next entry"). Daily after the close
+  (`.github/workflows/entry-scan.yml`, 21:20 UTC weekdays;
+  `workflow_dispatch` defaults to a dry run). For users with
+  `profiles.entry_alerts` (default on; Settings → Entry Alerts, saves on
+  tap) it checks their Tracking (`watchlist`) + open share / option
+  holdings tickers (max 80, shared across users, Yahoo in batches of 6)
+  and alerts when the **LEAPS buy zone turns YES** (default thresholds —
+  users' adjusted thresholds live on their devices; one alert per
+  buy-zone cluster, started within the last 3 trading days) or a **weekly
+  Hardening bull** fires in the last two completed weeks (the current
+  week counts once the latest daily bar is a Friday). Each alert is an
+  `alerts` row (`alert_type` `entry_buy_zone` / `entry_hardening_bull`,
+  new `ticker` + `event_date` columns, unique index `alerts_entry_once`
+  on (user_id, alert_type, ticker, event_date) — re-runs are no-ops) plus
+  web-push to the user's devices (skipped without VAPID keys); the bell
+  shows them and tapping opens `/charts/entry/:ticker`. The decision is
+  `src/utils/entryEvents.js` (`npm run entryevents:check`); the edge
+  function runs **generated copies** of `entryEvents.js`, `indicators.js`
+  and `signalSuite.js` in `_shared/` — edit `src/utils/`, then
+  `npm run indicators:sync` (`indicators:check` fails when a copy is
+  stale). POST `{ dry_run: true }` reports without writing.
 - `monitor-positions` v1+ (`verify_jwt=true`). Polls Tastytrade
   `/accounts/:n/orders` for active orders and reconciles fill status
   onto `order_history`. Triggered by
@@ -1339,6 +1361,10 @@ Continuous — dxlink-worker (Fly.io)
 
 Periodic   — monitor-positions.yml
              Polls Tastytrade for fill status on open orders
+
+5:20pm ET  — entry-scan.yml (weekdays, 21:20 UTC)
+             Entry alerts: LEAPS buy zone YES / weekly Hardening bull
+             on each user's Tracking + holdings tickers → bell + push
 
 Periodic   — snapshot-gex.yml
              Refreshes gex_snapshots cache for the curated tickers

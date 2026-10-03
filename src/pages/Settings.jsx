@@ -447,6 +447,7 @@ export default function Settings() {
       </Section>
 
       <PushSection userId={user?.id} />
+      <EntryAlertsSection userId={user?.id} />
 
       <Section title="Broker">
         <div className="flex items-start gap-3">
@@ -911,6 +912,44 @@ function Toggle({ value, onChange, label }) {
         )}
       />
     </button>
+  )
+}
+
+// Entry alerts (entry-scan, daily after the close): the LEAPS buy zone
+// turning YES or a weekly Hardening bull on a Tracking / holdings ticker →
+// the bell and push. Saves on tap, like push.
+function EntryAlertsSection({ userId }) {
+  const [on, setOn] = useState(null)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    if (!userId) return
+    supabase.from('profiles').select('entry_alerts').eq('id', userId).maybeSingle()
+      .then(({ data }) => setOn(data?.entry_alerts ?? true))
+  }, [userId])
+  async function toggle() {
+    const next = !on
+    setBusy(true)
+    setOn(next)
+    const { error } = await supabase.from('profiles').update({ entry_alerts: next }).eq('id', userId)
+    if (error) setOn(!next)
+    setBusy(false)
+  }
+  if (on == null) return null
+  return (
+    <Section title="Entry Alerts">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1">
+          <p className="text-fg text-sm font-medium">{on ? 'On' : 'Off'}</p>
+          <p className="text-subtle text-xs mt-0.5">
+            Each weekday after the close, your Tracking list and holdings are checked. You get an alert when one enters the LEAPS buy zone or a weekly Hardening bull fires.
+          </p>
+        </div>
+        <button type="button" role="switch" aria-checked={on} aria-label="Entry alerts" onClick={toggle} disabled={busy}
+          className={`relative shrink-0 h-7 w-12 rounded-full transition-colors disabled:opacity-60 ${on ? 'bg-amber-400' : 'bg-faint'}`}>
+          <span className={`absolute top-0.5 h-6 w-6 rounded-full bg-fg transition-all ${on ? 'left-[22px]' : 'left-0.5'}`} />
+        </button>
+      </div>
+    </Section>
   )
 }
 

@@ -1,0 +1,49 @@
+# Daily entry alerts (owner, 2026-10-03: "ensure the next entry"). After
+# the US close on weekdays, asks the entry-scan edge function to check every
+# opted-in user's Tracking + holdings tickers and alert (bell + push) when
+# the LEAPS buy zone turns YES or a weekly Hardening bull fires. Alerts are
+# idempotent per (user, kind, ticker, date), so a re-run is a no-op.
+#
+# Same curl-the-edge-function pattern as trigger-eval.yml.
+
+name: Entry alerts
+
+on:
+  schedule:
+    - cron: '20 21 * * 1-5'   # 21:20 UTC = 5:20pm ET (DST) / 4:20pm ET (standard) — after the close
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Compute and report only — write and push nothing'
+        type: boolean
+        default: true
+
+concurrency:
+  group: entry-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Invoke entry-scan edge function
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          DRY_RUN: ${{ inputs.dry_run == true }}
+        run: |
+          body='{}'
+          if [ "$DRY_RUN" = "true" ]; then body='{"dry_run":true}'; fi
+          resp=$(curl -sS --max-time 540 -w "\n%{http_code}" -X POST \
+            "${SUPABASE_URL}/functions/v1/entry-scan" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "$body")
+          http=$(echo "$resp" | tail -n1)
+          payload=$(echo "$resp" | head -n -1)
+          echo "entry-scan status=${http} body=${payload}"
+          if [ "$http" != "200" ]; then
+            echo "::error::entry-scan returned ${http}"
+            exit 1
+          fi

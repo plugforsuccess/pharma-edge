@@ -1,0 +1,58 @@
+// The entries a ticker has today, for entry alerts (entry-scan edge
+// function; owner, 2026-10-03: "ensure the next entry"). Pure: give it the
+// bars, get back what to alert.
+//
+//   entryEvents({ ticker, daily, weekly, spyWeekly, vixWeekly })
+//   → [{ kind, ticker, event_date, title, message }]
+//   (params / suiteParams override the default thresholds — tests only;
+//   alerts use the defaults.)
+//
+//   entry_buy_zone        buy zone YES on the latest daily bar (default
+//                         thresholds), and the cluster started in the last 3
+//                         trading days; event_date = the cluster's first day.
+//   entry_hardening_bull  weekly Hardening bull in the last two completed
+//                         weeks; the current week counts as completed when
+//                         the latest daily bar is a Friday. event_date = the
+//                         week's start.
+
+import { entryModel } from './indicators.js'
+import { suiteModel, normalizePeriods } from './signalSuite.js'
+
+const money = (v) => `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+
+export function entryEvents({ ticker, daily, weekly, spyWeekly = [], vixWeekly = [], params, suiteParams }) {
+  const out = []
+  if (daily?.length >= 260) {
+    const m = entryModel(daily, params ? { params } : undefined)
+    const last = daily.length - 1
+    const trade = m.trades[m.trades.length - 1]
+    if (m.status?.cond?.all && trade && last - trade.i <= 2) {
+      out.push({
+        kind: 'entry_buy_zone', ticker, event_date: String(trade.t),
+        title: `${ticker} is in the LEAPS buy zone`,
+        message: `${ticker} entered the LEAPS buy zone — all 5 conditions met at ${money(m.status.close)}.`,
+      })
+    }
+  }
+  const w = normalizePeriods(weekly ?? [], '1wk')
+  if (w.length >= 220 && daily?.length) {
+    const onPeriods = (list) => {
+      const byKey = new Map(normalizePeriods(list, '1wk').map((x) => [x.k, x.c]))
+      return w.map((p) => ({ t: p.t, c: byKey.get(p.k) })).filter((x) => x.c != null)
+    }
+    const s = suiteModel(w, { spy: onPeriods(spyWeekly), vix: onPeriods(vixWeekly), ...(suiteParams ? { params: suiteParams } : {}) })
+    const lastP = w.length - 1
+    const friday = new Date(`${String(daily[daily.length - 1].t)}T12:00:00Z`).getUTCDay() === 5
+    const lastClosed = friday ? lastP : lastP - 1
+    for (const sg of s.bulls) {
+      if (sg.i > lastClosed || sg.i < lastClosed - 1) continue
+      const stars = '★'.repeat(sg.stars)
+      out.push({
+        kind: 'entry_hardening_bull', ticker, event_date: String(w[sg.i].t),
+        title: `${ticker}: weekly Hardening bull ${stars}`,
+        message: `${ticker} — weekly Hardening bull ${stars}${sg.boosters.length ? ` (${sg.boosters.join(', ')})` : ''} at ${money(sg.price)}.`,
+      })
+    }
+  }
+  return out
+}
