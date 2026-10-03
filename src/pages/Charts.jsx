@@ -20,7 +20,7 @@ import PriceChart from '../components/PriceChart'
 // Yahoo fallback). Holding charts are hidden for now; their history
 // (leaps_position_marks) keeps collecting.
 
-const RANGES = [['1d', '1D'], ['5d', '1W'], ['1mo', '1M'], ['3mo', '3M'], ['6mo', '6M'], ['1y', '1Y'], ['2y', '2Y']]
+const RANGES = [['1d', '1D'], ['5d', '1W'], ['1mo', '1M'], ['3mo', '3M'], ['6mo', '6M'], ['1y', '1Y'], ['2y', '2Y'], ['5y', '5Y'], ['max', 'All']]
 const DAY_MS = 86400000
 const BOT_DAYS = 30
 const price = (n) => (Number.isFinite(n)
@@ -161,14 +161,14 @@ export default function Charts() {
   const lastBar = ohlc?.[ohlc.length - 1]
   const firstBar = ohlc?.[0]
   const shown = hover ?? lastBar
-  // Change over the range (1D: since the previous close). Hovering a daily
-  // candle shows that day's change; hovering intraday, the change since
-  // the range's start.
+  // Gain or loss from the start of the range (1D: the previous close) to
+  // the latest candle — or, while scrubbing, to the candle under the finger.
   const intraday = typeof firstBar?.t === 'number'
-  const prevOf = (b) => { const i = ohlc?.indexOf(b) ?? -1; return i > 0 ? ohlc[i - 1].c : null }
-  const rangeBase = range === '1d' && data?.prev_close > 0 ? data.prev_close : firstBar?.c
-  const base = hover && !intraday ? prevOf(hover) : rangeBase
+  const base = range === '1d' && data?.prev_close > 0 ? data.prev_close : firstBar?.c
   const change = shown && base > 0 ? shown.c - base : null
+  const changeLabel = range === '1d' ? 'today'
+    : hover && firstBar ? `since ${typeof firstBar.t === 'string' && ['1y', '2y', '5y', 'max'].includes(range) ? shortDate(firstBar.t) : dayLabel(firstBar.t)}`
+    : RANGES.find(([v]) => v === range)?.[1]
   // Stable per pick, so hovering doesn't rebuild the chart.
   const levels = useMemo(() => (current?.lines ?? []).map((l) => ({ price: l.v, label: l.label, gold: l.gold })), [current])
 
@@ -213,9 +213,10 @@ export default function Charts() {
                     <div className="text-right shrink-0">
                       <div className="text-2xl font-semibold font-mono-tab leading-none text-fg">{price(shown.c)}</div>
                       {change != null && (
-                        <div className={clsx('mt-1 text-xs font-mono-tab', change < 0 ? 'text-rose-300' : 'text-green-400')}>
-                          {change >= 0 ? '+' : '−'}{Math.abs(change).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({change >= 0 ? '+' : '−'}{Math.abs((change / base) * 100).toFixed(2)}%)
-                          <span className="text-muted"> {hover && !intraday ? 'day' : RANGES.find(([v]) => v === range)?.[1]}</span>
+                        <div className={clsx('mt-1 font-mono-tab', change < 0 ? 'text-rose-300' : 'text-green-400')}>
+                          <span className="text-sm font-semibold">{change >= 0 ? '+' : '−'}{Math.abs((change / base) * 100).toFixed(2)}%</span>
+                          <span className="text-xs"> {change >= 0 ? '+' : '−'}{Math.abs(change).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                          <div className="text-[11px] text-muted">{changeLabel}</div>
                         </div>
                       )}
                     </div>
@@ -249,7 +250,7 @@ export default function Charts() {
                 <div className="flex-1 flex items-center" role="tablist" aria-label="Range">
                   {RANGES.map(([v, label]) => (
                     <button key={v} type="button" role="tab" aria-selected={range === v} onClick={() => { setHover(null); setRange(v) }}
-                      className={clsx('flex-1 min-h-[36px] min-w-0 px-1 rounded-md text-xs font-semibold transition',
+                      className={clsx('flex-1 min-h-[36px] min-w-0 px-0.5 rounded-md text-[11px] font-semibold transition',
                         range === v ? 'bg-bg-elev text-fg' : 'text-muted hover:text-fg')}>
                       {label}
                     </button>
