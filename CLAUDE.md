@@ -1009,6 +1009,16 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
 - **Charts** (owner, 2026-10-03) = **price charts of the stocks where
   the app suggests a LEAPS trade**, the trade drawn on the chart. **No
   GEX plays here — they live on Pulse** (owner). Groups, ideas first:
+  **Search** (owner, 2026-10-03): the header's Search opens the same
+  `TickerDrawer` as Pulse (with `feedLabels={false}` — no "real-time /
+  15-min delayed" labels, since Charts reads daily prices for every
+  ticker; the 11 sector ETFs first, then the app's ticker list, the
+  user's Tracking list, and "Use XYZ" for any other symbol). Any ticker
+  gets a chart with the drawing tools; a ticker that already has an idea
+  or holding call opens that item. Other searches show as **Searched**
+  ("No suggested trade"), the last 8 kept on this device
+  (`cm:chart-recent`, Clear). `price-history` maps share classes to
+  Yahoo's form (BRK.B → BRK-B).
   **LEAPS ideas** — buys from the **`suggest-leaps`** edge function, and
   LEAPS bot suggestions (`ldp_audit_log` kind `suggestion`, last 30
   days, newest per ticker, skipped where an idea covers the ticker;
