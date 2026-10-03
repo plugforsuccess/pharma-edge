@@ -49,9 +49,9 @@ export default function ConfluenceLeaders({ mine = [] }) {
         </div>
         <div className="mt-3 flex items-center gap-2">
           <div className="flex gap-0.5 p-0.5 rounded-lg bg-bg-elev" role="tablist" aria-label="Side">
-            {[['buy', 'Buy · lows'], ['sell', 'Sell · highs']].map(([k, label]) => (
+            {[['buy', 'Lows · buy'], ['sell', 'Highs · sell']].map(([k, label]) => (
               <button key={k} type="button" role="tab" aria-selected={side === k} onClick={() => setSide(k)}
-                className={clsx('min-h-[36px] px-3 rounded-md text-xs font-semibold transition',
+                className={clsx('min-h-[36px] px-2.5 rounded-md text-xs font-semibold transition whitespace-nowrap',
                   side === k ? (k === 'buy' ? 'bg-card text-confluence shadow-sm' : 'bg-card text-suite-bear shadow-sm') : 'text-muted hover:text-subtle')}>{label}</button>
             ))}
           </div>
@@ -59,7 +59,7 @@ export default function ConfluenceLeaders({ mine = [] }) {
           <div className="flex gap-0.5 p-0.5 rounded-lg bg-bg-elev" role="tablist" aria-label="Which tickers">
             {[['all', 'Top 10'], ['mine', 'Yours']].map(([k, label]) => (
               <button key={k} type="button" role="tab" aria-selected={scope === k} onClick={() => setScope(k)}
-                className={clsx('min-h-[36px] px-3 rounded-md text-xs font-semibold transition', scope === k ? 'bg-card text-fg shadow-sm' : 'text-muted hover:text-subtle')}>{label}</button>
+                className={clsx('min-h-[36px] px-2.5 rounded-md text-xs font-semibold transition whitespace-nowrap', scope === k ? 'bg-card text-fg shadow-sm' : 'text-muted hover:text-subtle')}>{label}</button>
             ))}
           </div>
         </div>
