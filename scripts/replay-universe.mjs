@@ -1,0 +1,182 @@
+// Universe replay (owner, 2026-10-03: NOW +84% — "how can the app suggest
+// this trade and signal the exit?"). Run by .github/workflows/replay-universe.yml.
+//
+// For every ticker in the app's universe: 5 years of daily bars → the same
+// entry model, signal suite and confluence math as the entry chart → the
+// day-by-day replay in src/utils/replay.js (no look-ahead; the LEAPS call
+// priced with Black-Scholes). Then, pooled across tickers:
+//   runs          every entry rule × exit rule: trades, win rate, average /
+//                 median option return, share losing half or more, stock
+//                 return, days held, capture of the best move in the trade
+//   moves         big moves (a swing low then +30% within 6 months), found
+//                 after the fact: how many each entry rule caught (a signal
+//                 from 10 days before the low up to half the move), how much
+//                 of the move the trade kept, and why the misses were missed
+//   missed        the biggest missed moves (tap through to the entry chart)
+//   walk_forward  the history filter tested out of sample: each confluence
+//                 trade judged only by setups whose 6-month result was known
+//                 before its signal (own record blended toward the pool,
+//                 like the ranking) — does "history says yes" beat "no"?
+//   by_year       the default strategy's trades by entry year (stability)
+//   spotlight     every trade for SPOTLIGHT tickers (default NOW)
+// → one row in replay_runs (mode write), or printed (dry-run).
+//
+// Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, TICKERS (subset),
+//      SPOTLIGHT=NOW,PLTR, CONCURRENCY (default 3).
+
+import { CHART_TICKERS } from '../src/lib/chartTickers.js'
+import { entryModel, HORIZONS } from '../src/utils/indicators.js'
+import { suiteModel } from '../src/utils/signalSuite.js'
+import { confluenceModel, blend, SHRINK_K } from '../src/utils/confluence.js'
+import { replayModel, tradeStats, moveStats, ENTRY_RULES, EXIT_RULES, OPTION_MODEL, MOVE } from '../src/utils/replay.js'
+import { EXIT_PLAYBOOK } from '../src/utils/afterTax.js'
+import { dailyBars, mapLimit, sources } from './lib/marketData.mjs'
+
+const args = process.argv.slice(2)
+const MODE = args.includes('--mode') ? args[args.indexOf('--mode') + 1] : 'dry-run'
+if (!['write', 'dry-run'].includes(MODE)) throw new Error(`unknown mode ${MODE}`)
+const CONCURRENCY = Number(process.env.CONCURRENCY) || 3
+const SPOTLIGHT = new Set((process.env.SPOTLIGHT || 'NOW').split(',').map((s) => s.trim().toUpperCase()).filter(Boolean))
+const H6 = HORIZONS.findIndex(([l]) => l === '6M')
+const H6_BARS = HORIZONS[H6][1]
+
+const universe = (process.env.TICKERS ? process.env.TICKERS.split(',') : CHART_TICKERS.map((t) => t.symbol))
+  .map((s) => s.trim().toUpperCase()).filter((s) => /^[A-Z][A-Z0-9.-]{0,11}$/.test(s))
+
+const r4 = (x) => (x == null || !Number.isFinite(x) ? null : Math.round(x * 1e4) / 1e4)
+const compactTrade = (ticker, t) => ({
+  ticker, signal: t.signalT, entry: t.t, end: t.endT, open: t.open, stock: r4(t.stock), strike: r4(t.strike), cost: r4(t.cost),
+  vol: r4(t.vol), option: r4(t.optionReturn), stockRet: r4(t.stockReturn), best: r4(t.bestStock), days: t.days, key: t.key,
+  exits: t.exits.map((x) => ({ t: x.t, frac: r4(x.frac), mult: r4(x.mult), reason: x.reason })),
+})
+
+function analyze(ticker, bars) {
+  if (!bars || bars.length < 300) return null
+  const model = entryModel(bars)
+  const suite = suiteModel(bars)
+  const rp = replayModel({ bars, model, suite })
+  const conf = confluenceModel({ bars, model, suite, horizons: HORIZONS })
+  // Buy setups with the day their 6-month result became known.
+  const setups = conf.buy.setups
+    .filter((s) => s.returns[H6] != null && s.i + H6_BARS < bars.length)
+    .map((s) => ({ key: s.key, r: s.returns[H6], done: bars[s.i + H6_BARS].t }))
+  return { ticker, asOf: bars[bars.length - 1].t, rp, setups }
+}
+
+// Out-of-sample history estimate for each confluence trade: only setups
+// whose 6M result was known before the signal — own (this ticker) blended
+// toward the pool (all tickers), as the ranking does.
+function walkForward(results, exitRule) {
+  const byKey = new Map()
+  for (const r of results) for (const s of r.setups) {
+    if (!byKey.has(s.key)) byKey.set(s.key, [])
+    byKey.get(s.key).push({ ...s, ticker: r.ticker })
+  }
+  for (const list of byKey.values()) list.sort((a, b) => a.done.localeCompare(b.done))
+  const groups = { yes: [], no: [], unknown: [] }
+  for (const r of results) {
+    for (const t of r.rp.runs[`confluence:${exitRule}`].trades) {
+      const list = byKey.get(t.key) ?? []
+      let poolN = 0, poolSum = 0, ownN = 0, ownSum = 0
+      for (const s of list) {
+        if (s.done >= t.signalT) break
+        poolN++; poolSum += s.r
+        if (s.ticker === r.ticker) { ownN++; ownSum += s.r }
+      }
+      if (poolN < SHRINK_K) { groups.unknown.push(t); continue }
+      const est = blend(ownN ? ownSum / ownN : null, ownN, poolSum / poolN)
+      groups[est > 0 ? 'yes' : 'no'].push(t)
+    }
+  }
+  return Object.fromEntries(Object.entries(groups).map(([k, list]) => [k, tradeStats(list)]))
+}
+
+async function main() {
+  const t0 = Date.now()
+  const failed = []
+  let done = 0
+  const results = (await mapLimit(universe, CONCURRENCY, async (ticker) => {
+    try { return analyze(ticker, await dailyBars(ticker)) } catch (e) { failed.push(e.message); return null } finally {
+      done++
+      if (done % 50 === 0) console.log(`  ${done}/${universe.length} · ${failed.length} failed · ${((Date.now() - t0) / 1000).toFixed(0)}s`)
+      if (done === 30 && failed.length >= 24) { console.error(`Market data is failing (${failed.slice(0, 3).join('; ')}) — aborting.`); process.exit(1) }
+    }
+  })).filter(Boolean)
+  if (!results.length) throw new Error(`no tickers analyzed (${failed.slice(0, 5).join('; ')})`)
+  const asOf = results.map((r) => r.asOf).sort().pop()
+
+  const runs = {}
+  for (const [entryRule, entryLabel] of ENTRY_RULES) {
+    for (const [exitRule, exitLabel] of EXIT_RULES) {
+      const key = `${entryRule}:${exitRule}`
+      const all = results.flatMap((r) => r.rp.runs[key].trades.map((t) => ({ ...t, ticker: r.ticker })))
+      const closed = all.filter((t) => !t.open).sort((a, b) => b.optionReturn - a.optionReturn)
+      runs[key] = {
+        entryRule, exitRule, entryLabel, exitLabel, ...tradeStats(all),
+        best: closed.slice(0, 5).map((t) => compactTrade(t.ticker, t)),
+        worst: closed.slice(-5).reverse().map((t) => compactTrade(t.ticker, t)),
+      }
+    }
+  }
+
+  const moves = {}
+  let missed = []
+  for (const [entryRule, label] of ENTRY_RULES) {
+    const graded = results.flatMap((r) => r.rp.graded[entryRule].graded.map((g) => ({ ...g, ticker: r.ticker })))
+    const why = {}
+    for (const g of graded) if (!g.caught && !g.held) why[g.why] = (why[g.why] ?? 0) + 1
+    moves[entryRule] = { label, ...moveStats(graded), why }
+    if (entryRule === 'confluence') {
+      missed = graded.filter((g) => !g.caught && !g.held).sort((a, b) => b.gain - a.gain).slice(0, 60)
+        .map((g) => ({ ticker: g.ticker, low: g.lowT, peak: g.peakT, gain: r4(g.gain), why: g.why, best: g.bestScore, combo: g.bestKey || null }))
+    }
+  }
+
+  const walk = Object.fromEntries(EXIT_RULES.map(([exitRule]) => [exitRule, walkForward(results, exitRule)]))
+
+  const byYear = {}
+  for (const r of results) for (const t of r.rp.runs['confluence:targets'].trades) {
+    const y = t.t.slice(0, 4)
+    ;(byYear[y] ??= []).push(t)
+  }
+  const years = Object.fromEntries(Object.entries(byYear).sort().map(([y, list]) => [y, tradeStats(list)]))
+
+  const spotlight = {}
+  for (const r of results.filter((x) => SPOTLIGHT.has(x.ticker))) {
+    spotlight[r.ticker] = {
+      runs: Object.fromEntries(Object.entries(r.rp.runs).map(([k, v]) => [k, { stats: v.stats, trades: v.trades.map((t) => compactTrade(r.ticker, t)) }])),
+      moves: r.rp.graded.confluence.graded.map((g) => ({ low: g.lowT, peak: g.peakT, gain: r4(g.gain), caught: g.caught, held: !!g.held, why: g.why ?? null, kept: r4(g.kept ?? null) })),
+    }
+  }
+
+  const summary = {
+    as_of: asOf, tickers: results.length, universe: universe.length, failed: failed.length,
+    sources: { ...sources }, seconds: Math.round((Date.now() - t0) / 1000),
+    option_model: OPTION_MODEL, plan: { targets: EXIT_PLAYBOOK.targets, fractions: EXIT_PLAYBOOK.fractions, runnerTrailPct: EXIT_PLAYBOOK.runnerTrailPct, rollDays: EXIT_PLAYBOOK.rollDays },
+    move_rule: MOVE, runs, moves, missed, walk_forward: walk, by_year: years, spotlight,
+  }
+
+  const pct = (x) => (x == null ? '—' : `${x >= 0 ? '+' : ''}${(x * 100).toFixed(1)}%`)
+  console.log(`Replayed ${results.length}/${universe.length} tickers in ${summary.seconds}s; ${failed.length} failed; as of ${asOf}; Yahoo ${sources.yahoo}, edge ${sources.edge}.`)
+  if (failed.length) console.log('Failed (first 10):', failed.slice(0, 10).join(' | '))
+  console.log('\nentry:exit            trades  win    avg      median   ≤−50%  days  capture')
+  for (const [k, r] of Object.entries(runs)) console.log(`  ${k.padEnd(20)} ${String(r.n).padStart(5)}  ${pct(r.winRate).padStart(6)} ${pct(r.avg).padStart(8)} ${pct(r.median).padStart(8)} ${pct(r.bigLoss).padStart(6)} ${String(Math.round(r.avgDays ?? 0)).padStart(5)} ${pct(r.capture).padStart(7)}`)
+  console.log('\nBig moves (+30% in 6 months from a swing low):')
+  for (const [k, m] of Object.entries(moves)) console.log(`  ${k.padEnd(11)} ${m.caught}/${m.moves - m.held} caught (${pct(m.catchRate)}), kept ${pct(m.avgKept)} of the move · misses: ${JSON.stringify(m.why)}`)
+  console.log('\nWalk-forward (confluence entries, history known before each signal):')
+  for (const [k, w] of Object.entries(walk)) console.log(`  ${k.padEnd(8)} yes ${w.yes.n} avg ${pct(w.yes.avg)} win ${pct(w.yes.winRate)} · no ${w.no.n} avg ${pct(w.no.avg)} win ${pct(w.no.winRate)} · unknown ${w.unknown.n}`)
+  for (const [t, s] of Object.entries(spotlight)) {
+    console.log(`\n${t}:`)
+    for (const tr of s.runs['confluence:targets'].trades) console.log(`  ${tr.entry} → ${tr.end}${tr.open ? ' (open)' : ''}  option ${pct(tr.option)}  stock ${pct(tr.stockRet)}  ${tr.exits.map((x) => `${x.reason}@${x.mult.toFixed(2)}x`).join(' ')}`)
+    for (const m of s.moves) console.log(`  move ${m.low} → ${m.peak} ${pct(m.gain)}: ${m.caught ? `caught, kept ${pct(m.kept)}` : m.held ? 'held' : `missed (${m.why})`}`)
+  }
+  if (MODE === 'dry-run') return
+
+  const { createClient } = await import('@supabase/supabase-js')
+  const db = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } })
+  const { error } = await db.from('replay_runs').insert({ as_of: asOf, tickers: results.length, summary })
+  if (error) throw new Error(`replay_runs insert: ${error.message}`)
+  console.log('\nWrote replay_runs.')
+}
+
+main().catch((e) => { console.error(e); process.exit(1) })

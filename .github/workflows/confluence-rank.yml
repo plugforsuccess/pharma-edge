@@ -23,6 +23,7 @@ on:
     branches-ignore: [main]
     paths:
       - scripts/rank-confluence.mjs
+      - scripts/lib/marketData.mjs
       - src/utils/confluence.js
       - .github/workflows/confluence-rank.yml
 

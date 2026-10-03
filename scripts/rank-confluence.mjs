@@ -33,55 +33,16 @@ import { CHART_TICKERS } from '../src/lib/chartTickers.js'
 import { entryModel, HORIZONS } from '../src/utils/indicators.js'
 import { suiteModel } from '../src/utils/signalSuite.js'
 import { confluenceModel, poolStats, blendedEstimate, MIN_SCORE, SIDES } from '../src/utils/confluence.js'
+import { dailyBars, mapLimit, sources } from './lib/marketData.mjs'
 
 const args = process.argv.slice(2)
 const MODE = (args[args.indexOf('--mode') + 1] && args.includes('--mode')) ? args[args.indexOf('--mode') + 1] : 'dry-run'
 if (!['full', 'rank-only', 'dry-run'].includes(MODE)) throw new Error(`unknown mode ${MODE}`)
-const CONCURRENCY = Number(process.env.CONCURRENCY) || 4
+const CONCURRENCY = Number(process.env.CONCURRENCY) || 3
 const TOP = 10
-const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-const HOSTS = ['query1.finance.yahoo.com', 'query2.finance.yahoo.com']
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
-const etDay = (ms) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date(ms))
 
 const universe = (process.env.TICKERS ? process.env.TICKERS.split(',') : CHART_TICKERS.map((t) => t.symbol))
   .map((s) => s.trim().toUpperCase()).filter((s) => /^[A-Z][A-Z0-9.-]{0,11}$/.test(s))
-
-// 5y of daily bars from Yahoo, with retries (429 / 5xx back off).
-export async function yahooDaily(ticker, fetchImpl = fetch) {
-  const symbol = ticker.replace(/\./g, '-')
-  const path = `/v8/finance/chart/${encodeURIComponent(symbol)}?range=5y&interval=1d&includePrePost=false`
-  let last = 'no response'
-  for (let attempt = 0; attempt < 3; attempt++) {
-    for (const host of HOSTS) {
-      try {
-        const resp = await fetchImpl(`https://${host}${path}`, { headers: { 'User-Agent': UA, Accept: 'application/json' }, signal: AbortSignal.timeout(10000) })
-        if (resp.status === 404) throw new Error('not found')
-        if (!resp.ok) { last = String(resp.status); continue }
-        const body = await resp.json()
-        const r = body?.chart?.result?.[0]
-        const ts = r?.timestamp ?? []
-        const q = r?.indicators?.quote?.[0] ?? {}
-        const bars = []
-        ts.forEach((s, i) => {
-          const c = Number(q.close?.[i])
-          if (!Number.isFinite(c) || c <= 0) return
-          bars.push({ t: etDay(s * 1000), c, o: Number(q.open?.[i]) || c, h: Number(q.high?.[i]) || c, l: Number(q.low?.[i]) || c, v: Number(q.volume?.[i]) || 0 })
-        })
-        // Yahoo can repeat today's date as a live bar; keep the last.
-        const out = []
-        for (const b of bars) { if (out.length && out[out.length - 1].t === b.t) out[out.length - 1] = b; else out.push(b) }
-        if (out.length) return out
-        last = 'empty'
-      } catch (e) {
-        if (e.message === 'not found') throw e
-        last = e.message
-      }
-    }
-    await sleep(1000 * 2 ** attempt)
-  }
-  throw new Error(`yahoo ${ticker}: ${last}`)
-}
 
 // One ticker → everything the ranking needs (null when too little history).
 export function analyze(ticker, bars) {
@@ -150,19 +111,6 @@ export function poolRows(pools, results, asOf) {
   return out
 }
 
-async function mapLimit(items, limit, fn) {
-  const out = new Array(items.length)
-  let next = 0
-  await Promise.all(Array.from({ length: limit }, async () => {
-    while (next < items.length) {
-      const k = next++
-      out[k] = await fn(items[k], k)
-      await sleep(150)
-    }
-  }))
-  return out
-}
-
 const pct = (x) => (x == null ? '—' : `${x >= 0 ? '+' : ''}${(x * 100).toFixed(1)}%`)
 
 async function main() {
@@ -170,7 +118,7 @@ async function main() {
   const failed = []
   let done = 0
   const results = (await mapLimit(universe, CONCURRENCY, async (ticker) => {
-    try { return analyze(ticker, await yahooDaily(ticker)) } catch (e) { failed.push(`${ticker}: ${e.message}`); return null } finally {
+    try { return analyze(ticker, await dailyBars(ticker)) } catch (e) { failed.push(`${ticker}: ${e.message}`); return null } finally {
       done++
       if (done % 50 === 0) console.log(`  ${done}/${universe.length} · ${failed.length} failed · ${((Date.now() - t0) / 1000).toFixed(0)}s`)
       // Yahoo blocking this runner: stop instead of retrying for hours.
@@ -182,7 +130,7 @@ async function main() {
   const pools = Object.fromEntries(SIDES.map((side) => [side, poolStats(results.map((r) => r[side].setups), HORIZONS, side)]))
   const rows = rankAll(results, pools)
   const pool = poolRows(pools, results, asOf)
-  console.log(`Analyzed ${results.length}/${universe.length} tickers in ${((Date.now() - t0) / 1000).toFixed(0)}s; ${failed.length} failed; as of ${asOf}.`)
+  console.log(`Analyzed ${results.length}/${universe.length} tickers in ${((Date.now() - t0) / 1000).toFixed(0)}s; ${failed.length} failed; as of ${asOf}; bars from Yahoo ${sources.yahoo}, edge ${sources.edge}.`)
   if (failed.length) console.log('Failed (first 10):', failed.slice(0, 10).join(' | '))
   for (const side of SIDES) {
     const top = rows.filter((r) => r.side === side && r.rank != null).sort((a, b) => a.rank - b.rank).slice(0, TOP)
