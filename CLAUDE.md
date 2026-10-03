@@ -1125,7 +1125,10 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   (no look-ahead), golden / death crosses, buy triangles, lighter MACD
   confirmation dots, buy-zone shading; then % from the 200 (±band), RSI 14
   (30 / level / 70), MACD 12-26-9, IV Rank 252 (cutoff line), IV vs HV20.
-  Panes toggle (`cm:entry-panes`). **Buy zone** = every condition on the
+  Panes toggle (`cm:entry-panes`) — the chip rows are labelled groups
+  ("Panels", "On price"; `ToggleGroup` in `LeapsEntry.jsx`): on = violet
+  tint + check, off = neutral outline + plus, so an off chip reads as
+  "add", never as disabled. **Buy zone** = every condition on the
   same day: within ±band of the 200, 200 rising, 50 > 200, RSI below the
   level within the lookback and up today, IV Rank below the cutoff.
   MACD cross up within 5 days = optional confirmation. Thresholds (band,
