@@ -8,9 +8,9 @@ import {
 // Attribution notice (Apache-2.0 NOTICE, required by the licence):
 //   TradingView Lightweight Charts™
 //   Copyright (c) 2025 TradingView, Inc. https://www.tradingview.com/
-// The on-chart logo is off (owner, 2026-10-03); the licence's link
-// requirement is met by the "Charts by TradingView" link on /charts —
-// keep that link if the logo stays off.
+// The on-chart logo is off and there's no credit on /charts (owner,
+// 2026-10-03); the licence's link requirement is met by the
+// "Open-source licenses" line at the bottom of Settings — keep it.
 // Candlesticks (owner: candles, not a line), a volume band under the price, a magnet
 // crosshair, and the trade's levels (strike, break-even, cost, target)
 // as dashed price lines with tags on the price axis. Pinch / drag to

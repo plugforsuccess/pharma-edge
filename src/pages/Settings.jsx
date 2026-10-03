@@ -478,6 +478,15 @@ export default function Settings() {
         Sign out
       </button>
 
+      {/* Open-source credits. The charting library's licence (TradingView
+          Lightweight Charts, Apache-2.0) requires a visible link to
+          tradingview.com somewhere in the app; it lives here, not on /charts. */}
+      <p className="text-[11px] text-muted text-center">
+        Open-source licenses: charts by{' '}
+        <a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-subtle">TradingView</a>
+        {' '}Lightweight Charts™.
+      </p>
+
       {/* Save bar — always reachable above the mobile nav. */}
       <div className="fixed left-1/2 -translate-x-1/2 w-full max-w-md lg:max-w-2xl px-4 z-40 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] lg:bottom-6">
         {(errors.length > 0 || notice) && (

@@ -1039,8 +1039,8 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   Lightweight Charts** (`lightweight-charts`, Apache-2.0). Its on-chart logo is
   **off** (owner); the licence then requires the attribution notice
   (kept in `PriceChart.jsx`) and a visible link to tradingview.com — the
-  "Charts by TradingView" link at the bottom of /charts. Don't remove
-  that link while the logo is off) in
+  "Open-source licenses" line at the bottom of Settings (owner: no
+  credit on /charts). Don't remove that line while the logo is off) in
   `components/PriceChart.jsx`: **candlesticks only** (owner — no line
   chart, no toggle), volume band, magnet crosshair driving the quote
   header's OHLC / volume / day change, the trade's levels as dashed price
