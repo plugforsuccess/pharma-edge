@@ -15,15 +15,16 @@
 // Vol rank: the engine uses IV rank; iv_history doesn't cover the sector
 // ETFs, so this uses the 20-day historical-vol rank over the last year
 // of daily closes (a stand-in — labelled as such in the response).
+// Delta: Yahoo gives each contract's IV, not greeks, so delta is
+// Black-Scholes from that IV (4% rate, no dividends).
 //
-// Data: Polygon (Massive) daily bars + options snapshot, MASSIVE_API_KEY.
-// Market-wide, not per user: cached 30 minutes in the warm instance.
-// Suggestions only — nothing is ordered here. verify_jwt=true.
+// Data: Yahoo (_shared/yahoo.ts) — daily bars and option chains (owner,
+// 2026-10-03: Polygon was cancelled). Market-wide, not per user: cached
+// 30 minutes in the warm instance. Suggestions only — nothing is ordered
+// here. verify_jwt=true.
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
-
-const POLYGON_BASE = Deno.env.get('POLYGON_BASE_URL') || 'https://api.polygon.io'
-const MASSIVE_API_KEY = Deno.env.get('MASSIVE_API_KEY')
+import { yahooBars, yahooOptions, callDelta } from '../_shared/yahoo.ts'
 
 const SECTORS = ['XLK', 'XLF', 'XLV', 'XLE', 'XLI', 'XLY', 'XLP', 'XLU', 'XLB', 'XLRE', 'XLC']
 const BENCHMARK = 'SPY'
@@ -42,16 +43,8 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
 }
 
-const ymd = (ms: number) => new Date(ms).toISOString().slice(0, 10)
-const withKey = (u: string) => u + (u.includes('?') ? '&' : '?') + `apiKey=${encodeURIComponent(MASSIVE_API_KEY!)}`
-
 async function dailyCloses(ticker: string): Promise<number[]> {
-  const to = Date.now()
-  const url = `${POLYGON_BASE}/v2/aggs/ticker/${ticker}/range/1/day/${ymd(to - 400 * DAY_MS)}/${ymd(to)}?adjusted=true&sort=asc&limit=5000`
-  const resp = await fetch(withKey(url), { signal: AbortSignal.timeout(8000) })
-  if (!resp.ok) throw new Error(`bars ${ticker} ${resp.status}`)
-  const body: { results?: Array<{ c: number }> } = await resp.json()
-  return (body.results ?? []).map((r) => r.c).filter((c) => Number.isFinite(c) && c > 0)
+  return (await yahooBars(ticker, '2y')).map((b) => b.c)
 }
 
 const ret = (c: number[], n: number) => (c.length > n ? c[c.length - 1] / c[c.length - 1 - n] - 1 : null)
@@ -72,66 +65,57 @@ function volRank(c: number[]): number | null {
   return hi > lo ? ((year[year.length - 1] - lo) / (hi - lo)) * 100 : 50
 }
 
-interface Snap {
-  details?: { contract_type?: string; expiration_date?: string; strike_price?: number; ticker?: string }
-  open_interest?: number
-  implied_volatility?: number
-  greeks?: { delta?: number }
-  last_quote?: { bid?: number; ask?: number }
+interface Quote {
+  symbol: string; expiration: string; strike: number; dte: number
+  delta: number | null; bid: number; ask: number; open_interest: number; iv: number | null
 }
 
-async function longCalls(ticker: string, spot: number): Promise<Snap[]> {
-  const today = Date.now()
-  const url = new URL(`${POLYGON_BASE}/v3/snapshot/options/${ticker}`)
-  url.searchParams.set('contract_type', 'call')
-  url.searchParams.set('expiration_date.gte', ymd(today + CONTRACT.minDte * DAY_MS))
-  url.searchParams.set('expiration_date.lte', ymd(today + 1100 * DAY_MS))
-  // Delta 0.70–0.80 calls are in the money: well under spot.
-  url.searchParams.set('strike_price.gte', String(Math.floor(spot * 0.4)))
-  url.searchParams.set('strike_price.lte', String(Math.ceil(spot * 1.0)))
-  url.searchParams.set('limit', '250')
-  let next: string | null = url.toString()
-  const out: Snap[] = []
-  for (let page = 0; next && page < 8; page++) {
-    const resp = await fetch(withKey(next), { signal: AbortSignal.timeout(8000) })
-    if (!resp.ok) throw new Error(`chain ${ticker} ${resp.status}`)
-    const body: { results?: Snap[]; next_url?: string } = await resp.json()
-    out.push(...(body.results ?? []))
-    next = body.next_url ?? null
+const ymdUtc = (unix: number) => new Date(unix * 1000).toISOString().slice(0, 10)
+
+// Every call expiring between minDte and ~3 years out, with a delta.
+async function longCalls(ticker: string, spot: number): Promise<Quote[]> {
+  const first = await yahooOptions(ticker)
+  const now = Date.now()
+  const dates = (first.expirationDates ?? []).filter((d) => {
+    const dte = (d * 1000 - now) / DAY_MS
+    return dte >= CONTRACT.minDte - 1 && dte <= 1100
+  })
+  const price = Number(first.quote?.regularMarketPrice) || spot
+  const out: Quote[] = []
+  for (const d of dates) {
+    const chain = await yahooOptions(ticker, d)
+    const exp = ymdUtc(d)
+    const dte = Math.round((Date.parse(`${exp}T00:00:00Z`) - Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate())) / DAY_MS)
+    for (const c of chain.options?.[0]?.calls ?? []) {
+      const strike = Number(c.strike)
+      if (!(strike > 0)) continue
+      const iv = Number(c.impliedVolatility) || null
+      out.push({
+        symbol: c.contractSymbol ?? '', expiration: exp, strike, dte,
+        delta: iv ? callDelta(price, strike, dte / 365, iv) : null,
+        bid: Number(c.bid) || 0, ask: Number(c.ask) || 0, open_interest: Number(c.openInterest) || 0, iv,
+      })
+    }
   }
   return out
 }
 
-function pickContract(chain: Snap[], vol: number | null) {
-  const today = Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate())
+function pickContract(chain: Quote[], vol: number | null) {
   const centre = (CONTRACT.deltaMin + CONTRACT.deltaMax) / 2
-  let checked = 0
   const passing = []
-  for (const s of chain) {
-    const exp = s.details?.expiration_date
-    const strike = Number(s.details?.strike_price)
-    const delta = Math.abs(Number(s.greeks?.delta))
-    const bid = Number(s.last_quote?.bid)
-    const ask = Number(s.last_quote?.ask)
-    const oi = Number(s.open_interest)
-    if (!exp || !(strike > 0)) continue
-    checked++
-    const dte = Math.round((Date.parse(`${exp}T00:00:00Z`) - today) / DAY_MS)
-    const mid = bid > 0 && ask >= bid ? (bid + ask) / 2 : null
-    const spreadPct = mid ? (ask - bid) / mid : null
-    const ok = dte >= CONTRACT.minDte
-      && Number.isFinite(delta) && delta >= CONTRACT.deltaMin && delta <= CONTRACT.deltaMax
+  for (const q of chain) {
+    const mid = q.bid > 0 && q.ask >= q.bid ? (q.bid + q.ask) / 2 : null
+    const spreadPct = mid ? (q.ask - q.bid) / mid : null
+    const ok = q.dte >= CONTRACT.minDte
+      && q.delta != null && q.delta >= CONTRACT.deltaMin && q.delta <= CONTRACT.deltaMax
       && vol != null && vol <= CONTRACT.maxVolRank
       && spreadPct != null && spreadPct <= CONTRACT.maxSpreadPct
-      && Number.isFinite(oi) && oi >= CONTRACT.minOpenInterest
-    if (ok) {
-      passing.push({ symbol: s.details?.ticker ?? '', expiration: exp, strike, dte, delta, bid, ask, mid: mid!,
-        spread_pct: spreadPct!, open_interest: oi, iv: Number(s.implied_volatility) || null })
-    }
+      && q.open_interest >= CONTRACT.minOpenInterest
+    if (ok) passing.push({ ...q, delta: q.delta!, mid: mid!, spread_pct: spreadPct! })
   }
   passing.sort((a, b) => Math.abs(a.dte - CONTRACT.targetDte) - Math.abs(b.dte - CONTRACT.targetDte)
     || Math.abs(a.delta - centre) - Math.abs(b.delta - centre) || a.spread_pct - b.spread_pct)
-  return { contract: passing[0] ?? null, checked, passed: passing.length }
+  return { contract: passing[0] ?? null, checked: chain.length, passed: passing.length }
 }
 
 let cache: { at: number; body: unknown } | null = null
@@ -139,7 +123,6 @@ let cache: { at: number; body: unknown } | null = null
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (req.method !== 'POST') return json({ success: false, error: 'method not allowed' }, 405)
-  if (!MASSIVE_API_KEY) return json({ success: false, error: 'market data not configured' }, 503)
   if (cache && Date.now() - cache.at < CACHE_MS) return json(cache.body)
 
   try {
@@ -179,6 +162,7 @@ serve(async (req) => {
         const reason = sel.contract ? null
           : m.vol_rank == null ? 'not enough price history to measure volatility'
           : m.vol_rank > CONTRACT.maxVolRank ? `volatility rank ${Math.round(m.vol_rank)} > ${CONTRACT.maxVolRank} — options are expensive`
+          : sel.checked === 0 ? 'no options listed 540+ days out'
           : `none of ${sel.checked} long-dated calls cleared the contract rules`
         return { ...m, contract: sel.contract, checked: sel.checked, passed: sel.passed, reason }
       } catch (e) {
@@ -187,7 +171,7 @@ serve(async (req) => {
     }))
 
     const body = {
-      success: true, as_of: new Date().toISOString(), benchmark: BENCHMARK, vol_rank_source: 'hv20_1y',
+      success: true, as_of: new Date().toISOString(), benchmark: BENCHMARK, vol_rank_source: 'hv20_1y', source: 'yahoo',
       rules: { ...CONTRACT, topN: CORE.topN, weights: CORE.weights }, picks, ranked,
     }
     cache = { at: Date.now(), body }

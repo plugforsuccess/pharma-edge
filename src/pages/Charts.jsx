@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import clsx from 'clsx'
+import { ChartCandlestick, ChartSpline } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { useHoldings, isQuantity } from '../hooks/useHoldings'
 import { todayYmd } from '../utils/afterTax'
 import { dailyDecisions, exitRows } from '../lib/holdingChecks'
-import LineChart from '../components/LineChart'
+import PriceChart from '../components/PriceChart'
 
 // Charts — the stocks where the app suggests a LEAPS trade, with the trade
 // drawn on the price chart. (GEX spread plays live on Pulse.)
@@ -20,17 +21,17 @@ import LineChart from '../components/LineChart'
 // Yahoo fallback). Holding charts are hidden for now; their history
 // (leaps_position_marks) keeps collecting.
 
-const RANGES = [['3mo', '3M'], ['6mo', '6M'], ['1y', '1Y']]
+const RANGES = [['1mo', '1M'], ['3mo', '3M'], ['6mo', '6M'], ['1y', '1Y'], ['2y', '2Y']]
+const MODE_KEY = 'cm:chart-mode'
 const DAY_MS = 86400000
 const BOT_DAYS = 30
-const ms = (ymd) => {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(ymd ?? ''))
-  return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : null
-}
 const price = (n) => (Number.isFinite(n)
   ? `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: n < 10 ? 4 : 2 })}`
   : '—')
 const shortDate = (ymd) => new Date(`${ymd}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
+const dayLabel = (ymd) => new Date(`${ymd}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
+const num = (n) => (Number.isFinite(n) ? n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—')
+const compact = (n) => Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(n)
 const pctSigned = (r) => (Number.isFinite(r) ? `${r >= 0 ? '+' : '−'}${Math.abs(r * 100).toFixed(1)}%` : '—')
 const money = (n) => `$${Math.round(n).toLocaleString('en-US')}`
 
@@ -71,6 +72,14 @@ export default function Charts() {
   const [selected, setSelected] = useState(null)
   const [range, setRange] = useState('6mo')
   const [bars, setBars] = useState({})
+  const [hover, setHover] = useState(null)
+  const [mode, setMode] = useState(() => {
+    try { return localStorage.getItem(MODE_KEY) === 'line' ? 'line' : 'candles' } catch { return 'candles' }
+  })
+  const pickMode = (m) => {
+    setMode(m)
+    try { localStorage.setItem(MODE_KEY, m) } catch { /* this visit only */ }
+  }
   const today = todayYmd()
 
   useEffect(() => {
@@ -154,15 +163,16 @@ export default function Charts() {
   }, [loading, current, key, range])
 
   const data = key ? bars[key] : null
-  const series = data?.bars?.length
-    ? data.bars.map((b) => ({ t: ms(b.t), v: b.c })).filter((p) => p.t != null)
-    : []
-  const first = series[0]?.v
-  const last = series[series.length - 1]?.v
-  const change = first > 0 && last != null ? last / first - 1 : null
-  const vLines = []
-  const exp = current?.expiration ? ms(current.expiration) : null
-  if (exp != null && series.length && exp - series[series.length - 1].t <= 45 * DAY_MS) vLines.push({ t: exp, label: 'Expires' })
+  const ohlc = data?.bars?.length ? data.bars : null
+  const lastBar = ohlc?.[ohlc.length - 1]
+  const firstBar = ohlc?.[0]
+  const shown = hover ?? lastBar
+  // Change over the range, or for the hovered day vs the day before.
+  const prevOf = (b) => { const i = ohlc?.indexOf(b) ?? -1; return i > 0 ? ohlc[i - 1].c : null }
+  const base = hover ? prevOf(hover) : firstBar?.c
+  const change = shown && base > 0 ? shown.c - base : null
+  // Stable per pick, so hovering doesn't rebuild the chart.
+  const levels = useMemo(() => (current?.lines ?? []).map((l) => ({ price: l.v, label: l.label, gold: l.gold })), [current])
 
   const ideaItems = items.filter((x) => x.group === 'ideas')
   const holdingItems = items.filter((x) => x.group === 'holdings')
@@ -187,41 +197,92 @@ export default function Charts() {
       ) : (
         <>
           {current && (
-            <section className="bg-card border border-amber-400/30 rounded-2xl p-5 mb-5">
-              <div className="flex items-baseline gap-2 mb-1">
-                <h2 className="flex-1 text-base font-semibold">{current.ticker}</h2>
-                {last != null && <span className="text-sm font-mono-tab text-fg">{price(last)}</span>}
-                {change != null && (
-                  <span className={clsx('text-xs font-mono-tab', change < 0 ? 'text-rose-300' : 'text-green-400')}>
-                    {change >= 0 ? '+' : '−'}{Math.abs(change * 100).toFixed(1)}%
-                  </span>
+            <section className="bg-card border border-border rounded-2xl mb-5 overflow-hidden">
+              {/* Quote header: last price and the range's change; while the
+                  crosshair is on the chart, that day's OHLC and volume. */}
+              <div className="px-5 pt-5">
+                <div className="flex items-start gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-lg font-semibold tracking-tight">{current.ticker}</h2>
+                      <span className={clsx('text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-md border', VERDICT_TONE[current.tone])}>
+                        {current.verdict}
+                      </span>
+                    </div>
+                    <div className="text-xs text-muted mt-0.5 truncate">{current.from}</div>
+                  </div>
+                  {shown && (
+                    <div className="text-right shrink-0">
+                      <div className="text-2xl font-semibold font-mono-tab leading-none text-fg">{price(shown.c)}</div>
+                      {change != null && (
+                        <div className={clsx('mt-1 text-xs font-mono-tab', change < 0 ? 'text-rose-300' : 'text-green-400')}>
+                          {change >= 0 ? '+' : '−'}{Math.abs(change).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({change >= 0 ? '+' : '−'}{Math.abs((change / base) * 100).toFixed(2)}%)
+                          <span className="text-muted"> {hover ? 'day' : RANGES.find(([v]) => v === range)?.[1]}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <div className="mt-3 h-[18px] text-[11px] font-mono-tab text-muted truncate">
+                  {shown && (
+                    <>
+                      {dayLabel(shown.t)}
+                      <span className="ml-3">O <span className="text-subtle">{num(shown.o)}</span></span>
+                      <span className="ml-2">H <span className="text-subtle">{num(shown.h)}</span></span>
+                      <span className="ml-2">L <span className="text-subtle">{num(shown.l)}</span></span>
+                      {shown.v > 0 && <span className="ml-2">Vol <span className="text-subtle">{compact(shown.v)}</span></span>}
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-1">
+                {data === null || data === undefined ? (
+                  <div className="h-[300px] flex items-center justify-center text-xs text-muted">Loading prices…</div>
+                ) : data.error || !ohlc ? (
+                  <div className="h-[300px] flex items-center justify-center text-xs text-muted">Couldn't load prices for {current.ticker}.</div>
+                ) : (
+                  <PriceChart bars={ohlc} levels={levels} mode={mode} height={300} onHover={setHover} />
                 )}
               </div>
-              <div className="flex items-center gap-1 mb-3" role="tablist" aria-label="Range">
-                {RANGES.map(([v, label]) => (
-                  <button key={v} type="button" role="tab" aria-selected={range === v} onClick={() => setRange(v)}
-                    className={clsx('min-h-[32px] px-3 rounded-full text-xs font-semibold transition',
-                      range === v ? 'bg-amber-400/10 text-amber-300' : 'text-muted hover:text-fg')}>
-                    {label}
-                  </button>
-                ))}
+
+              {/* Range + chart type */}
+              <div className="px-3 py-2 flex items-center gap-2 border-t border-hairline">
+                <div className="flex-1 flex items-center" role="tablist" aria-label="Range">
+                  {RANGES.map(([v, label]) => (
+                    <button key={v} type="button" role="tab" aria-selected={range === v} onClick={() => { setHover(null); setRange(v) }}
+                      className={clsx('min-h-[36px] min-w-[40px] px-2 rounded-md text-xs font-semibold transition',
+                        range === v ? 'bg-bg-elev text-fg' : 'text-muted hover:text-fg')}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center rounded-md bg-bg-elev p-0.5" role="group" aria-label="Chart type">
+                  {[['candles', ChartCandlestick, 'Candles'], ['line', ChartSpline, 'Line']].map(([m, Icon, label]) => (
+                    <button key={m} type="button" onClick={() => pickMode(m)} aria-pressed={mode === m} aria-label={label}
+                      className={clsx('min-h-[32px] min-w-[36px] flex items-center justify-center rounded transition',
+                        mode === m ? 'bg-card text-amber-300' : 'text-muted hover:text-fg')}>
+                      <Icon size={15} aria-hidden />
+                    </button>
+                  ))}
+                </div>
               </div>
-              {data === null || data === undefined ? (
-                <div className="h-[220px] flex items-center justify-center text-xs text-muted">Loading prices…</div>
-              ) : data.error ? (
-                <div className="h-[220px] flex items-center justify-center text-xs text-muted">Couldn't load prices for {current.ticker}.</div>
-              ) : (
-                <LineChart height={220} format={price} vLines={vLines}
-                  hLines={current.lines.map((l) => ({ v: l.v, label: `${l.label} ${price(l.v)}`,
-                    stroke: l.gold ? 'stroke-amber-400/60' : undefined, text: l.gold ? 'fill-amber-300' : undefined }))}
-                  series={[{ id: 'close', label: 'Close', points: series,
-                    stroke: change != null && change < 0 ? 'stroke-red-400' : 'stroke-green-400',
-                    text: change != null && change < 0 ? 'text-rose-300' : 'text-green-400' }]} />
-              )}
-              <div className="mt-4 pt-4 border-t border-hairline">
-                <div className="text-xs text-muted mb-1">{current.from}</div>
+
+              {/* The trade */}
+              <div className="px-5 py-4 border-t border-hairline">
                 <div className="text-sm font-semibold text-fg">{current.title}</div>
                 {current.body && <div className="text-sm text-subtle mt-1">{current.body}</div>}
+                {levels.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {levels.map((l) => (
+                      <span key={l.label} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-bg-elev text-xs">
+                        <span className={clsx('h-0.5 w-3 rounded', l.gold ? 'bg-amber-400' : 'bg-subtle')} aria-hidden />
+                        <span className="text-muted">{l.label}</span>
+                        <span className="font-mono-tab text-fg">{price(l.price)}</span>
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
             </section>
           )}

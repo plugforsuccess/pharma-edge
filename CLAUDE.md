@@ -1015,24 +1015,37 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   strike from the OCC `payload.contract`); **Your holdings** — today's
   sell / roll / exit calls (`dailyDecisions`; options show strike +
   break-even, shares / crypto your cost + the target's price per unit).
-  3M / 6M / 1Y. **`suggest-leaps`** (`verify_jwt`, Polygon/Massive with
-  `MASSIVE_API_KEY`, 30-min in-instance cache, market-wide) mirrors the
+  **Market data is Yahoo** (owner, 2026-10-03 — the Polygon/Massive
+  subscription was cancelled): `supabase/functions/_shared/yahoo.ts`
+  (`yahooBars` via /v8 chart, `yahooOptions` via /v7 options with the
+  cookie + crumb bootstrap shared across parallel callers, `callDelta`
+  Black-Scholes since Yahoo gives IV but no greeks). **`suggest-leaps`**
+  (`verify_jwt`, Yahoo, 30-min in-instance cache, market-wide) mirrors the
   LDP core sleeve — keep it in sync with `ldp/scoring.py`,
   `ldp/contracts.py` and `ldp/config.py`: the 11 SPDR sector ETFs scored
   on 3m / 6m / 12m return + 12m relative strength vs SPY (0.20 / 0.30 /
   0.30 / 0.20, min-max normalised), below the 200-day average = not
   eligible, top 3; for each, the call clearing DTE ≥ 540, delta
   0.70–0.80, vol rank ≤ 70, spread ≤ 10% of mid, OI ≥ 100, closest to
-  730 DTE → delta 0.75 → tightest spread. **Vol rank is the 20-day
+  730 DTE → delta 0.75 → tightest spread. Delta is Black-Scholes from
+  each contract's Yahoo IV (4% rate, no dividends). **Vol rank is the 20-day
   historical-vol rank over a year of closes**, a stand-in for the
   engine's IV rank (`iv_history` doesn't cover the sector ETFs). No pick
   → a "Watch" row with the reason. The card shows strike, break-even
   (strike + mid), cost per contract (mid × 100). Suggestions only;
   nothing is ordered. Prices: the **`price-history`** edge function
-  (`verify_jwt`; Polygon daily bars, Yahoo fallback; `crypto: true`
-  prices the coin in USD; 15-min cache, no table). Charts are plain SVG
-  (`components/LineChart.jsx`: series, flat lines with haloed labels,
-  date markers, shaded bands; tap or drag to read a date). **Holding
+  (`verify_jwt`; Yahoo daily OHLC + volume, 1M–2Y; `crypto: true` prices
+  the coin in USD; 15-min cache, no table). **The chart is TradingView
+  Lightweight Charts** (`lightweight-charts`, Apache-2.0 — keep its
+  attribution logo on, the licence requires it) in
+  `components/PriceChart.jsx`: candles or area line (choice remembered,
+  `cm:chart-mode`), volume band, magnet crosshair driving the quote
+  header's OHLC / volume / day change, the trade's levels as dashed price
+  lines with axis tags (autoscale widened so every level stays in view),
+  pinch / drag to zoom and pan; colors read from the theme tokens at
+  runtime. Pass it a stable `levels` array (memoized) or it rebuilds on
+  every hover. `components/LineChart.jsx` (plain SVG) is kept for the
+  hidden holding charts. **Holding
   charts are hidden for now** (owner); `leaps_position_marks` (one value
   per holding per day, SECURITY DEFINER trigger on `leaps_positions`,
   SELECT own) keeps collecting history for when they return.
