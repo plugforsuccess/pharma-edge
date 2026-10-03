@@ -1295,6 +1295,35 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   **Resend — a placeholder**: skipped (logged) until the `RESEND_API_KEY`
   Actions secret and a verified `RESEND_FROM` (Actions variable, default
   `Cash Moves <alerts@cashmoves.io>`) exist. No push from this job yet.
+- **Replay + Signal record** (owner, 2026-10-03: NOW +84% — "how can the
+  app suggest this trade and signal the exit?"; advised: it can't be
+  guaranteed without look-ahead, so measure it honestly). `src/utils/replay.js`
+  (`npm run replay:check`, which also proves no look-ahead: each day's
+  signals equal a model built on the bars up to that day) walks a ticker
+  day by day: entry rules **Confluence** (buy score reaching 2, 200-day
+  rising), **Buy zone** (turns YES), **Bravo ◆** (200-day rising); a signal
+  at a close buys the next open; the call is ~730 DTE at 0.75 delta,
+  **priced with Black-Scholes** from trailing 60-day vol (floor 15%), 2%
+  slippage per fill — estimates, not quotes. Exits: **Targets** (the exit
+  playbook: 70% at +100%, 15% at +200%, runner on a 30% trail once both
+  hit), **Signals** (all out on 2+ sell signals), **Both** (targets first;
+  after target 1, 2+ sell signals close the rest); time stop at 6 months
+  left; no hard stop. Big moves (swing low → +30% within 126 bars) are
+  found with hindsight only to grade: caught = a signal from 10 bars before
+  the low to the half-way bar; misses say why (200-day falling / no or one
+  signal / late / already holding). The entry chart's **Replay** card runs
+  it live (rules saved in `cm:replay-rules`; rows jump the chart).
+  **Universe:** `scripts/replay-universe.mjs` in
+  `.github/workflows/replay-universe.yml` (Saturdays, dispatch, branch
+  pushes touching it) replays every ticker, pools trades per rule pair,
+  catch rate + miss reasons, the 60 biggest misses, **walk-forward** (each
+  confluence trade judged only by setups whose 6M result was known before
+  its signal, own blended toward the pool) and by-year → one `replay_runs`
+  row (authenticated SELECT, service-role write); `/charts/record` (Signal
+  record, linked from the leaders card and the Replay card) shows the
+  latest. Both Actions jobs fetch bars through `scripts/lib/marketData.mjs`:
+  Yahoo with the cookie + crumb session (runners get 429 without it), else
+  the `leaps-entry` edge function with the service-role key.
 - **Signal suite on the entry chart** (owner, 2026-10-03: "for better
   entries and sell signals"). A JS port of the TradingView suite in
   `plugforsuccess/wiley-indicator-suite` (Bravo trend, Echo momentum,
@@ -1526,6 +1555,9 @@ Periodic   — monitor-positions.yml
 5:40pm ET  — confluence-rank.yml (weekdays, 21:40 UTC)
              Ranks ~564 tickers on buy / sell confluence → confluence_ranks
              + confluence_pool; top-10 alerts (bell + Resend email placeholder)
+
+Saturday   — replay-universe.yml (14:17 UTC)
+             Day-by-day LEAPS replay of every ticker → replay_runs (/charts/record)
 
 5:20pm ET  — entry-scan.yml (weekdays, 21:20 UTC)
              Entry alerts: LEAPS buy zone YES / weekly Hardening bull
