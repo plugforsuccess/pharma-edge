@@ -10,14 +10,16 @@ import { supabase } from '../lib/supabase'
 // day with no hindsight, a priced LEAPS call on each entry rule × exit
 // rule, big moves caught vs missed, and the walk-forward test of the
 // history filter. Read-only; the job runs weekly.
-const pctS = (x) => (x == null ? '—' : `${x >= 0 ? '+' : '−'}${Math.abs(Math.round(x * 100))}%`)
+const pctS = (x) => (x == null ? '—' : Math.abs(x) < 0.005 ? '0%' : `${x >= 0 ? '+' : '−'}${Math.abs(Math.round(x * 100))}%`)
 const share = (x) => (x == null ? '—' : `${Math.round(x * 100)}%`)
-const day = (t) => (t ? new Date(`${t}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }) : '')
+const day = (t) => (t ? new Date(`${t}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit', timeZone: 'UTC' }).replace(/, (\d\d)$/, ' ’$1') : '')
 const tone = (x) => (x == null ? 'text-muted' : x < 0 ? 'text-rose-300' : 'text-green-400')
-const ENTRY_ORDER = ['confluence', 'zone', 'bravo']
-const EXIT_ORDER = ['targets', 'signals', 'both']
-const ENTRY_LABEL = { confluence: 'Confluence', zone: 'Buy zone', bravo: 'Bravo ◆' }
-const EXIT_LABEL = { targets: 'Exit targets', signals: 'Sell signals', both: 'Targets + signals' }
+const ENTRIES = [['confluence', 'Confluence'], ['zone', 'Buy zone'], ['bravo', 'Bravo ◆']]
+const EXITS = [
+  ['targets', 'Exit targets', '70% at 2x · 15% at 3x · trail the rest'],
+  ['signals', 'Sell signals', 'All out on 2+ sell signals'],
+  ['both', 'Both', '70% at 2x, then 2+ sell signals'],
+]
 
 export default function SignalRecord() {
   const [row, setRow] = useState(undefined)
@@ -30,153 +32,137 @@ export default function SignalRecord() {
     return () => { cancelled = true }
   }, [])
   const s = row?.summary
+  const mv = s?.moves?.[entry]
+  const open = mv ? mv.moves - mv.held : 0
+  const years = s?.by_year ? Object.entries(s.by_year) : []
+  const maxAbs = Math.max(0.01, ...years.map(([, r]) => Math.abs(r.avg ?? 0)))
 
   return (
     <div className="px-4 py-4 pb-24 max-w-md md:max-w-3xl mx-auto">
-      <header className="flex items-center gap-2 mb-4">
+      <header className="flex items-center gap-2 mb-5">
         <Link to="/charts" aria-label="Back to Charts"
           className="min-h-[44px] min-w-[44px] -ml-2 flex items-center justify-center rounded-xl text-subtle hover:text-fg">
           <ArrowLeft size={18} />
         </Link>
         <div className="flex-1 min-w-0">
-          <div className="text-[11px] uppercase tracking-[0.14em] text-muted font-semibold">Charts</div>
           <h1 className="text-lg font-semibold leading-tight">Signal record</h1>
+          {s && <div className="text-xs text-muted">{s.tickers} tickers · 5 years · as LEAPS, no hindsight · {day(s.as_of)}</div>}
         </div>
       </header>
 
       {row === undefined ? (
         <div className="space-y-4" aria-busy="true">{[0, 1, 2].map((k) => <div key={k} className="h-40 rounded-2xl bg-card border border-border animate-pulse" />)}</div>
       ) : !s ? (
-        <section className="bg-card border border-border rounded-2xl p-5 text-sm text-subtle">No replay yet — it runs weekly over every ticker.</section>
+        <section className="bg-card border border-border rounded-2xl p-5 text-sm text-subtle">No replay yet. It runs every Saturday.</section>
       ) : (
         <>
-          <p className="text-xs text-muted mb-4">
-            {s.tickers} tickers, 5 years each, replayed day by day with only what was known at each close. A ~2-year, 0.75-delta call bought the day after each signal. As of {day(s.as_of)}.
-          </p>
+          <div className="flex gap-1 p-1 rounded-xl bg-card border border-border mb-4" role="tablist" aria-label="Buy on">
+            {ENTRIES.filter(([k]) => s.runs[`${k}:targets`]).map(([k, label]) => (
+              <button key={k} type="button" role="tab" aria-selected={entry === k} onClick={() => setEntry(k)}
+                className={clsx('flex-1 min-w-0 min-h-[40px] px-1 rounded-lg text-sm font-semibold transition truncate',
+                  entry === k ? 'bg-bg-elev text-fg' : 'text-muted hover:text-subtle')}>
+                {label}
+              </button>
+            ))}
+          </div>
 
-          <Card title="Buy on">
-            <div className="flex gap-1 p-1 rounded-xl bg-bg-elev" role="tablist" aria-label="Entry rule">
-              {ENTRY_ORDER.filter((k) => s.runs[`${k}:targets`]).map((k) => (
-                <button key={k} type="button" role="tab" aria-selected={entry === k} onClick={() => setEntry(k)}
-                  className={clsx('flex-1 min-w-0 min-h-[36px] px-1 rounded-lg text-xs font-semibold transition truncate',
-                    entry === k ? 'bg-card text-fg shadow-sm' : 'text-muted hover:text-subtle')}>
-                  {ENTRY_LABEL[k]}
-                </button>
-              ))}
-            </div>
-            <div className="mt-4 overflow-x-auto -mx-1">
-              <table className="w-full text-xs font-mono-tab">
-                <thead>
-                  <tr className="text-muted text-left">
-                    <th className="font-normal px-1 pb-2">Sell by</th>
-                    <th className="font-normal px-1 pb-2 text-right">Trades</th>
-                    <th className="font-normal px-1 pb-2 text-right">Win</th>
-                    <th className="font-normal px-1 pb-2 text-right">Avg</th>
-                    <th className="font-normal px-1 pb-2 text-right">Median</th>
-                    <th className="font-normal px-1 pb-2 text-right">Lost ½+</th>
-                    <th className="font-normal px-1 pb-2 text-right">Days</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-hairline">
-                  {EXIT_ORDER.map((x) => {
-                    const r = s.runs[`${entry}:${x}`]
-                    if (!r) return null
-                    return (
-                      <tr key={x}>
-                        <td className="px-1 py-2 text-fg font-sans">{EXIT_LABEL[x]}</td>
-                        <td className="px-1 py-2 text-right">{r.n}</td>
-                        <td className="px-1 py-2 text-right">{share(r.winRate)}</td>
-                        <td className={clsx('px-1 py-2 text-right', tone(r.avg))}>{pctS(r.avg)}</td>
-                        <td className={clsx('px-1 py-2 text-right', tone(r.median))}>{pctS(r.median)}</td>
-                        <td className="px-1 py-2 text-right">{share(r.bigLoss)}</td>
-                        <td className="px-1 py-2 text-right">{Math.round(r.avgDays ?? 0)}</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-            <p className="mt-3 text-xs text-muted">Option returns on closed trades. Exit targets sell 70% at +100%, 15% at +200%, the rest on a 30% give-back; sell signals close on 2+ sell signals; both = targets first, then signals guard the rest. Out with 6 months left.</p>
+          <Card title="How each exit did">
+            <ul className="space-y-4">
+              {EXITS.map(([x, label, hint]) => {
+                const r = s.runs[`${entry}:${x}`]
+                if (!r) return null
+                return (
+                  <li key={x} className="flex items-center gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm text-fg">{label}</div>
+                      <div className="text-[11px] text-muted truncate">{hint}</div>
+                      <div className="mt-1 text-xs text-subtle font-mono-tab">{share(r.winRate)} win · {r.n} trades · {Math.round(r.avgDays ?? 0)} days</div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className={clsx('text-2xl font-semibold tracking-tight font-mono-tab leading-none', tone(r.avg))}>{pctS(r.avg)}</div>
+                      <div className="mt-1 text-[11px] text-muted">avg · median {pctS(r.median)}</div>
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
           </Card>
 
-          {s.moves?.[entry] && (
-            <Card title="Big moves">
-              <div className="text-2xl font-semibold font-mono-tab text-fg">{share(s.moves[entry].catchRate)}</div>
-              <div className="text-xs text-subtle mt-0.5">
-                caught · {s.moves[entry].caught} of {s.moves[entry].moves - s.moves[entry].held} moves of +{share(s.move_rule.minGain)} or more within 6 months of a low
-                {s.moves[entry].held ? ` (${s.moves[entry].held} more while already holding)` : ''}
+          {mv && open > 0 && (
+            <Card title="Big moves caught">
+              <div className="flex items-baseline gap-3">
+                <div className="text-4xl font-semibold tracking-tight font-mono-tab text-fg leading-none">{share(mv.catchRate)}</div>
+                <div className="text-xs text-muted">{mv.caught} of {open} rallies of +{share(s.move_rule.minGain)} off a low</div>
               </div>
-              {s.moves[entry].avgKept != null && <div className="text-xs text-muted mt-1">The trades that caught one kept {share(s.moves[entry].avgKept)} of the move on average.</div>}
-              <div className="mt-3 text-[11px] uppercase tracking-wider text-muted">Why the rest were missed</div>
-              <ul className="mt-1 text-sm">
-                {Object.entries(s.moves[entry].why).sort((a, b) => b[1] - a[1]).map(([why, n]) => (
-                  <li key={why} className="py-1 flex"><span className="flex-1 text-subtle">{why}</span><span className="font-mono-tab text-fg">{n}</span></li>
+              <div className="mt-3 h-1.5 rounded-full bg-bg-elev overflow-hidden" aria-hidden>
+                <div className="h-full rounded-full bg-confluence" style={{ width: `${(mv.catchRate ?? 0) * 100}%` }} />
+              </div>
+              {mv.avgKept != null && <div className="mt-2 text-xs text-subtle">Kept {share(mv.avgKept)} of each move caught</div>}
+              <div className="mt-4 flex flex-wrap gap-1.5">
+                {Object.entries(mv.why).sort((a, b) => b[1] - a[1]).map(([why, n]) => (
+                  <span key={why} className="px-2.5 py-1 rounded-full bg-bg-elev text-xs text-subtle">{why} <span className="font-mono-tab text-fg">{n}</span></span>
                 ))}
+              </div>
+            </Card>
+          )}
+
+          {entry === 'confluence' && s.walk_forward && (
+            <Card title="Does history help?">
+              <div className="text-xs text-muted -mt-1 mb-3">Trades split by what the setup had done before each signal</div>
+              <ul className="space-y-3">
+                {EXITS.map(([x, label]) => {
+                  const w = s.walk_forward[x]
+                  if (!w) return null
+                  return (
+                    <li key={x}>
+                      <div className="text-sm text-fg">{label}</div>
+                      <div className="mt-1 grid grid-cols-2 gap-2">
+                        <Split label="History yes" g={w.yes} />
+                        <Split label="History no" g={w.no} />
+                      </div>
+                    </li>
+                  )
+                })}
               </ul>
             </Card>
           )}
 
-          {s.walk_forward && (
-            <Card title="Does the history filter help?">
-              <p className="text-xs text-muted mb-3">Confluence entries judged only by what that setup had done before the signal (this ticker blended with the whole universe, like the ranking). Out of sample.</p>
-              <table className="w-full text-xs font-mono-tab">
-                <thead>
-                  <tr className="text-muted text-left">
-                    <th className="font-normal pb-2">Sell by</th>
-                    <th className="font-normal pb-2 text-right">History: yes</th>
-                    <th className="font-normal pb-2 text-right">History: no</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-hairline">
-                  {EXIT_ORDER.map((x) => {
-                    const w = s.walk_forward[x]
-                    if (!w) return null
-                    const cell = (g) => <><span className={tone(g.avg)}>{pctS(g.avg)}</span><span className="text-muted"> · {share(g.winRate)} win · {g.closed}</span></>
-                    return (
-                      <tr key={x}>
-                        <td className="py-2 text-fg font-sans">{EXIT_LABEL[x]}</td>
-                        <td className="py-2 text-right">{cell(w.yes)}</td>
-                        <td className="py-2 text-right">{cell(w.no)}</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </Card>
-          )}
-
-          {s.by_year && (
-            <Card title="By year · Confluence + exit targets">
-              <ul className="divide-y divide-hairline text-xs font-mono-tab">
-                {Object.entries(s.by_year).map(([y, r]) => (
-                  <li key={y} className="py-2 flex gap-3">
-                    <span className="w-12 text-fg">{y}</span>
-                    <span className="flex-1 text-muted">{r.n} trades · {share(r.winRate)} win</span>
-                    <span className={tone(r.avg)}>{pctS(r.avg)}</span>
+          {entry === 'confluence' && years.length > 0 && (
+            <Card title="By year">
+              <ul className="space-y-2.5">
+                {years.map(([y, r]) => (
+                  <li key={y} className="flex items-center gap-3 text-xs font-mono-tab">
+                    <span className="w-10 text-subtle">{y}</span>
+                    <span className="flex-1 h-1.5 rounded-full bg-bg-elev overflow-hidden" aria-hidden>
+                      <span className={clsx('block h-full rounded-full', (r.avg ?? 0) < 0 ? 'bg-rose-300/70' : 'bg-green-400/70')} style={{ width: `${(Math.abs(r.avg ?? 0) / maxAbs) * 100}%` }} />
+                    </span>
+                    <span className={clsx('w-12 text-right', tone(r.avg))}>{pctS(r.avg)}</span>
+                    <span className="w-14 text-right text-muted">{r.closed} done</span>
                   </li>
                 ))}
               </ul>
-              <p className="mt-2 text-xs text-muted">Recent years have fewer closed trades — most are still open.</p>
+              <div className="mt-3 text-[11px] text-muted">Confluence buys, exit targets. Recent trades are mostly still open.</div>
             </Card>
           )}
 
-          {s.missed?.length > 0 && (
-            <Card title="Biggest missed moves" flush>
+          {entry === 'confluence' && s.missed?.length > 0 && (
+            <Card title="Biggest misses" flush>
               <ul className="divide-y divide-hairline">
-                {(allMissed ? s.missed : s.missed.slice(0, 15)).map((m) => (
+                {(allMissed ? s.missed : s.missed.slice(0, 10)).map((m) => (
                   <li key={`${m.ticker}${m.low}`}>
                     <Link to={`/charts/entry/${encodeURIComponent(m.ticker)}`} className="px-5 py-3 flex items-center gap-3 hover:bg-card-hover/40 transition">
+                      <span className="w-14 shrink-0 text-sm font-semibold text-fg">{m.ticker}</span>
                       <span className="flex-1 min-w-0">
-                        <span className="block text-sm text-fg"><span className="font-semibold">{m.ticker}</span> <span className="font-mono-tab text-subtle">{day(m.low)} → {day(m.peak)}</span></span>
-                        <span className="block text-xs text-muted">{m.why}{m.best ? ` · best ${m.best}/5` : ''}</span>
+                        <span className="block text-xs text-subtle font-mono-tab">{day(m.low)} → {day(m.peak)}</span>
+                        <span className="block text-[11px] text-muted truncate">{m.why}</span>
                       </span>
-                      <span className="text-sm font-semibold font-mono-tab text-green-400">{pctS(m.gain)}</span>
+                      <span className="text-sm font-semibold font-mono-tab text-subtle">{pctS(m.gain)}</span>
                       <ChevronRight size={14} className="text-muted" aria-hidden />
                     </Link>
                   </li>
                 ))}
               </ul>
-              {s.missed.length > 15 && (
+              {s.missed.length > 10 && (
                 <button type="button" onClick={() => setAllMissed(!allMissed)} className="w-full min-h-[44px] border-t border-hairline text-xs font-semibold text-subtle hover:text-fg">
                   {allMissed ? 'Show fewer' : `Show all ${s.missed.length}`}
                 </button>
@@ -184,11 +170,19 @@ export default function SignalRecord() {
             </Card>
           )}
 
-          <p className="text-[11px] text-muted px-1">
-            Option prices are Black-Scholes estimates from each stock&apos;s recent volatility, with 2% slippage per fill — real fills differ. Big moves are found with hindsight, only to grade the entries. Past results, not advice.
-          </p>
+          <p className="text-[11px] text-muted px-1">Estimated option prices (Black-Scholes, 2% slippage). Past results, not advice.</p>
         </>
       )}
+    </div>
+  )
+}
+
+function Split({ label, g }) {
+  return (
+    <div className="rounded-xl bg-bg-elev px-3 py-2.5">
+      <div className="text-[11px] text-muted">{label}</div>
+      <div className={clsx('mt-0.5 text-base font-semibold font-mono-tab', tone(g?.avg))}>{pctS(g?.avg)}</div>
+      <div className="text-[11px] text-muted font-mono-tab">{share(g?.winRate)} win · {g?.closed ?? 0}</div>
     </div>
   )
 }
@@ -196,7 +190,7 @@ export default function SignalRecord() {
 function Card({ title, children, flush = false }) {
   return (
     <section className="bg-card border border-border rounded-2xl mb-4 overflow-hidden">
-      <h2 className={clsx('text-sm font-semibold px-5 pt-5', flush ? 'pb-3' : 'pb-3')}>{title}</h2>
+      <h2 className="text-sm font-semibold px-5 pt-5 pb-3">{title}</h2>
       <div className={flush ? '' : 'px-5 pb-5'}>{children}</div>
     </section>
   )

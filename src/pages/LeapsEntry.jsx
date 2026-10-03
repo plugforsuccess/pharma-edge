@@ -324,7 +324,7 @@ export default function LeapsEntry() {
           </div>
 
           <div className="min-w-0 md:order-5 md:col-span-2">
-            <ReplayCard ticker={ticker} bars={bars} model={model} suite={dailySuite} onJumpDay={jumpDay} />
+            <ReplayCard bars={bars} model={model} suite={dailySuite} onJumpDay={jumpDay} />
           </div>
         </div>
       )}
