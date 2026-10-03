@@ -718,6 +718,9 @@ function SuitePanel({ pack, failed, tf, onTf, holdings, onJump, onOpenPane, onBr
   const bravoLatest = bravoB != null && (bravoS == null || bravoB > bravoS) ? { side: 'Bull', n: ago(bravoB) } : bravoS != null ? { side: 'Bear', n: ago(bravoS) } : null
   const tone = (side) => (side === 'Bull' ? 'up' : side === 'Bear' ? 'down' : 'flat')
   const since = pack.periods[0]?.t?.slice(0, 4)
+  // Short ages for the pillar rows: "now", "3w ago", "2mo ago".
+  const short = info.unit === 'week' ? 'w' : 'mo'
+  const agoShort = (n) => (n === 0 ? 'now' : `${n}${short} ago`)
   return (
     <section className="bg-card border border-border rounded-2xl mb-4 overflow-hidden">
       {header}
@@ -737,13 +740,14 @@ function SuitePanel({ pack, failed, tf, onTf, holdings, onJump, onOpenPane, onBr
       <ul className="border-t border-hairline divide-y divide-hairline">
         <PillarRow name="Bravo" what="Trend" onClick={onBravo} action={bravoOn ? 'On chart' : 'Show band'}
           value={regime === 1 ? 'Bull trend' : regime === -1 ? 'Bear trend' : 'No trend'} valueTone={regime === 1 ? 'up' : regime === -1 ? 'down' : 'flat'}
-          latest={bravoLatest && `${bravoLatest.side} ${agoText(bravoLatest.n)}`} latestTone={tone(bravoLatest?.side)} />
+          chip={regime === 1 ? 'Above basis' : regime === -1 ? 'Below basis' : 'Mixed'}
+          latest={bravoLatest && `${bravoLatest.side} ${agoShort(bravoLatest.n)}`} latestTone={tone(bravoLatest?.side)} />
         <PillarRow name="Echo" what="Momentum" onClick={() => onOpenPane('echo')} action="Open" expand
           value={echo.v == null ? '—' : echo.v.toFixed(1)} mono valueTone={echo.v == null ? 'flat' : echo.v >= 0 ? 'up' : 'down'} chip={echo.zone}
-          latest={echo.latest && `${echo.latest.side} ${agoText(echo.latest.n)}`} latestTone={tone(echo.latest?.side)} />
+          latest={echo.latest && `${echo.latest.side} ${agoShort(echo.latest.n)}`} latestTone={tone(echo.latest?.side)} />
         <PillarRow name="Tango" what="Money flow" onClick={() => onOpenPane('tango')} action="Open" expand
           value={tango.v == null ? '—' : tango.v.toFixed(1)} mono valueTone={tango.v == null ? 'flat' : tango.v >= 0 ? 'up' : 'down'} chip={tango.zone}
-          latest={tango.latest && `${tango.latest.side} ${agoText(tango.latest.n)}`} latestTone={tone(tango.latest?.side)} />
+          latest={tango.latest && `${tango.latest.side} ${agoShort(tango.latest.n)}`} latestTone={tone(tango.latest?.side)} />
       </ul>
       {holdings?.length > 0 && (
         <ul className="border-t border-hairline divide-y divide-hairline">
@@ -794,23 +798,27 @@ function SignalTile({ tone, icon: Icon, label, title, stars, sub, onClick }) {
 }
 
 const TONE_TEXT = { up: 'text-green-400', down: 'text-rose-300', flat: 'text-subtle' }
+// Two aligned lines per row: name · value · latest signal on top, the role ·
+// state chip · action below — every column shares the same two baselines.
 function PillarRow({ name, what, value, valueTone, mono, chip, latest, latestTone, onClick, action, expand }) {
   return (
     <li>
       <button type="button" onClick={onClick}
-        className="w-full text-left px-5 py-3 flex items-center gap-3 min-h-[60px] hover:bg-card-hover/40 transition">
-        <span className={clsx('h-2 w-2 rounded-full shrink-0', valueTone === 'up' ? 'bg-green-400' : valueTone === 'down' ? 'bg-red-400' : 'bg-faint')} aria-hidden />
-        <span className="w-[88px] shrink-0">
-          <span className="block text-sm text-fg font-medium leading-tight">{name}</span>
-          <span className="block text-[11px] text-muted leading-tight mt-0.5">{what}</span>
+        className="w-full text-left px-5 py-3 grid grid-cols-[8px_84px_minmax(0,1fr)_auto] items-start gap-x-3 hover:bg-card-hover/40 transition">
+        <span className={clsx('mt-[7px] h-2 w-2 rounded-full', valueTone === 'up' ? 'bg-green-400' : valueTone === 'down' ? 'bg-red-400' : 'bg-faint')} aria-hidden />
+        <span className="min-w-0">
+          <span className="block h-5 text-sm leading-5 text-fg font-medium truncate">{name}</span>
+          <span className="block h-4 mt-1 text-[11px] leading-4 text-muted truncate">{what}</span>
         </span>
-        <span className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
-          <span className={clsx('text-sm font-semibold', mono && 'font-mono-tab', TONE_TEXT[valueTone])}>{value}</span>
-          {chip && <span className="text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-bg-elev text-muted">{chip}</span>}
+        <span className="min-w-0">
+          <span className={clsx('block h-5 text-sm leading-5 font-semibold truncate', mono && 'font-mono-tab', TONE_TEXT[valueTone])}>{value}</span>
+          <span className="block h-4 mt-1">
+            {chip && <span className="inline-block max-w-full truncate whitespace-nowrap align-top text-[10px] leading-4 font-semibold uppercase tracking-wider px-1.5 rounded bg-bg-elev text-muted">{chip}</span>}
+          </span>
         </span>
-        <span className="shrink-0 text-right">
-          {latest && <span className={clsx('block text-xs font-mono-tab', TONE_TEXT[latestTone])}>{latest}</span>}
-          <span className="flex items-center justify-end gap-1 text-[11px] text-violet-300 mt-0.5 font-semibold">
+        <span className="text-right">
+          <span className={clsx('block h-5 text-xs leading-5 font-mono-tab whitespace-nowrap', TONE_TEXT[latestTone])}>{latest ?? ''}</span>
+          <span className="flex h-4 mt-1 items-center justify-end gap-1 text-[11px] leading-4 text-violet-300 font-semibold whitespace-nowrap">
             {expand ? <Maximize2 size={11} aria-hidden /> : null}{action}{!expand && <ChevronRight size={12} aria-hidden />}
           </span>
         </span>
