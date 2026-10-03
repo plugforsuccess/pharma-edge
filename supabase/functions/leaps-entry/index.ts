@@ -6,7 +6,7 @@
 //   Yahoo history ("max") on that interval plus SPY / ^VIX on the same
 //   interval, so the 200-bar warm-ups have room (owner, 2026-10-03:
 //   Hardening reads weekly / monthly, not daily).
-//   → { success, ticker, source: "yahoo", bars: [{ t, o, h, l, c, v }],
+//   daily → { success, ticker, source: "yahoo", bars: [{ t, o, h, l, c, v }],
 //       iv_points: [{ t, iv }], iv_today, iv_today_expiry }
 //   bars: 5 years of daily bars (the page shows the last 2; the rest warms
 //   up the 200-day SMA / 252-day ranks and feeds the backtest).
