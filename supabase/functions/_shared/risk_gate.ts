@@ -14,6 +14,9 @@
 //   9. max trades attempted today?  (bot_runs.trades_attempted today)
 //  10. consecutive losses cooldown?
 //  11. NLV available (broker live; falls back to profile.account_size)
+//  12. account minimum: auto-trading needs NLV >= MIN_AUTO_TRADE_NLV
+//      ($25,000, owner 2026-10-03), and live mode must read it from the
+//      broker — a typed-in account_size can't unlock live auto-trades.
 //
 // Returns { allowed, skipReason, nlv, nlv_source, per_trade_cap_dollars }
 // — the caller uses nlv + per_trade_cap_dollars to size contracts.
@@ -60,6 +63,21 @@ export interface RiskCheckResult {
   strategy_cap_dollars: number
   account_number: string | null
   env: TtEnv
+}
+
+// Owner rule (2026-10-03): no bot auto-trades below $25k of account
+// value. Shared by the multi-leg (spread) and single-leg entry executors.
+export const MIN_AUTO_TRADE_NLV = 25_000
+
+// Why auto-trading is blocked for this account size, or null if allowed.
+export function accountMinimumBlock(
+  nlv: number,
+  source: string,
+  mode: 'paper' | 'live' | undefined,
+): string | null {
+  if (mode === 'live' && source !== 'broker_live') return `account_min_needs_broker_nlv (${source})`
+  if (!(nlv >= MIN_AUTO_TRADE_NLV)) return `below_account_minimum ($${Math.round(nlv).toLocaleString('en-US')} < $${MIN_AUTO_TRADE_NLV.toLocaleString('en-US')})`
+  return null
 }
 
 function todayNyDate(): string {
@@ -149,6 +167,10 @@ export async function evaluateRisk(
   const nlv = nlvResult.nlv
   if (nlv <= 0) {
     return { ...blank, skipReason: `no_nlv (${nlvResult.source})`, status: 'skipped_caps' }
+  }
+  const minBlock = accountMinimumBlock(nlv, nlvResult.source, cfg.mode)
+  if (minBlock) {
+    return { ...blank, nlv, nlv_source: nlvResult.source, skipReason: minBlock, status: 'skipped_caps' }
   }
 
   const today = todayNyDate()

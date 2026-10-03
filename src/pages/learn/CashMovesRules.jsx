@@ -23,6 +23,7 @@ const RULE_SECTIONS = [
       'Max 2% of account per spread (max-loss-per-spread × contracts ≤ 2% of NLV)',
       'Manual override allowed but the calculator warns when you breach',
       'Max 20% of account in any single underlying',
+      'Bot auto-trades need at least $25,000 in the account (read from your broker)',
     ],
   },
   {
