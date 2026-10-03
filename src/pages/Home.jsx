@@ -3,8 +3,9 @@ import { Link, useNavigate } from 'react-router-dom'
 import { Calculator, ChevronRight, Plus, RefreshCw, Settings as SettingsIcon, X } from 'lucide-react'
 import clsx from 'clsx'
 import NotificationCenter from '../components/NotificationCenter'
-import { useHoldings, isQuantity } from '../hooks/useHoldings'
-import { todayYmd, timeStop, longTermFitsPlan } from '../utils/afterTax'
+import { useHoldings } from '../hooks/useHoldings'
+import { todayYmd } from '../utils/afterTax'
+import { usd, pctSigned, nameOf, sellCount, gainLabel, isRoc, needsAction } from '../lib/holdingChecks'
 
 // Home — the LEAPS dashboard. One look at what needs attention today,
 // pulled from the same numbers as Positions (useHoldings): net worth after
@@ -12,28 +13,8 @@ import { todayYmd, timeStop, longTermFitsPlan } from '../utils/afterTax'
 // long-term date worth waiting for, stale prices), the next exit targets,
 // goals and income. Every row links to Positions; nothing here edits.
 
-const usd = (n) => (Number.isFinite(n) ? `${n < 0 ? '−' : ''}$${Math.round(Math.abs(n)).toLocaleString('en-US')}` : '—')
-const pctSigned = (r) => (Number.isFinite(r) ? `${r > 0.00005 ? '+' : r < -0.00005 ? '−' : ''}${Math.abs(r * 100).toFixed(1)}%` : '—')
-const STALE_DAYS = 7
 // "Nothing today" can be closed; it stays closed until something needs action.
 const CLEAR_KEY = 'cm:home-clear-closed'
-const DAY_MS = 86400000
-
-const nameOf = (pos) => pos.ticker ?? pos.name ?? 'Holding'
-const unitOf = (pos) => (pos.instrument_type === 'crypto' ? `$${pos.ticker}` : isQuantity(pos.instrument_type) ? 'share' : 'contract')
-function qty(n, unit) {
-  const s = Number(n).toLocaleString('en-US', { maximumFractionDigits: unit.startsWith('$') ? 8 : 2 })
-  return unit.startsWith('$') ? `${s} ${unit}` : `${s} ${unit}${Number(n) === 1 ? '' : 's'}`
-}
-// What a target sells, as a count ("35 contracts", "0.1625 $BTC").
-function sellCount(row, pos) {
-  const unit = unitOf(pos)
-  const units = isQuantity(pos.instrument_type) ? Number(pos.shares) : Number(pos.contracts)
-  if (row.contracts != null) return qty(row.contracts, unit)
-  return units > 0 ? qty(+(units * row.fraction).toFixed(unit.startsWith('$') ? 8 : 2), unit) : `${Math.round(row.fraction * 100)}%`
-}
-const gainLabel = (row) => `${Math.round(row.gain_pct * 100).toLocaleString('en-US')}% gain`
-const isRoc = (pos) => pos.instrument_type === 'stock' && pos.details?.dividend_kind === 'roc'
 
 export default function Home() {
   const navigate = useNavigate()
@@ -47,57 +28,8 @@ export default function Home() {
   const after = invested + (others.cash ?? 0) + (others.realEstate ?? 0)
   const before = (summary?.current_value ?? 0) + (others.cashBefore ?? 0) + (others.realEstateBefore ?? 0)
 
-  // ── Needs action, most urgent first ──────────────────────────
-  const actions = useMemo(() => {
-    const out = []
-    for (const r of results) {
-      const { pos, calc } = r
-      if (!calc) continue
-      const rows = r.custom?.length ? r.custom : r.ladder
-      if (!isRoc(pos)) {
-        // Time stop (options): act now, or the roll window is open.
-        const stop = isQuantity(pos.instrument_type) ? null : timeStop(pos.expiration, today, plan)
-        if (stop?.level === 'act') {
-          out.push({ rank: 0, tone: 'red', pos, title: `${nameOf(pos)}: exit or roll now`,
-            body: `${stop.dte} days to expiry — past your 6-month time stop.` })
-        }
-        // Targets the current value has reached.
-        for (const row of rows ?? []) {
-          if (!row.hit || row.contracts === 0) continue
-          out.push({ rank: 1, tone: 'green', pos, title: `${nameOf(pos)} hit ${gainLabel(row)}`,
-            body: <>Sell <span className="text-amber-300">{sellCount(row, pos)}</span>{row.after_tax_gain > 0 && <> · <span className="font-mono-tab text-green-400">+{usd(row.after_tax_gain)}</span> after taxes</>}</> })
-        }
-        // Runner trail — only once every target has hit.
-        const runner = r.runner
-        const units = isQuantity(pos.instrument_type) ? Number(pos.shares) : Number(pos.contracts)
-        const unitNow = units > 0 ? calc.current_value / units : null
-        if (runner?.trail_unit_value != null && unitNow != null && (rows ?? []).length > 0
-          && rows.every((x) => x.hit) && unitNow <= runner.trail_unit_value) {
-          out.push({ rank: 1, tone: 'amber', pos, title: `${nameOf(pos)}: runner trail hit`,
-            body: `Down ${Math.round(runner.trail_pct * 100)}% from its peak — the plan sells the runner.` })
-        }
-        if (stop?.level === 'warn') {
-          const months = Math.max(1, Math.round(stop.dte / 30.44))
-          out.push({ rank: 2, tone: 'amber', pos, title: `${nameOf(pos)}: roll window open`,
-            body: `${months} months to expiry. Exit or roll before 6 months are left.` })
-        }
-        // Long-term soon and worth waiting for.
-        if (calc.is_long_term === false && calc.tax_saved_by_waiting > 0 && calc.days_until_long_term <= 60
-          && longTermFitsPlan(calc.long_term_date, isQuantity(pos.instrument_type) ? null : pos.expiration, plan)) {
-          out.push({ rank: 3, tone: 'green', pos, title: `${nameOf(pos)} goes long-term in ${calc.days_until_long_term} days`,
-            body: <>Waiting saves about <span className="font-mono-tab text-green-400">{usd(calc.tax_saved_by_waiting)}</span> in tax.</> })
-        }
-      }
-    }
-    // Prices entered by hand go stale.
-    const stale = (positions ?? []).filter((x) => x.instrument_type !== 'cash' && x.value_as_of
-      && (Date.now() - new Date(x.value_as_of).getTime()) / DAY_MS > STALE_DAYS)
-    if (stale.length) {
-      out.push({ rank: 4, tone: 'neutral', title: `Update ${stale.length} price${stale.length === 1 ? '' : 's'}`,
-        body: `${stale.slice(0, 3).map(nameOf).join(', ')}${stale.length > 3 ? '…' : ''} last priced over ${STALE_DAYS} days ago.` })
-    }
-    return out.sort((a, b) => a.rank - b.rank)
-  }, [results, positions, plan, today])
+  // ── Needs action, most urgent first (same checks as the Bot view) ──
+  const actions = useMemo(() => needsAction(results, positions, plan, today), [results, positions, plan, today])
 
   const [clearClosed, setClearClosed] = useState(() => {
     try { return localStorage.getItem(CLEAR_KEY) === '1' } catch { return false }
@@ -176,7 +108,7 @@ export default function Home() {
                     <span className="flex-1">
                       Investments <span className={clsx('font-mono-tab', summary.after_tax_gain < 0 ? 'text-rose-300' : 'text-green-400')}>{pctSigned(summary.after_tax_return_pct)}</span> after tax
                     </span>
-                    <span className="text-xs text-muted inline-flex items-center">Positions <ChevronRight size={14} /></span>
+                    <span className="text-xs text-muted inline-flex items-center">Portfolio <ChevronRight size={14} /></span>
                   </div>
                 )}
               </>
@@ -218,6 +150,10 @@ export default function Home() {
                     ))}
                   </ol>
                 )}
+                <Link to="/bot" className="mt-3 pr-3 flex items-center gap-2 min-h-[44px] text-xs text-muted hover:text-fg">
+                  <span className="flex-1">Today's check on every holding</span>
+                  <ChevronRight size={14} aria-hidden />
+                </Link>
               </section>
               )}
 

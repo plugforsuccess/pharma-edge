@@ -492,6 +492,7 @@ leaps_tax_profiles  ← per-user after-tax inputs (portfolio, allocation, filing
 leaps_positions     ← per-user LEAPS positions (basis, current value, purchase date) — manual today
 ldp_risk_profiles   ← LDP engine risk tier + capping rule per user (service-role write only)
 ldp_audit_log       ← LDP append-only audit of every trade / suggestion / skip / hold
+leaps_position_marks ← one value per holding per day (trigger-written on every price save) — feeds /charts
 ```
 
 ### RLS Policy
@@ -788,9 +789,13 @@ LEAPS drives growth. Tiers:
 Other revenue: Tradier referral fees; managed accounts (auto-trading)
 only after the adviser-registration question is settled with counsel.
 
-Nav (mobile): Home · Positions · Simulator (center) · Research · Pulse
-(Elite, locked teaser for Pro); desktop rail adds Settings + an "Add a
-position" CTA. Hidden indefinitely via `src/lib/features.js` (code
+Nav (owner, 2026-10-03): **Home · Portfolio · Charts · Pulse · Taxes**
+— five equal tabs; Charts is the middle tab and looks like the others
+(no raised button). Pulse is Elite (locked teaser for Pro). Portfolio is
+`/leaps` (page title "Portfolio"). The desktop rail adds LEAPS bot,
+Simulator, Settings and an "Add a holding" CTA; on mobile the Simulator
+and the bot are reached from Home. Research (`/reasoning`) is out of
+the nav until the research bot ships (route kept). Hidden indefinitely via `src/lib/features.js` (code
 kept; each flag gates the route AND every entry point to it — flip to
 true to restore): Wheel + Picks, Log a Move (`/log` → `/leaps?add=1`),
 signal / play detail, Flow, Leaderboard. Hidden routes redirect, never
@@ -994,6 +999,37 @@ value, holding period) and must pass before any edit to that file lands.
   consult-a-professional note. Keep it that way.
 
 ---
+
+## Charts (`/charts`), LEAPS bot (`/bot`), Taxes (`/taxes`)
+
+Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
+- **Charts.** Price history is `leaps_position_marks` (PK position +
+  day; a SECURITY DEFINER trigger on `leaps_positions` upserts the day's
+  mark on every insert / value change; users SELECT own rows only).
+  Each holding's history starts at its cost on its purchase date. After-
+  tax values are figured as of each date (holding period then). Cards:
+  **Gain over time** (investments, before / after tax, vs break-even —
+  gain, not value, so new money doesn't read as growth); one holding at a
+  time (chips) with cost, hit targets and the next target as flat lines
+  (a target over 1.6× the chart's high is named under it instead), and
+  long-term / roll window / exit-or-roll dates as markers (within ~18
+  months); **Where it sits, after tax** (by type); **Gain after tax, by
+  holding**. Charts are plain SVG (`components/LineChart.jsx`, no chart
+  library) — tap or drag to read a date.
+- **LEAPS bot.** Mode (places trades only on managed accounts, else
+  suggests), risk tier, **Today's checks** — one decision per holding
+  from `dailyDecisions` in `src/lib/holdingChecks.jsx` (time stop →
+  targets → runner trail → roll window → wait for long-term → hold; the
+  same checks feed Home's Needs action via `needsAction`) — and
+  **History** from `ldp_audit_log` (newest 50). Linked from Home's Needs
+  action card.
+- **Taxes.** Tax if sold today (investments netted + real estate) and
+  tax on income / yr; gains by character; **Waiting for long-term**
+  (short-term winners, date, savings); **Losses you could use** (biggest
+  first, each limited to the gains left to offset + the $3,000 ordinary
+  deduction, the rest carries forward; one wash-sale line); income tax
+  by kind (ROC shown as due at sale); the rate breakdown
+  (`components/RateBreakdown.jsx`, shared with Portfolio's View rates).
 
 ## Simulator (`/simulator`)
 

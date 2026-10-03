@@ -8,7 +8,7 @@ import {
   FILING_STATUSES, DEFAULT_TARGET_PCTS, makeRateResolver, deriveRates,
   applyRateOverride, targetTable, targetRow, positionAfterTax, portfolioSummary,
   todayYmd, holdingPeriod, suggestInstrumentType, exerciseCall,
-  blended1256Rate, rateAtGainFor, EXIT_PLAYBOOK, playbookTargets, runnerPlan, runnerAfterTax, annualizedReturn, timeStop,
+  rateAtGainFor, EXIT_PLAYBOOK, playbookTargets, runnerPlan, runnerAfterTax, annualizedReturn, timeStop,
   longTermFitsPlan, entryRunwayDays,
   CASH_KINDS, DEFAULT_SELLING_COST_PCT, cashAfterTax, cashYieldComparison, realEstateAfterTax,
   INCOME_KINDS, dividendAfterTax, incomeYieldComparison,
@@ -16,6 +16,7 @@ import {
 } from '../utils/afterTax'
 import NumberInput from '../components/NumberInput'
 import Modal from '../components/Modal'
+import RateBreakdown from '../components/RateBreakdown'
 import { useHoldings, DEFAULT_PROFILE, INVESTMENT_TYPES, isQuantity, wholeUnits } from '../hooks/useHoldings'
 
 // LEAPS — after-tax targets + live after-tax value.
@@ -195,7 +196,7 @@ export default function Leaps() {
       <header className="mb-5">
         <div className="flex items-center gap-2 mb-1">
           <Landmark size={16} className="text-amber-400" />
-          <h1 className="text-lg font-semibold">Positions</h1>
+          <h1 className="text-lg font-semibold">Portfolio</h1>
           <span className="flex-1" />
           {federal && (
             <span className="text-[10px] uppercase tracking-wider px-2 py-1 rounded-md border border-border text-subtle whitespace-nowrap">
@@ -376,58 +377,6 @@ function TaxSummaryCard({ profile, hasProfile, states, rates }) {
 }
 
 // ── Rate breakdown ────────────────────────────────────────────────
-
-function RateBreakdown({ rates, state, taxYear, show1256, onClose }) {
-  const rows = [
-    ['Long-term (held > 1 yr)', rates.long_term],
-    ['Short-term', rates.short_term],
-  ]
-  const blend = blended1256Rate(rates)
-  return (
-    <div>
-      <div className="flex items-center gap-2 mb-4">
-        <h2 className="text-base font-semibold">Estimated tax rate</h2>
-        <span className="flex-1" />
-        <span className="text-xs text-muted">{taxYear}</span>
-        <button type="button" onClick={onClose} aria-label="Close"
-          className="-mr-2 min-h-[44px] min-w-[44px] flex items-center justify-center rounded text-subtle hover:text-fg">
-          <X size={16} />
-        </button>
-      </div>
-      <div className="space-y-4">
-        {rows.map(([label, r]) => (
-          <div key={label}>
-            <div className="flex items-baseline gap-2 text-sm">
-              <span className="text-subtle flex-1">{label}</span>
-              <span className="font-mono-tab text-fg font-semibold">{ratePct(r.total)}</span>
-            </div>
-            <div className="mt-1 text-xs text-muted font-mono-tab">
-              {r.overridden
-                ? 'CPA-provided rate (override)'
-                : `${ratePct(r.federal)} federal + ${ratePct(r.niit)} NIIT + ${ratePct(r.state)} ${state?.state_code ?? 'state'} = ${ratePct(r.total)}`}
-            </div>
-          </div>
-        ))}
-        {show1256 && (
-          <div>
-            <div className="flex items-baseline gap-2 text-sm">
-              <span className="text-subtle flex-1">Index options (§1256)</span>
-              <span className="font-mono-tab text-fg font-semibold">{ratePct(blend)}</span>
-            </div>
-            <div className="mt-1 text-xs text-muted font-mono-tab">
-              60% × {ratePct(rates.long_term.total)} + 40% × {ratePct(rates.short_term.total)} = {ratePct(blend)} · any holding period
-            </div>
-          </div>
-        )}
-      </div>
-      {state?.confidence === 'low' && (
-        <p className="mt-4 text-xs text-amber-200/90">
-          These residency figures are flagged for review — consider entering a CPA rate in Settings.
-        </p>
-      )}
-    </div>
-  )
-}
 
 // ── Positions ─────────────────────────────────────────────────────
 
@@ -1963,7 +1912,7 @@ function PortfolioTotals({ summary, count, others }) {
   return (
     <section className="bg-card border border-amber-400/30 rounded-2xl p-5 mb-5">
       <div className="flex items-center gap-2 mb-4">
-        <h2 className="text-sm font-semibold">Portfolio</h2>
+        <h2 className="text-sm font-semibold">Total</h2>
         <span className="flex-1" />
         <span className="text-xs text-muted">{holdings} holding{holdings === 1 ? '' : 's'}</span>
       </div>
