@@ -1,7 +1,9 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import clsx from 'clsx'
+import { Share2 } from 'lucide-react'
 import { peerComparisons, AGE_LABELS } from '../utils/peers'
+import PeersShare from './PeersShare'
 import { todayYmd } from '../utils/afterTax'
 
 // Portfolio → Total card → Peers (owner, 2026-10-03; free): the user's net
@@ -11,6 +13,9 @@ import { todayYmd } from '../utils/afterTax'
 // it exists the view says so instead of guessing.
 const files = import.meta.glob('../data/netWorthBenchmarks.json', { eager: true, import: 'default' })
 const BENCHMARKS = Object.values(files)[0] ?? null
+// State rows: Census SIPP, built by scraper/build_state_net_worth.py.
+const stateFiles = import.meta.glob('../data/stateNetWorth.json', { eager: true, import: 'default' })
+const STATES = Object.values(stateFiles)[0] ?? null
 
 const compact = (n) => {
   const a = Math.abs(n)
@@ -24,7 +29,9 @@ export default function PeersView({ netWorth, profile, homeowner }) {
     benchmarks: BENCHMARKS, netWorth, birthDate: p.birth_date, today: todayYmd(),
     filingStatus: p.filing_status, income: Number(p.annual_income), homeowner,
     sex: p.sex, race: p.race_ethnicity, education: p.education,
-  }), [netWorth, p.birth_date, p.filing_status, p.annual_income, homeowner, p.sex, p.race_ethnicity, p.education])
+    stateBenchmarks: STATES, stateCode: p.state_code,
+  }), [netWorth, p.birth_date, p.filing_status, p.annual_income, homeowner, p.sex, p.race_ethnicity, p.education, p.state_code])
+  const [shareOpen, setShareOpen] = useState(false)
 
   if (!BENCHMARKS) {
     return <p className="text-sm text-subtle">Comparison data isn't available yet.</p>
@@ -34,6 +41,8 @@ export default function PeersView({ netWorth, profile, homeowner }) {
   const src = BENCHMARKS.source
   const age = result.band ? AGE_LABELS[result.band] : null
   const month = src.dollars.match(/to (\w+ \d{4})/)?.[1]
+  const stateRow = rest.find((r) => r.source === 'census')
+  const sourceLine = `Federal Reserve SCF 2022${month ? `, in ${month} dollars` : ''}${stateRow ? `; ${stateRow.name.replace(' households', '')} from Census SIPP 2023` : ''}.`
 
   return (
     <div>
@@ -62,6 +71,7 @@ export default function PeersView({ netWorth, profile, homeowner }) {
             <div className="flex items-baseline gap-3">
               <div className="flex-1 min-w-0 text-sm text-fg truncate">
                 {r.name}{r.withinAge && <span className="text-muted"> · {age}</span>}
+                {r.source === 'census' && <span className="ml-2 align-middle text-[10px] uppercase tracking-wider text-muted">Census</span>}
               </div>
               <div className={clsx('shrink-0 text-sm font-semibold font-mono-tab', (r.pct ?? 0) >= 50 ? 'text-green-400' : 'text-subtle')}>{r.rank}</div>
             </div>
@@ -73,12 +83,22 @@ export default function PeersView({ netWorth, profile, homeowner }) {
         ))}
       </ul>
 
-      <p className="mt-5 text-[11px] text-muted">
-        Net worth before tax. Federal Reserve SCF 2022{month ? `, in ${month} dollars` : ''}.
+      {head && (
+        <button type="button" onClick={() => setShareOpen(true)}
+          className="mt-5 w-full min-h-[44px] rounded-xl bg-bg-elev text-sm font-semibold text-fg inline-flex items-center justify-center gap-2 hover:bg-card-hover transition">
+          <Share2 size={15} aria-hidden /> Share your rank
+        </button>
+      )}
+      <p className="mt-4 text-[11px] text-muted">
+        Net worth before tax. {sourceLine}
         {!(p.sex || p.race_ethnicity || p.education) && (
           <> <Link to="/settings#about-you" className="text-amber-300">Add more comparisons</Link></>
         )}
       </p>
+      {head && (
+        <PeersShare open={shareOpen} onClose={() => setShareOpen(false)} head={head} rows={rest.filter((r) => r.source !== 'census')}
+          age={age} netWorth={netWorth} source={`Federal Reserve SCF 2022${month ? ` · ${month} dollars` : ''}`} />
+      )}
     </div>
   )
 }

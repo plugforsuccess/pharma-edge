@@ -1,5 +1,5 @@
 // Checks for src/utils/peers.js (npm run peers:check).
-import { ageOn, ageBand, percentileOf, rankLabel, incomeBand, incomeRangeLabel, percentileLabel, peerComparisons } from '../src/utils/peers.js'
+import { ageOn, ageBand, percentileOf, rankLabel, incomeBand, incomeRangeLabel, percentileLabel, peerComparisons, stateComparison } from '../src/utils/peers.js'
 
 let passed = 0
 const failures = []
@@ -66,6 +66,22 @@ const none = peerComparisons({ ...base })
 eq('optional groups left out when not shared', none.rows.some((r) => /race|education|sex/.test(r.key)), false)
 eq('homeowner row only when known', none.rows.some((r) => r.key.includes('home:')), false)
 eq('no birth date → no headline', peerComparisons({ ...base, birthDate: null }).rows[0].key, 'all')
+
+// State row (Census SIPP): within the age band when the state has it.
+{
+  const vals = (k) => ps.map((p) => p * k)
+  const stateBenchmarks = { percentiles: ps, states: { GA: { name: 'Georgia', households: 900, values: vals(10), mean: 1200, by_age: { '35_44': { households: 120, values: vals(5), mean: 500 } } } } }
+  const r = stateComparison({ stateBenchmarks, stateCode: 'GA', netWorth: 250, band: '35_44' })
+  eq('state row within the age band', r.withinAge, true)
+  eq('state row label', r.label, 'Georgia households, ages\u00a035–\u206044')
+  eq('state row percentile', r.pct, 50, 1e-9)
+  eq('state row source', r.source, 'census')
+  const r2 = stateComparison({ stateBenchmarks, stateCode: 'GA', netWorth: 250, band: 'under_35' })
+  eq('state row falls back to all ages', r2.withinAge === false && r2.label === 'Georgia households', true)
+  eq('unknown state → null', stateComparison({ stateBenchmarks, stateCode: 'PR', netWorth: 250, band: null }), null)
+  const out = peerComparisons({ ...base, stateBenchmarks, stateCode: 'GA' })
+  eq('state row sits after All US households', out.rows.findIndex((x) => x.source === 'census'), out.rows.findIndex((x) => x.key === 'all') + 1)
+}
 
 console.log(`peers checks: ${passed} passed, ${failures.length} failed`)
 if (failures.length) {

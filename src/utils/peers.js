@@ -118,12 +118,34 @@ export function incomeRangeLabel(income, bands) {
   return `Income ${k(c[i - 1])}–${k(c[i])}`
 }
 
+// The user's state (residency) against Census SIPP households there —
+// within the age band when the state has ≥ 100 such households, else all
+// ages. A separate source from the SCF rows, labelled as such.
+export function stateComparison({ stateBenchmarks, stateCode, netWorth, band, today }) {
+  const st = stateBenchmarks?.states?.[stateCode]
+  if (!st || !Number.isFinite(netWorth)) return null
+  const ps = stateBenchmarks.percentiles
+  const at = (vals, p) => vals[ps.indexOf(p)]
+  const crossed = band ? st.by_age?.[band] : null
+  const g = crossed ?? st
+  const r = percentileOf(g.values, ps, netWorth)
+  const ageText = band ? `ages${NB}${AGE_LABELS[band]}` : null
+  return {
+    key: crossed ? `state:${stateCode}|age:${band}` : `state:${stateCode}`,
+    label: crossed ? `${st.name} households, ${ageText}` : `${st.name} households`,
+    name: `${st.name} households`,
+    rank: rankLabel(r), pctLabel: percentileLabel(r), pct: r?.pct ?? null, top: r ? 100 - r.pct : null,
+    median: at(g.values, 50), p75: at(g.values, 75), p90: at(g.values, 90), mean: g.mean ?? null,
+    households: g.households, withinAge: !!crossed, source: 'census', today,
+  }
+}
+
 // Every comparison for this user, headline (age band) first. Each row:
 // { key, label, rank, top (0–100 share of households above), median,
 //   p75, p90, households, withinAge }.
 export function peerComparisons({
   benchmarks, netWorth, birthDate, today, filingStatus, income, homeowner = null,
-  sex = null, race = null, education = null,
+  sex = null, race = null, education = null, stateBenchmarks = null, stateCode = null,
 }) {
   if (!benchmarks?.groups || !Number.isFinite(netWorth)) return { rows: [], age: null, band: null }
   const ps = benchmarks.percentiles
@@ -164,6 +186,8 @@ export function peerComparisons({
       mean: g.mean ?? null, households: g.households, withinAge: true, headline: true })
   }
   add('all', 'All US households', { cross: false })
+  const stateRow = stateComparison({ stateBenchmarks, stateCode, netWorth, band })
+  if (stateRow) rows.push(stateRow)
   add(couple ? 'household:couple' : 'household:single', couple ? 'Couples' : 'Singles')
   if (homeowner === true) add('home:owner', 'Homeowners')
   const ib = incomeBand(Number(income), benchmarks.income_bands)

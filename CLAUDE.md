@@ -1056,7 +1056,27 @@ value, holding period) and must pass before any edit to that file lands.
   beside "Top N%", the percentile ("96th percentile", rounded down). Ranks read "Top
   18%" in the top half, "30th percentile" below the median. Math in
   `src/utils/peers.js` (`peerComparisons`; `npm run peers:check`), card in
-  `components/PeersView.jsx`.
+  `components/PeersView.jsx`. **Layout** (owner, 2026-10-03: "simplify the
+  copy, state of the art"): the rank is the hero (text-5xl green) with
+  "96th percentile · households under 35" under it, the percentile bar,
+  two tiles (your net worth, the group's average), then one row per
+  comparison — short name ("Singles · under 35"), rank, a slim bar with
+  the user's dot, "Median $12K · Avg $109K" — and a one-line source.
+  **Share** (owner, 2026-10-03; `components/PeersShare.jsx`): "Share your
+  rank" opens a Modal with a 1080² canvas card (wordmark, the rank, who
+  it's against, up to three rows, the SCF source) → `navigator.share`
+  with the PNG when the browser allows files, else a download. The
+  dollar figure is **off by default** ("Include my net worth" switch).
+  **State row** (owner, 2026-10-03): the SCF has no geography, so the
+  user's residency (`leaps_tax_profiles.state_code`) is compared against
+  Census **SIPP 2023** (reference year 2022) households in that state —
+  `scraper/build_state_net_worth.py` (Census API, THNETWORTH for the
+  December reference person, WPFINWGT, by state and age band ≥ 100
+  households, CPI-U adjusted) run by `.github/workflows/state-net-worth.yml`
+  → `src/data/stateNetWorth.json`; `stateComparison` in `peers.js` adds
+  the row after "All US households", tagged CENSUS (SIPP undercounts the
+  wealthiest, so it's a separate source, named in the footer). No PR row.
+  Optional `CENSUS_API_KEY` Actions secret raises the API's daily limit.
 - **Dividend income.** The add form's 6th type, **Income** (Options ·
   Shares · Income / Crypto · Cash · Real estate), is a `stock` row with
   the income type and a required yield; a stock row with a yield or ROC
