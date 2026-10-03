@@ -11,6 +11,7 @@
     "verdict:check:server": "deno run --allow-read scripts/check-verdict-server.ts",
     "verdict:check": "npm run verdict:check:client && npm run verdict:check:server",
     "aftertax:check": "node scripts/check-after-tax.mjs",
+    "charttools:check": "node scripts/check-chart-tools.mjs",
     "ldp:risk:check": "node --experimental-strip-types --no-warnings scripts/check-ldp-risk-tier.ts"
   },
   "dependencies": {
