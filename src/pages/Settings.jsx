@@ -12,7 +12,8 @@ import clsx from 'clsx'
 import NumberInput from '../components/NumberInput'
 import BotSettingsSection from '../components/BotSettingsSection'
 import { FEATURES } from '../lib/features'
-import { FILING_STATUSES, DEFAULT_TARGET_PCTS, EXIT_PLAYBOOK, isValidTaxRate } from '../utils/afterTax'
+import { FILING_STATUSES, DEFAULT_TARGET_PCTS, EXIT_PLAYBOOK, isValidTaxRate, todayYmd } from '../utils/afterTax'
+import { SEX_OPTIONS, RACE_OPTIONS, EDUCATION_OPTIONS } from '../utils/peers'
 import { LDP_DISCLOSURES_VERSION, DISCLOSURES, TOLERANCES, EXPERIENCE } from '../lib/ldpDisclosures'
 
 // Settings — the one place users edit their account, LEAPS risk profile,
@@ -100,6 +101,26 @@ const ACT60_OPTIONS = [
 
 // One after-tax return goal; each holding's goal bar solves it on that
 // holding's own cost. (target_pcts keeps just this one value.)
+// About you (peer comparison): birth date, and optional sex (single
+// households only), race / ethnicity and education. '' = not shared.
+function aboutFrom(t) {
+  return {
+    birth_date: t?.birth_date ?? '',
+    sex: t?.sex ?? '',
+    race_ethnicity: t?.race_ethnicity ?? '',
+    education: t?.education ?? '',
+  }
+}
+const NOT_SHARED = { value: '', label: 'Prefer not to say' }
+
+// Net worth outside the holdings: cars etc. and debts (not mortgages).
+function worthFrom(t) {
+  return {
+    other_assets: t?.other_assets != null ? String(t.other_assets) : '',
+    other_debts: t?.other_debts != null ? String(t.other_debts) : '',
+  }
+}
+
 function goalsFrom(t) {
   const sel = Number(t?.selected_target_pct)
   return {
@@ -137,6 +158,8 @@ export default function Settings() {
   const [risk, setRisk] = useState(riskFrom(null, profile))
   const [tax, setTax] = useState(taxFrom(null))
   const [goals, setGoals] = useState(goalsFrom(null))
+  const [worth, setWorth] = useState(worthFrom(null))
+  const [about, setAbout] = useState(aboutFrom(null))
   const [ladder, setLadder] = useState(ladderFrom(null))
   const [baseline, setBaseline] = useState(null)
   const [accepted, setAccepted] = useState({})
@@ -176,9 +199,11 @@ export default function Settings() {
       risk: riskFrom(riskRow, profile),
       tax: taxFrom(taxRow),
       goals: goalsFrom(taxRow),
+      worth: worthFrom(taxRow),
+      about: aboutFrom(taxRow),
       ladder: ladderFrom(riskRow),
     }
-    setNames(b.names); setRisk(b.risk); setTax(b.tax); setGoals(b.goals); setLadder(b.ladder)
+    setNames(b.names); setRisk(b.risk); setTax(b.tax); setGoals(b.goals); setWorth(b.worth); setAbout(b.about); setLadder(b.ladder)
     setBaseline(b)
   }, [loaded, taxRow, riskRow, profile?.id, profile?.display_name, profile?.public_slug, profile?.is_public])
 
@@ -196,8 +221,10 @@ export default function Settings() {
     accountSize: risk.account_size !== baseline.risk.account_size,
     tax: !same(tax, baseline.tax),
     goals: !same(goals, baseline.goals),
+    worth: !same(worth, baseline.worth),
+    about: !same(about, baseline.about),
     ladder: !same(ladder, baseline.ladder),
-  }, [baseline, names, risk, tax, goals, ladder])
+  }, [baseline, names, risk, tax, goals, worth, about, ladder])
   const anyDirty = !!dirty && Object.values(dirty).some(Boolean)
 
   const disclosuresOnFile = riskRow?.disclosures_version === LDP_DISCLOSURES_VERSION
@@ -236,7 +263,16 @@ export default function Settings() {
       if (years == null || years < 0 || years > 100) errs.push('Risk profile: enter your time horizon in years.')
       if (needsDisclosures && !DISCLOSURES.every((d) => accepted[d.id])) errs.push('Risk profile: accept each statement to save new answers.')
     }
-    if (dirty.tax || dirty.goals || dirty.accountSize) {
+    if (dirty.worth) {
+      for (const [k, label] of [['other_assets', 'other assets'], ['other_debts', 'debts']]) {
+        const v = num(worth[k])
+        if (v != null && v < 0) errs.push(`Net worth: ${label} can't be negative.`)
+      }
+    }
+    if (dirty.about && about.birth_date && (about.birth_date < '1900-01-01' || about.birth_date > todayYmd())) {
+      errs.push('About you: enter a real birth date.')
+    }
+    if (dirty.tax || dirty.goals || dirty.accountSize || dirty.worth || dirty.about) {
       const income = num(tax.annual_income)
       if (income == null || income < 0) errs.push('Tax profile: enter your expected taxable income (0 or more).')
       if (!tax.state_code) errs.push('Tax profile: pick your residency.')
@@ -313,7 +349,7 @@ export default function Settings() {
     }
 
     // 2. Tax profile + goals (+ account size as portfolio size).
-    if (dirty.tax || dirty.goals || dirty.accountSize) {
+    if (dirty.tax || dirty.goals || dirty.accountSize || dirty.worth || dirty.about) {
       const goal = num(goals.goal) / 100
       const lt = num(tax.lt_rate_override)
       const st = num(tax.st_rate_override)
@@ -328,6 +364,12 @@ export default function Settings() {
         pr_act60_rate: tax.state_code === 'PR' && tax.pr_act60_rate !== 'none' ? Number(tax.pr_act60_rate) : null,
         target_pcts: [goal],
         selected_target_pct: goal,
+        other_assets: num(worth.other_assets),
+        other_debts: num(worth.other_debts),
+        birth_date: about.birth_date || null,
+        sex: about.sex || null,
+        race_ethnicity: about.race_ethnicity || null,
+        education: about.education || null,
         ...(size > 0 ? { portfolio_size: size } : {}),
       }
       const { data, error } = await supabase.from('leaps_tax_profiles').upsert(row).select().single()
@@ -354,6 +396,8 @@ export default function Settings() {
   const setR = (k, v) => setRisk((x) => ({ ...x, [k]: v }))
   const setT = (k, v) => setTax((x) => ({ ...x, [k]: v }))
   const setG = (k, v) => setGoals((x) => ({ ...x, [k]: v }))
+  const setW = (k, v) => setWorth((x) => ({ ...x, [k]: v }))
+  const setA = (k, v) => setAbout((x) => ({ ...x, [k]: v }))
 
   return (
     <div className="px-4 lg:px-6 pt-6 pb-28 space-y-4 mx-auto lg:max-w-2xl w-full">
@@ -442,11 +486,42 @@ export default function Settings() {
           value={goals.goal} onChange={(v) => setG('goal', v)} placeholder="50" />
       </Section>
 
+      <Section title="About you" id="about-you">
+        <div>
+          <label className="text-muted text-[10px] uppercase tracking-wider block mb-1">Birth date</label>
+          <input type="date" value={about.birth_date} max={todayYmd()} min="1900-01-01" onChange={(e) => setA('birth_date', e.target.value)}
+            className="w-full min-h-[44px] bg-bg border border-border text-fg rounded-xl px-3 text-sm focus:outline-none focus:border-amber-400/60" />
+        </div>
+        <p className="text-xs text-muted mt-2 mb-4">Compares your net worth with households your age (Portfolio → Peers). The rest is optional.</p>
+        <div className="grid grid-cols-1 gap-3">
+          <Select label="Sex (optional — single households only)" value={about.sex} onChange={(v) => setA('sex', v)}
+            options={[NOT_SHARED, ...SEX_OPTIONS]} />
+          <Select label="Race / ethnicity (optional)" value={about.race_ethnicity} onChange={(v) => setA('race_ethnicity', v)}
+            options={[NOT_SHARED, ...RACE_OPTIONS]} />
+          <Select label="Education (optional)" value={about.education} onChange={(v) => setA('education', v)}
+            options={[NOT_SHARED, ...EDUCATION_OPTIONS]} />
+        </div>
+        <p className="text-xs text-muted mt-2">Private to you. Used only to compare you with similar households.</p>
+      </Section>
+
+      <Section title="Net worth" id="net-worth">
+        <div className="grid grid-cols-2 gap-3">
+          <Input label="Other assets (cars, etc.)" prefix="$" inputMode="numeric"
+            value={worth.other_assets} onChange={(v) => setW('other_assets', v)} placeholder="0" />
+          <Input label="Debts" prefix="$" inputMode="numeric"
+            value={worth.other_debts} onChange={(v) => setW('other_debts', v)} placeholder="0" />
+        </div>
+        <p className="text-xs text-muted mt-2">
+          Counted in your net worth. Debts are cards, student, car and personal loans; mortgages go on the property.
+        </p>
+      </Section>
+
       <Section title="Exit Targets" id="exit-targets">
         <LadderEditor plan={ladder} onChange={setLadder} />
       </Section>
 
       <PushSection userId={user?.id} />
+      <EntryAlertsSection userId={user?.id} />
 
       <Section title="Broker">
         <div className="flex items-start gap-3">
@@ -911,6 +986,44 @@ function Toggle({ value, onChange, label }) {
         )}
       />
     </button>
+  )
+}
+
+// Entry alerts (entry-scan, daily after the close): the LEAPS buy zone
+// turning YES or a weekly Hardening bull on a Tracking / holdings ticker →
+// the bell and push. Saves on tap, like push.
+function EntryAlertsSection({ userId }) {
+  const [on, setOn] = useState(null)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    if (!userId) return
+    supabase.from('profiles').select('entry_alerts').eq('id', userId).maybeSingle()
+      .then(({ data }) => setOn(data?.entry_alerts ?? true))
+  }, [userId])
+  async function toggle() {
+    const next = !on
+    setBusy(true)
+    setOn(next)
+    const { error } = await supabase.from('profiles').update({ entry_alerts: next }).eq('id', userId)
+    if (error) setOn(!next)
+    setBusy(false)
+  }
+  if (on == null) return null
+  return (
+    <Section title="Entry Alerts">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1">
+          <p className="text-fg text-sm font-medium">{on ? 'On' : 'Off'}</p>
+          <p className="text-subtle text-xs mt-0.5">
+            Each weekday after the close, your Tracking list and holdings are checked. You get an alert when one enters the LEAPS buy zone or a weekly Hardening bull fires.
+          </p>
+        </div>
+        <button type="button" role="switch" aria-checked={on} aria-label="Entry alerts" onClick={toggle} disabled={busy}
+          className={`relative shrink-0 h-7 w-12 rounded-full transition-colors disabled:opacity-60 ${on ? 'bg-amber-400' : 'bg-faint'}`}>
+          <span className={`absolute top-0.5 h-6 w-6 rounded-full bg-fg transition-all ${on ? 'left-[22px]' : 'left-0.5'}`} />
+        </button>
+      </div>
+    </Section>
   )
 }
 

@@ -1,7 +1,7 @@
 // Checks for src/utils/indicators.js (LEAPS entry chart).
 // Run: npm run indicators:check
 import {
-  sma, ema, rsi, macd, historicalVol, rank, weeklyEmaOnDays, ivSeries, entryModel, DEFAULT_PARAMS,
+  sma, ema, rsi, macd, historicalVol, rank, weeklyEmaOnDays, ivSeries, entryModel, entryGaps, DEFAULT_PARAMS,
 } from '../src/utils/indicators.js'
 
 let passed = 0
@@ -96,6 +96,18 @@ let cv = 100
 for (let i = 0; i < 520; i++) { cv *= i < 250 ? 0.997 : 1.004; v.push({ t: bars[i % bars.length].t, o: cv, h: cv, l: cv, c: cv, v: 1 }) }
 const vm = entryModel(v.map((b, i) => ({ ...b, t: `${2020 + Math.floor(i / 300)}-${String(1 + Math.floor((i % 300) / 25)).padStart(2, '0')}-${String(1 + (i % 25)).padStart(2, '0')}` })))
 eq('golden cross found on a V', vm.golden.length >= 1, true)
+
+// What's missing for the next entry.
+const fake = (over) => ({ params: DEFAULT_PARAMS, status: { close: 110, dist: 10, sma200: 100, slope200: -2, sma50: 95, rsi: 55, rsiPrev: 54, rsiMinLookback: 50, ivRank: 60, cond: { band: false, rising: false, trend: false, rsi: false, iv: false }, ...over } })
+const g = entryGaps(fake({}))
+eq('band: fall to the top of the band', g.band.price, 105)
+eq('band: % move from today', g.band.move, 105 / 110 - 1, 1e-12)
+eq('band below: rise to the bottom', entryGaps(fake({ close: 90, dist: -10 })).band.price, 95)
+eq('trend gap', g.trend.gap, -0.05, 1e-12)
+eq('rsi: needs a dip', g.rsi.points, 15)
+eq('rsi: dipped, needs to tick up', entryGaps(fake({ rsiMinLookback: 35 })).rsi.need, 'Dipped — needs to tick up from here')
+eq('iv points over', g.iv.points, 25)
+eq('met conditions have no gap', entryGaps(fake({ cond: { band: true, rising: true, trend: true, rsi: true, iv: true } })), { band: null, rising: null, trend: null, rsi: null, iv: null })
 
 console.log(`indicator checks: ${passed} passed, ${failures.length} failed`)
 if (failures.length) {

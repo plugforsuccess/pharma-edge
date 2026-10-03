@@ -13,10 +13,12 @@ import {
   CASH_KINDS, DEFAULT_SELLING_COST_PCT, cashAfterTax, cashYieldComparison, realEstateAfterTax,
   INCOME_KINDS, dividendAfterTax, incomeYieldComparison,
   customExitTargets, validateCustomTargets, MAX_CUSTOM_TARGETS,
+  ACCOUNT_TYPES, accountRates, isSheltered,
 } from '../utils/afterTax'
 import NumberInput from '../components/NumberInput'
 import Modal from '../components/Modal'
 import RateBreakdown from '../components/RateBreakdown'
+import PeersView from '../components/PeersView'
 import { useHoldings, DEFAULT_PROFILE, INVESTMENT_TYPES, isQuantity, wholeUnits } from '../hooks/useHoldings'
 
 // LEAPS — after-tax targets + live after-tax value.
@@ -108,14 +110,16 @@ function BoughtLine({ verb = 'Bought', date, suffix }) {
   )
 }
 
-function GainLine({ afterGain, beforeGain, cost, purchaseDate }) {
+// afterCost: the cost after tax when it differs (traditional-account money
+// went in pre-tax).
+function GainLine({ afterGain, beforeGain, cost, afterCost = cost, purchaseDate }) {
   const [mode, flip] = useGainMode()
   const asOf = todayYmd()
-  const a = annualizedReturn({ gain: afterGain, cost, purchaseDate, asOf })
+  const a = annualizedReturn({ gain: afterGain, cost: afterCost, purchaseDate, asOf })
   const b = annualizedReturn({ gain: beforeGain, cost, purchaseDate, asOf })
   const annual = mode === 'annual'
   const tone = (n, gainTone) => (n < 0 ? 'text-rose-300' : gainTone)
-  let after = gainPct(afterGain, cost)
+  let after = gainPct(afterGain, afterCost)
   let before = gainPct(beforeGain, cost)
   // Under a year the total is the return — nothing to annualize.
   if (annual && a?.annualized != null && b?.annualized != null) {
@@ -286,8 +290,9 @@ export default function Leaps() {
             <Banner tone="amber">Pick your residency in Settings (or enter both CPA rates) to see after-tax figures.</Banner>
           )}
 
-          {ready && (summary || others.cashCount > 0 || others.realEstateCount > 0) && (
-            <PortfolioTotals summary={summary} count={results.length} others={others} />
+          {ready && (summary || others.any) && (
+            <PortfolioTotals summary={summary} count={results.length} others={others} profile={p}
+              homeowner={positions.some((x) => x.instrument_type === 'real_estate' && x.details?.kind !== 'rental')} />
           )}
 
 
@@ -316,7 +321,7 @@ export default function Leaps() {
 
               {adding && (
                 <PositionForm
-                  preview={(f, own) => previewTargets(f, own, ladderFor, customFor)}
+                  preview={(f, own) => previewTargets(f, own, ladderFor, customFor, rateForGain)}
                   onCancel={() => { setAdding(false); dropAddParam() }}
                   allowAddAnother
                   onSave={async (row, { keepOpen } = {}) => {
@@ -348,7 +353,7 @@ export default function Leaps() {
                   plan={plan}
                   open={openIds.has(pos.id)}
                   onToggle={() => toggleOpen(pos.id)}
-                  previewFor={(f, own) => previewTargets(f, own, ladderFor, customFor)}
+                  previewFor={(f, own) => previewTargets(f, own, ladderFor, customFor, rateForGain)}
                   selectedTargetPct={Number(p.selected_target_pct)}
                   onSave={(row) => savePosition(row, pos.id)}
                   onExercise={(args) => exercisePosition(pos, args)}
@@ -495,6 +500,8 @@ function emptyForm(initial) {
       : t === 'real_estate' ? 'real_estate' : 'option',
     ticker: initial?.ticker ?? '',
     name: initial?.name ?? '',
+    // Where it's held: taxable, or a retirement account (changes the tax math).
+    account_type: initial?.account_type ?? 'taxable',
     // Income (shares with a yield)
     div_yield: d.dividend_yield != null ? String(+(Number(d.dividend_yield) * 100).toFixed(4)) : '',
     div_kind: d.dividend_kind ?? 'qualified',
@@ -631,6 +638,7 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
       cost_basis: exact(balance), current_value: exact(balance), value_as_of: new Date().toISOString(),
       purchase_date: initial?.purchase_date ?? todayYmd(), exit_targets: null,
       details: { apy: apy == null ? 0 : exact(apy / 100), account_kind: f.account_kind },
+      account_type: f.account_type,
     }, keepOpen, f.name.trim())
   }
 
@@ -658,6 +666,7 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
         depreciation: f.re_kind === 'rental' ? dep : 0,
         exclusion_eligible: f.re_kind === 'primary' ? !!f.exclusion_eligible : false,
       },
+      account_type: 'taxable',
     }, keepOpen, f.name.trim())
   }
 
@@ -717,6 +726,7 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
       purchase_date: f.purchase_date,
       exit_targets: exitTargets,
       runner_trail_pct: exitTargets ? runnerTrail : null,
+      account_type: f.account_type,
     }, keepOpen, f.ticker)
   }
 
@@ -774,6 +784,22 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
           { value: 'crypto', label: 'Crypto' }, { value: 'cash', label: 'Cash' }, { value: 'real_estate', label: 'Real Estate' },
         ]}
       />
+
+      {/* Where it's held — the tax follows the account, not the asset. */}
+      {!isRE && (
+        <div className="mt-4">
+          <Segmented label="Account" value={f.account_type} onChange={setV('account_type')} columns={2}
+            options={ACCOUNT_TYPES.map((a) => ({ value: a.value, label: a.label }))} />
+          {f.account_type !== 'taxable' && (
+            <p className="mt-2 text-xs text-muted">
+              {f.account_type === 'traditional'
+                ? 'Also 401(k) / 403(b): no tax inside; withdrawals are taxed as ordinary income.'
+                : f.account_type === 'roth' ? 'Also Roth 401(k): qualified withdrawals are tax-free.'
+                  : 'HSA: tax-free for medical costs.'}
+            </p>
+          )}
+        </div>
+      )}
 
       {isCash && (
         <FormSection title="Cash account">
@@ -953,7 +979,7 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
         )}
       </FormSection>
 
-      {!rocIncome && <GoalSection goal={f.goal} onGoal={setV('goal')} basis={basis} is1256={is1256} />}
+      {!rocIncome && <GoalSection goal={f.goal} onGoal={setV('goal')} basis={basis} is1256={is1256} accountType={f.account_type} />}
 
       {isIncome && <YieldCompare group="income" amount={value} />}
 
@@ -1132,14 +1158,16 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
           <span
             className={clsx(
               'inline-block mt-2 text-[10px] uppercase tracking-wider px-2 py-1 rounded-md border font-semibold',
-              is1256
+              calc.sheltered
+                ? BADGE_TONE.retirement
+                : is1256
                 ? 'bg-violet-400/15 text-violet-300 border-violet-400/40'
                 : calc.is_long_term
                   ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
                   : 'bg-amber-500/15 text-amber-300 border-amber-500/40',
             )}
           >
-            {is1256 ? '§1256 · 60/40' : calc.is_long_term ? 'Long-term' : 'Short-term'}
+            {calc.sheltered ? accountLabel(calc.account_type) : is1256 ? '§1256 · 60/40' : calc.is_long_term ? 'Long-term' : 'Short-term'}
           </span>
         </div>
         <div className="shrink-0 flex items-start gap-2">
@@ -1148,7 +1176,7 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
               <div className={clsx('text-base font-semibold font-mono-tab', up ? 'text-green-400' : 'text-rose-300')}>
                 {usd(calc.after_tax_value)}
               </div>
-              <div className="text-xs text-muted mt-0.5">{gainPct(income?.after_tax_gain ?? calc.after_tax_gain, calc.basis)} after tax</div>
+              <div className="text-xs text-muted mt-0.5">{gainPct(income?.after_tax_gain ?? calc.after_tax_gain, calc.after_tax_basis ?? calc.basis)} after tax</div>
               {stop && stop.level !== 'ok' && (
                 <div className={clsx('text-xs mt-1 font-semibold', stop.level === 'act' ? 'text-rose-300' : 'text-amber-300')}>
                   {stop.level === 'act' ? 'Time stop' : 'Roll window'}
@@ -1179,10 +1207,14 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
           </span>
           <ChevronDown size={14} className={clsx('text-muted transition-transform', showTaxDetail && 'rotate-180')} />
         </button>
-        <GainLine afterGain={income?.after_tax_gain ?? calc.after_tax_gain} beforeGain={income?.gain ?? calc.gain} cost={calc.basis} purchaseDate={pos.purchase_date} />
+        <GainLine afterGain={income?.after_tax_gain ?? calc.after_tax_gain} beforeGain={income?.gain ?? calc.gain} cost={calc.basis}
+          afterCost={calc.after_tax_basis} purchaseDate={pos.purchase_date} />
         {showTaxDetail && (
           <div className="mt-1 text-xs text-muted font-mono-tab">
-            {calc.gain > 0
+            {calc.account_type === 'traditional'
+              ? `No tax inside the account · est. ${usd(calc.estimated_tax)} at ${ratePct(calc.tax_rate)} when withdrawn · before 59½ +${usd(calc.early_penalty)} penalty`
+              : calc.sheltered ? `No tax inside ${calc.account_type === 'hsa' ? 'an' : 'a'} ${accountLabel(calc.account_type)}`
+              : calc.gain > 0
               ? `${usd(income?.after_tax_gain ?? calc.after_tax_gain)} after-tax gain · est. tax ${usd(calc.estimated_tax)} at ${ratePct(calc.tax_rate)}`
               : 'Loss — no tax on sale'}
           </div>
@@ -1301,7 +1333,10 @@ const BADGE_TONE = {
   neutral: 'bg-bg/40 text-subtle border-border',
   cash: 'bg-blue-400/10 text-blue-300 border-blue-400/40',
   realEstate: 'bg-orange-400/10 text-orange-300 border-orange-400/35',
+  // Holdings in a retirement account (Traditional / Roth / HSA).
+  retirement: 'bg-teal-400/10 text-teal-300 border-teal-400/35',
 }
+const accountLabel = (a) => ACCOUNT_TYPES.find((x) => x.value === a)?.label ?? 'Taxable'
 
 function HoldingShell({ pos, open, onToggle, title, meta, badge, badgeTone = 'neutral', value, valueLabel, valueUp = true, editing, form, onEdit, onDelete, children }) {
   if (editing) return form
@@ -1359,9 +1394,10 @@ function CashCard({ pos, cash, open, onToggle, onSave, onDelete }) {
       form={<PositionForm initial={pos} onCancel={() => setEditing(false)}
         onSave={async (row) => { const err = await onSave(row); if (!err) setEditing(false); return err }} />}
       title={`${pos.name} • ${cashKindLabel(kind)}`}
-      meta={[cash.apy > 0 ? `${ratePct(cash.apy)} APY` : 'No yield entered']}
+      meta={[cash.apy > 0 ? `${ratePct(cash.apy)} APY` : 'No yield entered',
+        isSheltered(cash.account_type) && `In ${cash.account_type === 'hsa' ? 'an' : 'a'} ${accountLabel(cash.account_type)}`]}
       badge="Cash" badgeTone="cash"
-      value={usd(cash.balance)} valueLabel="balance"
+      value={usd(cash.after_tax_value)} valueLabel={cash.account_type === 'traditional' ? 'after tax' : 'balance'}
     >
       <div className="mb-4">
         <div className="text-[10px] uppercase tracking-wider text-muted mb-1">Balance</div>
@@ -1373,7 +1409,10 @@ function CashCard({ pos, cash, open, onToggle, onSave, onDelete }) {
         <Stat label="After-tax yield" value={yieldPct(cash.after_tax_yield)} />
       </div>
       <p className="mt-3 text-xs text-muted">
-        Interest is taxed as ordinary income ({ratePct(cash.rate)}){kind === 't_bills' ? ' — T-bills skip state tax' : ''}.
+        {cash.account_type === 'traditional'
+          ? `No tax on interest inside the account; withdrawals are ordinary income (${ratePct(cash.withdrawal_rate)}).`
+          : isSheltered(cash.account_type) ? 'No tax on interest inside the account.'
+            : `Interest is taxed as ordinary income (${ratePct(cash.rate)})${kind === 't_bills' ? ' — T-bills skip state tax' : ''}.`}
       </p>
     </HoldingShell>
   )
@@ -1482,8 +1521,10 @@ function YieldRows({ rows, apys, setApy, best }) {
 
 // This holding's after-tax return goal, with the full targets table a tap
 // away (solved on the cost entered above). Blank = the Settings default.
-function GoalSection({ goal, onGoal, basis, is1256 }) {
-  const { rateForGain, defaultGoal } = useContext(RatesContext)
+function GoalSection({ goal, onGoal, basis, is1256, accountType = 'taxable' }) {
+  const { rateForGain: userRates, defaultGoal } = useContext(RatesContext)
+  // Goals inside a retirement account solve on that account's rates.
+  const rateForGain = userRates ? accountRates(accountType, userRates) : userRates
   const [showAll, setShowAll] = useState(false)
   // An empty field shows the default goal (Settings), so there's always a number.
   const defaultStr = defaultGoal ? String(+(defaultGoal * 100).toFixed(2)) : ''
@@ -1685,19 +1726,21 @@ function RungProgress({ hit, progress }) {
 
 // Live preview while the user is typing a position in the form:
 // the account ladder, or the user's own % / $ targets when set.
-function previewTargets(f, own, ladderFor, customFor) {
+function previewTargets(f, own, ladderFor, customFor, rateForGain) {
   const basis = num(f.cost_basis)
   if (!(basis > 0) || !f.purchase_date) return []
   const value = num(f.current_value) ?? basis
-  const character = f.instrument_type === 'index_option_1256'
+  // A retirement account's rates (no tax inside Roth / HSA; ordinary at withdrawal for traditional).
+  const rates = rateForGain ? accountRates(f.account_type ?? 'taxable', rateForGain) : undefined
+  const character = isSheltered(f.account_type) ? 'short_term' : f.instrument_type === 'index_option_1256'
     ? 'section_1256'
     : (holdingPeriod(f.purchase_date, todayYmd())?.is_long_term ? 'long_term' : 'short_term')
   const contracts = wholeUnits(isQuantity(f.instrument_type) ? num(f.shares) : num(f.contracts))
   if (own) {
     const usable = own.filter((t) => Number.isFinite(t.value) && t.value > 0 && Number.isFinite(t.sell) && t.sell > 0)
-    return customFor(basis, value, character, contracts, usable)
+    return customFor(basis, value, character, contracts, usable, rates)
   }
-  return ladderFor(basis, value, character, contracts)
+  return ladderFor(basis, value, character, contracts, rates)
 }
 
 // ── User-set Exit Targets (% or $) ───────────────────────────────
@@ -1964,25 +2007,48 @@ function holdingStart(date) {
 // The portfolio is the sum of the holdings. With cash or real estate it
 // leads with after-tax net worth and breaks it down by type; the cost /
 // gain / return stats cover investments only (options, shares, crypto).
-function PortfolioTotals({ summary, count, others }) {
+const TOTALS_VIEW_KEY = 'cm:totals-view'
+
+function PortfolioTotals({ summary, count, others, profile, homeowner }) {
   const [showCost, setShowCost] = useState(false)
-  const hasOthers = others && (others.cashCount > 0 || others.realEstateCount > 0)
+  // Totals | Peers (net worth vs US households), remembered on the device.
+  const [view, setView] = useState(() => {
+    try { return localStorage.getItem(TOTALS_VIEW_KEY) === 'peers' ? 'peers' : 'totals' } catch { return 'totals' }
+  })
+  const pickView = (v) => {
+    setView(v)
+    try { localStorage.setItem(TOTALS_VIEW_KEY, v) } catch { /* this visit only */ }
+  }
+  const hasOthers = !!others?.any
   const invested = summary?.after_tax_value ?? 0
-  const total = invested + (others?.cash ?? 0) + (others?.realEstate ?? 0)
+  const total = invested + (others?.after ?? 0)
   const up = hasOthers ? total >= 0 : (summary?.after_tax_gain ?? 0) >= 0
   const holdings = count + (others?.cashCount ?? 0) + (others?.realEstateCount ?? 0)
   // What it's all worth today, before tax (and before selling costs).
-  const before = (summary?.current_value ?? 0) + (hasOthers ? (others.cashBefore ?? 0) + (others.realEstateBefore ?? 0) : 0)
+  const before = (summary?.current_value ?? 0) + (hasOthers ? others.before ?? 0 : 0)
+  // Net worth by type: only the ones the user has (debts subtract).
+  const parts = hasOthers ? [
+    { label: 'Investments', value: usd(invested) },
+    others.cashCount > 0 && { label: 'Cash', value: usd(others.cash) },
+    others.realEstateCount > 0 && { label: 'Real Estate', value: usd(others.realEstate) },
+    others.otherAssets > 0 && { label: 'Other assets', value: usd(others.otherAssets) },
+    others.otherDebts > 0 && { label: 'Debts', value: `−${usd(others.otherDebts)}`, debt: true },
+  ].filter(Boolean) : []
   const after = hasOthers ? total : invested
   const cost = before - after
   const costLabel = others?.realEstateCount > 0 ? 'tax & selling costs' : 'tax'
   return (
     <section className="bg-card border border-amber-400/30 rounded-2xl p-5 mb-5">
       <div className="flex items-center gap-2 mb-4">
-        <h2 className="text-sm font-semibold">Total</h2>
+        <h2 className="text-sm font-semibold">{view === 'peers' ? 'Vs. US households' : 'Total'}</h2>
+        {view === 'totals' && <span className="text-xs text-muted">· {holdings} holding{holdings === 1 ? '' : 's'}</span>}
         <span className="flex-1" />
-        <span className="text-xs text-muted">{holdings} holding{holdings === 1 ? '' : 's'}</span>
+        <div className="w-[148px] -my-1">
+          <Segmented compact value={view} onChange={pickView}
+            options={[{ value: 'totals', label: 'Totals' }, { value: 'peers', label: 'Peers' }]} />
+        </div>
       </div>
+      {view === 'peers' ? <PeersView netWorth={before} profile={profile} homeowner={homeowner} /> : (<>
       {/* After tax and before tax side by side: same label row, same size. */}
       <div className="grid grid-cols-2 gap-4 mb-5">
         <div className="min-w-0">
@@ -2009,11 +2075,14 @@ function PortfolioTotals({ summary, count, others }) {
           <span className="font-mono-tab">−{usd(cost)}</span> {costLabel} if everything sold today
         </div>
       )}
-      {hasOthers && (
-        <div className="grid grid-cols-3 gap-3 pt-4 border-t border-hairline mb-4">
-          <Stat label="Investments" value={usd(invested)} />
-          <Stat label="Cash" value={usd(others.cash)} />
-          <Stat label="Real Estate" value={usd(others.realEstate)} />
+      {parts.length > 0 && (
+        <div className="grid grid-cols-3 gap-x-3 gap-y-4 pt-4 border-t border-hairline mb-4">
+          {parts.map((x) => (
+            <div key={x.label} className="min-w-0">
+              <div className="text-xs text-muted truncate mb-1">{x.label}</div>
+              <div className={clsx('text-sm truncate font-mono-tab', x.debt ? 'text-rose-300' : 'text-fg')}>{x.value}</div>
+            </div>
+          ))}
         </div>
       )}
       {others?.income > 0 && (
@@ -2030,6 +2099,7 @@ function PortfolioTotals({ summary, count, others }) {
           <Stat label="After-tax return" value={pct(summary.after_tax_return_pct)} />
         </div>
       )}
+      </>)}
     </section>
   )
 }

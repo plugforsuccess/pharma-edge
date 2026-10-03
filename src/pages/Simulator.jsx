@@ -27,6 +27,9 @@ const todayYmd = () => {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
+// Retirement-account holdings run on different tax rules; the simulator
+// models taxable money only.
+const taxable = (pos) => (pos.account_type ?? 'taxable') === 'taxable'
 const unitsLabel = (pos) => (pos.instrument_type === 'crypto' ? `${Number(pos.shares)} $${pos.ticker}`
   : pos.instrument_type === 'stock' ? `${Number(pos.shares).toLocaleString('en-US')} shares`
     : `${Number(pos.contracts).toLocaleString('en-US')} contracts`)
@@ -115,10 +118,10 @@ export default function Simulator() {
       ) : !myRates ? (
         <div className={CARD}><p className="text-sm text-subtle">Pick your residency in Settings to run the simulator.</p></div>
       ) : tab === 'grow' ? (
-        <GrowSim positions={positions.filter((x) => GROWABLE.has(x.instrument_type))}
-          cash={positions.filter((x) => x.instrument_type === 'cash')} rateForGain={myRates} />
+        <GrowSim positions={positions.filter((x) => GROWABLE.has(x.instrument_type) && taxable(x))}
+          cash={positions.filter((x) => x.instrument_type === 'cash' && taxable(x))} rateForGain={myRates} />
       ) : (
-        <SellSim positions={positions.filter((x) => INVESTMENTS.has(x.instrument_type))} setup={setup} states={states} resolverFor={resolverFor} />
+        <SellSim positions={positions.filter((x) => INVESTMENTS.has(x.instrument_type) && taxable(x))} setup={setup} states={states} resolverFor={resolverFor} />
       )}
 
       <p className="text-xs text-muted">

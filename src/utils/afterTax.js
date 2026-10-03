@@ -653,11 +653,15 @@ export function portfolioSummary(results, portfolioSize, rateForGain) {
   const basis = rows.reduce((s, r) => s + r.basis, 0)
   const value = rows.reduce((s, r) => s + r.current_value, 0)
   const afterTaxValue = rows.reduce((s, r) => s + r.after_tax_value, 0)
-  const afterTaxGain = afterTaxValue - basis
+  // Traditional-account money went in pre-tax: its cost counts after tax too.
+  const afterTaxBasis = rows.reduce((s, r) => s + (r.after_tax_basis ?? r.basis), 0)
+  const afterTaxGain = afterTaxValue - afterTaxBasis
 
   let st = 0
   let lt = 0
   for (const r of rows) {
+    // Retirement accounts: no capital gains to net.
+    if (r.sheltered) continue
     if (r.tax_character === 'section_1256') {
       lt += r.gain * SECTION_1256_LT_SHARE
       st += r.gain * (1 - SECTION_1256_LT_SHARE)
@@ -675,7 +679,7 @@ export function portfolioSummary(results, portfolioSize, rateForGain) {
     current_value: value,
     after_tax_value: afterTaxValue,
     after_tax_gain: afterTaxGain,
-    after_tax_return_pct: portfolioSize > 0 ? afterTaxGain / portfolioSize : null,
+    after_tax_return_pct: portfolioSize > 0 ? afterTaxGain / (portfolioSize - basis + afterTaxBasis) : null,
     netted: {
       estimated_tax: nettedTax,
       after_tax_value: value - nettedTax,
@@ -1077,4 +1081,81 @@ export function portfolioProjection({ sleeves = [], monthly = 0, years, priceGro
     for (const k of keys) row[k] = runs.reduce((sum, r) => sum + (r[i]?.[k] ?? 0), 0)
     return row
   })
+}
+
+// ── Account type (taxable vs retirement accounts) ─────────────────
+//
+// The tax follows the account, not the asset (leaps_positions.account_type):
+//   taxable      — the rules above (capital gains by holding period,
+//                  dividends / interest taxed each year).
+//   traditional  — 401(k) / 403(b) / traditional or SEP IRA: nothing is
+//                  taxed inside (sales, dividends, interest); withdrawals
+//                  are ordinary income — federal + state at the user's
+//                  ordinary rate on the whole balance, as if it all came out
+//                  today (the same "if everything sold today" view as the
+//                  rest of net worth). No NIIT on retirement distributions.
+//                  The contributions went in pre-tax, so the after-tax gain
+//                  is the gain × (1 − rate). A CPA override uses its
+//                  ordinary total. The 10% before-59½ penalty is shown, not
+//                  taken off.
+//   roth, hsa    — tax-free (qualified Roth / medical HSA withdrawals).
+// No long / short-term countdown inside any of them.
+
+export const ACCOUNT_TYPES = [
+  { value: 'taxable', label: 'Taxable', long: 'Taxable (brokerage / bank)' },
+  { value: 'traditional', label: 'Traditional IRA', long: 'Traditional IRA, 401(k) / 403(b)' },
+  { value: 'roth', label: 'Roth IRA', long: 'Roth IRA, Roth 401(k)' },
+  { value: 'hsa', label: 'HSA', long: 'HSA' },
+]
+export const EARLY_WITHDRAWAL_PENALTY = 0.10
+export const isSheltered = (accountType) => accountType === 'traditional' || accountType === 'roth' || accountType === 'hsa'
+
+const NO_RATE = Object.freeze({ federal: 0, niit: 0, state: 0, total: 0, overridden: false })
+export const NO_TAX = () => ({ long_term: NO_RATE, short_term: NO_RATE })
+
+// The ordinary rate on a withdrawal of `amount`: federal + state, no NIIT.
+export function withdrawalRate(rateForGain, amount) {
+  const st = rateForGain(Math.max(0, Number(amount) || 0)).short_term
+  return st.overridden ? st.total : Math.min(MAX_TAX_RATE, st.federal + st.state)
+}
+
+// The rate resolver to use for a holding in this account: taxable → the
+// user's; Roth / HSA → zero; traditional → the withdrawal rate for every
+// kind of gain or payout (marked overridden so income / interest kinds all
+// take the one total).
+export function accountRates(accountType, rateForGain) {
+  if (accountType === 'roth' || accountType === 'hsa') return NO_TAX
+  if (accountType !== 'traditional') return rateForGain
+  return (amount) => {
+    const st = rateForGain(Math.max(0, Number(amount) || 0)).short_term
+    const total = st.overridden ? st.total : Math.min(MAX_TAX_RATE, st.federal + st.state)
+    const r = { federal: st.federal, niit: 0, state: st.state, total, overridden: true }
+    return { long_term: r, short_term: r }
+  }
+}
+
+// A positionAfterTax result, re-stated for a retirement account.
+export function shelteredPosition(calc, accountType, rateForGain) {
+  if (!calc || !isSheltered(accountType)) return calc
+  const traditional = accountType === 'traditional'
+  const rate = traditional ? withdrawalRate(rateForGain, calc.current_value) : 0
+  return {
+    ...calc,
+    account_type: accountType,
+    sheltered: true,
+    tax_character: accountType,
+    is_long_term: null,
+    long_term_date: null,
+    days_until_long_term: null,
+    tax_saved_by_waiting: null,
+    tax_rate: rate,
+    long_term_rate: rate,
+    short_term_rate: rate,
+    // No tax on a sale inside the account; this is the tax on withdrawal.
+    estimated_tax: calc.current_value * rate,
+    after_tax_value: calc.current_value * (1 - rate),
+    after_tax_basis: calc.basis * (1 - rate),
+    after_tax_gain: calc.gain * (1 - rate),
+    early_penalty: traditional ? calc.current_value * EARLY_WITHDRAWAL_PENALTY : 0,
+  }
 }

@@ -179,6 +179,28 @@ variable to its full name; set `VITE_PUBLIC_RECORD_REPO` in Vercel env.
   and writes `ldp_risk_profiles` (service role) + `leaps_tax_profiles`.
   Never sets `account_tier` — new users default to self-directed.
   Requires the current `LDP_DISCLOSURES_VERSION` to be accepted.
+- `entry-scan` (`verify_jwt=true`, **service-role only**; owner,
+  2026-10-03: "ensure the next entry"). Daily after the close
+  (`.github/workflows/entry-scan.yml`, 21:20 UTC weekdays;
+  `workflow_dispatch` defaults to a dry run). For users with
+  `profiles.entry_alerts` (default on; Settings → Entry Alerts, saves on
+  tap) it checks their Tracking (`watchlist`) + open share / option
+  holdings tickers (max 80, shared across users, Yahoo in batches of 6)
+  and alerts when the **LEAPS buy zone turns YES** (default thresholds —
+  users' adjusted thresholds live on their devices; one alert per
+  buy-zone cluster, started within the last 3 trading days) or a **weekly
+  Hardening bull** fires in the last two completed weeks (the current
+  week counts once the latest daily bar is a Friday). Each alert is an
+  `alerts` row (`alert_type` `entry_buy_zone` / `entry_hardening_bull`,
+  new `ticker` + `event_date` columns, unique index `alerts_entry_once`
+  on (user_id, alert_type, ticker, event_date) — re-runs are no-ops) plus
+  web-push to the user's devices (skipped without VAPID keys); the bell
+  shows them and tapping opens `/charts/entry/:ticker`. The decision is
+  `src/utils/entryEvents.js` (`npm run entryevents:check`); the edge
+  function runs **generated copies** of `entryEvents.js`, `indicators.js`
+  and `signalSuite.js` in `_shared/` — edit `src/utils/`, then
+  `npm run indicators:sync` (`indicators:check` fails when a copy is
+  stale). POST `{ dry_run: true }` reports without writing.
 - `monitor-positions` v1+ (`verify_jwt=true`). Polls Tastytrade
   `/accounts/:n/orders` for active orders and reconciles fill status
   onto `order_history`. Triggered by
@@ -680,7 +702,9 @@ symbols. Prefer one size scale per screen: 11px meta / eyebrows
 
 **Line height** is opened up app-wide in `@theme` (text-xs 18px, text-sm
 22px). **No (i) info pop-ups for now** (removed 2026-10-02 at the
-owner's request until the copy and the pop-up behavior are designed).
+owner's request until the copy and the pop-up behavior are designed;
+one exception: the entry chart's gold (i) beside each unmet buy-zone
+condition, which expands its "what it needs" line inline).
 `components/InfoTip.jsx` is kept but unused; don't add footnote
 paragraphs back under cards either. Tax screens keep one visible line:
 "All tax figures are estimates, not tax advice. Consult a tax
@@ -977,6 +1001,57 @@ value, holding period) and must pass before any edit to that file lands.
   entered (`YieldCompare`), both at the user's after-tax rate — categories only, no named
   products (named partners wait on counsel); rates are user-entered,
   prefilled with example rates (`cm:cash-yield-apys`).
+- **Retirement accounts are an account, not a holding type** (owner,
+  2026-10-03: "the 6 we have now are sufficient"). Options, Shares,
+  Income, Crypto and Cash carry `leaps_positions.account_type`
+  (`ACCOUNT_TYPES`: taxable — default — / traditional / roth / hsa,
+  labelled **Taxable · Traditional IRA · Roth IRA · HSA** (owner: those
+  are the labels; 401(k) / 403(b) and Roth 401(k) ride along in the hint);
+  the add form's **Account** row, 2 × 2; real estate is always taxable). The tax
+  follows the account, not the asset: **traditional** (401(k) / 403(b) /
+  traditional or SEP IRA) — nothing taxed inside (sales, dividends,
+  interest); after tax = value × (1 − federal − state ordinary rate), as
+  if withdrawn today, no NIIT (CPA override → its ordinary total); its
+  cost went in pre-tax, so `after_tax_basis` = cost × (1 − rate) and the
+  card's after-tax % uses it; the 10% before-59½ penalty shows in the tax
+  detail line, never taken off. **Roth / HSA** — tax-free. No long /
+  short-term countdown, wait-for-long-term notices or capital-gains
+  netting for any of them; badges read Traditional IRA / Roth IRA / HSA (teal).
+  `accountRates` (the rate resolver per account), `shelteredPosition`,
+  `withdrawalRate` in `afterTax.js`; `useHoldings` runs every holding
+  on its account's rates (goals, exit targets, runner, payouts too).
+  Taxes and the Simulator cover taxable holdings only.
+- **Cars and debts** (owner, 2026-10-03) aren't holdings: Settings →
+  **Net worth** has two optional totals, `leaps_tax_profiles.other_assets`
+  (cars, etc.) and `other_debts` (cards, student / car / personal loans;
+  mortgages stay on the property). Both count in net worth (debts
+  subtract) on Portfolio and Home (`others.after` / `others.before` in
+  `useHoldings`); the Total card lists only the parts the user has.
+- **Peers** (owner, 2026-10-03; **free**): the Total card's **Totals |
+  Peers** switch (`cm:totals-view`) shows net worth **before tax** against
+  US households from the Federal Reserve's **Survey of Consumer Finances
+  2022** (summary-extract microdata, CPI-U adjusted). The tables are
+  **data built by a script, never typed in**: `scraper/build_net_worth_benchmarks.py`
+  (run by `.github/workflows/net-worth-benchmarks.yml` — federalreserve.gov
+  and api.bls.gov aren't reachable from the dev sandbox) writes
+  `src/data/netWorthBenchmarks.json`: weighted percentiles (1–99, 99.5,
+  99.9) for all households and by age band, couple / single, homeowner,
+  income band (SCF INCCAT cut points), education, race / ethnicity and
+  single women / men, each also within the age band when the sample has
+  ≥ 100 households. Re-run it (workflow_dispatch) to refresh the CPI
+  month; bump it when the SCF 2025 data ships. The public SCF has no
+  geography — no state / region comparison. Headline = the user's age
+  band (from `leaps_tax_profiles.birth_date`, full date — owner); rows
+  for all households, couple / single (filing status: joint or separate
+  = couple), homeowners (a primary home among holdings), similar income,
+  and only when shared: single women / men (singles only — owner),
+  education, race / ethnicity (`sex`, `race_ethnicity`, `education`
+  columns, Settings → **About you**, each "Prefer not to say" = NULL).
+  These live on `leaps_tax_profiles` (own-row RLS, no anon policy) —
+  never on `profiles`, which has public read policies. Ranks read "Top
+  18%" in the top half, "30th percentile" below the median. Math in
+  `src/utils/peers.js` (`peerComparisons`; `npm run peers:check`), card in
+  `components/PeersView.jsx`.
 - **Dividend income.** The add form's 6th type, **Income** (Options ·
   Shares · Income / Crypto · Cash · Real estate), is a `stock` row with
   the income type and a required yield; a stock row with a yield or ROC
@@ -1092,7 +1167,11 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   every hover. **Drawing tools** (owner, 2026-10-03), a row under the
   ranges: **Measure** — tap a candle for pin A, another for B (each snaps
   to that candle's high or low, whichever is nearer the tap; with both
-  set, a tap moves the nearer pin); the readout shows % and $ change,
+  set, a tap moves the nearer pin; **drag a pin** to move it — a press
+  within 24px grabs it, the chart's pan / zoom is held off until release,
+  and it snaps to each candle's high or low as it moves; the readout's
+  ‹ › step a pin one candle, same side, never crossing the other —
+  `stepPin`); the readout shows % and $ change,
   both dates and prices, and trading days / calendar days (candles on
   1D / 1W, weeks on 5Y, months on All). **Auto** — the biggest swing in
   view (largest % rise from a low to a later high, or fall from a high
@@ -1108,7 +1187,13 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   and Fib draw on the live chart (markers, a line series, price lines),
   so zoom survives a new pin. Math is pure in `src/utils/chartTools.js`
   (`snapPin`, `placePins`, `measure`, `fibLevels`, `autoSwing`);
-  `npm run charttools:check` must pass before changing it. `components/LineChart.jsx` (plain SVG) is kept for the
+  `npm run charttools:check` must pass before changing it. **Full
+  screen** (owner, 2026-10-03): the violet maximize button at the end of
+  the OHLC line opens the chart over the whole screen (ranges, tools and
+  readout stay; the trade card hides; Esc or the minimize button closes).
+  The axis price tag is a price line at the **latest close** — the
+  library's own last-value tag followed the last candle in view, so a
+  panned-back chart showed an old price. `components/LineChart.jsx` (plain SVG) is kept for the
   hidden holding charts. **Holding
   charts are hidden for now** (owner); `leaps_position_marks` (one value
   per holding per day, SECURITY DEFINER trigger on `leaps_positions`,
@@ -1131,7 +1216,14 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   "add", never as disabled. **Buy zone** = every condition on the
   same day: within ±band of the 200, 200 rising, 50 > 200, RSI below the
   level within the lookback and up today, IV Rank below the cutoff.
-  MACD cross up within 5 days = optional confirmation. Thresholds (band,
+  MACD cross up within 5 days = optional confirmation. **Next entry**
+  (owner, 2026-10-03): each unmet condition gets a gold (i) after its
+  label; tapping it shows what it still needs in gold under the label
+  (hidden until tapped, owner) (`entryGaps` in `indicators.js`: "Fall 3.2% to
+  $381.40 or lower", "Needs a dip below 40", "Needs to drop 7 points",
+  "4.4% below — needs to cross above", "Still falling — needs to turn
+  up"), and a NO shows the entry price zone (the ±band around the
+  200-day) under the headline. Thresholds (band,
   RSI level, IV Rank cutoff, lookback) are inputs saved on the device
   (`cm:entry-params`). **IV Rank falls back to the 20-day HV rank** until
   200 of the last 252 days have real IV (labelled "HV rank stand-in").
@@ -1333,6 +1425,10 @@ Continuous — dxlink-worker (Fly.io)
 
 Periodic   — monitor-positions.yml
              Polls Tastytrade for fill status on open orders
+
+5:20pm ET  — entry-scan.yml (weekdays, 21:20 UTC)
+             Entry alerts: LEAPS buy zone YES / weekly Hardening bull
+             on each user's Tracking + holdings tickers → bell + push
 
 Periodic   — snapshot-gex.yml
              Refreshes gex_snapshots cache for the curated tickers

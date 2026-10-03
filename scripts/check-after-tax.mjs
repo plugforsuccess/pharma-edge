@@ -19,6 +19,7 @@ import {
   exitLadder, allocateContracts, rateAtGainFor, customExitTargets, validateCustomTargets,
   cashAfterTax, cashYieldComparison, realEstateAfterTax, interestTaxRate,
   dividendAfterTax, incomeTaxRate, incomeYieldComparison, growthProjection, runnerAfterTax, annualizedReturn, portfolioProjection, incomeHoldingReturn, rocAdjustedBasis,
+  accountRates, shelteredPosition, withdrawalRate, isSheltered, NO_TAX,
   EXIT_PLAYBOOK, allocateWithRunner, playbookTargets, runnerPlan, timeStop, longTermFitsPlan, entryRunwayDays,
 } from '../src/utils/afterTax.js'
 
@@ -572,6 +573,38 @@ const round2 = (x) => Math.round(x * 100) / 100
   const loss = realEstateAfterTax({ value: 250000, basis: 300000, primary: false,
     purchaseDate: '2015-06-01', asOf: '2026-10-02', rateForGain: flatRE(0.288, 0.458) })
   eq('loss → no tax', loss.estimated_tax, 0)
+}
+
+// ── Retirement accounts (account_type) ──────────────────────────
+{
+  // Fixture GA single at $800k: ordinary 37% + GA 4.99%; no NIIT on withdrawals.
+  const gaRates = makeRateResolver({ federal, state: GA, filingStatus: 'single', income: 800000 })
+  eq('withdrawal rate = federal + state', withdrawalRate(gaRates, 100000), 0.37 + 0.0499, 1e-9)
+  const raw = positionAfterTax({ basis: 10000, currentValue: 15000, purchaseDate: '2026-09-01', asOf: '2026-10-03',
+    rateForGain: accountRates('traditional', gaRates), instrumentType: 'stock' })
+  const trad = shelteredPosition(raw, 'traditional', gaRates)
+  eq('traditional: after tax = value × (1 − rate)', trad.after_tax_value, 15000 * (1 - 0.4199), 1e-6)
+  eq('traditional: after-tax gain = gain × (1 − rate)', trad.after_tax_gain, 5000 * (1 - 0.4199), 1e-6)
+  eq('traditional: no long-term countdown', trad.days_until_long_term, null)
+  eq('traditional: no wait-for-long-term savings', trad.tax_saved_by_waiting, null)
+  eq('traditional: 10% early penalty shown', trad.early_penalty, 1500)
+  const roth = shelteredPosition(positionAfterTax({ basis: 10000, currentValue: 15000, purchaseDate: '2026-09-01',
+    asOf: '2026-10-03', rateForGain: NO_TAX, instrumentType: 'stock' }), 'roth', gaRates)
+  eq('Roth: tax-free', roth.after_tax_value, 15000)
+  eq('Roth: full gain kept', roth.after_tax_gain, 5000)
+  // Inside a traditional account, every payout kind takes the one ordinary rate.
+  const tr = accountRates('traditional', gaRates)
+  eq('traditional: qualified dividends at the withdrawal rate', incomeTaxRate(tr(1000), 'qualified'), 0.37 + 0.0499, 1e-9)
+  eq('traditional: T-bill interest at the withdrawal rate', interestTaxRate(tr(1000), 't_bills'), 0.37 + 0.0499, 1e-9)
+  eq('Roth: no tax on interest', interestTaxRate(accountRates('roth', gaRates)(1000), 'savings'), 0)
+  eq('taxable passes through', accountRates('taxable', gaRates), gaRates)
+  eq('isSheltered', [isSheltered('taxable'), isSheltered('hsa'), isSheltered(undefined)].join(), 'false,true,false')
+  // Portfolio: sheltered rows skip the capital-gains netting, and the
+  // after-tax gain counts traditional cost after tax.
+  const taxable = positionAfterTax({ basis: 10000, currentValue: 12000, purchaseDate: '2024-01-01', asOf: '2026-10-03', rateForGain: gaRates, instrumentType: 'stock' })
+  const sum = portfolioSummary([taxable, trad], 20000, gaRates)
+  eq('netting ignores the 401(k) gain', sum.netted.estimated_tax, taxable.estimated_tax, 1e-6)
+  eq('after-tax gain adds both', sum.after_tax_gain, taxable.after_tax_gain + trad.after_tax_gain, 1e-6)
 }
 
 // ── Validation ───────────────────────────────────────────────────

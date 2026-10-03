@@ -6,11 +6,11 @@ import { useAuth } from '../context/AuthContext'
 import { useHoldings, isQuantity } from '../hooks/useHoldings'
 import { todayYmd } from '../utils/afterTax'
 import { dailyDecisions, exitRows } from '../lib/holdingChecks'
-import { ChartLine, ChevronRight, Crosshair, Ruler, Search, Sparkles, X } from 'lucide-react'
+import { ChartLine, ChevronLeft, ChevronRight, Crosshair, Maximize2, Minimize2, Ruler, Search, Sparkles, X } from 'lucide-react'
 import TickerDrawer from '../components/TickerDrawer'
 import { CHART_TICKERS } from '../lib/chartTickers'
 import PriceChart from '../components/PriceChart'
-import { placePins, measure, fibLevels, autoSwing } from '../utils/chartTools'
+import { placePins, measure, fibLevels, autoSwing, stepPin } from '../utils/chartTools'
 
 // Charts — the stocks where the app suggests a LEAPS trade, with the trade
 // drawn on the price chart. (GEX spread plays live on Pulse.)
@@ -95,6 +95,17 @@ export default function Charts() {
   // whether Fib levels are on. `picking` = the next tap drops a pin.
   const [tools, setTools] = useState({ ticker: null, pins: [], fib: false })
   const [picking, setPicking] = useState(false)
+  // Full screen chart (the maximize button by the OHLC line; Esc or the
+  // minimize button closes it).
+  const [full, setFull] = useState(false)
+  useEffect(() => {
+    if (!full) return undefined
+    const onKey = (e) => { if (e.key === 'Escape') setFull(false) }
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    window.addEventListener('keydown', onKey)
+    return () => { document.body.style.overflow = prev; window.removeEventListener('keydown', onKey) }
+  }, [full])
   const today = todayYmd()
 
   useEffect(() => {
@@ -258,6 +269,12 @@ export default function Charts() {
     saveTools({ ...tools, pins })
     if (pins.length === 2 && tools.pins.length < 2) setPicking(false)
   }
+  // A dragged pin (live while dragging) or a ‹ › step.
+  const onPinsChange = (pins) => { if (tools.ticker === ticker) saveTools({ ...tools, pins }) }
+  const step = (k, dir) => {
+    const next = stepPin(ohlc, placed, k, dir)
+    if (next) saveTools({ ...tools, pins: next })
+  }
   const placed = useMemo(() => (tools.ticker === ticker && ohlc ? placePins(ohlc, tools.pins) : null), [tools, ticker, ohlc])
   const move = useMemo(() => measure(placed), [placed])
   const fib = useMemo(() => (tools.fib ? fibLevels(placed) : []), [tools.fib, placed])
@@ -300,10 +317,13 @@ export default function Charts() {
       ) : (
         <>
           {current && (
-            <section ref={chartRef} className="bg-card border border-border rounded-2xl mb-5 overflow-hidden scroll-mt-4">
+            <section ref={chartRef} className={clsx('bg-card scroll-mt-4',
+              full ? 'fixed inset-0 z-[70] flex flex-col overflow-y-auto overscroll-contain pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]'
+                : 'border border-border rounded-2xl mb-5 overflow-hidden')}
+              role={full ? 'dialog' : undefined} aria-modal={full || undefined} aria-label={full ? `${current.ticker} chart` : undefined}>
               {/* Quote header: last price and the range's change; while the
                   crosshair is on the chart, that day's OHLC and volume. */}
-              <div className="px-5 pt-5">
+              <div className={clsx('px-5 shrink-0', full ? 'pt-3' : 'pt-5')}>
                 <div className="flex items-start gap-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
@@ -312,7 +332,7 @@ export default function Charts() {
                         {current.verdict}
                       </span>
                     </div>
-                    <div className="text-xs text-muted mt-0.5 truncate">{current.from}</div>
+                    {!full && <div className="text-xs text-muted mt-0.5 truncate">{current.from}</div>}
                   </div>
                   {shown && (
                     <div className="text-right shrink-0">
@@ -321,38 +341,44 @@ export default function Charts() {
                         <div className={clsx('mt-1 font-mono-tab', change < 0 ? 'text-rose-300' : 'text-green-400')}>
                           <span className="text-sm font-semibold">{change >= 0 ? '+' : '−'}{Math.abs((change / base) * 100).toFixed(2)}%</span>
                           <span className="text-xs"> {change >= 0 ? '+' : '−'}{Math.abs(change).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                          <div className="text-[11px] text-muted">{changeLabel}</div>
+                          {!full && <div className="text-[11px] text-muted">{changeLabel}</div>}
                         </div>
                       )}
                     </div>
                   )}
                 </div>
-                <div className="mt-3 h-[18px] text-[11px] font-mono-tab text-muted truncate">
-                  {shown && (
-                    <>
-                      {dayLabel(shown.t)}
-                      <span className="ml-3">O <span className="text-subtle">{num(shown.o)}</span></span>
-                      <span className="ml-2">H <span className="text-subtle">{num(shown.h)}</span></span>
-                      <span className="ml-2">L <span className="text-subtle">{num(shown.l)}</span></span>
-                      {shown.v > 0 && <span className="ml-2">Vol <span className="text-subtle">{compact(shown.v)}</span></span>}
-                    </>
-                  )}
+                <div className={clsx('flex items-center gap-2', full ? 'mt-1' : 'mt-3')}>
+                  <div className="flex-1 min-w-0 h-[18px] text-[11px] font-mono-tab text-muted truncate">
+                    {shown && (
+                      <>
+                        {dayLabel(shown.t)}
+                        <span className="ml-3">O <span className="text-subtle">{num(shown.o)}</span></span>
+                        <span className="ml-2">H <span className="text-subtle">{num(shown.h)}</span></span>
+                        <span className="ml-2">L <span className="text-subtle">{num(shown.l)}</span></span>
+                        {shown.v > 0 && <span className="ml-2">Vol <span className="text-subtle">{compact(shown.v)}</span></span>}
+                      </>
+                    )}
+                  </div>
+                  <button type="button" onClick={() => setFull((v) => !v)} aria-label={full ? 'Exit full screen' : 'Full screen'}
+                    className="shrink-0 -my-3 -mr-3 h-11 w-11 flex items-center justify-center rounded-md text-violet-300 hover:text-violet-200">
+                    {full ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+                  </button>
                 </div>
               </div>
 
-              <div className="mt-1">
+              <div className={clsx('mt-1', full && 'flex-1 min-h-[200px]')}>
                 {data === null || data === undefined ? (
                   <div className="h-[300px] flex items-center justify-center text-xs text-muted">Loading prices…</div>
                 ) : data.error || !ohlc ? (
                   <div className="h-[300px] flex items-center justify-center text-xs text-muted">Couldn't load prices for {current.ticker}.</div>
                 ) : (
-                  <PriceChart bars={ohlc} levels={levels} fitLevels={!intraday} height={300} onHover={setHover}
-                    pins={chartPins} fib={fib} picking={picking} onPick={onPick} />
+                  <PriceChart bars={ohlc} levels={levels} fitLevels={!intraday} height={full ? '100%' : 300} onHover={setHover}
+                    pins={chartPins} fib={fib} picking={picking} onPick={onPick} onPinsChange={onPinsChange} />
                 )}
               </div>
 
               {/* Range */}
-              <div className="px-3 py-2 flex items-center gap-2 border-t border-hairline">
+              <div className="px-3 py-2 flex items-center gap-2 border-t border-hairline shrink-0">
                 <div className="flex-1 flex items-center" role="tablist" aria-label="Range">
                   {RANGES.map(([v, label]) => (
                     <button key={v} type="button" role="tab" aria-selected={range === v} onClick={() => { setHover(null); setRange(v) }}
@@ -365,7 +391,7 @@ export default function Charts() {
               </div>
 
               {/* Drawing tools: Measure (two pins), Auto swing, Fibonacci */}
-              <div className="px-3 py-2 flex items-center gap-1.5 border-t border-hairline">
+              <div className="px-3 py-2 flex items-center gap-1.5 border-t border-hairline shrink-0">
                 <ToolButton active={picking} onClick={() => setPicking((v) => !v)} label="Measure" icon={Ruler} />
                 <ToolButton onClick={() => { const a = ohlc && autoSwing(ohlc); if (a) { saveTools({ ...tools, ticker, pins: a, fib: true }); setPicking(false) } }}
                   label="Auto" icon={Sparkles} disabled={!ohlc} />
@@ -385,7 +411,7 @@ export default function Charts() {
                 )}
               </div>
               {(picking || move || offRange) && (
-                <div className="px-5 pb-3 -mt-1 text-xs">
+                <div className="px-5 pb-3 -mt-1 text-xs shrink-0">
                   {move ? (
                     <div className="rounded-xl bg-bg-elev px-4 py-3">
                       {/* The move, and how long it took */}
@@ -401,9 +427,11 @@ export default function Charts() {
                       </div>
                       {/* From A to B */}
                       <div className="mt-3 pt-3 border-t border-hairline grid grid-cols-[1fr_auto_1fr] items-center gap-3">
-                        <PinCell letter="A" label="From" date={pinDate(move.from.t)} price={num(move.from.p)} />
+                        <PinCell letter="A" label="From" date={pinDate(move.from.t)} price={num(move.from.p)}
+                          onStep={(dir) => step(0, dir)} canBack={!!stepPin(ohlc, placed, 0, -1)} canFwd={!!stepPin(ohlc, placed, 0, 1)} />
                         <span className="text-muted text-sm" aria-hidden>→</span>
-                        <PinCell letter="B" label="To" date={pinDate(move.to.t)} price={num(move.to.p)} />
+                        <PinCell letter="B" label="To" date={pinDate(move.to.t)} price={num(move.to.p)}
+                          onStep={(dir) => step(1, dir)} canBack={!!stepPin(ohlc, placed, 1, -1)} canFwd={!!stepPin(ohlc, placed, 1, 1)} />
                       </div>
                     </div>
                   ) : offRange ? (
@@ -411,11 +439,11 @@ export default function Charts() {
                   ) : (
                     <span className="text-muted">Tap a candle for point {tools.pins.length === 0 ? 'A' : 'B'}. It snaps to the high or low.</span>
                   )}
-                  {picking && move && <div className="text-muted mt-0.5">Tap again to move the nearer pin.</div>}
+                  {move && <div className="text-muted mt-2">Drag a pin to move it{picking ? ', or tap a candle to move the nearer one' : ''}.</div>}
                 </div>
               )}
               {fib.length > 0 && (
-                <div className="px-5 pb-3 grid grid-cols-2 gap-x-4 gap-y-1 text-xs font-mono-tab">
+                <div className="px-5 pb-3 shrink-0 grid grid-cols-2 gap-x-4 gap-y-1 text-xs font-mono-tab">
                   {fib.map((l) => (
                     <div key={`${l.kind}-${l.ratio}`} className="flex items-baseline gap-2">
                       <span className={clsx('w-12', l.kind === 'extension' ? (l.up ? 'text-green-400' : 'text-rose-300')
@@ -427,7 +455,7 @@ export default function Charts() {
               )}
 
               {/* The trade */}
-              <div className="px-5 py-4 border-t border-hairline">
+              <div className={clsx('px-5 py-4 border-t border-hairline', full && 'hidden')}>
                 <div className="text-sm font-semibold text-fg">{current.title}</div>
                 {current.body && <div className="text-sm text-subtle mt-1">{current.body}</div>}
                 {levels.length > 0 && (
@@ -491,7 +519,9 @@ const VERDICT_TONE = {
 // "PLTR hit 100% gain" → "hit 100% gain" (the ticker is already shown).
 const withoutTicker = (it) => (it.title.startsWith(it.ticker) ? it.title.slice(it.ticker.length).replace(/^[:\s]+/, '') : it.title)
 
-function PinCell({ letter, label, date, price }) {
+// One pin of the measure card; ‹ › step it a candle earlier / later.
+function PinCell({ letter, label, date, price, onStep, canBack, canFwd }) {
+  const btn = 'shrink-0 h-9 w-8 -my-1.5 flex items-center justify-center rounded-md text-subtle hover:text-fg hover:bg-card disabled:opacity-30 disabled:hover:bg-transparent'
   return (
     <div className="min-w-0">
       <div className="flex items-center gap-1.5 text-[11px] text-muted">
@@ -499,7 +529,15 @@ function PinCell({ letter, label, date, price }) {
         {label}
       </div>
       <div className="mt-1 text-xs text-subtle truncate">{date}</div>
-      <div className="text-sm font-mono-tab text-fg">${price}</div>
+      <div className="flex items-center gap-1">
+        <span className="flex-1 min-w-0 text-sm font-mono-tab text-fg truncate">${price}</span>
+        <button type="button" className={btn} onClick={() => onStep(-1)} disabled={!canBack} aria-label={`Move ${letter} one candle earlier`}>
+          <ChevronLeft size={15} />
+        </button>
+        <button type="button" className={btn} onClick={() => onStep(1)} disabled={!canFwd} aria-label={`Move ${letter} one candle later`}>
+          <ChevronRight size={15} />
+        </button>
+      </div>
     </div>
   )
 }

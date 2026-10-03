@@ -12,9 +12,12 @@
     "verdict:check": "npm run verdict:check:client && npm run verdict:check:server",
     "aftertax:check": "node scripts/check-after-tax.mjs",
     "charttools:check": "node scripts/check-chart-tools.mjs",
-    "indicators:check": "node scripts/check-indicators.mjs",
+    "indicators:check": "node scripts/check-indicators.mjs && node scripts/sync-edge-indicators.mjs --check",
+    "indicators:sync": "node scripts/sync-edge-indicators.mjs",
+    "entryevents:check": "node scripts/check-entry-events.mjs",
     "suite:check": "node scripts/check-signal-suite.mjs",
-    "ldp:risk:check": "node --experimental-strip-types --no-warnings scripts/check-ldp-risk-tier.ts"
+    "ldp:risk:check": "node --experimental-strip-types --no-warnings scripts/check-ldp-risk-tier.ts",
+    "peers:check": "node scripts/check-peers.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",

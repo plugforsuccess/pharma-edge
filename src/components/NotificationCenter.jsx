@@ -9,6 +9,7 @@ import {
   FileEdit,
   Sparkles,
   CheckCheck,
+  Crosshair,
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
@@ -29,6 +30,9 @@ const TYPE_META = {
   daily_digest: { Icon: FileBarChart, tone: 'subtle', label: 'Digest' },
   outcome_reminder: { Icon: FileEdit, tone: 'amber', label: 'Outcome' },
   new_signal: { Icon: Sparkles, tone: 'amber', label: 'Signal' },
+  // Entry alerts (entry-scan): tap opens that ticker's entry chart.
+  entry_buy_zone: { Icon: Crosshair, tone: 'green', label: 'Buy zone' },
+  entry_hardening_bull: { Icon: TrendingUp, tone: 'amber', label: 'Hardening' },
 }
 
 const TONE_BG = {
@@ -152,6 +156,11 @@ export default function NotificationCenter() {
 
   function handleRowClick(alert) {
     markRead(alert.id)
+    if (alert.ticker && alert.alert_type?.startsWith('entry_')) {
+      setOpen(false)
+      navigate(`/charts/entry/${encodeURIComponent(alert.ticker)}`)
+      return
+    }
     if (alert.signal_id && FEATURES.signalDetail) {
       setOpen(false)
       navigate(`/signal/${alert.signal_id}`)

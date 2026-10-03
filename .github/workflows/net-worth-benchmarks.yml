@@ -1,0 +1,48 @@
+# Net worth benchmarks for the Peers card (owner, 2026-10-03). Downloads the
+# Federal Reserve's SCF 2022 summary extract + the latest CPI-U, computes
+# weighted net worth percentiles by group (scraper/build_net_worth_benchmarks.py)
+# and commits src/data/netWorthBenchmarks.json to the branch it ran on.
+#
+# Runs when the script or this workflow changes on a feature branch, or by
+# hand (workflow_dispatch) to refresh the CPI adjustment. Never pushes to
+# main on its own.
+
+name: Net worth benchmarks
+
+on:
+  push:
+    branches-ignore: [main]
+    paths:
+      - scraper/build_net_worth_benchmarks.py
+      - .github/workflows/net-worth-benchmarks.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: net-worth-benchmarks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pandas==2.2.3
+      - name: Build benchmarks
+        run: python scraper/build_net_worth_benchmarks.py
+      - name: Commit if changed
+        run: |
+          if git diff --quiet -- src/data/netWorthBenchmarks.json && git ls-files --error-unmatch src/data/netWorthBenchmarks.json >/dev/null 2>&1; then
+            echo "No change."; exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/data/netWorthBenchmarks.json
+          git commit -m "Net worth benchmarks: SCF 2022, CPI-adjusted ($(date -u +%Y-%m-%d))"
+          git push
