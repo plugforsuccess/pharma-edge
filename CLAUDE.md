@@ -1050,7 +1050,8 @@ value, holding period) and must pass before any edit to that file lands.
   education, race / ethnicity (`sex`, `race_ethnicity`, `education`
   columns, Settings → **About you**, each "Prefer not to say" = NULL).
   These live on `leaps_tax_profiles` (own-row RLS, no anon policy) —
-  never on `profiles`, which has public read policies. Ranks read "Top
+  never on `profiles`, which has public read policies. The similar-income row names its band ("Income $104K–$173K") and every
+  row's median reads "Median net worth" (owner asked: it read as income). Ranks read "Top
   18%" in the top half, "30th percentile" below the median. Math in
   `src/utils/peers.js` (`peerComparisons`; `npm run peers:check`), card in
   `components/PeersView.jsx`.

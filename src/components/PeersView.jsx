@@ -57,7 +57,7 @@ export default function PeersView({ netWorth, profile, homeowner }) {
           <li key={r.key} className="py-3 flex items-center gap-3">
             <div className="flex-1 min-w-0">
               <div className="text-sm text-fg leading-snug">{r.label}</div>
-              <div className="text-xs text-muted font-mono-tab">Median {usd(r.median)}</div>
+              <div className="text-xs text-muted font-mono-tab">Median net worth {usd(r.median)}</div>
             </div>
             <div className={clsx('text-sm font-semibold font-mono-tab shrink-0', (r.pct ?? 0) >= 50 ? 'text-green-400' : 'text-subtle')}>{r.rank}</div>
           </li>

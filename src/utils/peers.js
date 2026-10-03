@@ -97,6 +97,19 @@ export function incomeBand(income, bands) {
   return `p${e[i]}_${e[i + 1]}`
 }
 
+// The band's household-income range, for its label: "Income $104K–$173K",
+// "Income under $36K", "Income $285K+".
+export function incomeRangeLabel(income, bands) {
+  if (!Number.isFinite(income) || !bands?.cutoffs?.length) return null
+  const c = bands.cutoffs
+  let i = 0
+  while (i < c.length && income >= c[i]) i++
+  const k = (n) => `$${Math.round(n / 1000)}K`
+  if (i === 0) return `Income under ${k(c[0])}`
+  if (i === c.length) return `Income ${k(c[c.length - 1])}+`
+  return `Income ${k(c[i - 1])}–${k(c[i])}`
+}
+
 // Every comparison for this user, headline (age band) first. Each row:
 // { key, label, rank, top (0–100 share of households above), median,
 //   p75, p90, households, withinAge }.
@@ -143,7 +156,7 @@ export function peerComparisons({
   add(couple ? 'household:couple' : 'household:single', couple ? 'Couples' : 'Single households')
   if (homeowner === true) add('home:owner', 'Homeowners')
   const ib = incomeBand(Number(income), benchmarks.income_bands)
-  if (ib) add(`income:${ib}`, 'Similar income')
+  if (ib) add(`income:${ib}`, incomeRangeLabel(Number(income), benchmarks.income_bands))
   if (!couple && (sex === 'female' || sex === 'male')) add(`sex:single_${sex}`, sex === 'female' ? 'Single women' : 'Single men')
   const ed = EDUCATION_OPTIONS.find((o) => o.value === education)
   if (ed) add(`education:${ed.value}`, ed.group)
