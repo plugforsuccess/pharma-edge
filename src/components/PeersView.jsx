@@ -39,10 +39,18 @@ export default function PeersView({ netWorth, profile, homeowner }) {
       {head ? (
         <div className="mb-5">
           <div className="text-[10px] uppercase tracking-wider text-muted mb-1">{head.label}</div>
-          <div className="text-3xl font-semibold font-mono-tab text-green-400">{head.rank}</div>
+          <div className="flex items-baseline gap-3">
+            <div className="text-3xl font-semibold font-mono-tab text-green-400">{head.rank}</div>
+            {head.rank.startsWith('Top') && head.pctLabel && <div className="text-sm text-subtle font-mono-tab">{head.pctLabel}</div>}
+          </div>
           <div className="text-xs text-subtle mt-1">
             Your net worth before tax, <span className="font-mono-tab text-fg">{usd(netWorth)}</span>
           </div>
+          {head.mean != null && (
+            <div className="text-xs text-muted mt-0.5 font-mono-tab">
+              Median {usd(head.median)} · average {usd(head.mean)}
+            </div>
+          )}
           <PercentileBar row={head} netWorth={netWorth} />
         </div>
       ) : (
@@ -58,8 +66,12 @@ export default function PeersView({ netWorth, profile, homeowner }) {
             <div className="flex-1 min-w-0">
               <div className="text-sm text-fg leading-snug">{r.label}</div>
               <div className="text-xs text-muted font-mono-tab">Median net worth {usd(r.median)}</div>
+              {r.mean != null && <div className="text-xs text-muted font-mono-tab">Average {usd(r.mean)}</div>}
             </div>
-            <div className={clsx('text-sm font-semibold font-mono-tab shrink-0', (r.pct ?? 0) >= 50 ? 'text-green-400' : 'text-subtle')}>{r.rank}</div>
+            <div className="shrink-0 text-right">
+              <div className={clsx('text-sm font-semibold font-mono-tab', (r.pct ?? 0) >= 50 ? 'text-green-400' : 'text-subtle')}>{r.rank}</div>
+              {r.rank.startsWith('Top') && r.pctLabel && <div className="text-xs text-muted font-mono-tab">{r.pctLabel}</div>}
+            </div>
           </li>
         ))}
       </ul>
@@ -73,6 +85,7 @@ export default function PeersView({ netWorth, profile, homeowner }) {
       <p className="mt-3 text-xs text-muted">
         {src.survey}, {src.dollars.replace(/^(\d{4}) dollars adjusted by CPI-U to/, '$1 dollars adjusted for inflation to')}.
         Net worth before tax, compared by household.
+        {head?.mean != null && ' The average sits far above the median because a few households hold most of the wealth.'}
       </p>
     </div>
   )

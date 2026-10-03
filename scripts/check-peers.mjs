@@ -1,5 +1,5 @@
 // Checks for src/utils/peers.js (npm run peers:check).
-import { ageOn, ageBand, percentileOf, rankLabel, incomeBand, incomeRangeLabel, peerComparisons } from '../src/utils/peers.js'
+import { ageOn, ageBand, percentileOf, rankLabel, incomeBand, incomeRangeLabel, percentileLabel, peerComparisons } from '../src/utils/peers.js'
 
 let passed = 0
 const failures = []
@@ -31,6 +31,9 @@ const bands = { edges_pct: [0, 20, 40, 60, 80, 90, 100], cutoffs: [30000, 60000,
 eq('income lowest band', incomeBand(10000, bands), 'p0_20')
 eq('income on a cutoff', incomeBand(60000, bands), 'p40_60')
 eq('income top band', incomeBand(800000, bands), 'p90_100')
+eq('percentile label', percentileLabel({ pct: 96.4 }), '96th percentile')
+eq('percentile label 99.x', percentileLabel({ pct: 99.47 }), '99.4th percentile')
+eq('percentile label 92', percentileLabel({ pct: 92.2 }), '92nd percentile')
 eq('income range label', incomeRangeLabel(150000, { cutoffs: [35880, 61862, 103928, 173213, 284565] }), 'Income $104K–$173K')
 eq('income range label top', incomeRangeLabel(300000, { cutoffs: [35880, 61862, 103928, 173213, 284565] }), 'Income $285K+')
 eq('income range label bottom', incomeRangeLabel(20000, { cutoffs: [35880, 61862, 103928, 173213, 284565] }), 'Income under $36K')

@@ -149,7 +149,10 @@ def build(df: pd.DataFrame, factor: float, cpi_label: str) -> dict:
         if households < MIN_HOUSEHOLDS:
             continue
         vals = weighted_percentiles(nw[mask], w[mask], PERCENTILES)
-        out_groups[key] = {"households": households, "values": [round(v) for v in vals]}
+        # Weighted mean too (owner asked for the average); it sits far above
+        # the median because a few households hold most of the wealth.
+        mean = float((nw[mask] * w[mask]).sum() / w[mask].sum())
+        out_groups[key] = {"households": households, "values": [round(v) for v in vals], "mean": round(mean)}
 
     return {
         "source": {

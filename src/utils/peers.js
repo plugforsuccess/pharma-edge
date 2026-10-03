@@ -79,6 +79,14 @@ export function rankLabel(r) {
   if (r.pct < 50) return `${ordinal(Math.max(1, Math.round(r.pct)))} percentile`
   return `Top ${Math.max(1, Math.round(top))}%`
 }
+// "96th percentile" (rounded down so it never overstates; 99.5 → "99.5th").
+export function percentileLabel(r) {
+  if (!r || r.pct == null) return null
+  if (r.below) return 'Below the 1st percentile'
+  if (r.above) return `Above the ${fmtPct(r.pct)}th percentile`
+  const p = r.pct >= 99 ? Math.floor(r.pct * 10) / 10 : Math.floor(r.pct)
+  return `${Number.isInteger(p) ? ordinal(Math.max(1, p)) : `${p}th`} percentile`
+}
 function ordinal(n) {
   const t = n % 100
   if (t >= 11 && t <= 13) return `${n}th`
@@ -135,11 +143,13 @@ export function peerComparisons({
       key: crossed ? `age:${band}|${key}` : key,
       label: crossed ? `${label}, ${ageText}` : label,
       rank: rankLabel(r),
+      pctLabel: percentileLabel(r),
       pct: r?.pct ?? null,
       top: r ? 100 - r.pct : null,
       median: at(g.values, 50),
       p75: at(g.values, 75),
       p90: at(g.values, 90),
+      mean: g.mean ?? null,
       households: g.households,
       withinAge: !!crossed,
     })
@@ -148,9 +158,9 @@ export function peerComparisons({
   if (band && benchmarks.groups[`age:${band}`]) {
     const g = benchmarks.groups[`age:${band}`]
     const r = percentileOf(g.values, ps, netWorth)
-    rows.push({ key: `age:${band}`, label: `Households, ${ageText}`, rank: rankLabel(r), pct: r?.pct ?? null,
+    rows.push({ key: `age:${band}`, label: `Households, ${ageText}`, rank: rankLabel(r), pctLabel: percentileLabel(r), pct: r?.pct ?? null,
       top: r ? 100 - r.pct : null, median: at(g.values, 50), p75: at(g.values, 75), p90: at(g.values, 90),
-      households: g.households, withinAge: true, headline: true })
+      mean: g.mean ?? null, households: g.households, withinAge: true, headline: true })
   }
   add('all', 'All US households', { cross: false })
   add(couple ? 'household:couple' : 'household:single', couple ? 'Couples' : 'Single households')
