@@ -1,6 +1,7 @@
 // Checks for src/utils/confluence.js (npm run confluence:check).
 import {
   swingPoints, confluenceSeries, confluenceSetups, setupStats, comboTable, todaySetup, compareWindows, MIN_MATCHES,
+  extendedFlags, poolStats, blend, blendedEstimate, SHRINK_K,
 } from '../src/utils/confluence.js'
 
 let passed = 0
@@ -40,19 +41,19 @@ const swings = { lows: [11], highs: [], confirmedTo: n - 1 - 10 }
 const H = [['5', 5], ['10', 10]]
 const setups = confluenceSetups({ series: s, closes, swings, window: 5, horizons: H })
 eq('setups by first appearance', setups.map((x) => [x.i, x.key]), [[12, 'bravo+echo'], [13, 'bravo+echo+macd'], [15, 'echo+macd']])
-eq('near the swing low (the last too close to the end to grade)', setups.map((x) => x.nearLow), [true, true, null])
+eq('near the swing low (the last too close to the end to grade)', setups.map((x) => x.atTurn), [true, true, null])
 eq('forward returns', setups[0].returns.map((r) => +r.toFixed(4)), [+(117 / 112 - 1).toFixed(4), +(122 / 112 - 1).toFixed(4)])
 eq('returns past the end are null', confluenceSetups({ series: s, closes, swings, window: 5, horizons: [['30', 30]] })[0].returns, [null])
-eq('ungraded when the low isn\'t confirmable yet', confluenceSetups({ series: s, closes, swings: { ...swings, confirmedTo: 14 }, window: 5, horizons: H })[0].nearLow, null)
+eq('ungraded when the low isn\'t confirmable yet', confluenceSetups({ series: s, closes, swings: { ...swings, confirmedTo: 14 }, window: 5, horizons: H })[0].atTurn, null)
 
 const st = setupStats(setups, H)
 eq('stats count', st.n, 3)
-eq('stats near-low share (graded only)', [st.nearLow, st.graded], [1, 2])
+eq('stats near-low share (graded only)', [st.atTurn, st.graded], [1, 2])
 eq('stats win rate', st.horizons[0].winRate, 1)
 eq('combo table, most frequent first', comboTable([...setups, { ...setups[0] }], H)[0].key, 'bravo+echo')
 
 // Today: exact when there are enough matches, else at-least-this-score.
-const hist = Array.from({ length: MIN_MATCHES }, (_, k) => ({ i: k, key: 'bravo+echo', lit: ['bravo', 'echo'], score: 2, nearLow: true, returns: [0.1, 0.2] }))
+const hist = Array.from({ length: MIN_MATCHES }, (_, k) => ({ i: k, key: 'bravo+echo', lit: ['bravo', 'echo'], score: 2, atTurn: true, returns: [0.1, 0.2] }))
 const live = [{ lit: ['bravo', 'echo'], score: 2, key: 'bravo+echo' }]
 eq('exact match', todaySetup({ series: live, setups: hist, horizons: H }).basis, 'exact')
 const few = todaySetup({ series: live, setups: hist.slice(0, 2).concat([{ ...hist[0], key: 'echo+macd' }]), horizons: H })
@@ -61,12 +62,37 @@ eq('one signal is not a setup', todaySetup({ series: [{ lit: ['bravo'], score: 1
 eq('nothing lit → no record', todaySetup({ series: [{ lit: [], score: 0, key: '' }], setups: hist, horizons: H }).basis, null)
 
 // Window comparison runs for each window.
-const wc = compareWindows({ flags, closes, bars: v.concat(v.slice(0, 5)), horizons: H, windows: [3, 5, 10], minScore: 2 })
+const wc = compareWindows({ flags, closes, swings: swingPoints(v.concat(v.slice(0, 5))), horizons: H, windows: [3, 5, 10], minScore: 2 })
 eq('one row per window', wc.map((r) => r.window), [3, 5, 10])
 eq('wider window, more agreement', wc[2].n >= wc[0].n, true)
 // Every window is graded on the same ±5 bars.
 const g10 = confluenceSetups({ series: confluenceSeries(flags, n, 10), closes, swings: { lows: [24], highs: [], confirmedTo: 29 }, window: 10, gradeWindow: 5, horizons: H, minScore: 2 })
-eq('grading window held fixed', g10.every((x) => x.nearLow === (Math.abs(24 - x.i) <= 5)), true)
+eq('grading window held fixed', g10.every((x) => x.atTurn === (Math.abs(24 - x.i) <= 5)), true)
+
+// Sell side: graded against swing highs; a sell wins when the stock fell.
+const sellSetups = confluenceSetups({ series: s, closes: closes.map((c) => 200 - c), swings: { lows: [], highs: [12], confirmedTo: 19 }, window: 5, horizons: H, side: 'sell' })
+eq('sell setups graded at a high', sellSetups.map((x) => x.atTurn), [true, true, null])
+eq('sell wins when the stock fell', setupStats(sellSetups, H, 'sell').horizons[0].winRate, 1)
+eq('buy would call that a loss', setupStats(sellSetups, H, 'buy').horizons[0].winRate, 0)
+
+// Extended: RSI ≥ 70, or % above the 200-day in its top 10% over a year.
+const rsi = Array.from({ length: 200 }, (_, i) => (i === 50 ? 72 : 50))
+const dist = Array.from({ length: 200 }, (_, i) => (i < 150 ? (i % 10) : i === 199 ? 30 : 2))
+const ext = extendedFlags(rsi, dist)
+eq('RSI 72 is extended', ext[50], true)
+eq('a quiet day is not', ext[160], false)
+eq('top-decile distance is extended', ext[199], true)
+eq('needs 120 days before the percentile counts', ext[100], false)
+
+// Pool + blend: own record leans in as its count grows.
+eq('blend with no own cases = pooled', blend(null, 0, 0.1), 0.1)
+eq('blend weights by count', blend(0.3, SHRINK_K, 0.1), 0.2, 1e-12)
+const pool = poolStats([[{ key: 'bravo+echo', lit: ['bravo', 'echo'], score: 2, atTurn: true, returns: [0.1, 0.2] }],
+  [{ key: 'bravo+echo', lit: ['bravo', 'echo'], score: 2, atTurn: false, returns: [-0.1, 0] }]], H)
+eq('pooled across tickers', [pool['bravo+echo'].n, pool['bravo+echo'].atTurn], [2, 0.5])
+const est = blendedEstimate({ today: { now: { key: 'bravo+echo', lit: ['bravo', 'echo'], score: 2 } }, setups: [], pool, horizons: H })
+eq('no own history → the pool', [est.ownN, est.poolN, est.atTurn], [0, 2, 0.5])
+eq('no setup today → no estimate', blendedEstimate({ today: { now: { key: 'bravo', lit: ['bravo'], score: 1 } }, setups: [], pool, horizons: H }), null)
 
 console.log(`confluence checks: ${passed} passed, ${failures.length} failed`)
 if (failures.length) {

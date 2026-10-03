@@ -947,70 +947,98 @@ function BacktestHeader({ tab, setTab, children }) {
   )
 }
 
-const CONF_LABEL = Object.fromEntries(COMPONENTS)
-const comboText = (lit) => lit.map((k) => CONF_LABEL[k]).join(' + ')
+const CONF_LABEL = { buy: Object.fromEntries(COMPONENTS.buy), sell: Object.fromEntries(COMPONENTS.sell) }
+const comboText = (lit, side = 'buy') => lit.map((k) => CONF_LABEL[side][k]).join(' + ')
 const pctText = (x) => (x == null ? '—' : `${Math.round(x * 100)}%`)
-const h12 = (st) => st?.horizons?.find((h) => h.label === '12M') ?? st?.horizons?.[st.horizons.length - 1]
+const hAt = (st, label) => st?.horizons?.find((h) => h.label === label) ?? null
+const SIDE_TEXT = {
+  buy: { title: 'Buy · lows', turn: 'at a low', tone: 'text-confluence', chip: 'border-confluence/50 bg-confluence/12 text-confluence', win: 'win' },
+  sell: { title: 'Sell · extended highs', turn: 'at a high', tone: 'text-suite-bear', chip: 'border-suite-bear/50 bg-suite-bear/12 text-suite-bear', win: 'fell' },
+}
 
-// Beside the YES / NO: how many of the five signals agree now, and what
-// that setup did before on this ticker.
-function ConfluenceLine({ conf }) {
-  const { now, basis, stats, exactN } = conf.today
-  const score = now?.score ?? 0
-  const lit = new Set(now?.lit ?? [])
-  const y = h12(stats)
+// Beside the YES / NO: how many buy signals (lows) and sell signals
+// (extended highs) agree now, and what that setup did before — on this
+// ticker, and across the whole universe when this ticker has few cases.
+function ConfluenceLine({ conf, pool }) {
   return (
     <div className="relative px-5 pb-4">
-      <div className="rounded-xl border border-hairline bg-bg-elev/60 px-4 py-3">
-        <div className="flex items-baseline gap-2">
-          <span className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold flex-1">Confluence · last {conf.window} days</span>
-          <span className={clsx('text-sm font-semibold font-mono-tab', score >= 3 ? 'text-confluence' : 'text-subtle')}>{score} of 5</span>
-        </div>
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {COMPONENTS.map(([k, label]) => (
-            <span key={k} className={clsx('px-2 py-0.5 rounded-full text-[11px] font-semibold border',
-              lit.has(k) ? 'border-confluence/50 bg-confluence/12 text-confluence' : 'border-border text-muted')}>{label}</span>
-          ))}
-        </div>
-        <div className="mt-2 text-xs text-subtle leading-snug">
-          {score === 0 ? 'No signals in the last few days.'
-            : score === 1 ? `Only ${CONF_LABEL[now.lit[0]]} so far — a setup needs 2+ signals agreeing.`
-            : !stats ? 'Not seen before on this ticker.'
-              : (
-                <>
-                  {basis === 'exact' ? `This setup: ${stats.n}× in 5 years` : `This exact setup ${exactN ? `${exactN}×` : 'not seen'} — any ${score}+ agreeing: ${stats.n}×`}
-                  {stats.nearLow != null && <> · <span className="text-fg font-mono-tab">{pctText(stats.nearLow)}</span> near a low</>}
-                  {y?.avg != null && <> · 12M <span className={clsx('font-mono-tab', y.avg < 0 ? 'text-rose-300' : 'text-green-400')}>{signed(y.avg * 100)}</span> avg, {pctText(y.winRate)} win</>}
-                </>
-              )}
-        </div>
-        {stats && stats.n < MIN_MATCHES && <div className="mt-1 text-[11px] text-muted">Few cases — treat as a hint, not a pattern.</div>}
+      <div className="rounded-xl border border-hairline bg-bg-elev/60 divide-y divide-hairline">
+        {['buy', 'sell'].map((side) => <ConfluenceSide key={side} side={side} conf={conf} pool={pool?.[side]} />)}
       </div>
     </div>
   )
 }
 
+function ConfluenceSide({ side, conf, pool }) {
+  const T = SIDE_TEXT[side]
+  const { now, basis, stats, exactN } = conf[side].today
+  const score = now?.score ?? 0
+  const lit = new Set(now?.lit ?? [])
+  const universe = score >= 2 && (basis !== 'exact') && pool?.[now.key]?.n >= MIN_MATCHES ? pool[now.key] : null
+  const line = (st, prefix) => {
+    const y = hAt(st, '6M') ?? hAt(st, '12M')
+    return (
+      <>
+        {prefix}
+        {st.atTurn != null && <> · <span className="text-fg font-mono-tab">{pctText(st.atTurn)}</span> {T.turn}</>}
+        {y?.avg != null && <> · {y.label} <span className={clsx('font-mono-tab', y.avg < 0 ? 'text-rose-300' : 'text-green-400')}>{signed(y.avg * 100)}</span> avg, {pctText(y.winRate)} {T.win}</>}
+      </>
+    )
+  }
+  return (
+    <div className="px-4 py-3">
+      <div className="flex items-baseline gap-2">
+        <span className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold flex-1">{T.title} · last {conf.window} days</span>
+        <span className={clsx('text-sm font-semibold font-mono-tab', score >= 3 ? T.tone : 'text-subtle')}>{score} of 5</span>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {COMPONENTS[side].map(([k, label]) => (
+          <span key={k} className={clsx('px-2 py-0.5 rounded-full text-[11px] font-semibold border', lit.has(k) ? T.chip : 'border-border text-muted')}>{label}</span>
+        ))}
+      </div>
+      <div className="mt-2 text-xs text-subtle leading-snug">
+        {score === 0 ? 'No signals in the last few days.'
+          : score === 1 ? `Only ${CONF_LABEL[side][now.lit[0]]} so far — a setup needs 2+ signals agreeing.`
+            : universe ? line(universe, <>This exact setup {exactN ? `${exactN}× here` : 'not seen here'} — across the universe: {universe.n}×</>)
+              : !stats ? 'Not seen before on this ticker.'
+                : line(stats, basis === 'exact' ? <>This setup: {stats.n}× in 5 years</> : <>This exact setup {exactN ? `${exactN}×` : 'not seen'} — any {score}+ agreeing: {stats.n}×</>)}
+      </div>
+      {!universe && stats && stats.n < MIN_MATCHES && <div className="mt-1 text-[11px] text-muted">Few cases — treat as a hint, not a pattern.</div>}
+    </div>
+  )
+}
+
 // Backtest → Confluence: every combination seen on this ticker, how often
-// it sat at a real swing low and what followed; then which agreement
-// window lines up best with the lows.
+// it sat at a real swing low (buy) or high (sell) and what followed; then
+// which agreement window lines up best with the turns.
 function ConfluenceBacktest({ conf }) {
-  const rows = conf.combos.filter((c) => c.score >= 2).slice(0, 12)
+  const [side, setSide] = useState('buy')
+  const T = SIDE_TEXT[side]
+  const m = conf[side]
+  const rows = m.combos.filter((c) => c.score >= 2).slice(0, 12)
   return (
     <div>
-      <div className="px-5 -mt-1 pb-3 text-xs text-muted">
-        Setups where 2+ of the five signals agreed within {conf.window} days, graded against swing lows (lowest low 10 days either side) · stock return, not option return
+      <div className="px-5 -mt-1 pb-3">
+        <div className="flex gap-1 p-0.5 rounded-lg bg-bg-elev w-max" role="tablist" aria-label="Side">
+          {[['buy', 'Buy · lows'], ['sell', 'Sell · highs']].map(([k, label]) => (
+            <button key={k} type="button" role="tab" aria-selected={side === k} onClick={() => setSide(k)}
+              className={clsx('min-h-[32px] px-3 rounded-md text-[11px] font-semibold transition',
+                side === k ? 'bg-card shadow-sm ' + SIDE_TEXT[k].tone : 'text-muted hover:text-subtle')}>{label}</button>
+          ))}
+        </div>
+        <div className="text-xs text-muted mt-2">
+          Setups where 2+ of the five {side} signals agreed within {conf.window} days, graded against swing {side === 'buy' ? 'lows' : 'highs'} ({side === 'buy' ? 'lowest low' : 'highest high'} 10 days either side) · stock return{side === 'sell' ? ' (falling = the call was right)' : ''}, not option return
+        </div>
       </div>
-      {/* One row per combination: the signals and how often, then how often
-          it sat at a swing low and the average stock return after. */}
       <ul className="border-y border-hairline divide-y divide-hairline">
         {rows.map((c) => (
           <li key={c.key} className="px-5 py-3">
             <div className="flex items-baseline gap-3">
-              <span className="flex-1 min-w-0 text-sm text-fg">{comboText(c.lit)}</span>
+              <span className="flex-1 min-w-0 text-sm text-fg">{comboText(c.lit, side)}</span>
               <span className="shrink-0 text-xs font-mono-tab text-subtle">{c.n}×</span>
             </div>
             <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs font-mono-tab">
-              <span className="text-subtle"><span className="text-fg">{pctText(c.nearLow)}</span> at a low</span>
+              <span className="text-subtle"><span className="text-fg">{pctText(c.atTurn)}</span> {T.turn}</span>
               {c.horizons.map((h) => (
                 <span key={h.label} className="text-muted">{h.label}{' '}
                   <span className={h.avg == null ? 'text-muted' : h.avg < 0 ? 'text-rose-300' : 'text-green-400'}>{h.avg == null ? '—' : signed(h.avg * 100)}</span>
@@ -1023,15 +1051,15 @@ function ConfluenceBacktest({ conf }) {
       </ul>
       <div className="px-5 pt-4 pb-5">
         <div className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold mb-1">Agreement window</div>
-        <div className="text-xs text-muted mb-2">Setups with 3+ signals agreeing, each graded against swing lows ±{conf.window} days.</div>
+        <div className="text-xs text-muted mb-2">Setups with 3+ signals agreeing, each graded against swing {side === 'buy' ? 'lows' : 'highs'} ±{conf.window} days.</div>
         <div className="grid grid-cols-3 gap-2">
-          {conf.windows.map((w) => {
-            const y = h12(w)
+          {m.windows.map((w) => {
+            const y = hAt(w, '12M')
             return (
               <div key={w.window} className={clsx('rounded-xl px-3 py-2.5 border', w.window === conf.window ? 'border-confluence/40 bg-confluence/[0.06]' : 'border-hairline bg-bg-elev')}>
                 <div className="text-[11px] text-muted font-semibold">±{w.window} days</div>
-                <div className="mt-1 text-lg font-semibold font-mono-tab leading-none text-fg">{pctText(w.nearLow)}</div>
-                <div className="text-[11px] text-muted mt-1">at a low</div>
+                <div className="mt-1 text-lg font-semibold font-mono-tab leading-none text-fg">{pctText(w.atTurn)}</div>
+                <div className="text-[11px] text-muted mt-1">{T.turn}</div>
                 <div className="text-[11px] text-muted font-mono-tab mt-1">{w.n} setups</div>
                 <div className="text-[11px] text-muted font-mono-tab">12M {y?.avg == null ? '—' : signed(y.avg * 100)}</div>
                 {w.window === conf.window && <div className="text-[11px] text-confluence font-semibold mt-1">In use</div>}
