@@ -18,6 +18,7 @@ import {
 import NumberInput from '../components/NumberInput'
 import Modal from '../components/Modal'
 import RateBreakdown from '../components/RateBreakdown'
+import PeersView from '../components/PeersView'
 import { useHoldings, DEFAULT_PROFILE, INVESTMENT_TYPES, isQuantity, wholeUnits } from '../hooks/useHoldings'
 
 // LEAPS — after-tax targets + live after-tax value.
@@ -290,7 +291,8 @@ export default function Leaps() {
           )}
 
           {ready && (summary || others.any) && (
-            <PortfolioTotals summary={summary} count={results.length} others={others} />
+            <PortfolioTotals summary={summary} count={results.length} others={others} profile={p}
+              homeowner={positions.some((x) => x.instrument_type === 'real_estate' && x.details?.kind !== 'rental')} />
           )}
 
 
@@ -2005,8 +2007,18 @@ function holdingStart(date) {
 // The portfolio is the sum of the holdings. With cash or real estate it
 // leads with after-tax net worth and breaks it down by type; the cost /
 // gain / return stats cover investments only (options, shares, crypto).
-function PortfolioTotals({ summary, count, others }) {
+const TOTALS_VIEW_KEY = 'cm:totals-view'
+
+function PortfolioTotals({ summary, count, others, profile, homeowner }) {
   const [showCost, setShowCost] = useState(false)
+  // Totals | Peers (net worth vs US households), remembered on the device.
+  const [view, setView] = useState(() => {
+    try { return localStorage.getItem(TOTALS_VIEW_KEY) === 'peers' ? 'peers' : 'totals' } catch { return 'totals' }
+  })
+  const pickView = (v) => {
+    setView(v)
+    try { localStorage.setItem(TOTALS_VIEW_KEY, v) } catch { /* this visit only */ }
+  }
   const hasOthers = !!others?.any
   const invested = summary?.after_tax_value ?? 0
   const total = invested + (others?.after ?? 0)
@@ -2028,10 +2040,15 @@ function PortfolioTotals({ summary, count, others }) {
   return (
     <section className="bg-card border border-amber-400/30 rounded-2xl p-5 mb-5">
       <div className="flex items-center gap-2 mb-4">
-        <h2 className="text-sm font-semibold">Total</h2>
+        <h2 className="text-sm font-semibold">{view === 'peers' ? 'Vs. US households' : 'Total'}</h2>
+        {view === 'totals' && <span className="text-xs text-muted">· {holdings} holding{holdings === 1 ? '' : 's'}</span>}
         <span className="flex-1" />
-        <span className="text-xs text-muted">{holdings} holding{holdings === 1 ? '' : 's'}</span>
+        <div className="w-[148px] -my-1">
+          <Segmented compact value={view} onChange={pickView}
+            options={[{ value: 'totals', label: 'Totals' }, { value: 'peers', label: 'Peers' }]} />
+        </div>
       </div>
+      {view === 'peers' ? <PeersView netWorth={before} profile={profile} homeowner={homeowner} /> : (<>
       {/* After tax and before tax side by side: same label row, same size. */}
       <div className="grid grid-cols-2 gap-4 mb-5">
         <div className="min-w-0">
@@ -2082,6 +2099,7 @@ function PortfolioTotals({ summary, count, others }) {
           <Stat label="After-tax return" value={pct(summary.after_tax_return_pct)} />
         </div>
       )}
+      </>)}
     </section>
   )
 }

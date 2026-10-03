@@ -1027,6 +1027,31 @@ value, holding period) and must pass before any edit to that file lands.
   mortgages stay on the property). Both count in net worth (debts
   subtract) on Portfolio and Home (`others.after` / `others.before` in
   `useHoldings`); the Total card lists only the parts the user has.
+- **Peers** (owner, 2026-10-03; **free**): the Total card's **Totals |
+  Peers** switch (`cm:totals-view`) shows net worth **before tax** against
+  US households from the Federal Reserve's **Survey of Consumer Finances
+  2022** (summary-extract microdata, CPI-U adjusted). The tables are
+  **data built by a script, never typed in**: `scraper/build_net_worth_benchmarks.py`
+  (run by `.github/workflows/net-worth-benchmarks.yml` — federalreserve.gov
+  and api.bls.gov aren't reachable from the dev sandbox) writes
+  `src/data/netWorthBenchmarks.json`: weighted percentiles (1–99, 99.5,
+  99.9) for all households and by age band, couple / single, homeowner,
+  income band (SCF INCCAT cut points), education, race / ethnicity and
+  single women / men, each also within the age band when the sample has
+  ≥ 100 households. Re-run it (workflow_dispatch) to refresh the CPI
+  month; bump it when the SCF 2025 data ships. The public SCF has no
+  geography — no state / region comparison. Headline = the user's age
+  band (from `leaps_tax_profiles.birth_date`, full date — owner); rows
+  for all households, couple / single (filing status: joint or separate
+  = couple), homeowners (a primary home among holdings), similar income,
+  and only when shared: single women / men (singles only — owner),
+  education, race / ethnicity (`sex`, `race_ethnicity`, `education`
+  columns, Settings → **About you**, each "Prefer not to say" = NULL).
+  These live on `leaps_tax_profiles` (own-row RLS, no anon policy) —
+  never on `profiles`, which has public read policies. Ranks read "Top
+  18%" in the top half, "30th percentile" below the median. Math in
+  `src/utils/peers.js` (`peerComparisons`; `npm run peers:check`), card in
+  `components/PeersView.jsx`.
 - **Dividend income.** The add form's 6th type, **Income** (Options ·
   Shares · Income / Crypto · Cash · Real estate), is a `stock` row with
   the income type and a required yield; a stock row with a yield or ROC
