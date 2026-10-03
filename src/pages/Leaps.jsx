@@ -2039,7 +2039,7 @@ function PortfolioTotals({ summary, count, others, profile, homeowner }) {
   const cost = before - after
   const costLabel = others?.realEstateCount > 0 ? 'tax & selling costs' : 'tax'
   return (
-    // Two pages, Totals and Peers: swipe the card sideways, or tap a dot
+    // Two pages, Totals and Rank (owner, 2026-10-03: "Rank", not "Peers"): swipe the card sideways, or tap a dot
     // (the dots sit above "N holdings", top right — owner, 2026-10-03).
     <section className="bg-card border border-amber-400/30 rounded-2xl p-5 mb-5 touch-pan-y"
       onTouchStart={(e) => { const t = e.touches[0]; swipe.current = { x: t.clientX, y: t.clientY } }}
@@ -2053,10 +2053,10 @@ function PortfolioTotals({ summary, count, others, profile, homeowner }) {
         pickView(dx < 0 ? 'peers' : 'totals')
       }}>
       <div className="flex items-start gap-2 mb-4">
-        <h2 className="flex-1 text-sm font-semibold pt-[18px]">{view === 'peers' ? 'You vs. US households' : 'Total'}</h2>
+        <h2 className="flex-1 text-sm font-semibold pt-[18px]">{view === 'peers' ? 'Your rank' : 'Total'}</h2>
         <div className="text-right">
           <div className="flex justify-end -mr-2" role="tablist" aria-label="Total card page">
-            {[['totals', 'Totals'], ['peers', 'Peers']].map(([v, label]) => (
+            {[['totals', 'Totals'], ['peers', 'Rank']].map(([v, label]) => (
               <button key={v} type="button" role="tab" aria-selected={view === v} aria-label={label} onClick={() => pickView(v)}
                 className="h-11 w-7 -my-[13px] flex items-center justify-center">
                 <span className={clsx('block rounded-full transition-all', view === v ? 'h-2 w-2 bg-fg' : 'h-1.5 w-1.5 bg-muted')} aria-hidden />
@@ -2064,7 +2064,7 @@ function PortfolioTotals({ summary, count, others, profile, homeowner }) {
             ))}
           </div>
           <div className="text-xs text-muted">
-            {view === 'totals' ? `${holdings} holding${holdings === 1 ? '' : 's'}` : 'Net worth'}
+            {view === 'totals' ? `${holdings} holding${holdings === 1 ? '' : 's'}` : 'vs. US households'}
           </div>
         </div>
       </div>
