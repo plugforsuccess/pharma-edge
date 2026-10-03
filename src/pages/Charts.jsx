@@ -6,7 +6,9 @@ import { useAuth } from '../context/AuthContext'
 import { useHoldings, isQuantity } from '../hooks/useHoldings'
 import { todayYmd } from '../utils/afterTax'
 import { dailyDecisions, exitRows } from '../lib/holdingChecks'
+import { Ruler, Sparkles, X } from 'lucide-react'
 import PriceChart from '../components/PriceChart'
+import { placePins, measure, fibLevels, autoSwing } from '../utils/chartTools'
 
 // Charts — the stocks where the app suggests a LEAPS trade, with the trade
 // drawn on the price chart. (GEX spread plays live on Pulse.)
@@ -32,6 +34,19 @@ const dayLabel = (t) => (typeof t === 'number'
   ? new Date(t * 1000).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'UTC' })
   : new Date(`${t}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }))
 const num = (n) => (Number.isFinite(n) ? n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—')
+const TOOLS_KEY = (ticker) => `cm:chart-tools:${ticker}`
+// "54 trading days · 78 days" / "12 candles" between the pins.
+// The span between the pins: main line + an optional calendar-days line.
+function spanLabel(m, range) {
+  if (range === '1d' || range === '5d') return { main: `${m.candles} candle${m.candles === 1 ? '' : 's'}`, sub: null }
+  const unit = range === '5y' ? 'week' : range === 'max' ? 'month' : 'trading day'
+  return {
+    main: `${m.candles.toLocaleString('en-US')} ${unit}${m.candles === 1 ? '' : 's'}`,
+    sub: unit === 'trading day' ? `${m.days.toLocaleString('en-US')} calendar days` : null,
+  }
+}
+// A pin's date: with the year for daily candles, with the time intraday.
+const pinDate = (t) => (typeof t === 'number' ? dayLabel(t) : shortDate(t))
 const compact = (n) => Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(n)
 const pctSigned = (r) => (Number.isFinite(r) ? `${r >= 0 ? '+' : '−'}${Math.abs(r * 100).toFixed(1)}%` : '—')
 const money = (n) => `$${Math.round(n).toLocaleString('en-US')}`
@@ -74,6 +89,10 @@ export default function Charts() {
   const [range, setRange] = useState('6mo')
   const [bars, setBars] = useState({})
   const [hover, setHover] = useState(null)
+  // Drawing tools, per ticker, saved on this device: two Measure pins and
+  // whether Fib levels are on. `picking` = the next tap drops a pin.
+  const [tools, setTools] = useState({ ticker: null, pins: [], fib: false })
+  const [picking, setPicking] = useState(false)
   const today = todayYmd()
 
   useEffect(() => {
@@ -172,6 +191,48 @@ export default function Charts() {
   // Stable per pick, so hovering doesn't rebuild the chart.
   const levels = useMemo(() => (current?.lines ?? []).map((l) => ({ price: l.v, label: l.label, gold: l.gold })), [current])
 
+  // Load this ticker's saved pins when the pick changes.
+  const ticker = current?.ticker ?? null
+  useEffect(() => {
+    if (!ticker) return
+    let saved = null
+    try { saved = JSON.parse(localStorage.getItem(TOOLS_KEY(ticker)) ?? 'null') } catch { /* none */ }
+    setTools({ ticker, pins: Array.isArray(saved?.pins) ? saved.pins.slice(0, 2) : [], fib: saved?.fib === true })
+    setPicking(false)
+  }, [ticker])
+  const saveTools = (next) => {
+    setTools(next)
+    try { localStorage.setItem(TOOLS_KEY(next.ticker), JSON.stringify({ pins: next.pins, fib: next.fib })) } catch { /* this visit only */ }
+  }
+  // A tap while measuring: first A, then B; with both set, it moves the nearer pin.
+  const onPick = (pin) => {
+    if (!pin || tools.ticker !== ticker) return
+    let pins = tools.pins
+    if (pins.length < 2) pins = [...pins, pin]
+    else {
+      const placedNow = placePins(ohlc, pins)
+      const idx = ohlc.findIndex((b) => b.t === pin.t)
+      const nearer = placedNow && Math.abs(placedNow[0].i - idx) <= Math.abs(placedNow[1].i - idx) ? 0 : 1
+      const ordered = placedNow ? [{ t: placedNow[0].t, p: placedNow[0].p }, { t: placedNow[1].t, p: placedNow[1].p }] : pins
+      pins = ordered.map((x, i) => (i === nearer ? pin : x))
+    }
+    saveTools({ ...tools, pins })
+    if (pins.length === 2 && tools.pins.length < 2) setPicking(false)
+  }
+  const placed = useMemo(() => (tools.ticker === ticker && ohlc ? placePins(ohlc, tools.pins) : null), [tools, ticker, ohlc])
+  const move = useMemo(() => measure(placed), [placed])
+  const fib = useMemo(() => (tools.fib ? fibLevels(placed) : []), [tools.fib, placed])
+  const chartPins = useMemo(() => {
+    if (placed) return placed
+    // One pin so far: show it on its candle.
+    if (tools.ticker === ticker && tools.pins.length === 1 && ohlc) {
+      const one = placePins(ohlc, [tools.pins[0], tools.pins[0]])
+      return one ? [one[0]] : []
+    }
+    return []
+  }, [placed, tools, ticker, ohlc])
+  const offRange = tools.ticker === ticker && tools.pins.length === 2 && ohlc && !placed
+
   const ideaItems = items.filter((x) => x.group === 'ideas')
   const holdingItems = items.filter((x) => x.group === 'holdings')
 
@@ -241,7 +302,8 @@ export default function Charts() {
                 ) : data.error || !ohlc ? (
                   <div className="h-[300px] flex items-center justify-center text-xs text-muted">Couldn't load prices for {current.ticker}.</div>
                 ) : (
-                  <PriceChart bars={ohlc} levels={levels} fitLevels={!intraday} height={300} onHover={setHover} />
+                  <PriceChart bars={ohlc} levels={levels} fitLevels={!intraday} height={300} onHover={setHover}
+                    pins={chartPins} fib={fib} picking={picking} onPick={onPick} />
                 )}
               </div>
 
@@ -257,6 +319,62 @@ export default function Charts() {
                   ))}
                 </div>
               </div>
+
+              {/* Drawing tools: Measure (two pins), Auto swing, Fibonacci */}
+              <div className="px-3 py-2 flex items-center gap-1.5 border-t border-hairline">
+                <ToolButton active={picking} onClick={() => setPicking((v) => !v)} label="Measure" icon={Ruler} />
+                <ToolButton onClick={() => { const a = ohlc && autoSwing(ohlc); if (a) { saveTools({ ...tools, ticker, pins: a, fib: true }); setPicking(false) } }}
+                  label="Auto" icon={Sparkles} disabled={!ohlc} />
+                <ToolButton active={tools.fib} onClick={() => saveTools({ ...tools, ticker, fib: !tools.fib })} label="Fib" disabled={!placed} />
+                <span className="flex-1" />
+                {(tools.pins.length > 0 || tools.fib) && (
+                  <button type="button" onClick={() => { saveTools({ ticker, pins: [], fib: false }); setPicking(false) }} aria-label="Clear drawings"
+                    className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-md text-muted hover:text-fg">
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+              {(picking || move || offRange) && (
+                <div className="px-5 pb-3 -mt-1 text-xs">
+                  {move ? (
+                    <div className="rounded-xl bg-bg-elev px-4 py-3">
+                      {/* The move, and how long it took */}
+                      <div className="flex items-start gap-3">
+                        <div className={clsx('flex-1 min-w-0 font-mono-tab', move.change < 0 ? 'text-rose-300' : 'text-green-400')}>
+                          <span className="text-lg font-semibold">{move.change >= 0 ? '+' : '−'}{Math.abs(move.pct * 100).toFixed(2)}%</span>
+                          <span className="ml-2 text-sm">{move.change >= 0 ? '+' : '−'}${num(Math.abs(move.change))}</span>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <div className="text-sm text-fg">{spanLabel(move, range).main}</div>
+                          {spanLabel(move, range).sub && <div className="text-[11px] text-muted">{spanLabel(move, range).sub}</div>}
+                        </div>
+                      </div>
+                      {/* From A to B */}
+                      <div className="mt-3 pt-3 border-t border-hairline grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+                        <PinCell letter="A" label="From" date={pinDate(move.from.t)} price={num(move.from.p)} />
+                        <span className="text-muted text-sm" aria-hidden>→</span>
+                        <PinCell letter="B" label="To" date={pinDate(move.to.t)} price={num(move.to.p)} />
+                      </div>
+                    </div>
+                  ) : offRange ? (
+                    <span className="text-muted">Your pins are outside this range.</span>
+                  ) : (
+                    <span className="text-muted">Tap a candle for point {tools.pins.length === 0 ? 'A' : 'B'}. It snaps to the high or low.</span>
+                  )}
+                  {picking && move && <div className="text-muted mt-0.5">Tap again to move the nearer pin.</div>}
+                </div>
+              )}
+              {fib.length > 0 && (
+                <div className="px-5 pb-3 grid grid-cols-2 gap-x-4 gap-y-1 text-xs font-mono-tab">
+                  {fib.map((l) => (
+                    <div key={`${l.kind}-${l.ratio}`} className="flex items-baseline gap-2">
+                      <span className={clsx('w-12', l.kind === 'extension' ? (l.up ? 'text-green-400' : 'text-rose-300')
+                        : l.ratio === 0.5 || l.ratio === 0.618 ? 'text-amber-300' : 'text-muted')}>{l.label}</span>
+                      <span className="text-subtle">{num(l.price)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {/* The trade */}
               <div className="px-5 py-4 border-t border-hairline">
@@ -302,6 +420,30 @@ const VERDICT_TONE = {
 
 // "PLTR hit 100% gain" → "hit 100% gain" (the ticker is already shown).
 const withoutTicker = (it) => (it.title.startsWith(it.ticker) ? it.title.slice(it.ticker.length).replace(/^[:\s]+/, '') : it.title)
+
+function PinCell({ letter, label, date, price }) {
+  return (
+    <div className="min-w-0">
+      <div className="flex items-center gap-1.5 text-[11px] text-muted">
+        <span className="h-4 w-4 rounded-full bg-amber-400 text-bg text-[10px] font-bold flex items-center justify-center" aria-hidden>{letter}</span>
+        {label}
+      </div>
+      <div className="mt-1 text-xs text-subtle truncate">{date}</div>
+      <div className="text-sm font-mono-tab text-fg">${price}</div>
+    </div>
+  )
+}
+
+function ToolButton({ active, onClick, label, icon: Icon, disabled }) {
+  return (
+    <button type="button" onClick={onClick} disabled={disabled} aria-pressed={active ?? undefined}
+      className={clsx('min-h-[36px] px-2.5 inline-flex items-center gap-1.5 rounded-md text-xs font-semibold transition disabled:opacity-40',
+        active ? 'bg-amber-400/15 text-amber-300' : 'text-subtle hover:text-fg')}>
+      {Icon && <Icon size={14} aria-hidden />}
+      {label}
+    </button>
+  )
+}
 
 function TradeList({ title, items, current, onPick }) {
   return (

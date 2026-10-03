@@ -1053,7 +1053,26 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   except 1D / 1W, where it would flatten the candles),
   pinch / drag to zoom and pan; colors read from the theme tokens at
   runtime. Pass it a stable `levels` array (memoized) or it rebuilds on
-  every hover. `components/LineChart.jsx` (plain SVG) is kept for the
+  every hover. **Drawing tools** (owner, 2026-10-03), a row under the
+  ranges: **Measure** — tap a candle for pin A, another for B (each snaps
+  to that candle's high or low, whichever is nearer the tap; with both
+  set, a tap moves the nearer pin); the readout shows % and $ change,
+  both dates and prices, and trading days / calendar days (candles on
+  1D / 1W, weeks on 5Y, months on All). **Auto** — the biggest swing in
+  view (largest % rise from a low to a later high, or fall from a high
+  to a later low; ties → most recent) becomes the pins, Fib on.
+  **Fib** — retracements 0 / 23.6 / 38.2 / 50 / 61.8 / 78.6 / 100% back
+  from B toward A, extensions 127.2 / 161.8 / 261.8% past B (green on an
+  up swing, red on a down swing; 50 and 61.8 in gold), as price lines
+  with axis tags and a list under the chart; the scale fits the
+  retracements and 127.2%. **X** clears. Pins + Fib are saved **on this
+  device only**, per ticker (`cm:chart-tools:TICKER`); pins land on the
+  nearest candle of any range (by calendar day across intraday / daily)
+  and show "Your pins are outside this range" when they don't fit. Pins
+  and Fib draw on the live chart (markers, a line series, price lines),
+  so zoom survives a new pin. Math is pure in `src/utils/chartTools.js`
+  (`snapPin`, `placePins`, `measure`, `fibLevels`, `autoSwing`);
+  `npm run charttools:check` must pass before changing it. `components/LineChart.jsx` (plain SVG) is kept for the
   hidden holding charts. **Holding
   charts are hidden for now** (owner); `leaps_position_marks` (one value
   per holding per day, SECURITY DEFINER trigger on `leaps_positions`,

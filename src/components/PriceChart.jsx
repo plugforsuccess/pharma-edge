@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
-  createChart, CandlestickSeries, HistogramSeries, ColorType, CrosshairMode, LineStyle,
+  createChart, createSeriesMarkers, CandlestickSeries, HistogramSeries, LineSeries, ColorType, CrosshairMode, LineStyle,
 } from 'lightweight-charts'
+import { snapPin } from '../utils/chartTools'
 
 // Stock price chart for /charts, on TradingView Lightweight Charts.
 //
@@ -23,6 +24,13 @@ import {
 //   fitLevels: widen the price scale so every level stays in view (off for
 //            1D / 1W, where it would flatten the candles)
 //   onHover: (bar | null) => void — the bar under the crosshair
+//   pins:    [{ t, p }] placed Measure pins (A, B) — drawn as markers
+//            joined by a line
+//   fib:     [{ kind, ratio, price, label, up }] Fibonacci levels (chartTools)
+//   picking: when true, a tap calls onPick with a pin snapped to that
+//            candle's high or low
+// Pins and Fib levels are drawn on the existing chart (no rebuild), so
+// zoom and pan survive setting a pin.
 
 function token(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim()
@@ -34,10 +42,15 @@ function alpha(hex, a) {
   return `rgba(${parseInt(m[1], 16)}, ${parseInt(m[2], 16)}, ${parseInt(m[3], 16)}, ${a})`
 }
 
-export default function PriceChart({ bars, levels = [], fitLevels = true, height = 300, onHover }) {
+export default function PriceChart({ bars, levels = [], fitLevels = true, height = 300, onHover, pins, fib, picking = false, onPick }) {
   const box = useRef(null)
   const hoverRef = useRef(onHover)
   hoverRef.current = onHover
+  const pickRef = useRef({ picking, onPick })
+  pickRef.current = { picking, onPick }
+  // The live chart, for the overlay effect below; a new version after each rebuild.
+  const live = useRef(null)
+  const [version, setVersion] = useState(0)
 
   useEffect(() => {
     const el = box.current
@@ -88,23 +101,24 @@ export default function PriceChart({ bars, levels = [], fitLevels = true, height
       vol.setData(bars.map((b) => ({ time: b.t, value: b.v, color: alpha(b.c >= b.o ? t.up : t.down, 0.25) })))
     }
 
-    // Keep every level in view (autoscale ignores price lines otherwise).
-    const levelPrices = levels.map((l) => l.price).filter(Number.isFinite)
-    if (fitLevels && levelPrices.length) {
-      price.applyOptions({
-        autoscaleInfoProvider: (base) => {
-          const r = base()
-          if (!r?.priceRange) return r
-          return {
-            ...r,
-            priceRange: {
-              minValue: Math.min(r.priceRange.minValue, ...levelPrices),
-              maxValue: Math.max(r.priceRange.maxValue, ...levelPrices),
-            },
-          }
-        },
-      })
-    }
+    // Keep every level in view (autoscale ignores price lines otherwise),
+    // plus the Fib retracements and first extension while they're on.
+    const levelPrices = fitLevels ? levels.map((l) => l.price).filter(Number.isFinite) : []
+    const extra = { prices: [] }
+    price.applyOptions({
+      autoscaleInfoProvider: (base) => {
+        const r = base()
+        const fitTo = levelPrices.concat(extra.prices)
+        if (!r?.priceRange || !fitTo.length) return r
+        return {
+          ...r,
+          priceRange: {
+            minValue: Math.min(r.priceRange.minValue, ...fitTo),
+            maxValue: Math.max(r.priceRange.maxValue, ...fitTo),
+          },
+        }
+      },
+    })
     for (const l of levels) {
       if (!Number.isFinite(l.price)) continue
       price.createPriceLine({
@@ -116,18 +130,73 @@ export default function PriceChart({ bars, levels = [], fitLevels = true, height
     chart.timeScale().fitContent()
 
     const byTime = new Map(bars.map((b) => [b.t, b]))
+    // The library hands date times back as strings or { year, month, day }.
+    const timeKey = (time) => (typeof time === 'string' || typeof time === 'number' ? time
+      : time && typeof time === 'object' ? `${time.year}-${String(time.month).padStart(2, '0')}-${String(time.day).padStart(2, '0')}`
+      : null)
     const onMove = (param) => {
-      const key = typeof param.time === 'string' || typeof param.time === 'number' ? param.time
-        : param.time && typeof param.time === 'object' ? `${param.time.year}-${String(param.time.month).padStart(2, '0')}-${String(param.time.day).padStart(2, '0')}`
-        : null
-      hoverRef.current?.(key ? byTime.get(key) ?? null : null)
+      const key = timeKey(param.time)
+      hoverRef.current?.(key != null ? byTime.get(key) ?? null : null)
     }
     chart.subscribeCrosshairMove(onMove)
+
+    // Measure: a tap drops a pin on that candle's high or low.
+    const onClick = (param) => {
+      const { picking: on, onPick: pick } = pickRef.current
+      if (!on || !pick || !param.point) return
+      const key = timeKey(param.time)
+      const bar = key != null ? byTime.get(key) : null
+      if (!bar) return
+      pick(snapPin(bar, price.coordinateToPrice(param.point.y)))
+    }
+    chart.subscribeClick(onClick)
+
+    const markers = createSeriesMarkers(price, [])
+    live.current = { chart, price, markers, extra, t, line: null, fibLines: [] }
+    setVersion((v) => v + 1)
     return () => {
       chart.unsubscribeCrosshairMove(onMove)
+      chart.unsubscribeClick(onClick)
+      live.current = null
       chart.remove()
     }
   }, [bars, levels, fitLevels])
 
-  return <div ref={box} style={{ height }} className="w-full" role="img" aria-label="Price chart" />
+  // Pins + Fib on the live chart.
+  useEffect(() => {
+    const L = live.current
+    if (!L) return
+    const { chart, price, markers, extra, t } = L
+    if (L.line) { chart.removeSeries(L.line); L.line = null }
+    for (const pl of L.fibLines) price.removePriceLine(pl)
+    L.fibLines = []
+
+    const placed = pins ?? []
+    markers.setMarkers(placed.map((pin, i) => ({
+      time: pin.t, position: 'atPriceMiddle', price: pin.p, shape: 'circle', color: t.gold, size: 1.4, text: i === 0 ? 'A' : 'B',
+    })))
+    if (placed.length === 2) {
+      L.line = chart.addSeries(LineSeries, {
+        color: t.gold, lineWidth: 2, lastValueVisible: false, priceLineVisible: false,
+        crosshairMarkerVisible: false, pointMarkersVisible: false,
+      })
+      L.line.setData(placed.map((pin) => ({ time: pin.t, value: pin.p })))
+    }
+
+    for (const l of fib ?? []) {
+      const strong = l.kind === 'retracement' && (l.ratio === 0.5 || l.ratio === 0.618)
+      const edge = l.kind === 'retracement' && (l.ratio === 0 || l.ratio === 1)
+      const color = l.kind === 'extension' ? (l.up ? t.up : t.down) : strong ? t.gold : edge ? t.muted : t.subtle
+      L.fibLines.push(price.createPriceLine({
+        price: l.price, title: `Fib ${l.label}`, color, lineWidth: 1,
+        lineStyle: l.kind === 'extension' ? LineStyle.SparseDotted : LineStyle.Dotted,
+        axisLabelVisible: true, axisLabelColor: alpha(color, 0.9), axisLabelTextColor: t.card,
+      }))
+    }
+    // Fit the retracements and the first extension; farther targets show when in view.
+    extra.prices = (fib ?? []).filter((l) => l.kind === 'retracement' || l.ratio === 1.272).map((l) => l.price)
+    price.applyOptions({})
+  }, [pins, fib, version])
+
+  return <div ref={box} style={{ height }} className={picking ? 'w-full cursor-crosshair' : 'w-full'} role="img" aria-label="Price chart" />
 }
