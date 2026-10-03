@@ -87,7 +87,7 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
     const t = {
       up: token('--color-green-400'), down: token('--color-red-400'), gold: token('--color-amber-400'),
       goldHi: token('--color-amber-200'), fg: token('--color-fg'), muted: token('--color-muted'),
-      subtle: token('--color-subtle'), faint: token('--color-faint'), border: token('--color-border'),
+      subtle: token('--color-subtle'), faint: token('--color-faint'), border: token('--color-border'), borderHi: token('--color-border-hover'),
     }
     const chart = createChart(el, {
       autoSize: true,
@@ -96,7 +96,7 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
         // Axis numbers in the secondary-text grey (muted was too dim on phones).
         textColor: t.subtle, fontSize: 11, fontFamily: getComputedStyle(el).fontFamily,
         attributionLogo: false,
-        panes: { separatorColor: t.border, separatorHoverColor: alpha(t.gold, 0.3), enableResize: false },
+        panes: { separatorColor: t.borderHi, separatorHoverColor: t.borderHi, enableResize: false },
       },
       grid: { vertLines: { visible: false }, horzLines: { color: alpha(t.faint, 0.55) } },
       rightPriceScale: { borderVisible: false, minimumWidth: 56 },
@@ -348,6 +348,10 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
   return (
     <div className="relative" style={{ height }}>
       <div ref={box} className="absolute inset-0" />
+      {/* Pane dividers: a 2px line over the chart's 1px separator, so panes read as separate. */}
+      {shown.map((k, pi) => (pi > 0 && tops[pi] != null ? (
+        <div key={`sep-${k}`} className="absolute inset-x-0 h-[2px] bg-border-hover pointer-events-none" style={{ top: tops[pi] - 1.5 }} aria-hidden />
+      ) : null))}
       {shown.map((k, pi) => (
         <div key={k}>
           <div className="absolute left-3 right-[104px] pointer-events-none flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10.5px] leading-4 font-mono-tab"
