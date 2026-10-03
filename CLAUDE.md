@@ -1076,7 +1076,10 @@ value, holding period) and must pass before any edit to that file lands.
   → `src/data/stateNetWorth.json`; `stateComparison` in `peers.js` adds
   the row after "All US households", tagged CENSUS (SIPP undercounts the
   wealthiest, so it's a separate source, named in the footer). No PR row.
-  Optional `CENSUS_API_KEY` Actions secret raises the API's daily limit.
+  **Needs the `CENSUS_API_KEY` Actions secret** (free:
+  api.census.gov/data/key_signup.html) — the SIPP endpoint refuses keyless
+  requests; until it's set the job fails with that message and the card
+  shows no state row.
 - **Dividend income.** The add form's 6th type, **Income** (Options ·
   Shares · Income / Crypto · Cash · Real estate), is a `stock` row with
   the income type and a required yield; a stock row with a yield or ROC

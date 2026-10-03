@@ -12,7 +12,8 @@ with the SCF, so the card labels these rows as a separate source.
 
 Run by .github/workflows/state-net-worth.yml (api.census.gov and
 api.bls.gov aren't reachable from the dev sandbox). Env: CENSUS_API_KEY
-(optional; raises the daily request limit). Stdlib only.
+(**required** — the SIPP endpoint refuses keyless requests; free at
+https://api.census.gov/data/key_signup.html). Stdlib only.
 """
 from __future__ import annotations
 
@@ -69,6 +70,9 @@ def census_rows(year: int, with_predicate: bool) -> list | None:
     except urllib.error.HTTPError as e:
         print(f"SIPP {year} predicate={with_predicate}: HTTP {e.code} {e.read()[:300]!r}", file=sys.stderr)
         return None
+    if b"Missing Key" in body[:2000] or b"Invalid Key" in body[:2000]:
+        raise SystemExit("The Census API needs a key for SIPP: get a free one at "
+                         "https://api.census.gov/data/key_signup.html and add it as the CENSUS_API_KEY Actions secret.")
     try:
         rows = json.loads(body)
     except json.JSONDecodeError:
