@@ -1036,8 +1036,11 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   nothing is ordered. Prices: the **`price-history`** edge function
   (`verify_jwt`; Yahoo daily OHLC + volume, 1M–2Y; `crypto: true` prices
   the coin in USD; 15-min cache, no table). **The chart is TradingView
-  Lightweight Charts** (`lightweight-charts`, Apache-2.0 — keep its
-  attribution logo on, the licence requires it) in
+  Lightweight Charts** (`lightweight-charts`, Apache-2.0). Its on-chart logo is
+  **off** (owner); the licence then requires the attribution notice
+  (kept in `PriceChart.jsx`) and a visible link to tradingview.com — the
+  "Charts by TradingView" link at the bottom of /charts. Don't remove
+  that link while the logo is off) in
   `components/PriceChart.jsx`: **candlesticks only** (owner — no line
   chart, no toggle), volume band, magnet crosshair driving the quote
   header's OHLC / volume / day change, the trade's levels as dashed price

@@ -3,8 +3,14 @@ import {
   createChart, CandlestickSeries, HistogramSeries, ColorType, CrosshairMode, LineStyle,
 } from 'lightweight-charts'
 
-// Stock price chart for /charts, on TradingView Lightweight Charts
-// (Apache-2.0 — its attribution logo stays on, per the licence).
+// Stock price chart for /charts, on TradingView Lightweight Charts.
+//
+// Attribution notice (Apache-2.0 NOTICE, required by the licence):
+//   TradingView Lightweight Charts™
+//   Copyright (c) 2025 TradingView, Inc. https://www.tradingview.com/
+// The on-chart logo is off (owner, 2026-10-03); the licence's link
+// requirement is met by the "Charts by TradingView" link on /charts —
+// keep that link if the logo stays off.
 // Candlesticks (owner: candles, not a line), a volume band under the price, a magnet
 // crosshair, and the trade's levels (strike, break-even, cost, target)
 // as dashed price lines with tags on the price axis. Pinch / drag to
@@ -45,7 +51,7 @@ export default function PriceChart({ bars, levels = [], height = 300, onHover })
         textColor: t.muted,
         fontSize: 11,
         fontFamily: getComputedStyle(el).fontFamily,
-        attributionLogo: true,
+        attributionLogo: false,
       },
       grid: { vertLines: { visible: false }, horzLines: { color: alpha(t.faint, 0.6) } },
       rightPriceScale: { borderVisible: false, scaleMargins: { top: 0.08, bottom: 0.24 } },

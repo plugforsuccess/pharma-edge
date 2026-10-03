@@ -278,6 +278,10 @@ export default function Charts() {
 
           <p className="text-xs text-muted">
             Suggestions, not advice. Prices are daily closes and may be delayed.
+            {' '}Charts by{' '}
+            {/* Required by the charting library's licence (logo is off). */}
+            <a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer"
+              className="underline underline-offset-2 hover:text-subtle">TradingView</a>.
           </p>
         </>
       )}
