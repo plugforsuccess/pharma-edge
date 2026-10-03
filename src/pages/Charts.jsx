@@ -6,9 +6,9 @@ import { useAuth } from '../context/AuthContext'
 import { useHoldings, isQuantity } from '../hooks/useHoldings'
 import { todayYmd } from '../utils/afterTax'
 import { dailyDecisions, exitRows } from '../lib/holdingChecks'
-import { Ruler, Search, Sparkles, X } from 'lucide-react'
+import { Crosshair, Ruler, Search, Sparkles, X } from 'lucide-react'
 import TickerDrawer from '../components/TickerDrawer'
-import { TICKER_UNIVERSE } from '../lib/tickerUniverse'
+import { CHART_TICKERS } from '../lib/chartTickers'
 import PriceChart from '../components/PriceChart'
 import { placePins, measure, fibLevels, autoSwing } from '../utils/chartTools'
 
@@ -365,6 +365,12 @@ export default function Charts() {
                   label="Auto" icon={Sparkles} disabled={!ohlc} />
                 <ToolButton active={tools.fib} onClick={() => saveTools({ ...tools, ticker, fib: !tools.fib })} label="Fib" disabled={!placed} />
                 <span className="flex-1" />
+                {!current.crypto && (
+                  <Link to={`/charts/entry/${encodeURIComponent(current.ticker)}`}
+                    className="min-h-[36px] px-2.5 inline-flex items-center gap-1.5 rounded-md text-xs font-semibold text-amber-300 hover:text-amber-200">
+                    <Crosshair size={13} aria-hidden /> Entry chart
+                  </Link>
+                )}
                 {(tools.pins.length > 0 || tools.fib) && (
                   <button type="button" onClick={() => { saveTools({ ticker, pins: [], fib: false }); setPicking(false) }} aria-label="Clear drawings"
                     className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-md text-muted hover:text-fg">
@@ -466,17 +472,6 @@ export default function Charts() {
 }
 
 const NO_GATES = new Set()
-// The 11 SPDR sector ETFs the LEAPS ideas rank (suggest-leaps) — searchable
-// alongside the app's ticker list, listed first under "Popular".
-const SECTOR_ETFS = [
-  ['XLK', 'Technology'], ['XLF', 'Financials'], ['XLV', 'Health Care'], ['XLE', 'Energy'],
-  ['XLI', 'Industrials'], ['XLY', 'Consumer Discretionary'], ['XLP', 'Consumer Staples'],
-  ['XLU', 'Utilities'], ['XLB', 'Materials'], ['XLRE', 'Real Estate'], ['XLC', 'Communication Services'],
-].map(([symbol, label]) => ({ symbol, label: `${label} sector`, isHot: true }))
-const CHART_TICKERS = (() => {
-  const seen = new Set(SECTOR_ETFS.map((t) => t.symbol))
-  return [...SECTOR_ETFS, ...TICKER_UNIVERSE.filter((t) => !seen.has(t.symbol))]
-})()
 const RECENT_KEY = 'cm:chart-recent'
 const RECENT_MAX = 8
 

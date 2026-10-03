@@ -30,6 +30,7 @@ const Wheel = lazy(() => import('./pages/Wheel'))
 const WheelWatchlist = lazy(() => import('./pages/WheelWatchlist'))
 const KingBoard = lazy(() => import('./pages/KingBoard'))
 const Charts = lazy(() => import('./pages/Charts'))
+const LeapsEntry = lazy(() => import('./pages/LeapsEntry'))
 const Taxes = lazy(() => import('./pages/Taxes'))
 const Bot = lazy(() => import('./pages/Bot'))
 const Leaps = lazy(() => import('./pages/Leaps'))
@@ -125,6 +126,8 @@ export default function App() {
             <Route path="leaps/onboarding" element={<LeapsOnboarding />} />
             <Route path="simulator" element={<Simulator />} />
             <Route path="charts" element={<Charts />} />
+            <Route path="charts/entry" element={<LeapsEntry />} />
+            <Route path="charts/entry/:ticker" element={<LeapsEntry />} />
             <Route path="taxes" element={<Taxes />} />
             <Route path="bot" element={<Bot />} />
             <Route path="flow" element={hidden(FEATURES.flow, <AdminOnly><Flow /></AdminOnly>)} />
