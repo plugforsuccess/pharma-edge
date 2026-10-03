@@ -1006,19 +1006,55 @@ value, holding period) and must pass before any edit to that file lands.
 ## Charts (`/charts`), LEAPS bot (`/bot`), Taxes (`/taxes`)
 
 Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
-- **Charts.** Price history is `leaps_position_marks` (PK position +
-  day; a SECURITY DEFINER trigger on `leaps_positions` upserts the day's
-  mark on every insert / value change; users SELECT own rows only).
-  Each holding's history starts at its cost on its purchase date. After-
-  tax values are figured as of each date (holding period then). Cards:
-  **Gain over time** (investments, before / after tax, vs break-even —
-  gain, not value, so new money doesn't read as growth); one holding at a
-  time (chips) with cost, hit targets and the next target as flat lines
-  (a target over 1.6× the chart's high is named under it instead), and
-  long-term / roll window / exit-or-roll dates as markers (within ~18
-  months); **Where it sits, after tax** (by type); **Gain after tax, by
-  holding**. Charts are plain SVG (`components/LineChart.jsx`, no chart
-  library) — tap or drag to read a date.
+- **Charts** (owner, 2026-10-03) = **price charts of the stocks where
+  the app suggests a LEAPS trade**, the trade drawn on the chart. **No
+  GEX plays here — they live on Pulse** (owner). Groups, ideas first:
+  **LEAPS ideas** — buys from the **`suggest-leaps`** edge function, and
+  LEAPS bot suggestions (`ldp_audit_log` kind `suggestion`, last 30
+  days, newest per ticker, skipped where an idea covers the ticker;
+  strike from the OCC `payload.contract`); **Your holdings** — today's
+  sell / roll / exit calls (`dailyDecisions`; options show strike +
+  break-even, shares / crypto your cost + the target's price per unit).
+  **Market data is Yahoo** (owner, 2026-10-03 — the Polygon/Massive
+  subscription was cancelled): `supabase/functions/_shared/yahoo.ts`
+  (`yahooBars` via /v8 chart, `yahooOptions` via /v7 options with the
+  cookie + crumb bootstrap shared across parallel callers, `callDelta`
+  Black-Scholes since Yahoo gives IV but no greeks). **`suggest-leaps`**
+  (`verify_jwt`, Yahoo, 30-min in-instance cache, market-wide) mirrors the
+  LDP core sleeve — keep it in sync with `ldp/scoring.py`,
+  `ldp/contracts.py` and `ldp/config.py`: the 11 SPDR sector ETFs scored
+  on 3m / 6m / 12m return + 12m relative strength vs SPY (0.20 / 0.30 /
+  0.30 / 0.20, min-max normalised), below the 200-day average = not
+  eligible, top 3; for each, the call clearing DTE ≥ 540, delta
+  0.70–0.80, vol rank ≤ 70, spread ≤ 10% of mid, OI ≥ 100, closest to
+  730 DTE → delta 0.75 → tightest spread. Delta is Black-Scholes from
+  each contract's Yahoo IV (4% rate, no dividends). **Vol rank is the 20-day
+  historical-vol rank over a year of closes**, a stand-in for the
+  engine's IV rank (`iv_history` doesn't cover the sector ETFs). No pick
+  → a "Watch" row with the reason. The card shows strike, break-even
+  (strike + mid), cost per contract (mid × 100). Suggestions only;
+  nothing is ordered. Prices: the **`price-history`** edge function
+  (`verify_jwt`; Yahoo OHLC + volume: **1D = 5-minute and 1W = 30-minute
+  candles** (times as ET wall clock read as UTC, 2-min cache; 1D change is
+  vs the previous close), 1M–2Y daily; `crypto: true` prices
+  the coin in USD; 15-min cache, no table). **The chart is TradingView
+  Lightweight Charts** (`lightweight-charts`, Apache-2.0). Its on-chart logo is
+  **off** (owner); the licence then requires the attribution notice
+  (kept in `PriceChart.jsx`) and a visible link to tradingview.com — the
+  "Open-source licenses" line at the bottom of Settings (owner: no
+  credit on /charts). Don't remove that line while the logo is off) in
+  `components/PriceChart.jsx`: **candlesticks only** (owner — no line
+  chart, no toggle), volume band, magnet crosshair driving the quote
+  header's OHLC / volume / day change, the trade's levels as dashed price
+  lines with axis tags (autoscale widened so every level stays in view —
+  except 1D / 1W, where it would flatten the candles),
+  pinch / drag to zoom and pan; colors read from the theme tokens at
+  runtime. Pass it a stable `levels` array (memoized) or it rebuilds on
+  every hover. `components/LineChart.jsx` (plain SVG) is kept for the
+  hidden holding charts. **Holding
+  charts are hidden for now** (owner); `leaps_position_marks` (one value
+  per holding per day, SECURITY DEFINER trigger on `leaps_positions`,
+  SELECT own) keeps collecting history for when they return.
 - **LEAPS bot.** Mode (places trades only on managed accounts, else
   suggests), risk tier, **Today's checks** — one decision per holding
   from `dailyDecisions` in `src/lib/holdingChecks.jsx` (time stop →
