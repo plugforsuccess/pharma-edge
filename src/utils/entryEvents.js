@@ -13,14 +13,20 @@
 //   entry_hardening_bull  weekly Hardening bull in the last two completed
 //                         weeks; the current week counts as completed when
 //                         the latest daily bar is a Friday. event_date = the
-//                         week's start.
+//                         week's start. OFF for now (owner, 2026-10-03:
+//                         Hardening "prevents trades and isn't helpful" —
+//                         hidden, maybe rebuilt later); `hardening: true`
+//                         turns it back on.
 
 import { entryModel } from './indicators.js'
 import { suiteModel, normalizePeriods } from './signalSuite.js'
 
+// Hardening alerts are off while Hardening is hidden (FEATURES.hardening).
+export const HARDENING_ALERTS = false
+
 const money = (v) => `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
-export function entryEvents({ ticker, daily, weekly, spyWeekly = [], vixWeekly = [], params, suiteParams }) {
+export function entryEvents({ ticker, daily, weekly, spyWeekly = [], vixWeekly = [], params, suiteParams, hardening = HARDENING_ALERTS }) {
   const out = []
   if (daily?.length >= 260) {
     const m = entryModel(daily, params ? { params } : undefined)
@@ -34,7 +40,7 @@ export function entryEvents({ ticker, daily, weekly, spyWeekly = [], vixWeekly =
       })
     }
   }
-  const w = normalizePeriods(weekly ?? [], '1wk')
+  const w = hardening ? normalizePeriods(weekly ?? [], '1wk') : []
   if (w.length >= 220 && daily?.length) {
     const onPeriods = (list) => {
       const byKey = new Map(normalizePeriods(list, '1wk').map((x) => [x.k, x.c]))

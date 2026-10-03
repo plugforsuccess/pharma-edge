@@ -146,11 +146,11 @@ export function suiteModel(bars, { spy = [], vix = [], params = SUITE_PARAMS } =
   const bravoBearRaw = bars.map((_, i) => ok(i) && close[i] < basis[i] && fast[i] < basis[i] && slope[i] < 0 && close[i] < close[i - 1])
   const bravoBull = cooldown(bravoBullRaw, p.bravoCooldown)
   const bravoBear = cooldown(bravoBearRaw, p.bravoCooldown)
-  // Diamonds: the bar a condition turns on (Pine's "visual" event), at most
-  // one per cooldown — Bravo's raw condition flickers on every up / down
-  // close, which crowded the chart.
-  const bravoBullOn = cooldown(bravoBullRaw.map((x, i) => x && !bravoBullRaw[i - 1]), p.bravoCooldown)
-  const bravoBearOn = cooldown(bravoBearRaw.map((x, i) => x && !bravoBearRaw[i - 1]), p.bravoCooldown)
+  // Diamonds: exactly the Pine's plotted "visual" event — the bar the raw
+  // condition turns on after being off, no cooldown (owner, 2026-10-03: the
+  // Bravo diamonds must match TradingView; a cooldown hid most of them).
+  const bravoBullOn = bravoBullRaw.map((x, i) => x && !bravoBullRaw[i - 1])
+  const bravoBearOn = bravoBearRaw.map((x, i) => x && !bravoBearRaw[i - 1])
   // Regime: above / below the basis with the fast EMA on the same side.
   const regime = bars.map((_, i) => (basis[i] == null || fast[i] == null ? 0
     : close[i] > basis[i] && fast[i] > basis[i] ? 1 : close[i] < basis[i] && fast[i] < basis[i] ? -1 : 0))
@@ -253,12 +253,15 @@ export function horizonStats(trades, horizons, win = (r) => r > 0) {
 // ---------------------------------------------------------------------------
 
 export const SUITE_TIMEFRAMES = {
+  // Daily = the chart's own bars, like TradingView on a daily chart.
+  '1d': { label: 'Daily', unit: 'day', horizons: [['3M', 63], ['6M', 126], ['12M', 252]], fresh: 10 },
   '1wk': { label: 'Weekly', unit: 'week', horizons: [['3M', 13], ['6M', 26], ['12M', 52]], fresh: 2 },
   '1mo': { label: 'Monthly', unit: 'month', horizons: [['3M', 3], ['6M', 6], ['12M', 12]], fresh: 1 },
 }
 
 // Period key of a 'YYYY-MM-DD' date: the week's Monday, or 'YYYY-MM'.
 export function periodKey(t, tf) {
+  if (tf === '1d') return String(t).slice(0, 10)
   if (tf === '1mo') return String(t).slice(0, 7)
   const d = new Date(`${String(t).slice(0, 10)}T00:00:00Z`)
   d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7))

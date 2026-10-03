@@ -11,7 +11,8 @@
 //                         per buy-zone cluster: event_date = the cluster's
 //                         first day, and the cluster must have started in the
 //                         last 3 trading days (a missed run still alerts).
-//   entry_hardening_bull  a weekly Hardening bull in the last two completed
+//   entry_hardening_bull  (OFF while Hardening is hidden — HARDENING_ALERTS)
+//                         a weekly Hardening bull in the last two completed
 //                         weeks (the current week counts once it has closed,
 //                         i.e. when the latest daily bar is a Friday).
 //                         event_date = that week's start.
@@ -31,7 +32,7 @@ import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import webpush from 'npm:web-push@3.6.7'
 import { yahooChart, type Bar } from '../_shared/yahoo.ts'
-import { entryEvents } from '../_shared/entryEvents.js'
+import { entryEvents, HARDENING_ALERTS } from '../_shared/entryEvents.js'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? ''
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
@@ -94,7 +95,7 @@ async function entriesFor(ticker: string, spyW: Array<{ t: string; c: number }>,
   const symbol = ticker.replace(/\./g, '-')
   const [daily, weekly] = await Promise.all([
     yahooChart(symbol, '5y', '1d').then((r) => r.bars as Bar[]),
-    yahooChart(symbol, 'max', '1wk').then((r) => r.bars as Bar[]),
+    HARDENING_ALERTS ? yahooChart(symbol, 'max', '1wk').then((r) => r.bars as Bar[]) : Promise.resolve([] as Bar[]),
   ])
   // deno-lint-ignore no-explicit-any
   return (entryEvents as any)({ ticker, daily, weekly, spyWeekly: spyW, vixWeekly: vixW }) as Entry[]
@@ -135,9 +136,9 @@ serve(async (req) => {
   for (const r of pos ?? []) add(r.ticker, r.user_id)
   const tickers = [...follows.keys()].sort().slice(0, MAX_TICKERS)
 
-  const [spyW, vixW] = await Promise.all(['SPY', '^VIX'].map(async (sym) => {
+  const [spyW, vixW] = HARDENING_ALERTS ? await Promise.all(['SPY', '^VIX'].map(async (sym) => {
     try { return (await yahooChart(sym, 'max', '1wk')).bars.map((b) => ({ t: String(b.t), c: b.c })) } catch { return [] }
-  }))
+  })) : [[], []]
 
   const report: Array<Record<string, unknown>> = []
   let written = 0

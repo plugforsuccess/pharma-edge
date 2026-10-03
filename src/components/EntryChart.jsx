@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { FEATURES } from '../lib/features'
 import { Maximize2 } from 'lucide-react'
 import { DiamondMarkers, LANE_PX } from './chartDiamonds'
 import {
@@ -42,20 +43,21 @@ function alpha(hex, a) {
   return `rgba(${parseInt(m[1], 16)}, ${parseInt(m[2], 16)}, ${parseInt(m[3], 16)}, ${a})`
 }
 
+// Echo and Tango right under the price (owner, 2026-10-03).
 export const SUB_PANES = [
+  ['echo', 'Echo'],
+  ['tango', 'Tango'],
   ['dist', '200-day'],
   ['rsi', 'RSI'],
   ['macd', 'MACD'],
   ['ivr', 'IV Rank'],
   ['ivhv', 'IV / HV'],
-  ['echo', 'Echo'],
-  ['tango', 'Tango'],
 ]
 export const LAYERS = [
-  ['hardening', 'Hardening ★'],
   ['bravoSignals', 'Bravo ◆'],
   ['exits', 'Exits'],
   ['bravo', 'Bravo band'],
+  ...(FEATURES.hardening ? [['hardening', 'Hardening ★']] : []),
 ]
 const PRICE_H = 340
 const SUB_H = 112
@@ -121,6 +123,10 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
     const line = (arr, i0 = 0) => arr.map((v, i) => (v == null ? { time: time[i] } : { time: time[i], value: v })).slice(i0)
     const quiet = { lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false }
     const paneOf = (k) => shown.indexOf(k)
+    // Create every pane up front, in order: the library appends a pane when
+    // a series asks for an index past the last one, so adding a lower pane's
+    // series first would land it in the wrong slot.
+    for (let k = 1; k < shown.length; k++) chart.addPane(true)
 
     // Price pane ---------------------------------------------------------
     if (showPrice) {
@@ -157,7 +163,7 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
     const signalSet = new Set(model.signals)
     const markers = []
     const stars = (n) => '★'.repeat(n)
-    if (on('hardening')) {
+    if (FEATURES.hardening && on('hardening')) {
       for (const sg of suite.signals) {
         if (sg.i < 0) continue // before the daily bars (weekly / monthly history)
         markers.push(sg.side === 'bull'

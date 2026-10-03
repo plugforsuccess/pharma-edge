@@ -1180,7 +1180,12 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   from B toward A, extensions 127.2 / 161.8 / 261.8% past B (green on an
   up swing, red on a down swing; 50 and 61.8 in gold), as price lines
   with axis tags and a list under the chart; the scale fits the
-  retracements and 127.2%. **X** clears. Pins + Fib are saved **on this
+  retracements and 127.2%. Labels say which end a level hangs from
+  (owner, 2026-10-03 — B read as A): axis tags "Fib 0% · B" … "Fib 100%
+  · A" and "Ext 127.2%", and the list splits into "Pullback from B
+  toward A" and "Targets past B" (the trading convention: retracements
+  measure the pullback from B, extensions run past B as multiples of
+  A→B). **X** clears. Pins + Fib are saved **on this
   device only**, per ticker (`cm:chart-tools:TICKER`); pins land on the
   nearest candle of any range (by calendar day across intraday / daily)
   and show "Your pins are outside this range" when they don't fit. Pins
@@ -1273,9 +1278,29 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   Every pane has a **violet title** (`PANE_TITLES`) and a small violet
   maximize button at its top right that opens that pane alone full
   screen (`FullPane` in `LeapsEntry.jsx`; Esc or X closes).
-  **Timeframe: weekly or monthly, never daily** (owner, 2026-10-03: daily
-  Hardening isn't needed). The card's Weekly | Monthly switch
-  (`cm:suite-tf`, default weekly) runs the whole suite on that interval:
+  **Hardening is hidden** (owner, 2026-10-03: "prevents trades and isn't
+  helpful" — maybe rebuilt later): `FEATURES.hardening = false` hides its
+  layer, the buy-zone confirmation row, the backtest tab / with-without
+  table, and the Signal suite tiles fall back to the **Bravo diamonds**
+  (Entry = latest Bravo bull, Sell = fresh Bravo bear or exit); the
+  backtest tabs read Buy zone · Bravo ◆ · Sell signals (Bravo bears +
+  exits). The Hardening entry alert is off too (`HARDENING_ALERTS` in
+  `entryEvents.js`; entry-scan v2 is deployed with a buy-zone-only subset
+  of the shared files — redeploy from the full `_shared` copies to bring
+  it back). The Hardening code and checks stay.
+  **Bravo diamonds = TradingView's** (owner, 2026-10-03: "extremely
+  important"): exactly the Pine's plotted event — the bar the raw
+  condition turns on, **no cooldown** (`bravo.bullOn` / `bearOn`); the
+  layer setting moved to `cm:entry-layers:v2` (default Bravo ◆ + Exits),
+  since choices saved before the layer existed left it off. **Panes:**
+  Echo and Tango sit right under the price (`SUB_PANES` order);
+  `EntryChart` creates every pane up front (`chart.addPane(true)`) — the
+  library appends a pane when a series asks for an index past the last,
+  so out-of-order series landed in the wrong pane.
+  **Timeframe: Daily (default) · Weekly · Monthly** (owner, 2026-10-03;
+  daily = the chart's own bars, like TradingView on a daily chart — no
+  extra fetch; Daily came back once Hardening was hidden). The card's
+  switch (`cm:suite-tf:v2`) runs the whole suite on that interval:
   `leaps-entry` with `suite: '1wk' | '1mo'` returns the ticker's full
   Yahoo history ("max") plus SPY / ^VIX on the same interval (the
   200-bar warm-ups need it). `normalizePeriods` merges Yahoo's live

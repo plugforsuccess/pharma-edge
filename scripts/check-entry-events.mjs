@@ -63,8 +63,8 @@ const lastMonday = wk[wk.length - 1].t
 const fri = new Date(`${lastMonday}T12:00:00Z`); fri.setUTCDate(fri.getUTCDate() + 4)
 const wed = new Date(`${lastMonday}T12:00:00Z`); wed.setUTCDate(wed.getUTCDate() + 2)
 const dayBar = (t) => [{ t: t.toISOString().slice(0, 10), o: 1, h: 1, l: 1, c: 1, v: 1 }]
-const onFri = entryEvents({ ticker: 'W', daily: dayBar(fri), weekly: wk, suiteParams: loose })
-const onWed = entryEvents({ ticker: 'W', daily: dayBar(wed), weekly: wk, suiteParams: loose })
+const onFri = entryEvents({ ticker: 'W', daily: dayBar(fri), weekly: wk, suiteParams: loose, hardening: true })
+const onWed = entryEvents({ ticker: 'W', daily: dayBar(wed), weekly: wk, suiteParams: loose, hardening: true })
 eq('weekly events are Hardening bulls', [...onFri, ...onWed].every((x) => x.kind === 'entry_hardening_bull'), true)
 eq('mid-week, the open week never alerts', onWed.every((x) => x.event_date !== lastMonday), true)
 eq('weekly event dates are week starts', [...onFri, ...onWed].every((x) => periodKey(x.event_date, '1wk') === x.event_date), true)
@@ -78,13 +78,15 @@ if (allBulls.length) {
   const mon = cut[cut.length - 1].t
   const f2 = new Date(`${mon}T12:00:00Z`); f2.setUTCDate(f2.getUTCDate() + 4)
   const w2 = new Date(`${mon}T12:00:00Z`); w2.setUTCDate(w2.getUTCDate() + 2)
-  eq('bull in the closed week alerts on Friday', entryEvents({ ticker: 'W', daily: dayBar(f2), weekly: cut, suiteParams: loose }).map((x) => x.event_date).includes(mon), true)
-  eq('same bull mid-week (week still open) does not', entryEvents({ ticker: 'W', daily: dayBar(w2), weekly: cut, suiteParams: loose }).map((x) => x.event_date).includes(mon), false)
+  eq('bull in the closed week alerts on Friday', entryEvents({ ticker: 'W', daily: dayBar(f2), weekly: cut, suiteParams: loose, hardening: true }).map((x) => x.event_date).includes(mon), true)
+  eq('same bull mid-week (week still open) does not', entryEvents({ ticker: 'W', daily: dayBar(w2), weekly: cut, suiteParams: loose, hardening: true }).map((x) => x.event_date).includes(mon), false)
   // The next Wednesday, last week is closed → it alerts then.
   const next = wk.slice(0, b.i + 2)
   const w3 = new Date(`${next[next.length - 1].t}T12:00:00Z`); w3.setUTCDate(w3.getUTCDate() + 2)
-  eq('a missed Friday still alerts the next week', entryEvents({ ticker: 'W', daily: dayBar(w3), weekly: next, suiteParams: loose }).map((x) => x.event_date).includes(mon), true)
+  eq('a missed Friday still alerts the next week', entryEvents({ ticker: 'W', daily: dayBar(w3), weekly: next, suiteParams: loose, hardening: true }).map((x) => x.event_date).includes(mon), true)
 }
+
+eq('Hardening alerts are off by default', entryEvents({ ticker: 'W', daily: dayBar(fri), weekly: wk, suiteParams: loose }).some((x) => x.kind === 'entry_hardening_bull'), false)
 
 console.log(`entry-event checks: ${passed} passed, ${failures.length} failed`)
 if (failures.length) {
