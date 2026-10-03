@@ -146,6 +146,11 @@ export function suiteModel(bars, { spy = [], vix = [], params = SUITE_PARAMS } =
   const bravoBearRaw = bars.map((_, i) => ok(i) && close[i] < basis[i] && fast[i] < basis[i] && slope[i] < 0 && close[i] < close[i - 1])
   const bravoBull = cooldown(bravoBullRaw, p.bravoCooldown)
   const bravoBear = cooldown(bravoBearRaw, p.bravoCooldown)
+  // Diamonds: the bar a condition turns on (Pine's "visual" event), at most
+  // one per cooldown — Bravo's raw condition flickers on every up / down
+  // close, which crowded the chart.
+  const bravoBullOn = cooldown(bravoBullRaw.map((x, i) => x && !bravoBullRaw[i - 1]), p.bravoCooldown)
+  const bravoBearOn = cooldown(bravoBearRaw.map((x, i) => x && !bravoBearRaw[i - 1]), p.bravoCooldown)
   // Regime: above / below the basis with the fast EMA on the same side.
   const regime = bars.map((_, i) => (basis[i] == null || fast[i] == null ? 0
     : close[i] > basis[i] && fast[i] > basis[i] ? 1 : close[i] < basis[i] && fast[i] < basis[i] ? -1 : 0))
@@ -207,7 +212,7 @@ export function suiteModel(bars, { spy = [], vix = [], params = SUITE_PARAMS } =
 
   return {
     params: p,
-    bravo: { basis, upperBand, lowerBand, fast, bull: bravoBull, bear: bravoBear, regime },
+    bravo: { basis, upperBand, lowerBand, fast, bull: bravoBull, bear: bravoBear, bullOn: bravoBullOn, bearOn: bravoBearOn, regime },
     echo: { line: echo, ...echoRails, bull: echoBull, bear: echoBear },
     tango: { line: tango, ...tangoRails, bull: tangoBull, bear: tangoBear },
     signals,
@@ -318,7 +323,8 @@ export function suiteOnDays(dailyBars, periodBars, suite, tf) {
     tf, closeDays: cd,
     bravo: {
       basis: step(suite.bravo.basis), upperBand: step(suite.bravo.upperBand), lowerBand: step(suite.bravo.lowerBand),
-      fast: step(suite.bravo.fast), bull: flags(suite.bravo.bull), bear: flags(suite.bravo.bear), regime: step(suite.bravo.regime).map((x) => x ?? 0),
+      fast: step(suite.bravo.fast), bull: flags(suite.bravo.bull), bear: flags(suite.bravo.bear),
+      bullOn: flags(suite.bravo.bullOn), bearOn: flags(suite.bravo.bearOn), regime: step(suite.bravo.regime).map((x) => x ?? 0),
     },
     echo: osc(suite.echo),
     tango: osc(suite.tango),

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import clsx from 'clsx'
-import { ArrowDown, ArrowLeft, ArrowUp, Check, ChevronRight, Maximize2, RotateCcw, Search, X } from 'lucide-react'
+import { ArrowDown, ArrowLeft, ArrowUp, Check, ChevronRight, Maximize2, Plus, RotateCcw, Search, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { CHART_TICKERS } from '../lib/chartTickers'
 import { entryModel, DEFAULT_PARAMS, HORIZONS } from '../utils/indicators'
@@ -20,7 +20,7 @@ import NumberInput from '../components/NumberInput'
 const PARAMS_KEY = 'cm:entry-params'
 const PANES_KEY = 'cm:entry-panes:v2'
 const LAYERS_KEY = 'cm:entry-layers'
-const DEFAULT_LAYERS = ['hardening', 'exits']
+const DEFAULT_LAYERS = ['hardening', 'bravoSignals', 'exits']
 // The signal suite runs on weekly or monthly bars (owner, 2026-10-03: not
 // daily). A Hardening bull this many trading days from a buy-zone signal
 // (either side) confirms it.
@@ -232,24 +232,10 @@ export default function LeapsEntry() {
                   </div>
                 )}
               </div>
-              <div className="px-3 pb-2 flex flex-wrap gap-1.5" role="group" aria-label="Panels">
-                {SUB_PANES.map(([k, label]) => (
-                  <button key={k} type="button" onClick={() => togglePane(k)} aria-pressed={panes.includes(k)}
-                    className={clsx('min-h-[32px] px-2.5 rounded-lg text-[11px] font-semibold border transition',
-                      panes.includes(k) ? 'bg-bg-elev border-border-hover text-fg' : 'border-hairline text-muted hover:text-subtle')}>
-                    {label}
-                  </button>
-                ))}
-              </div>
-              <div className="px-3 pb-2 flex flex-wrap items-center gap-1.5" role="group" aria-label="On the price chart">
-                <span className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold px-1">On price</span>
-                {LAYERS.map(([k, label]) => (
-                  <button key={k} type="button" onClick={() => toggleLayer(k)} aria-pressed={layers.includes(k)}
-                    className={clsx('min-h-[32px] px-2.5 rounded-lg text-[11px] font-semibold border transition',
-                      layers.includes(k) ? 'bg-bg-elev border-border-hover text-fg' : 'border-hairline text-muted hover:text-subtle')}>
-                    {label}
-                  </button>
-                ))}
+              {/* What's drawn: indicator panels, then layers on the price chart. */}
+              <div className="px-5 pb-3 space-y-3">
+                <ToggleGroup label="Panels" items={SUB_PANES} isOn={(k) => panes.includes(k)} onToggle={togglePane} />
+                <ToggleGroup label="On price" items={LAYERS} isOn={(k) => layers.includes(k)} onToggle={toggleLayer} />
               </div>
               <EntryChart bars={bars} model={model} suite={suite} suiteLabel={SUITE_TIMEFRAMES[suiteTf].label} panes={panes} layers={layers} onHover={setHover} onExpand={setExpanded} jump={jump} />
               <div className="px-5 py-3 border-t border-hairline flex flex-wrap gap-x-4 gap-y-1.5 text-[11px] text-muted">
@@ -260,7 +246,11 @@ export default function LeapsEntry() {
                 <Key glyph={<span className="inline-block w-3 h-2.5 rounded-sm bg-green-400/15 align-middle" />}>Buy zone</Key>
                 {layers.includes('hardening') && <Key className="text-amber-300" glyph="▲">Hardening bull</Key>}
                 {layers.includes('hardening') && <Key className="text-rose-300" glyph="▼">Hardening bear</Key>}
-                {layers.includes('exits') && <Key className="text-rose-300/60" glyph="■">Exit (E Echo · T Tango · B Bravo)</Key>}
+                {layers.includes('bravoSignals') && <Key className="text-suite-bull" glyph="◆">Bravo bull</Key>}
+                {layers.includes('bravoSignals') && <Key className="text-suite-bear" glyph="◆">Bravo bear</Key>}
+                {layers.includes('exits') && <Key className="text-suite-bear" glyph="◇">Exit (E Echo · T Tango · B Bravo)</Key>}
+                {(panes.includes('echo') || panes.includes('tango')) && <Key className="text-suite-bull" glyph="◆">Echo / Tango bull</Key>}
+                {(panes.includes('echo') || panes.includes('tango')) && <Key className="text-suite-bear" glyph="◆">Echo / Tango bear</Key>}
               </div>
             </section>
           </div>
@@ -296,6 +286,29 @@ export default function LeapsEntry() {
   )
 }
 const NO_GATES = new Set()
+
+// A labelled row of on / off chips. On: violet tint + check. Off: neutral + plus.
+function ToggleGroup({ label, items, isOn, onToggle }) {
+  return (
+    <div role="group" aria-label={label}>
+      <div className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold mb-1.5">{label}</div>
+      <div className="flex flex-wrap gap-1.5">
+        {items.map(([k, name]) => {
+          const on = isOn(k)
+          return (
+            <button key={k} type="button" onClick={() => onToggle(k)} aria-pressed={on}
+              className={clsx('min-h-[34px] pl-2 pr-2.5 rounded-full text-xs font-semibold border inline-flex items-center gap-1 transition',
+                on ? 'bg-violet-400/12 border-violet-400/45 text-violet-200 hover:bg-violet-400/18'
+                  : 'bg-transparent border-border text-subtle hover:text-fg hover:border-border-hover')}>
+              {on ? <Check size={12} strokeWidth={3} aria-hidden /> : <Plus size={12} strokeWidth={2.5} aria-hidden />}
+              {name}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
 
 // One pane full screen. Esc or X closes; the page doesn't scroll behind it.
 function FullPane({ title, onClose, children }) {

@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Maximize2 } from 'lucide-react'
+import { DiamondMarkers, LANE_PX } from './chartDiamonds'
 import {
   createChart, createSeriesMarkers, BaselineSeries, CandlestickSeries, HistogramSeries, LineSeries,
   ColorType, CrosshairMode, LineStyle, LineType,
@@ -52,11 +53,15 @@ export const SUB_PANES = [
 ]
 export const LAYERS = [
   ['hardening', 'Hardening ★'],
+  ['bravoSignals', 'Bravo ◆'],
   ['exits', 'Exits'],
   ['bravo', 'Bravo band'],
 ]
-const PRICE_H = 320
-const SUB_H = 96
+const PRICE_H = 340
+const SUB_H = 112
+// Header strip above each pane's data (title + live values), px.
+const HEADER_PRICE = 46
+const HEADER_SUB = 30
 export const PANE_TITLES = {
   price: 'Price', dist: '% vs 200-day', rsi: 'RSI 14', macd: 'MACD 12·26·9', ivr: 'IV Rank',
   ivhv: 'IV vs HV 20', echo: 'Echo', tango: 'Tango',
@@ -86,6 +91,7 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
     const on = (k) => layers.includes(k) && suite
     const t = {
       up: token('--color-green-400'), down: token('--color-red-400'), gold: token('--color-amber-400'),
+      suiteBull: token('--color-suite-bull'), suiteBear: token('--color-suite-bear'), bg: token('--color-bg'),
       goldHi: token('--color-amber-200'), fg: token('--color-fg'), muted: token('--color-muted'),
       subtle: token('--color-subtle'), faint: token('--color-faint'), border: token('--color-border'), borderHi: token('--color-border-hover'),
     }
@@ -159,8 +165,26 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
           : { time: time[sg.i], position: 'aboveBar', shape: 'arrowDown', color: t.down, size: 1.5, text: stars(sg.stars) })
       }
     }
+    // Bravo signals: solid diamonds with a B — blue under the candle when its
+    // bull trend turns on, pink above when the bear one does. Exits: hollow
+    // pink diamonds above the candle with the reason inside (E / T / B),
+    // stacked over a Bravo bear diamond on the same day.
+    const priceDiamonds = []
+    const bravoBearDays = new Set()
+    if (on('bravoSignals')) {
+      suite.bravo.bullOn.forEach((f, i) => { if (f) priceDiamonds.push({ time: time[i], price: bars[i].l, offset: 15, color: t.suiteBull, label: 'B' }) })
+      suite.bravo.bearOn.forEach((f, i) => { if (f) { bravoBearDays.add(i); priceDiamonds.push({ time: time[i], price: bars[i].h, offset: -15, color: t.suiteBear, label: 'B' }) } })
+    }
     if (on('exits')) {
-      for (const x of suite.exits) if (x.i >= 0) markers.push({ time: time[x.i], position: 'aboveBar', shape: 'square', color: alpha(t.down, 0.6), size: 0.6, text: x.why.join('') })
+      for (const x of suite.exits) {
+        if (x.i < 0) continue
+        priceDiamonds.push({ time: time[x.i], price: bars[x.i].h, offset: bravoBearDays.has(x.i) ? -36 : -15, color: t.suiteBear, label: x.why.join(''), hollow: true })
+      }
+    }
+    if (priceDiamonds.length) {
+      const pd = new DiamondMarkers({ outline: t.bg, size: 7 })
+      candles.attachPrimitive(pd)
+      pd.setPoints(priceDiamonds)
     }
     for (const i of model.golden) markers.push({ time: time[i], position: 'aboveBar', shape: 'circle', color: t.gold, text: 'Golden cross', size: 1 })
     for (const i of model.death) markers.push({ time: time[i], position: 'aboveBar', shape: 'circle', color: t.down, text: 'Death cross', size: 1 })
@@ -176,6 +200,8 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
 
     // Sub-panes ----------------------------------------------------------
     const fixed = (lo, hi) => () => ({ priceRange: { minValue: lo, maxValue: hi } })
+    // 0–100 scales: blank tick labels past the ends (the header strip sits above 100).
+    const pct100 = (v) => (v > 100.5 || v < -0.5 ? '' : v.toFixed(0))
     const p = model.params
     if (paneOf('dist') >= 0) {
       const pi = paneOf('dist')
@@ -196,7 +222,7 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
     if (paneOf('rsi') >= 0) {
       const r = chart.addSeries(LineSeries, {
         ...quiet, lastValueVisible: true, color: t.fg, lineWidth: 1.5, autoscaleInfoProvider: fixed(0, 100),
-        priceFormat: { type: 'custom', formatter: (v) => v.toFixed(0) },
+        priceFormat: { type: 'custom', formatter: pct100 },
       }, paneOf('rsi'))
       r.setData(line(model.rsi))
       r.createPriceLine({ price: 70, color: alpha(t.down, 0.6), lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: false })
@@ -214,7 +240,7 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
     if (paneOf('ivr') >= 0) {
       const s = chart.addSeries(LineSeries, {
         ...quiet, lastValueVisible: true, color: t.gold, lineWidth: 1.5, autoscaleInfoProvider: fixed(0, 100),
-        priceFormat: { type: 'custom', formatter: (v) => v.toFixed(0) },
+        priceFormat: { type: 'custom', formatter: pct100 },
       }, paneOf('ivr'))
       s.setData(line(model.ivRank))
       s.createPriceLine({ price: p.ivRankMax, color: t.up, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, axisLabelColor: alpha(t.up, 0.85), axisLabelTextColor: '#000' })
@@ -239,22 +265,23 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
       chart.addSeries(LineSeries, rail, pi).setData(line(o.lower))
       const ln = chart.addSeries(BaselineSeries, {
         ...quiet, lastValueVisible: true, baseValue: { type: 'price', price: 0 }, lineWidth: 1.5, lineType: LineType.WithSteps,
-        topLineColor: t.up, topFillColor1: alpha(t.up, 0.2), topFillColor2: alpha(t.up, 0.02),
-        bottomLineColor: t.down, bottomFillColor1: alpha(t.down, 0.02), bottomFillColor2: alpha(t.down, 0.2),
+        topLineColor: t.suiteBull, topFillColor1: alpha(t.suiteBull, 0.6), topFillColor2: alpha(t.suiteBull, 0.12),
+        bottomLineColor: t.suiteBear, bottomFillColor1: alpha(t.suiteBear, 0.12), bottomFillColor2: alpha(t.suiteBear, 0.55),
         priceFormat: { type: 'custom', formatter: (v) => v.toFixed(0) },
       }, pi)
       ln.setData(line(o.line))
-      const dots = []
-      o.bull.forEach((f, i) => { if (f) dots.push({ time: time[i], position: 'atPriceMiddle', price: o.lower[i], shape: 'circle', color: t.up, size: 0.7 }) })
-      o.bear.forEach((f, i) => { if (f) dots.push({ time: time[i], position: 'atPriceMiddle', price: o.upper[i], shape: 'circle', color: t.down, size: 0.7 }) })
-      dots.sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0))
-      createSeriesMarkers(ln, dots)
+      // The pillar's signals in a lane along the pane's bottom: blue diamonds (bull), pink (bear).
+      const pts = []
+      o.bull.forEach((f, i) => { if (f) pts.push({ time: time[i], color: t.suiteBull }) })
+      o.bear.forEach((f, i) => { if (f) pts.push({ time: time[i], color: t.suiteBear }) })
+      const dia = new DiamondMarkers({ outline: t.bg, lane: true, size: 8 })
+      ln.attachPrimitive(dia)
+      dia.setPoints(pts)
     }
     osc('echo', suite?.echo)
     osc('tango', suite?.tango)
 
     // Indicator panes: little padding, so 0–100 scales stay 0–100 when tall.
-    shown.forEach((k, pi) => { if (k !== 'price') chart.priceScale('right', pi).applyOptions({ scaleMargins: { top: 0.1, bottom: 0.06 } }) })
 
     // Pane heights: price first, the rest equal.
     const all = chart.panes()
@@ -279,9 +306,22 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
     chart.subscribeCrosshairMove(move)
 
     // Legend positions (each pane's top edge).
+    // Each pane keeps a header strip (title + values) above its data: the
+    // top scale margin is the header's height over the pane's height.
     const measure = () => {
       let y = 0
-      setTops(chart.panes().map((pane) => { const top = y; y += pane.getHeight() + 1; return top }))
+      const ps = chart.panes()
+      ps.forEach((pane, pi) => {
+        const h = pane.getHeight()
+        if (!h) return
+        const top = Math.min(0.45, (shown[pi] === 'price' ? HEADER_PRICE : HEADER_SUB) / h)
+        // Echo / Tango keep a signal lane under their line.
+        const lane = shown[pi] === 'echo' || shown[pi] === 'tango'
+        const bottom = shown[pi] === 'price' ? 0.06 : Math.min(0.45, lane ? (LANE_PX + 6) / h : 0.05)
+        chart.priceScale('right', pi).applyOptions({ scaleMargins: { top, bottom } })
+        if (shown[pi] === 'price') chart.priceScale('zone', pi).applyOptions({ scaleMargins: { top, bottom: 0 } })
+      })
+      setTops(ps.map((pane) => { const top = y; y += pane.getHeight() + 1; return top }))
     }
     const raf = requestAnimationFrame(measure)
     const ro = new ResizeObserver(() => requestAnimationFrame(measure))
@@ -326,17 +366,17 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
     dist: [{ label: '', value: pct(v(model?.dist)), cls: v(model?.dist) < 0 ? 'text-rose-300' : 'text-green-400' }, { label: `±${model?.params.bandPct}% band`, value: '', cls: 'text-muted' }],
     rsi: [{ label: '', value: fmt(v(model?.rsi), 1), cls: 'text-fg' }],
     macd: [
-      { label: 'MACD', value: fmt(v(model?.macd.line)), cls: 'text-amber-300', swatch: 'bg-amber-400' },
-      { label: 'Signal', value: fmt(v(model?.macd.signal)), cls: 'text-subtle', swatch: 'bg-subtle' },
+      { label: '', value: fmt(v(model?.macd.line)), cls: 'text-amber-300', swatch: 'bg-amber-400' },
+      { label: '', value: fmt(v(model?.macd.signal)), cls: 'text-subtle', swatch: 'bg-subtle' },
       { label: 'Hist', value: fmt(v(model?.macd.hist)), cls: v(model?.macd.hist) < 0 ? 'text-rose-300' : 'text-green-400' },
     ],
     ivr: [{ label: model?.ivSource === 'iv' ? '' : 'HV stand-in', value: fmt(v(model?.ivRank), 0), cls: v(model?.ivRank) < model?.params.ivRankMax ? 'text-green-400' : 'text-amber-300' }],
     echo: [
-      { label: '', value: fmt(v(suite?.echo.line), 1), cls: v(suite?.echo.line) < 0 ? 'text-rose-300' : 'text-green-400' },
+      { label: '', value: fmt(v(suite?.echo.line), 1), cls: v(suite?.echo.line) < 0 ? 'text-suite-bear' : 'text-suite-bull' },
       { label: 'rails', value: `${fmt(v(suite?.echo.upper), 0)} / ${fmt(v(suite?.echo.lower), 0)}`, cls: 'text-subtle' },
     ],
     tango: [
-      { label: '', value: fmt(v(suite?.tango.line), 1), cls: v(suite?.tango.line) < 0 ? 'text-rose-300' : 'text-green-400' },
+      { label: '', value: fmt(v(suite?.tango.line), 1), cls: v(suite?.tango.line) < 0 ? 'text-suite-bear' : 'text-suite-bull' },
       { label: 'rails', value: `${fmt(v(suite?.tango.upper), 0)} / ${fmt(v(suite?.tango.lower), 0)}`, cls: 'text-subtle' },
     ],
     ivhv: [
@@ -354,8 +394,8 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
       ) : null))}
       {shown.map((k, pi) => (
         <div key={k}>
-          <div className="absolute left-3 right-[104px] pointer-events-none flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] leading-4 font-mono-tab"
-            style={{ top: (tops[pi] ?? 0) + 6 }}>
+          <div className={`absolute left-3 right-[104px] pointer-events-none flex items-center gap-x-3 gap-y-0.5 text-[11px] leading-4 font-mono-tab ${k === 'price' ? 'flex-wrap' : 'flex-nowrap overflow-hidden whitespace-nowrap !gap-x-2'}`}
+            style={{ top: (tops[pi] ?? 0) + 7 }}>
             <span className="bg-bg/80 rounded px-1 -mx-1 text-[11px] font-semibold text-violet-300">
               {PANE_TITLES[k]}{suiteLabel && (k === 'echo' || k === 'tango') ? ` · ${suiteLabel}` : ''}
             </span>

@@ -1125,7 +1125,10 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   (no look-ahead), golden / death crosses, buy triangles, lighter MACD
   confirmation dots, buy-zone shading; then % from the 200 (±band), RSI 14
   (30 / level / 70), MACD 12-26-9, IV Rank 252 (cutoff line), IV vs HV20.
-  Panes toggle (`cm:entry-panes`). **Buy zone** = every condition on the
+  Panes toggle (`cm:entry-panes`) — the chip rows are labelled groups
+  ("Panels", "On price"; `ToggleGroup` in `LeapsEntry.jsx`): on = violet
+  tint + check, off = neutral outline + plus, so an off chip reads as
+  "add", never as disabled. **Buy zone** = every condition on the
   same day: within ±band of the 200, 200 rising, 50 > 200, RSI below the
   level within the lookback and up today, IV Rank below the cutoff.
   MACD cross up within 5 days = optional confirmation. Thresholds (band,
@@ -1155,6 +1158,26 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   tiles, "fresh" = within 10 trading days, plus each pillar's state; the
   backtest has tabs Buy zone / Hardening ▲ / Sell signals (sell "win" =
   the stock fell after), and the Hardening tab lists near-misses by gate.
+  Each pane has a **header strip above its data** (owner, 2026-10-03):
+  the title and live values sit on their own row — the pane's top scale
+  margin is the header height (46px price, 30px others) over the pane
+  height, recomputed on resize; 0–100 scales blank tick labels past 100.
+  **Pillar signals are diamonds in the suite's colors** (owner,
+  2026-10-03): blue = bull, pink = bear (`--color-suite-bull` /
+  `--color-suite-bear` tokens, signals only — gains / losses stay green /
+  red), styled after TradingView's (owner's reference): a soft fill, a
+  bright outline in the same hue and a thin background-color ring. Echo /
+  Tango diamonds sit in a **signal lane** along the bottom of their pane
+  (a faint strip; the line keeps a bottom margin above it), and their
+  areas are blue above zero / pink below. On the price chart (owner,
+  2026-10-03): **Bravo diamonds** (layer "Bravo ◆", on by default) — solid,
+  "B" inside, blue under the candle where Bravo's bull condition turns on,
+  pink above where the bear one does, at most one per 5-bar cooldown
+  (`bravo.bullOn` / `bearOn`); **exits** are hollow pink diamonds above
+  the candle with the reason inside (E / T / B), stacked over a Bravo
+  bear diamond on the same day. Letters go inside the diamond. Drawn by
+  `components/chartDiamonds.js` (a series primitive — the library has no
+  diamond marker). Hardening keeps its gold ▲ / red ▼ arrows.
   Every pane has a **violet title** (`PANE_TITLES`) and a small violet
   maximize button at its top right that opens that pane alone full
   screen (`FullPane` in `LeapsEntry.jsx`; Esc or X closes).
