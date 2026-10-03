@@ -354,9 +354,9 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
       ) : null))}
       {shown.map((k, pi) => (
         <div key={k}>
-          <div className="absolute left-3 right-[104px] pointer-events-none flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10.5px] leading-4 font-mono-tab"
+          <div className="absolute left-3 right-[104px] pointer-events-none flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] leading-4 font-mono-tab"
             style={{ top: (tops[pi] ?? 0) + 6 }}>
-            <span className="bg-bg/80 rounded px-1 -mx-1 font-sans text-[11px] font-semibold tracking-tight text-violet-300">
+            <span className="bg-bg/80 rounded px-1 -mx-1 text-[11px] font-semibold text-violet-300">
               {PANE_TITLES[k]}{suiteLabel && (k === 'echo' || k === 'tango') ? ` · ${suiteLabel}` : ''}
             </span>
             {legends[k].map((l, li) => (

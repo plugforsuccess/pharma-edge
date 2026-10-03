@@ -669,8 +669,14 @@ brand/gold  #f0b44c    gain/green  #2fd17c    loss/red #e5484d
 - Long Call → green
 - Watch → zinc/grey
 
-**Typography:** System monospace for hash values and trade data. Default
-Tailwind sans for UI copy.
+**Typography** (owner, 2026-10-03 — mono numbers clashed with the copy):
+one family, Inter Tight, for copy **and** numbers; numbers get tabular
+(fixed-width) digits via `.font-mono-tab` (the name is historical — it
+no longer sets a monospace font), so columns still line up. Monospace
+(`font-mono`, JetBrains Mono) only for hashes, commit SHAs and OCC
+symbols. Prefer one size scale per screen: 11px meta / eyebrows
+(uppercase + tracking only for eyebrows and badges), 12px secondary,
+14px body, 16px tile titles, larger only for hero numbers.
 
 **Line height** is opened up app-wide in `@theme` (text-xs 18px, text-sm
 22px). **No (i) info pop-ups for now** (removed 2026-10-02 at the

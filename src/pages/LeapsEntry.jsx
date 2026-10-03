@@ -242,7 +242,7 @@ export default function LeapsEntry() {
                 ))}
               </div>
               <div className="px-3 pb-2 flex flex-wrap items-center gap-1.5" role="group" aria-label="On the price chart">
-                <span className="text-[10px] uppercase tracking-wider text-muted font-semibold px-1">On price</span>
+                <span className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold px-1">On price</span>
                 {LAYERS.map(([k, label]) => (
                   <button key={k} type="button" onClick={() => toggleLayer(k)} aria-pressed={layers.includes(k)}
                     className={clsx('min-h-[32px] px-2.5 rounded-lg text-[11px] font-semibold border transition',
@@ -380,7 +380,7 @@ function StatusPanel({ s, model, params, suite, confirmDays, tfLabel }) {
       <div className="relative px-5 pt-5 pb-4 flex items-center gap-4">
         <div className="flex-1 min-w-0">
           <div className="text-[11px] uppercase tracking-[0.14em] text-muted font-semibold">Buy zone · {day(s.t)}</div>
-          <div className={clsx('mt-1 text-3xl font-display font-semibold tracking-tight', yes ? 'text-green-400' : 'text-fg')}>
+          <div className={clsx('mt-1 text-3xl font-bold tracking-tight', yes ? 'text-green-400' : 'text-fg')}>
             {yes ? 'YES' : 'NO'}
           </div>
           <div className="text-xs text-subtle mt-0.5">
@@ -628,7 +628,7 @@ function Backtest({ model, suite, pack, confirmDays, onJump }) {
                 <tr key={`${tr.t}-${tr.tag}`} {...rowJump(tr.jumpI ?? tr.i, tr.t)}>
                   <td className="pl-5 pr-1 py-2.5 text-fg whitespace-nowrap">
                     {view.dateFmt ? view.dateFmt(tr.t) : shortDay(tr.t)}
-                    {tr.tag && <span className={clsx('block text-[10px] leading-3 mt-0.5',
+                    {tr.tag && <span className={clsx('block text-[11px] leading-4 mt-0.5',
                       view.sell ? 'text-rose-300/80' : tab === 'hardening' ? 'text-amber-300' : 'text-green-400/70')}>{tr.tag}</span>}
                   </td>
                   <td className="px-1.5 py-2.5 text-right text-subtle">{money(tr.price)}</td>
@@ -789,7 +789,7 @@ function SignalTile({ tone, icon: Icon, label, title, stars, sub, onClick }) {
         <span className={clsx('h-6 w-6 rounded-full flex items-center justify-center shrink-0', c.icon)} aria-hidden><Icon size={13} strokeWidth={2.5} /></span>
         <span className={clsx('text-[11px] uppercase tracking-[0.12em] font-semibold', c.label)}>{label}</span>
       </span>
-      <span className="mt-3 text-[15px] font-semibold text-fg leading-tight">{title}</span>
+      <span className="mt-3 text-base font-semibold text-fg leading-tight">{title}</span>
       {stars ? <span className="mt-0.5 text-xs text-amber-300 tracking-wider" aria-label={`${stars} stars`}>{'★'.repeat(stars)}<span className="text-faint">{'★'.repeat(4 - stars)}</span></span> : null}
       <span className="mt-1 text-xs text-muted leading-4">{sub}</span>
       {onClick && <span className="mt-auto pt-2 text-[11px] font-semibold text-subtle inline-flex items-center gap-0.5">View on chart <ChevronRight size={12} aria-hidden /></span>}
@@ -813,7 +813,7 @@ function PillarRow({ name, what, value, valueTone, mono, chip, latest, latestTon
         <span className="min-w-0">
           <span className={clsx('block h-5 text-sm leading-5 font-semibold truncate', mono && 'font-mono-tab', TONE_TEXT[valueTone])}>{value}</span>
           <span className="block h-4 mt-1">
-            {chip && <span className="inline-block max-w-full truncate whitespace-nowrap align-top text-[10px] leading-4 font-semibold uppercase tracking-wider px-1.5 rounded bg-bg-elev text-muted">{chip}</span>}
+            {chip && <span className="inline-block max-w-full truncate whitespace-nowrap align-top text-[11px] leading-4 font-medium px-1.5 rounded bg-bg-elev text-subtle">{chip}</span>}
           </span>
         </span>
         <span className="text-right">
