@@ -1,20 +1,48 @@
 // Diamond markers for lightweight-charts (it only ships circle / square /
 // arrow markers). The signal suite's pillar signals use the suite's own
-// standard: blue diamonds for bull, pink for bear (owner, 2026-10-03).
+// standard: blue diamonds for bull, pink for bear (owner, 2026-10-03) —
+// styled after TradingView's: a soft fill, a bright outline in the same
+// hue, and a thin ring in the background color so they read on any line.
 //
-//   const d = new DiamondMarkers(bgColor)
+//   const d = new DiamondMarkers({ outline: bg, lane: true })
 //   series.attachPrimitive(d)
-//   d.setPoints([{ time, price, color, offset?, text? }])
+//   d.setPoints([{ time, color, price?, offset?, text? }])
 //
-// `price` places the diamond on the series' scale; `offset` nudges it in
-// pixels (negative = up), e.g. above a candle's high. `text` is a small
-// label drawn just beyond the diamond, on the same side as the offset.
+// lane: true puts every diamond in a strip along the bottom of the pane
+// (a faint band, like TradingView's signal row) — give the series a bottom
+// scale margin so the line stays above it. Otherwise `price` places the
+// diamond on the series' scale and `offset` nudges it in pixels (negative =
+// up), e.g. above a candle's high; `text` is a small label beyond it.
 
-const HALF = 5 // half the diagonal, px
+export const LANE_PX = 30
+
+function rgba(hex, a) {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(hex).trim())
+  if (!m) return hex
+  return `rgba(${parseInt(m[1], 16)}, ${parseInt(m[2], 16)}, ${parseInt(m[3], 16)}, ${a})`
+}
+// The hue mixed toward white — the bright outline.
+function tint(hex, k) {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(hex).trim())
+  if (!m) return hex
+  const c = [m[1], m[2], m[3]].map((x) => Math.round(parseInt(x, 16) + (255 - parseInt(x, 16)) * k))
+  return `rgb(${c[0]}, ${c[1]}, ${c[2]})`
+}
+
+function diamond(ctx, x, y, r) {
+  ctx.beginPath()
+  ctx.moveTo(x, y - r)
+  ctx.lineTo(x + r, y)
+  ctx.lineTo(x, y + r)
+  ctx.lineTo(x - r, y)
+  ctx.closePath()
+}
 
 export class DiamondMarkers {
-  constructor(outline) {
+  constructor({ outline, lane = false, size = 8 } = {}) {
     this._outline = outline
+    this._lane = lane
+    this._r = size
     this._points = []
     this._chart = null
     this._series = null
@@ -23,35 +51,49 @@ export class DiamondMarkers {
     this._view = {
       zOrder: () => 'top',
       renderer: () => ({
+        drawBackground(target) {
+          if (!self._lane) return
+          target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.025)'
+            ctx.fillRect(0, mediaSize.height - LANE_PX, mediaSize.width, LANE_PX)
+          })
+        },
         draw(target) {
           const chart = self._chart
           const series = self._series
           if (!chart || !series) return
-          target.useMediaCoordinateSpace(({ context: ctx }) => {
+          target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
             const ts = chart.timeScale()
+            const r = self._r
             ctx.save()
-            ctx.lineWidth = 1.5
-            ctx.strokeStyle = self._outline
+            ctx.lineJoin = 'round'
             ctx.font = '600 10px ui-sans-serif, system-ui, sans-serif'
             ctx.textAlign = 'center'
             for (const p of self._points) {
               const x = ts.timeToCoordinate(p.time)
-              const yBase = series.priceToCoordinate(p.price)
-              if (x == null || yBase == null) continue
-              const y = yBase + (p.offset ?? 0)
-              ctx.beginPath()
-              ctx.moveTo(x, y - HALF)
-              ctx.lineTo(x + HALF, y)
-              ctx.lineTo(x, y + HALF)
-              ctx.lineTo(x - HALF, y)
-              ctx.closePath()
-              ctx.fillStyle = p.color
+              if (x == null) continue
+              let y
+              if (self._lane) y = mediaSize.height - LANE_PX / 2
+              else {
+                const yBase = series.priceToCoordinate(p.price)
+                if (yBase == null) continue
+                y = yBase + (p.offset ?? 0)
+              }
+              // Ring in the background color, then fill, then the bright outline.
+              diamond(ctx, x, y, r + 1.5)
+              ctx.fillStyle = self._outline
               ctx.fill()
+              diamond(ctx, x, y, r)
+              ctx.fillStyle = rgba(p.color, 0.78)
+              ctx.fill()
+              ctx.lineWidth = 2
+              ctx.strokeStyle = tint(p.color, 0.45)
               ctx.stroke()
               if (p.text) {
                 const up = (p.offset ?? 0) <= 0
+                ctx.fillStyle = tint(p.color, 0.3)
                 ctx.textBaseline = up ? 'bottom' : 'top'
-                ctx.fillText(p.text, x, up ? y - HALF - 2 : y + HALF + 2)
+                ctx.fillText(p.text, x, up ? y - r - 3 : y + r + 3)
               }
             }
             ctx.restore()

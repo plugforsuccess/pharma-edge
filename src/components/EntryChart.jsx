@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Maximize2 } from 'lucide-react'
-import { DiamondMarkers } from './chartDiamonds'
+import { DiamondMarkers, LANE_PX } from './chartDiamonds'
 import {
   createChart, createSeriesMarkers, BaselineSeries, CandlestickSeries, HistogramSeries, LineSeries,
   ColorType, CrosshairMode, LineStyle, LineType,
@@ -166,10 +166,10 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
     }
     // Exits: pink diamonds above the candle, lettered E / T / B.
     if (on('exits')) {
-      const exitDiamonds = new DiamondMarkers(t.bg)
+      const exitDiamonds = new DiamondMarkers({ outline: t.bg, size: 6 })
       candles.attachPrimitive(exitDiamonds)
       exitDiamonds.setPoints(suite.exits.filter((x) => x.i >= 0)
-        .map((x) => ({ time: time[x.i], price: bars[x.i].h, offset: -12, color: t.suiteBear, text: x.why.join('') })))
+        .map((x) => ({ time: time[x.i], price: bars[x.i].h, offset: -14, color: t.suiteBear, text: x.why.join('') })))
     }
     for (const i of model.golden) markers.push({ time: time[i], position: 'aboveBar', shape: 'circle', color: t.gold, text: 'Golden cross', size: 1 })
     for (const i of model.death) markers.push({ time: time[i], position: 'aboveBar', shape: 'circle', color: t.down, text: 'Death cross', size: 1 })
@@ -250,16 +250,16 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
       chart.addSeries(LineSeries, rail, pi).setData(line(o.lower))
       const ln = chart.addSeries(BaselineSeries, {
         ...quiet, lastValueVisible: true, baseValue: { type: 'price', price: 0 }, lineWidth: 1.5, lineType: LineType.WithSteps,
-        topLineColor: t.up, topFillColor1: alpha(t.up, 0.2), topFillColor2: alpha(t.up, 0.02),
-        bottomLineColor: t.down, bottomFillColor1: alpha(t.down, 0.02), bottomFillColor2: alpha(t.down, 0.2),
+        topLineColor: t.suiteBull, topFillColor1: alpha(t.suiteBull, 0.6), topFillColor2: alpha(t.suiteBull, 0.12),
+        bottomLineColor: t.suiteBear, bottomFillColor1: alpha(t.suiteBear, 0.12), bottomFillColor2: alpha(t.suiteBear, 0.55),
         priceFormat: { type: 'custom', formatter: (v) => v.toFixed(0) },
       }, pi)
       ln.setData(line(o.line))
-      // The pillar's signals: blue diamonds on the lower rail (bull), pink on the upper (bear).
+      // The pillar's signals in a lane along the pane's bottom: blue diamonds (bull), pink (bear).
       const pts = []
-      o.bull.forEach((f, i) => { if (f && o.lower[i] != null) pts.push({ time: time[i], price: o.lower[i], color: t.suiteBull }) })
-      o.bear.forEach((f, i) => { if (f && o.upper[i] != null) pts.push({ time: time[i], price: o.upper[i], color: t.suiteBear }) })
-      const dia = new DiamondMarkers(t.bg)
+      o.bull.forEach((f, i) => { if (f) pts.push({ time: time[i], color: t.suiteBull }) })
+      o.bear.forEach((f, i) => { if (f) pts.push({ time: time[i], color: t.suiteBear }) })
+      const dia = new DiamondMarkers({ outline: t.bg, lane: true, size: 8 })
       ln.attachPrimitive(dia)
       dia.setPoints(pts)
     }
@@ -300,7 +300,9 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
         const h = pane.getHeight()
         if (!h) return
         const top = Math.min(0.45, (shown[pi] === 'price' ? HEADER_PRICE : HEADER_SUB) / h)
-        const bottom = shown[pi] === 'price' ? 0.06 : 0.05
+        // Echo / Tango keep a signal lane under their line.
+        const lane = shown[pi] === 'echo' || shown[pi] === 'tango'
+        const bottom = shown[pi] === 'price' ? 0.06 : Math.min(0.45, lane ? (LANE_PX + 6) / h : 0.05)
         chart.priceScale('right', pi).applyOptions({ scaleMargins: { top, bottom } })
         if (shown[pi] === 'price') chart.priceScale('zone', pi).applyOptions({ scaleMargins: { top, bottom: 0 } })
       })
@@ -355,11 +357,11 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
     ],
     ivr: [{ label: model?.ivSource === 'iv' ? '' : 'HV stand-in', value: fmt(v(model?.ivRank), 0), cls: v(model?.ivRank) < model?.params.ivRankMax ? 'text-green-400' : 'text-amber-300' }],
     echo: [
-      { label: '', value: fmt(v(suite?.echo.line), 1), cls: v(suite?.echo.line) < 0 ? 'text-rose-300' : 'text-green-400' },
+      { label: '', value: fmt(v(suite?.echo.line), 1), cls: v(suite?.echo.line) < 0 ? 'text-suite-bear' : 'text-suite-bull' },
       { label: 'rails', value: `${fmt(v(suite?.echo.upper), 0)} / ${fmt(v(suite?.echo.lower), 0)}`, cls: 'text-subtle' },
     ],
     tango: [
-      { label: '', value: fmt(v(suite?.tango.line), 1), cls: v(suite?.tango.line) < 0 ? 'text-rose-300' : 'text-green-400' },
+      { label: '', value: fmt(v(suite?.tango.line), 1), cls: v(suite?.tango.line) < 0 ? 'text-suite-bear' : 'text-suite-bull' },
       { label: 'rails', value: `${fmt(v(suite?.tango.upper), 0)} / ${fmt(v(suite?.tango.lower), 0)}`, cls: 'text-subtle' },
     ],
     ivhv: [

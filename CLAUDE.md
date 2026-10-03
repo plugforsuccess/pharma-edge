@@ -1162,8 +1162,12 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   **Pillar signals are diamonds in the suite's colors** (owner,
   2026-10-03): blue = bull, pink = bear (`--color-suite-bull` /
   `--color-suite-bear` tokens, signals only — gains / losses stay green /
-  red). Echo / Tango diamonds sit on the rail they crossed; exits are
-  pink diamonds above the candle, lettered E / T / B. Drawn by
+  red), styled after TradingView's (owner's reference): a soft fill, a
+  bright outline in the same hue and a thin background-color ring. Echo /
+  Tango diamonds sit in a **signal lane** along the bottom of their pane
+  (a faint strip; the line keeps a bottom margin above it), and their
+  areas are blue above zero / pink below; exits are smaller pink
+  diamonds above the candle, lettered E / T / B. Drawn by
   `components/chartDiamonds.js` (a series primitive — the library has no
   diamond marker). Hardening keeps its gold ▲ / red ▼ arrows.
   Every pane has a **violet title** (`PANE_TITLES`) and a small violet
