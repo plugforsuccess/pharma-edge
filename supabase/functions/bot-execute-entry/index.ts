@@ -33,7 +33,6 @@
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { buildOccSymbol, tastytradeFetch, envFromMode, type TtEnv } from '../_shared/tastytrade.ts'
-import { accountMinimumBlock } from '../_shared/risk_gate.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
@@ -228,9 +227,6 @@ serve(async (req) => {
   const nlvResult = await resolveLiveNlv(supabase, profile.account_size, env)
   const nlv = nlvResult.nlv
   if (nlv <= 0) return skip(`no_nlv (${nlvResult.source})`, 'skipped_caps')
-  // $25k account minimum for any auto-trade (owner rule, 2026-10-03).
-  const minBlock = accountMinimumBlock(nlv, nlvResult.source, config.mode)
-  if (minBlock) return skip(minBlock, 'skipped_caps')
 
   // Today's run row (create if missing)
   const { data: runRow } = await supabase

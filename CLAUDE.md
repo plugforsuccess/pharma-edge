@@ -594,13 +594,13 @@ and the stop-loss UI. Do not remove or soften them.
   of NLV). Manual override allowed in PlaceOrderPanel + LogSignal step
   2 with a visible % warning when exceeded
 - Max 20% of account in any single underlying
-- **Auto-trade minimum: $25,000 NLV** (owner, 2026-10-03). The bot
-  places no spread (or single-leg) auto-trades below it, and live mode
-  must read NLV from the broker — a typed-in `profiles.account_size`
-  can't unlock live auto-trading. `MIN_AUTO_TRADE_NLV` /
-  `accountMinimumBlock` in `supabase/functions/_shared/risk_gate.ts`,
-  checked in `evaluateRisk` (multi-leg) and `bot-execute-entry`.
-  Manual orders aren't affected.
+- **GEX spread auto-trade minimum: $25,000 NLV** (owner, 2026-10-03).
+  The bot places no spread auto-trades below it, and live mode must read
+  NLV from the broker — a typed-in `profiles.account_size` can't unlock
+  live spread auto-trading. `MIN_AUTO_TRADE_NLV` / `accountMinimumBlock`
+  in `supabase/functions/_shared/risk_gate.ts`, checked in `evaluateRisk`
+  (multi-leg spreads). **Spreads only:** it does not apply to LEAPS (the
+  `ldp/` engine), single-leg entries, or manual orders.
 
 **Stop Loss:**
 - Spread mark down −50% from entry → exit immediately

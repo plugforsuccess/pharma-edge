@@ -14,7 +14,7 @@
 //   9. max trades attempted today?  (bot_runs.trades_attempted today)
 //  10. consecutive losses cooldown?
 //  11. NLV available (broker live; falls back to profile.account_size)
-//  12. account minimum: auto-trading needs NLV >= MIN_AUTO_TRADE_NLV
+//  12. account minimum: spread auto-trading needs NLV >= MIN_AUTO_TRADE_NLV
 //      ($25,000, owner 2026-10-03), and live mode must read it from the
 //      broker — a typed-in account_size can't unlock live auto-trades.
 //
@@ -65,8 +65,9 @@ export interface RiskCheckResult {
   env: TtEnv
 }
 
-// Owner rule (2026-10-03): no bot auto-trades below $25k of account
-// value. Shared by the multi-leg (spread) and single-leg entry executors.
+// Owner rule (2026-10-03): no GEX spread auto-trades below $25k of
+// account value. Spreads only (evaluateRisk → bot-execute-multileg-entry);
+// it does not apply to LEAPS (the ldp/ engine) or single-leg entries.
 export const MIN_AUTO_TRADE_NLV = 25_000
 
 // Why auto-trading is blocked for this account size, or null if allowed.
