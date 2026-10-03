@@ -39,7 +39,7 @@ import { dailyBars, mapLimit, sources } from './lib/marketData.mjs'
 const args = process.argv.slice(2)
 const MODE = args.includes('--mode') ? args[args.indexOf('--mode') + 1] : 'dry-run'
 if (!['write', 'dry-run'].includes(MODE)) throw new Error(`unknown mode ${MODE}`)
-const CONCURRENCY = Number(process.env.CONCURRENCY) || 3
+const CONCURRENCY = Number(process.env.CONCURRENCY) || 6
 const SPOTLIGHT = new Set((process.env.SPOTLIGHT || 'NOW').split(',').map((s) => s.trim().toUpperCase()).filter(Boolean))
 const H6 = HORIZONS.findIndex(([l]) => l === '6M')
 const H6_BARS = HORIZONS[H6][1]

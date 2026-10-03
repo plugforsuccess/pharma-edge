@@ -118,7 +118,7 @@ export async function dailyBars(ticker, { range = '5y' } = {}) {
 }
 
 // Run fn over items with `limit` workers and a pause between calls.
-export async function mapLimit(items, limit, fn, pauseMs = 250) {
+export async function mapLimit(items, limit, fn, pauseMs = 100) {
   const out = new Array(items.length)
   let next = 0
   await Promise.all(Array.from({ length: limit }, async () => {
