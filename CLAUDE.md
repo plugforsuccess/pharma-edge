@@ -1050,10 +1050,36 @@ value, holding period) and must pass before any edit to that file lands.
   education, race / ethnicity (`sex`, `race_ethnicity`, `education`
   columns, Settings → **About you**, each "Prefer not to say" = NULL).
   These live on `leaps_tax_profiles` (own-row RLS, no anon policy) —
-  never on `profiles`, which has public read policies. Ranks read "Top
+  never on `profiles`, which has public read policies. The similar-income row names its band ("Income $104K–$173K") and every
+  row's median reads "Median net worth" (owner asked: it read as income). Each
+  row also shows the weighted **average** (`mean` per group in the JSON) and,
+  beside "Top N%", the percentile ("96th percentile", rounded down). Ranks read "Top
   18%" in the top half, "30th percentile" below the median. Math in
   `src/utils/peers.js` (`peerComparisons`; `npm run peers:check`), card in
-  `components/PeersView.jsx`.
+  `components/PeersView.jsx`. **Layout** (owner, 2026-10-03: "simplify the
+  copy, state of the art"): the rank is the hero (text-5xl green) with
+  "96th percentile · households under 35" under it, the percentile bar,
+  two tiles (your net worth, the group's average), then one row per
+  comparison — short name ("Singles · under 35"), rank, a slim bar with
+  the user's dot, "Median $12K · Avg $109K" — and a one-line source.
+  **Share** (owner, 2026-10-03; `components/PeersShare.jsx`): "Share your
+  rank" opens a Modal with a 1080² canvas card (wordmark, the rank, who
+  it's against, up to three rows, the SCF source) → `navigator.share`
+  with the PNG when the browser allows files, else a download. The
+  dollar figure is **off by default** ("Include my net worth" switch).
+  **State row** (owner, 2026-10-03): the SCF has no geography, so the
+  user's residency (`leaps_tax_profiles.state_code`) is compared against
+  Census **SIPP 2023** (reference year 2022) households in that state —
+  `scraper/build_state_net_worth.py` (Census API, THNETWORTH for the
+  December reference person, WPFINWGT, by state and age band ≥ 100
+  households, CPI-U adjusted) run by `.github/workflows/state-net-worth.yml`
+  → `src/data/stateNetWorth.json`; `stateComparison` in `peers.js` adds
+  the row after "All US households", tagged CENSUS (SIPP undercounts the
+  wealthiest, so it's a separate source, named in the footer). No PR row.
+  **Needs the `CENSUS_API_KEY` Actions secret** (free:
+  api.census.gov/data/key_signup.html) — the SIPP endpoint refuses keyless
+  requests; until it's set the job fails with that message and the card
+  shows no state row.
 - **Dividend income.** The add form's 6th type, **Income** (Options ·
   Shares · Income / Crypto · Cash · Real estate), is a `stock` row with
   the income type and a required yield; a stock row with a yield or ROC
@@ -1178,7 +1204,7 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   1D / 1W, weeks on 5Y, months on All). **Auto** — the biggest swing in
   view (largest % rise from a low to a later high, or fall from a high
   to a later low; ties → most recent) becomes the pins, Fib on.
-  **Fib** — retracements 0 / 23.6 / 38.2 / 50 / 61.8 / 78.6 / 100% back
+  **Fibonacci** (toolbar order Measure · Fibonacci · Auto, only Auto has an icon — owner, 2026-10-03) — retracements 0 / 23.6 / 38.2 / 50 / 61.8 / 78.6 / 100% back
   from B toward A, extensions 127.2 / 161.8 / 261.8% past B (green on an
   up swing, red on a down swing; 50 and 61.8 in gold), as price lines
   with axis tags and a list under the chart; the scale fits the
@@ -1263,6 +1289,76 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   `--color-confluence` (hex — the chart canvas needs it). **The Bravo
   band is gone** (owner: not needed); the suite card's Bravo row jumps to
   the latest Bravo diamond.
+- **Two-sided confluence + the nightly ranking** (owner, 2026-10-03:
+  "identify lows (buy entries) and extended highs (exits)"). Confluence
+  has a **sell** side too: Extended (RSI ≥ 70, or % above the 200-day in
+  the top 10% of its last year), Bravo bear ◆, Echo / Tango bear, MACD
+  cross down — graded against swing **highs** (a sell "wins" when the stock
+  fell). The status card shows Buy · lows and Sell · extended highs; the
+  Confluence pane diverges (buy up, sell down); the backtest has a Buy /
+  Sell switch. **Ranking:** `scripts/rank-confluence.mjs` in
+  `.github/workflows/confluence-rank.yml` (21:40 UTC weekdays = full;
+  dispatch defaults to rank-only; a push to a feature branch touching it
+  re-ranks without alerts) runs the same `src/utils/` math on 5 years of
+  Yahoo bars for every ticker in `CHART_TICKERS` (~564), pools every
+  ticker's setups per side and combination (`confluence_pool`), blends
+  each ticker's own record of today's combination toward the pool
+  (`blendedEstimate`: (n·own + 10·pool) / (n + 10)) and ranks
+  (`confluence_ranks`, one row per side × ticker, rank NULL = not
+  eligible): **buy** = score ≥ 2, 200-day rising, blended 6M avg > 0, best
+  6M first; **sell** = score ≥ 2, blended 3M avg < 0, most negative first.
+  Both tables are shared market data (authenticated SELECT, service-role
+  write). Charts opens with **Confluence leaders** (Buy · lows / Sell ·
+  highs, Top 10 / Yours = Tracking + holdings; rows open the entry chart);
+  the entry card falls back to the pool's record ("across 564 tickers:
+  312×") when the ticker has < 5 cases. **Alerts** (full mode, users with
+  entry alerts on): a Tracking / holding ticker entering the buy top 10
+  (`confluence_top_buy`) or a holding entering the sell top 10
+  (`confluence_top_sell`) → an alerts row (bell) + one email per user via
+  **Resend — a placeholder**: skipped (logged) until the `RESEND_API_KEY`
+  Actions secret and a verified `RESEND_FROM` (Actions variable, default
+  `Cash Moves <alerts@cashmoves.io>`) exist. No push from this job yet.
+- **Replay + Signal record** (owner, 2026-10-03: NOW +84% — "how can the
+  app suggest this trade and signal the exit?"; advised: it can't be
+  guaranteed without look-ahead, so measure it honestly). `src/utils/replay.js`
+  (`npm run replay:check`, which also proves no look-ahead: each day's
+  signals equal a model built on the bars up to that day) walks a ticker
+  day by day: entry rules **Confluence** (buy score reaching 2, 200-day
+  rising), **Buy zone** (turns YES), **Bravo ◆** (200-day rising); a signal
+  at a close buys the next open; the call is ~730 DTE at 0.75 delta,
+  **priced with Black-Scholes** from trailing 60-day vol (floor 15%), 2%
+  slippage per fill — estimates, not quotes. Exits: **Targets** (the exit
+  playbook: 70% at +100%, 15% at +200%, runner on a 30% trail once both
+  hit), **Signals** (all out on 2+ sell signals), **Both** (targets first;
+  after target 1, 2+ sell signals close the rest); time stop at 6 months
+  left; no hard stop. Big moves (swing low → +30% within 126 bars) are
+  found with hindsight only to grade: caught = a signal from 10 bars before
+  the low to the half-way bar; misses say why (200-day falling / no or one
+  signal / late / already holding). The entry chart's **Replay** card runs
+  it live (rules saved in `cm:replay-rules`; rows jump the chart).
+  **Puts** (owner, 2026-10-03: "have we considered puts?" — advised: test
+  before suggesting; long-dated puts fight the drift, so the test is
+  **put debit spreads under the spread rules**): `replayPutSpreads` —
+  entry = the sell score reaching 2 (`BEAR_RULES`: 200-day falling / any
+  trend), ~90 DTE, long put at the money, short put one expected move
+  lower (S·σ·√T), debit ≤ 40% of width or skipped, +100% sell half, +200%
+  another quarter, −50% out, 2+ buy signals = thesis flip → out, out at 21
+  DTE (`PUT_MODEL`). Graded against big drops (swing high → −20% within
+  63 bars, `bigDrops` / `gradeDrops`). Shown as a Puts strip on the
+  Replay card and a Puts card on Signal record. **Nothing suggests a put
+  yet** — the LEAPS bot stays long only; bear trades would sit with the
+  spread rules if the test holds up.
+  **Universe:** `scripts/replay-universe.mjs` in
+  `.github/workflows/replay-universe.yml` (Saturdays, dispatch, branch
+  pushes touching it) replays every ticker, pools trades per rule pair,
+  catch rate + miss reasons, the 60 biggest misses, **walk-forward** (each
+  confluence trade judged only by setups whose 6M result was known before
+  its signal, own blended toward the pool) and by-year → one `replay_runs`
+  row (authenticated SELECT, service-role write); `/charts/record` (Signal
+  record, linked from the leaders card and the Replay card) shows the
+  latest. Both Actions jobs fetch bars through `scripts/lib/marketData.mjs`:
+  Yahoo with the cookie + crumb session (runners get 429 without it), else
+  the `leaps-entry` edge function with the service-role key.
 - **Signal suite on the entry chart** (owner, 2026-10-03: "for better
   entries and sell signals"). A JS port of the TradingView suite in
   `plugforsuccess/wiley-indicator-suite` (Bravo trend, Echo momentum,
@@ -1490,6 +1586,13 @@ Continuous — dxlink-worker (Fly.io)
 
 Periodic   — monitor-positions.yml
              Polls Tastytrade for fill status on open orders
+
+5:40pm ET  — confluence-rank.yml (weekdays, 21:40 UTC)
+             Ranks ~564 tickers on buy / sell confluence → confluence_ranks
+             + confluence_pool; top-10 alerts (bell + Resend email placeholder)
+
+Saturday   — replay-universe.yml (14:17 UTC)
+             Day-by-day LEAPS replay of every ticker → replay_runs (/charts/record)
 
 5:20pm ET  — entry-scan.yml (weekdays, 21:20 UTC)
              Entry alerts: LEAPS buy zone YES / weekly Hardening bull

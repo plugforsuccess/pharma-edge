@@ -1,7 +1,9 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import clsx from 'clsx'
-import { peerComparisons } from '../utils/peers'
+import { Share2 } from 'lucide-react'
+import { peerComparisons, AGE_LABELS } from '../utils/peers'
+import PeersShare from './PeersShare'
 import { todayYmd } from '../utils/afterTax'
 
 // Portfolio → Total card → Peers (owner, 2026-10-03; free): the user's net
@@ -11,8 +13,10 @@ import { todayYmd } from '../utils/afterTax'
 // it exists the view says so instead of guessing.
 const files = import.meta.glob('../data/netWorthBenchmarks.json', { eager: true, import: 'default' })
 const BENCHMARKS = Object.values(files)[0] ?? null
+// State rows: Census SIPP, built by scraper/build_state_net_worth.py.
+const stateFiles = import.meta.glob('../data/stateNetWorth.json', { eager: true, import: 'default' })
+const STATES = Object.values(stateFiles)[0] ?? null
 
-const usd = (n) => (Number.isFinite(n) ? `${n < 0 ? '−' : ''}$${Math.round(Math.abs(n)).toLocaleString('en-US')}` : '—')
 const compact = (n) => {
   const a = Math.abs(n)
   const s = a >= 1e6 ? `$${+(a / 1e6).toFixed(a >= 1e7 ? 0 : 1)}M` : a >= 1e3 ? `$${Math.round(a / 1e3)}K` : `$${Math.round(a)}`
@@ -25,7 +29,9 @@ export default function PeersView({ netWorth, profile, homeowner }) {
     benchmarks: BENCHMARKS, netWorth, birthDate: p.birth_date, today: todayYmd(),
     filingStatus: p.filing_status, income: Number(p.annual_income), homeowner,
     sex: p.sex, race: p.race_ethnicity, education: p.education,
-  }), [netWorth, p.birth_date, p.filing_status, p.annual_income, homeowner, p.sex, p.race_ethnicity, p.education])
+    stateBenchmarks: STATES, stateCode: p.state_code,
+  }), [netWorth, p.birth_date, p.filing_status, p.annual_income, homeowner, p.sex, p.race_ethnicity, p.education, p.state_code])
+  const [shareOpen, setShareOpen] = useState(false)
 
   if (!BENCHMARKS) {
     return <p className="text-sm text-subtle">Comparison data isn't available yet.</p>
@@ -33,47 +39,86 @@ export default function PeersView({ netWorth, profile, homeowner }) {
   const head = result.rows.find((r) => r.headline)
   const rest = result.rows.filter((r) => !r.headline)
   const src = BENCHMARKS.source
+  const age = result.band ? AGE_LABELS[result.band] : null
+  const month = src.dollars.match(/to (\w+ \d{4})/)?.[1]
+  const stateRow = rest.find((r) => r.source === 'census')
+  const sourceLine = `Federal Reserve SCF 2022${month ? `, in ${month} dollars` : ''}${stateRow ? `; ${stateRow.name.replace(' households', '')} from Census SIPP 2023` : ''}.`
 
   return (
     <div>
       {head ? (
-        <div className="mb-5">
-          <div className="text-[10px] uppercase tracking-wider text-muted mb-1">{head.label}</div>
-          <div className="text-3xl font-semibold font-mono-tab text-green-400">{head.rank}</div>
-          <div className="text-xs text-subtle mt-1">
-            Your net worth before tax, <span className="font-mono-tab text-fg">{usd(netWorth)}</span>
+        <div className="mb-6">
+          <div className="text-5xl font-semibold tracking-tight font-mono-tab text-green-400 leading-none">{head.rank}</div>
+          <div className="mt-2 text-sm text-subtle">
+            {head.rank.startsWith('Top') && head.pctLabel ? `${head.pctLabel} · ` : ''}households {age}
           </div>
           <PercentileBar row={head} netWorth={netWorth} />
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <Stat label="Your net worth" value={compact(netWorth)} strong />
+            {head.mean != null && <Stat label="Average" value={compact(head.mean)} />}
+          </div>
         </div>
       ) : (
-        <div className="mb-5 rounded-xl border border-hairline bg-bg/40 px-4 py-3 text-sm text-subtle">
-          Add your birth date to compare with households your age.
-          <Link to="/settings#about-you" className="ml-1 text-amber-300 underline decoration-dotted underline-offset-4">Add it in Settings</Link>
+        <div className="mb-5 rounded-xl bg-bg-elev px-4 py-3 text-sm text-subtle">
+          Add your birth date to compare with your age group.
+          <Link to="/settings#about-you" className="ml-1 text-amber-300">Settings</Link>
         </div>
       )}
 
-      <ul className="divide-y divide-hairline border-t border-hairline">
+      <ul className="space-y-4">
         {rest.map((r) => (
-          <li key={r.key} className="py-3 flex items-center gap-3">
-            <div className="flex-1 min-w-0">
-              <div className="text-sm text-fg leading-snug">{r.label}</div>
-              <div className="text-xs text-muted font-mono-tab">Median {usd(r.median)}</div>
+          <li key={r.key}>
+            <div className="flex items-baseline gap-3">
+              <div className="flex-1 min-w-0 text-sm text-fg truncate">
+                {r.name}{r.withinAge && <span className="text-muted"> · {age}</span>}
+                {r.source === 'census' && <span className="ml-2 align-middle text-[10px] uppercase tracking-wider text-muted">Census</span>}
+              </div>
+              <div className={clsx('shrink-0 text-sm font-semibold font-mono-tab', (r.pct ?? 0) >= 50 ? 'text-green-400' : 'text-subtle')}>{r.rank}</div>
             </div>
-            <div className={clsx('text-sm font-semibold font-mono-tab shrink-0', (r.pct ?? 0) >= 50 ? 'text-green-400' : 'text-subtle')}>{r.rank}</div>
+            <MiniBar pct={r.pct} />
+            <div className="mt-1 text-xs text-muted font-mono-tab">
+              Median {compact(r.median)}{r.mean != null && ` · Avg ${compact(r.mean)}`}
+            </div>
           </li>
         ))}
       </ul>
 
-      {!(p.sex || p.race_ethnicity || p.education) && (
-        <p className="mt-3 text-xs text-muted">
-          You can also compare by education, race or ethnicity, and (for single households) sex.
-          <Link to="/settings#about-you" className="ml-1 text-amber-300">Settings</Link>
-        </p>
+      {head && (
+        <button type="button" onClick={() => setShareOpen(true)}
+          className="mt-5 w-full min-h-[44px] rounded-xl bg-bg-elev text-sm font-semibold text-fg inline-flex items-center justify-center gap-2 hover:bg-card-hover transition">
+          <Share2 size={15} aria-hidden /> Share your rank
+        </button>
       )}
-      <p className="mt-3 text-xs text-muted">
-        {src.survey}, {src.dollars.replace(/^(\d{4}) dollars adjusted by CPI-U to/, '$1 dollars adjusted for inflation to')}.
-        Net worth before tax, compared by household.
+      <p className="mt-4 text-[11px] text-muted">
+        Net worth before tax. {sourceLine}
+        {!(p.sex || p.race_ethnicity || p.education) && (
+          <> <Link to="/settings#about-you" className="text-amber-300">Add more comparisons</Link></>
+        )}
       </p>
+      {head && (
+        <PeersShare open={shareOpen} onClose={() => setShareOpen(false)} head={head} rows={rest.filter((r) => r.source !== 'census')}
+          age={age} netWorth={netWorth} source={`Federal Reserve SCF 2022${month ? ` · ${month} dollars` : ''}`} />
+      )}
+    </div>
+  )
+}
+
+function Stat({ label, value, strong = false }) {
+  return (
+    <div className="rounded-xl bg-bg-elev px-3 py-2.5 min-w-0">
+      <div className="text-[11px] text-muted">{label}</div>
+      <div className={clsx('mt-0.5 text-sm font-semibold font-mono-tab truncate', strong ? 'text-fg' : 'text-subtle')}>{value}</div>
+    </div>
+  )
+}
+
+// A slim track with the user's spot.
+function MiniBar({ pct }) {
+  const you = Math.max(0, Math.min(100, pct ?? 0))
+  return (
+    <div className="relative mt-2 h-1 rounded-full bg-bg-elev" aria-hidden>
+      <div className="absolute inset-y-0 left-0 rounded-full bg-green-400/40" style={{ width: `${you}%` }} />
+      <span className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 h-2 w-2 rounded-full bg-green-400" style={{ left: `${you}%` }} />
     </div>
   )
 }

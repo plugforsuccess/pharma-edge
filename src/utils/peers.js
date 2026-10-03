@@ -27,9 +27,9 @@ export const RACE_OPTIONS = [
 ]
 export const EDUCATION_OPTIONS = [
   { value: 'no_hs', label: 'No high school diploma', group: 'No high school diploma' },
-  { value: 'hs', label: 'High school diploma', group: 'High school graduates' },
+  { value: 'hs', label: 'High school diploma', group: 'High school grads' },
   { value: 'some_college', label: 'Some college or associate degree', group: 'Some college' },
-  { value: 'bachelors', label: "Bachelor's degree or higher", group: 'College graduates' },
+  { value: 'bachelors', label: "Bachelor's degree or higher", group: 'College grads' },
 ]
 
 // Whole years old on `today` ('YYYY-MM-DD').
@@ -79,6 +79,14 @@ export function rankLabel(r) {
   if (r.pct < 50) return `${ordinal(Math.max(1, Math.round(r.pct)))} percentile`
   return `Top ${Math.max(1, Math.round(top))}%`
 }
+// "96th percentile" (rounded down so it never overstates; 99.5 → "99.5th").
+export function percentileLabel(r) {
+  if (!r || r.pct == null) return null
+  if (r.below) return 'Below the 1st percentile'
+  if (r.above) return `Above the ${fmtPct(r.pct)}th percentile`
+  const p = r.pct >= 99 ? Math.floor(r.pct * 10) / 10 : Math.floor(r.pct)
+  return `${Number.isInteger(p) ? ordinal(Math.max(1, p)) : `${p}th`} percentile`
+}
 function ordinal(n) {
   const t = n % 100
   if (t >= 11 && t <= 13) return `${n}th`
@@ -97,12 +105,47 @@ export function incomeBand(income, bands) {
   return `p${e[i]}_${e[i + 1]}`
 }
 
+// The band's household-income range, for its label: "Income $104K–$173K",
+// "Income under $36K", "Income $285K+".
+export function incomeRangeLabel(income, bands) {
+  if (!Number.isFinite(income) || !bands?.cutoffs?.length) return null
+  const c = bands.cutoffs
+  let i = 0
+  while (i < c.length && income >= c[i]) i++
+  const k = (n) => `$${Math.round(n / 1000)}K`
+  if (i === 0) return `Income under ${k(c[0])}`
+  if (i === c.length) return `Income ${k(c[c.length - 1])}+`
+  return `Income ${k(c[i - 1])}–${k(c[i])}`
+}
+
+// The user's state (residency) against Census SIPP households there —
+// within the age band when the state has ≥ 100 such households, else all
+// ages. A separate source from the SCF rows, labelled as such.
+export function stateComparison({ stateBenchmarks, stateCode, netWorth, band, today }) {
+  const st = stateBenchmarks?.states?.[stateCode]
+  if (!st || !Number.isFinite(netWorth)) return null
+  const ps = stateBenchmarks.percentiles
+  const at = (vals, p) => vals[ps.indexOf(p)]
+  const crossed = band ? st.by_age?.[band] : null
+  const g = crossed ?? st
+  const r = percentileOf(g.values, ps, netWorth)
+  const ageText = band ? `ages${NB}${AGE_LABELS[band]}` : null
+  return {
+    key: crossed ? `state:${stateCode}|age:${band}` : `state:${stateCode}`,
+    label: crossed ? `${st.name} households, ${ageText}` : `${st.name} households`,
+    name: `${st.name} households`,
+    rank: rankLabel(r), pctLabel: percentileLabel(r), pct: r?.pct ?? null, top: r ? 100 - r.pct : null,
+    median: at(g.values, 50), p75: at(g.values, 75), p90: at(g.values, 90), mean: g.mean ?? null,
+    households: g.households, withinAge: !!crossed, source: 'census', today,
+  }
+}
+
 // Every comparison for this user, headline (age band) first. Each row:
 // { key, label, rank, top (0–100 share of households above), median,
 //   p75, p90, households, withinAge }.
 export function peerComparisons({
   benchmarks, netWorth, birthDate, today, filingStatus, income, homeowner = null,
-  sex = null, race = null, education = null,
+  sex = null, race = null, education = null, stateBenchmarks = null, stateCode = null,
 }) {
   if (!benchmarks?.groups || !Number.isFinite(netWorth)) return { rows: [], age: null, band: null }
   const ps = benchmarks.percentiles
@@ -121,12 +164,15 @@ export function peerComparisons({
     rows.push({
       key: crossed ? `age:${band}|${key}` : key,
       label: crossed ? `${label}, ${ageText}` : label,
+      name: label,
       rank: rankLabel(r),
+      pctLabel: percentileLabel(r),
       pct: r?.pct ?? null,
       top: r ? 100 - r.pct : null,
       median: at(g.values, 50),
       p75: at(g.values, 75),
       p90: at(g.values, 90),
+      mean: g.mean ?? null,
       households: g.households,
       withinAge: !!crossed,
     })
@@ -135,15 +181,17 @@ export function peerComparisons({
   if (band && benchmarks.groups[`age:${band}`]) {
     const g = benchmarks.groups[`age:${band}`]
     const r = percentileOf(g.values, ps, netWorth)
-    rows.push({ key: `age:${band}`, label: `Households, ${ageText}`, rank: rankLabel(r), pct: r?.pct ?? null,
+    rows.push({ key: `age:${band}`, label: `Households, ${ageText}`, name: 'Households', rank: rankLabel(r), pctLabel: percentileLabel(r), pct: r?.pct ?? null,
       top: r ? 100 - r.pct : null, median: at(g.values, 50), p75: at(g.values, 75), p90: at(g.values, 90),
-      households: g.households, withinAge: true, headline: true })
+      mean: g.mean ?? null, households: g.households, withinAge: true, headline: true })
   }
   add('all', 'All US households', { cross: false })
-  add(couple ? 'household:couple' : 'household:single', couple ? 'Couples' : 'Single households')
+  const stateRow = stateComparison({ stateBenchmarks, stateCode, netWorth, band })
+  if (stateRow) rows.push(stateRow)
+  add(couple ? 'household:couple' : 'household:single', couple ? 'Couples' : 'Singles')
   if (homeowner === true) add('home:owner', 'Homeowners')
   const ib = incomeBand(Number(income), benchmarks.income_bands)
-  if (ib) add(`income:${ib}`, 'Similar income')
+  if (ib) add(`income:${ib}`, incomeRangeLabel(Number(income), benchmarks.income_bands))
   if (!couple && (sex === 'female' || sex === 'male')) add(`sex:single_${sex}`, sex === 'female' ? 'Single women' : 'Single men')
   const ed = EDUCATION_OPTIONS.find((o) => o.value === education)
   if (ed) add(`education:${ed.value}`, ed.group)

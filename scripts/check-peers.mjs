@@ -1,5 +1,5 @@
 // Checks for src/utils/peers.js (npm run peers:check).
-import { ageOn, ageBand, percentileOf, rankLabel, incomeBand, peerComparisons } from '../src/utils/peers.js'
+import { ageOn, ageBand, percentileOf, rankLabel, incomeBand, incomeRangeLabel, percentileLabel, peerComparisons, stateComparison } from '../src/utils/peers.js'
 
 let passed = 0
 const failures = []
@@ -31,6 +31,12 @@ const bands = { edges_pct: [0, 20, 40, 60, 80, 90, 100], cutoffs: [30000, 60000,
 eq('income lowest band', incomeBand(10000, bands), 'p0_20')
 eq('income on a cutoff', incomeBand(60000, bands), 'p40_60')
 eq('income top band', incomeBand(800000, bands), 'p90_100')
+eq('percentile label', percentileLabel({ pct: 96.4 }), '96th percentile')
+eq('percentile label 99.x', percentileLabel({ pct: 99.47 }), '99.4th percentile')
+eq('percentile label 92', percentileLabel({ pct: 92.2 }), '92nd percentile')
+eq('income range label', incomeRangeLabel(150000, { cutoffs: [35880, 61862, 103928, 173213, 284565] }), 'Income $104K–$173K')
+eq('income range label top', incomeRangeLabel(300000, { cutoffs: [35880, 61862, 103928, 173213, 284565] }), 'Income $285K+')
+eq('income range label bottom', incomeRangeLabel(20000, { cutoffs: [35880, 61862, 103928, 173213, 284565] }), 'Income under $36K')
 
 const g = (mult, households = 500) => ({ households, values: ps.map((_, i) => vals[i] * mult) })
 const benchmarks = {
@@ -60,6 +66,22 @@ const none = peerComparisons({ ...base })
 eq('optional groups left out when not shared', none.rows.some((r) => /race|education|sex/.test(r.key)), false)
 eq('homeowner row only when known', none.rows.some((r) => r.key.includes('home:')), false)
 eq('no birth date → no headline', peerComparisons({ ...base, birthDate: null }).rows[0].key, 'all')
+
+// State row (Census SIPP): within the age band when the state has it.
+{
+  const vals = (k) => ps.map((p) => p * k)
+  const stateBenchmarks = { percentiles: ps, states: { GA: { name: 'Georgia', households: 900, values: vals(10), mean: 1200, by_age: { '35_44': { households: 120, values: vals(5), mean: 500 } } } } }
+  const r = stateComparison({ stateBenchmarks, stateCode: 'GA', netWorth: 250, band: '35_44' })
+  eq('state row within the age band', r.withinAge, true)
+  eq('state row label', r.label, 'Georgia households, ages\u00a035–\u206044')
+  eq('state row percentile', r.pct, 50, 1e-9)
+  eq('state row source', r.source, 'census')
+  const r2 = stateComparison({ stateBenchmarks, stateCode: 'GA', netWorth: 250, band: 'under_35' })
+  eq('state row falls back to all ages', r2.withinAge === false && r2.label === 'Georgia households', true)
+  eq('unknown state → null', stateComparison({ stateBenchmarks, stateCode: 'PR', netWorth: 250, band: null }), null)
+  const out = peerComparisons({ ...base, stateBenchmarks, stateCode: 'GA' })
+  eq('state row sits after All US households', out.rows.findIndex((x) => x.source === 'census'), out.rows.findIndex((x) => x.key === 'all') + 1)
+}
 
 console.log(`peers checks: ${passed} passed, ${failures.length} failed`)
 if (failures.length) {

@@ -1,0 +1,49 @@
+# Net worth by state for the Peers card (owner, 2026-10-03). Pulls the
+# Census SIPP 2023 microdata through the Census API plus the latest CPI-U,
+# computes weighted net worth percentiles per state (and per age band) in
+# scraper/build_state_net_worth.py and commits src/data/stateNetWorth.json
+# to the branch it ran on. Runs when the script or this workflow changes
+# on a feature branch, or by hand to refresh the CPI month. Never pushes
+# to main on its own.
+
+name: State net worth
+
+on:
+  push:
+    branches-ignore: [main]
+    paths:
+      - scraper/build_state_net_worth.py
+      - .github/workflows/state-net-worth.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: state-net-worth-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Build
+        env:
+          CENSUS_API_KEY: ${{ secrets.CENSUS_API_KEY }}
+        run: python scraper/build_state_net_worth.py
+      - name: Commit if changed
+        run: |
+          if git diff --quiet -- src/data/stateNetWorth.json && git ls-files --error-unmatch src/data/stateNetWorth.json >/dev/null 2>&1; then
+            echo "No change."; exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/data/stateNetWorth.json
+          git commit -m "State net worth: Census SIPP 2023, CPI-adjusted ($(date -u +%Y-%m-%d))"
+          git pull --rebase origin "${GITHUB_REF_NAME}" || true
+          git push

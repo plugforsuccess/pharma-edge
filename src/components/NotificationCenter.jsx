@@ -33,6 +33,8 @@ const TYPE_META = {
   // Entry alerts (entry-scan): tap opens that ticker's entry chart.
   entry_buy_zone: { Icon: Crosshair, tone: 'green', label: 'Buy zone' },
   entry_hardening_bull: { Icon: TrendingUp, tone: 'amber', label: 'Hardening' },
+  confluence_top_buy: { Icon: TrendingUp, tone: 'green', label: 'Top 10 · lows' },
+  confluence_top_sell: { Icon: TrendingUp, tone: 'red', label: 'Top 10 · highs' },
 }
 
 const TONE_BG = {
@@ -156,7 +158,7 @@ export default function NotificationCenter() {
 
   function handleRowClick(alert) {
     markRead(alert.id)
-    if (alert.ticker && alert.alert_type?.startsWith('entry_')) {
+    if (alert.ticker && (alert.alert_type?.startsWith('entry_') || alert.alert_type?.startsWith('confluence_'))) {
       setOpen(false)
       navigate(`/charts/entry/${encodeURIComponent(alert.ticker)}`)
       return

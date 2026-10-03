@@ -6,10 +6,11 @@ import { useAuth } from '../context/AuthContext'
 import { useHoldings, isQuantity } from '../hooks/useHoldings'
 import { todayYmd } from '../utils/afterTax'
 import { dailyDecisions, exitRows } from '../lib/holdingChecks'
-import { ChartLine, ChevronLeft, ChevronRight, Crosshair, Maximize2, Minimize2, Ruler, Search, Sparkles, X } from 'lucide-react'
+import { ChartLine, ChevronLeft, ChevronRight, Crosshair, Maximize2, Minimize2, Search, Sparkles, X } from 'lucide-react'
 import TickerDrawer from '../components/TickerDrawer'
 import { CHART_TICKERS } from '../lib/chartTickers'
 import PriceChart from '../components/PriceChart'
+import ConfluenceLeaders from '../components/ConfluenceLeaders'
 import { placePins, measure, fibLevels, autoSwing, stepPin } from '../utils/chartTools'
 
 // Charts — the stocks where the app suggests a LEAPS trade, with the trade
@@ -178,6 +179,8 @@ export default function Charts() {
   // suggested trade. Recent searches are kept on this device.
   const [searchOpen, setSearchOpen] = useState(false)
   const [watchlist, setWatchlist] = useState([])
+  // Tracking + holdings tickers, for the leaders' "Yours" view.
+  const myTickers = useMemo(() => [...new Set([...watchlist, ...(positions ?? []).map((x) => x.ticker).filter(Boolean)])].sort(), [watchlist, positions])
   const [recent, setRecent] = useState(() => {
     try { const r = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]'); return Array.isArray(r) ? r.slice(0, RECENT_MAX) : [] } catch { return [] }
   })
@@ -303,6 +306,9 @@ export default function Charts() {
         </button>
       </header>
 
+      {/* The universe ranked on confluence (nightly), then this page's chart. */}
+      <ConfluenceLeaders mine={myTickers} />
+
       {loading ? (
         <div className="text-xs text-muted py-8 text-center">Loading…</div>
       ) : allItems.length === 0 ? (
@@ -390,17 +396,17 @@ export default function Charts() {
                 </div>
               </div>
 
-              {/* Drawing tools: Measure (two pins), Auto swing, Fibonacci */}
-              <div className="px-3 py-2 flex items-center gap-1.5 border-t border-hairline shrink-0">
-                <ToolButton active={picking} onClick={() => setPicking((v) => !v)} label="Measure" icon={Ruler} />
+              {/* Drawing tools: Measure (two pins), Fibonacci, Auto swing (owner, 2026-10-03: this order; only Auto keeps an icon) */}
+              <div className="px-3 py-2 flex items-center gap-1 border-t border-hairline shrink-0">
+                <ToolButton active={picking} onClick={() => setPicking((v) => !v)} label="Measure" />
+                <ToolButton active={tools.fib} onClick={() => saveTools({ ...tools, ticker, fib: !tools.fib })} label="Fibonacci" disabled={!placed} />
                 <ToolButton onClick={() => { const a = ohlc && autoSwing(ohlc); if (a) { saveTools({ ...tools, ticker, pins: a, fib: true }); setPicking(false) } }}
                   label="Auto" icon={Sparkles} disabled={!ohlc} />
-                <ToolButton active={tools.fib} onClick={() => saveTools({ ...tools, ticker, fib: !tools.fib })} label="Fib" disabled={!placed} />
                 <span className="flex-1" />
                 {!current.crypto && (
-                  <Link to={`/charts/entry/${encodeURIComponent(current.ticker)}`}
-                    className="min-h-[36px] px-2.5 inline-flex items-center gap-1.5 rounded-md text-xs font-semibold text-amber-300 hover:text-amber-200">
-                    <Crosshair size={13} aria-hidden /> Entry chart
+                  <Link to={`/charts/entry/${encodeURIComponent(current.ticker)}`} aria-label="Entry chart"
+                    className="min-h-[36px] px-2 inline-flex items-center gap-1.5 rounded-md text-xs font-semibold whitespace-nowrap text-amber-300 hover:text-amber-200">
+                    <Crosshair size={13} aria-hidden /> Entry
                   </Link>
                 )}
                 {(tools.pins.length > 0 || tools.fib) && (
@@ -557,7 +563,7 @@ function PinCell({ letter, label, date, price, onStep, canBack, canFwd }) {
 function ToolButton({ active, onClick, label, icon: Icon, disabled }) {
   return (
     <button type="button" onClick={onClick} disabled={disabled} aria-pressed={active ?? undefined}
-      className={clsx('min-h-[36px] px-2.5 inline-flex items-center gap-1.5 rounded-md text-xs font-semibold transition disabled:opacity-40',
+      className={clsx('min-h-[36px] px-2 inline-flex items-center gap-1.5 rounded-md text-xs font-semibold whitespace-nowrap transition disabled:opacity-40',
         active ? 'bg-amber-400/15 text-amber-300' : 'text-subtle hover:text-fg')}>
       {Icon && <Icon size={14} aria-hidden />}
       {label}

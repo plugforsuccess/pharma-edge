@@ -71,7 +71,8 @@ export const PANE_TITLES = {
   price: 'Price', dist: '% vs 200-day', rsi: 'RSI 14', macd: 'MACD 12·26·9', ivr: 'IV Rank',
   ivhv: 'IV vs HV 20', echo: 'Echo', tango: 'Tango', conf: 'Confluence',
 }
-const CONF_NAMES = { zone: 'Zone', bravo: 'Bravo', echo: 'Echo', tango: 'Tango', macd: 'MACD' }
+const CONF_NAMES = { zone: 'Zone', bravo: 'Bravo', echo: 'Echo', tango: 'Tango', macd: 'MACD', ext: 'Extended',
+  'bravo↓': 'Bravo↓', 'echo↓': 'Echo↓', 'tango↓': 'Tango↓', 'macd↓': 'MACD↓' }
 const SHOW_DAYS = 504 // two years of trading days in view by default
 // "% vs 200-day" reads "% vs 200-week" on weekly bars, etc.
 export function paneTitle(k, tf = '1d') {
@@ -328,16 +329,19 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
     osc('echo', suite?.echo)
     osc('tango', suite?.tango)
 
-    // Confluence: how many of the five signals agree (last N bars), 0–5.
+    // Confluence: buy signals agreeing (lows) up, sell signals (extended
+    // highs) down — each 0–5 over the last N bars. Bigger = more agreement.
     if (conf && paneOf('conf') >= 0) {
       const pi = paneOf('conf')
-      const tone = (sc) => (sc >= 4 ? t.up : sc === 3 ? t.violet : sc === 2 ? alpha(t.violet, 0.5) : alpha(t.subtle, 0.35))
-      const h = chart.addSeries(HistogramSeries, {
-        ...quiet, lastValueVisible: true, base: 0, autoscaleInfoProvider: fixed(0, 5),
-        priceFormat: { type: 'custom', formatter: (x) => (x > 5.2 || x < -0.2 ? '' : x.toFixed(0)) },
-      }, pi)
-      h.setData(conf.series.map((c, i) => (c.score ? { time: time[i], value: c.score, color: tone(c.score) } : { time: time[i], value: 0 })))
-      h.createPriceLine({ price: 3, color: alpha(t.violet, 0.6), lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: false })
+      const buyTone = (sc) => (sc >= 4 ? t.up : sc === 3 ? t.violet : sc === 2 ? alpha(t.violet, 0.5) : alpha(t.subtle, 0.35))
+      const sellTone = (sc) => (sc >= 4 ? t.down : sc === 3 ? t.suiteBear : sc === 2 ? alpha(t.suiteBear, 0.5) : alpha(t.subtle, 0.35))
+      const fmt5 = { type: 'custom', formatter: (x) => (Math.abs(x) > 5.2 ? '' : Math.abs(x).toFixed(0)) }
+      const hb = chart.addSeries(HistogramSeries, { ...quiet, lastValueVisible: true, base: 0, autoscaleInfoProvider: fixed(-5, 5), priceFormat: fmt5 }, pi)
+      hb.setData(conf.buy.series.map((c, i) => (c.score ? { time: time[i], value: c.score, color: buyTone(c.score) } : { time: time[i], value: 0 })))
+      const hs = chart.addSeries(HistogramSeries, { ...quiet, lastValueVisible: true, base: 0, autoscaleInfoProvider: fixed(-5, 5), priceFormat: fmt5 }, pi)
+      hs.setData(conf.sell.series.map((c, i) => (c.score ? { time: time[i], value: -c.score, color: sellTone(c.score) } : { time: time[i], value: 0 })))
+      hb.createPriceLine({ price: 3, color: alpha(t.violet, 0.6), lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: false })
+      hb.createPriceLine({ price: -3, color: alpha(t.suiteBear, 0.6), lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: false })
     }
 
     // Indicator panes: little padding, so 0–100 scales stay 0–100 when tall.
@@ -479,8 +483,9 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
       { label: 'rails', value: `${fmt(v(suite?.tango.upper), 0)} / ${fmt(v(suite?.tango.lower), 0)}`, cls: 'text-subtle' },
     ],
     conf: [
-      { label: '', value: v(conf?.series)?.score != null ? `${v(conf?.series).score} of 5` : '—', cls: (v(conf?.series)?.score ?? 0) >= 3 ? 'text-violet-300' : 'text-subtle' },
-      { label: v(conf?.series)?.lit?.length ? v(conf?.series).lit.map((k) => CONF_NAMES[k]).join(' · ') : `last ${conf?.window ?? 5} days`, value: '', cls: 'text-muted' },
+      { label: 'Buy', value: v(conf?.buy.series)?.score != null ? `${v(conf?.buy.series).score}/5` : '—', cls: (v(conf?.buy.series)?.score ?? 0) >= 3 ? 'text-confluence' : 'text-subtle' },
+      { label: 'Sell', value: v(conf?.sell.series)?.score != null ? `${v(conf?.sell.series).score}/5` : '—', cls: (v(conf?.sell.series)?.score ?? 0) >= 3 ? 'text-suite-bear' : 'text-subtle' },
+      { label: [...(v(conf?.buy.series)?.lit ?? []), ...(v(conf?.sell.series)?.lit ?? []).map((k) => (k === 'ext' ? 'ext' : `${k}↓`))].map((k) => CONF_NAMES[k] ?? k).join(' · ') || `last ${conf?.window ?? 5} days`, value: '', cls: 'text-muted' },
     ],
     ivhv: [
       { label: 'IV', value: v(model?.iv) == null ? '—' : `${(v(model?.iv) * 100).toFixed(1)}%`, cls: 'text-amber-300', swatch: 'bg-amber-400' },
