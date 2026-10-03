@@ -1145,6 +1145,21 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   Every pane has a **violet title** (`PANE_TITLES`) and a small violet
   maximize button at its top right that opens that pane alone full
   screen (`FullPane` in `LeapsEntry.jsx`; Esc or X closes).
+  **Timeframe: weekly or monthly, never daily** (owner, 2026-10-03: daily
+  Hardening isn't needed). The card's Weekly | Monthly switch
+  (`cm:suite-tf`, default weekly) runs the whole suite on that interval:
+  `leaps-entry` with `suite: '1wk' | '1mo'` returns the ticker's full
+  Yahoo history ("max") plus SPY / ^VIX on the same interval (the
+  200-bar warm-ups need it). `normalizePeriods` merges Yahoo's live
+  duplicate bar; `suiteOnDays` places each period's values on the daily
+  candle its week / month closes on (the current period on today), so
+  nothing shows early, and the Echo / Tango panes ("Echo · Weekly") and
+  the Bravo band draw as steps. Ages read in weeks / months; "fresh" =
+  within 2 weeks / 1 month. The Hardening ▲ and Sell backtests use the
+  period bars over the full history, returns after 13 / 26 / 52 weeks or
+  3 / 6 / 12 months; rows on the daily chart jump to it. The buy-zone
+  confirmation window is 10 trading days (weekly) / 21 (monthly). No
+  yearly: the 200-bar warm-ups never finish on yearly bars.
   **Everything in the Signal suite card is tappable** (owner, 2026-10-03):
   the Entry / Sell tiles jump the chart to that signal ("View on chart":
   ~3 months either side, crosshair on the bar — `jump` prop on

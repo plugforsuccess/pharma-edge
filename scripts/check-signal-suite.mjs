@@ -2,6 +2,7 @@
 // Run: npm run suite:check
 import {
   rma, atr, mfi, percentileNearestRank, alignCloses, suiteModel, forwardReturns, horizonStats, SUITE_PARAMS,
+  periodKey, normalizePeriods, periodCloseDays, stepToDays, suiteOnDays,
 } from '../src/utils/signalSuite.js'
 
 let passed = 0
@@ -106,6 +107,31 @@ const fr = forwardReturns(bars.map((b) => b.c), [{ i: 10 }, { i: 1090 }], H)
 eq('forward return', fr[0].returns[0], bars[73].c / bars[10].c - 1, 1e-12)
 eq('open when not enough bars', fr[1].returns[0], null)
 eq('stats for sells count falls', horizonStats([{ returns: [-0.1] }, { returns: [0.2] }], H, (x) => x < 0)[0].winRate, 0.5)
+
+// Weekly / monthly on the daily chart.
+eq('week key = Monday', periodKey('2026-10-01', '1wk'), '2026-09-28')
+eq('week key on a Monday', periodKey('2026-09-28', '1wk'), '2026-09-28')
+eq('month key', periodKey('2026-10-01', '1mo'), '2026-10')
+const live = normalizePeriods([{ t: '2026-09-01', c: 1 }, { t: '2026-10-01', c: 2 }, { t: '2026-10-03', c: 3 }], '1mo')
+eq('live duplicate merged into its period', live.map((x) => [x.t, x.c]), [['2026-09-01', 1], ['2026-10-01', 3]])
+const days = ['2026-09-28', '2026-09-29', '2026-10-02', '2026-10-05', '2026-10-06'].map((t) => ({ t }))
+const weeks = normalizePeriods([{ t: '2026-09-21' }, { t: '2026-09-28' }, { t: '2026-10-05' }], '1wk')
+const cdays = periodCloseDays(days, weeks, '1wk')
+eq('period closes on its last day', cdays, [-1, 2, 4])
+eq('step: a value appears on its close day, never earlier', stepToDays([10, 20, 30], cdays, 5), [null, null, 20, 20, 30])
+// Weekly suite from the synthetic daily bars: weekly bars built by hand.
+const wk = []
+for (const b of bars) {
+  const k = periodKey(b.t, '1wk')
+  const last = wk[wk.length - 1]
+  if (last && last.k === k) { last.h = Math.max(last.h, b.h); last.l = Math.min(last.l, b.l); last.c = b.c; last.v += b.v }
+  else wk.push({ k, t: b.t, o: b.o, h: b.h, l: b.l, c: b.c, v: b.v })
+}
+const ws = suiteModel(wk, { params: loose })
+const wd = suiteOnDays(bars, wk, ws, '1wk')
+eq('weekly events land on a Friday-or-last day of their week', wd.signals.every((x) => x.i < 0 || periodKey(bars[x.i].t, '1wk') === wk[x.pi].k), true)
+eq('weekly event day is the last day of that week', wd.signals.every((x) => x.i < 0 || x.i === bars.length - 1 || periodKey(bars[x.i + 1].t, '1wk') !== wk[x.pi].k), true)
+eq('weekly regime stepped to days', wd.bravo.regime.length, bars.length)
 
 console.log(`signal-suite checks: ${passed} passed, ${failures.length} failed`)
 console.log(`  (synthetic, default gates: ${m.bulls.length} bull / ${m.bears.length} bear; loose: ${mr.bulls.length} / ${mr.bears.length}; ${m.exits.length} exits)`)

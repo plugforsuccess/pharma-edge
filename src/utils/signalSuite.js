@@ -238,3 +238,94 @@ export function horizonStats(trades, horizons, win = (r) => r > 0) {
     }
   })
 }
+
+// ---------------------------------------------------------------------------
+// Weekly / monthly suite on the daily chart (owner, 2026-10-03: Hardening
+// reads weekly or monthly, not daily). The suite runs on the period bars;
+// each period's values land on the daily candle its period closes on (the
+// last trading day of that week / month — the current period's latest day
+// while it's still open), so nothing shows before it happened.
+// ---------------------------------------------------------------------------
+
+export const SUITE_TIMEFRAMES = {
+  '1wk': { label: 'Weekly', unit: 'week', horizons: [['3M', 13], ['6M', 26], ['12M', 52]], fresh: 2 },
+  '1mo': { label: 'Monthly', unit: 'month', horizons: [['3M', 3], ['6M', 6], ['12M', 12]], fresh: 1 },
+}
+
+// Period key of a 'YYYY-MM-DD' date: the week's Monday, or 'YYYY-MM'.
+export function periodKey(t, tf) {
+  if (tf === '1mo') return String(t).slice(0, 7)
+  const d = new Date(`${String(t).slice(0, 10)}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7))
+  return d.toISOString().slice(0, 10)
+}
+
+// One bar per period (Yahoo can repeat the current period as a live bar:
+// the last one wins, keeping the period's first date).
+export function normalizePeriods(bars, tf) {
+  const out = []
+  for (const b of bars ?? []) {
+    const k = periodKey(b.t, tf)
+    if (out.length && out[out.length - 1].k === k) out[out.length - 1] = { ...b, t: out[out.length - 1].t, k }
+    else out.push({ ...b, k })
+  }
+  return out
+}
+
+// For each period bar, the index of the daily bar its period closes on
+// (-1 when that period isn't in the daily bars).
+export function periodCloseDays(dailyBars, periodBars, tf) {
+  const lastDay = new Map()
+  dailyBars.forEach((b, i) => lastDay.set(periodKey(b.t, tf), i))
+  return periodBars.map((p) => lastDay.get(p.k ?? periodKey(p.t, tf)) ?? -1)
+}
+
+// Per-day step series: each day shows the latest period that has closed on
+// or before it (null before the first).
+export function stepToDays(values, closeDays, nDays) {
+  const out = new Array(nDays).fill(null)
+  let k = 0
+  let cur = null
+  for (let d = 0; d < nDays; d++) {
+    while (k < closeDays.length && (closeDays[k] < 0 || closeDays[k] <= d)) {
+      if (closeDays[k] >= 0) cur = values[k]
+      k++
+    }
+    out[d] = cur
+  }
+  return out
+}
+
+// Flags on periods → flags on their close days.
+function flagsToDays(flags, closeDays, nDays) {
+  const out = new Array(nDays).fill(false)
+  flags.forEach((f, k) => { if (f && closeDays[k] >= 0) out[closeDays[k]] = true })
+  return out
+}
+
+// The suite model reshaped for the daily chart: per-day series (step) and
+// flags, events with `i` = their close day (and `pi` = period index). Events
+// before the daily bars keep i = -1 (backtest only).
+export function suiteOnDays(dailyBars, periodBars, suite, tf) {
+  const n = dailyBars.length
+  const cd = periodCloseDays(dailyBars, periodBars, tf)
+  const step = (arr) => stepToDays(arr, cd, n)
+  const flags = (arr) => flagsToDays(arr, cd, n)
+  const ev = (list) => list.map((e) => ({ ...e, pi: e.i, i: cd[e.i] ?? -1 }))
+  const osc = (o) => ({ line: step(o.line), upper: step(o.upper), lower: step(o.lower), bull: flags(o.bull), bear: flags(o.bear) })
+  const signals = ev(suite.signals)
+  return {
+    tf, closeDays: cd,
+    bravo: {
+      basis: step(suite.bravo.basis), upperBand: step(suite.bravo.upperBand), lowerBand: step(suite.bravo.lowerBand),
+      fast: step(suite.bravo.fast), bull: flags(suite.bravo.bull), bear: flags(suite.bravo.bear), regime: step(suite.bravo.regime).map((x) => x ?? 0),
+    },
+    echo: osc(suite.echo),
+    tango: osc(suite.tango),
+    signals,
+    bulls: signals.filter((x) => x.side === 'bull'),
+    bears: signals.filter((x) => x.side === 'bear'),
+    exits: ev(suite.exits),
+    candidates: ev(suite.candidates),
+  }
+}

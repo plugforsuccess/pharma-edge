@@ -66,7 +66,7 @@ const SHOW_DAYS = 504 // two years of trading days in view by default
 const fmt = (v, d = 2) => (v == null || !Number.isFinite(v) ? '—' : v.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }))
 const pct = (v, d = 1) => (v == null ? '—' : `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(d)}%`)
 
-export default function EntryChart({ bars, model, suite, panes, layers = [], onHover, onExpand, focus = null, fill = null, jump = null }) {
+export default function EntryChart({ bars, model, suite, suiteLabel = null, panes, layers = [], onHover, onExpand, focus = null, fill = null, jump = null }) {
   const box = useRef(null)
   const hoverRef = useRef(onHover)
   hoverRef.current = onHover
@@ -141,11 +141,11 @@ export default function EntryChart({ bars, model, suite, panes, layers = [], onH
       : { time: time[i], value: v, color: model.slope200[i] == null ? t.subtle : model.slope200[i] > 0 ? t.up : t.down })))
 
     if (on('bravo')) {
-      const band = { ...quiet, color: alpha(t.subtle, 0.45), lineWidth: 1 }
+      const band = { ...quiet, color: alpha(t.subtle, 0.45), lineWidth: 1, lineType: LineType.WithSteps }
       chart.addSeries(LineSeries, band, 0).setData(line(suite.bravo.upperBand))
       chart.addSeries(LineSeries, band, 0).setData(line(suite.bravo.lowerBand))
-      chart.addSeries(LineSeries, { ...quiet, color: alpha(t.subtle, 0.6), lineWidth: 1, lineStyle: LineStyle.Dotted }, 0).setData(line(suite.bravo.basis))
-      chart.addSeries(LineSeries, { ...quiet, color: t.goldHi, lineWidth: 1.5 }, 0).setData(line(suite.bravo.fast))
+      chart.addSeries(LineSeries, { ...quiet, color: alpha(t.subtle, 0.6), lineWidth: 1, lineStyle: LineStyle.Dotted, lineType: LineType.WithSteps }, 0).setData(line(suite.bravo.basis))
+      chart.addSeries(LineSeries, { ...quiet, color: t.goldHi, lineWidth: 1.5, lineType: LineType.WithSteps }, 0).setData(line(suite.bravo.fast))
     }
 
     const signalSet = new Set(model.signals)
@@ -153,13 +153,14 @@ export default function EntryChart({ bars, model, suite, panes, layers = [], onH
     const stars = (n) => '★'.repeat(n)
     if (on('hardening')) {
       for (const sg of suite.signals) {
+        if (sg.i < 0) continue // before the daily bars (weekly / monthly history)
         markers.push(sg.side === 'bull'
           ? { time: time[sg.i], position: 'belowBar', shape: 'arrowUp', color: t.gold, size: 1.5, text: stars(sg.stars) }
           : { time: time[sg.i], position: 'aboveBar', shape: 'arrowDown', color: t.down, size: 1.5, text: stars(sg.stars) })
       }
     }
     if (on('exits')) {
-      for (const x of suite.exits) markers.push({ time: time[x.i], position: 'aboveBar', shape: 'square', color: alpha(t.down, 0.6), size: 0.6, text: x.why.join('') })
+      for (const x of suite.exits) if (x.i >= 0) markers.push({ time: time[x.i], position: 'aboveBar', shape: 'square', color: alpha(t.down, 0.6), size: 0.6, text: x.why.join('') })
     }
     for (const i of model.golden) markers.push({ time: time[i], position: 'aboveBar', shape: 'circle', color: t.gold, text: 'Golden cross', size: 1 })
     for (const i of model.death) markers.push({ time: time[i], position: 'aboveBar', shape: 'circle', color: t.down, text: 'Death cross', size: 1 })
@@ -237,7 +238,7 @@ export default function EntryChart({ bars, model, suite, panes, layers = [], onH
       chart.addSeries(LineSeries, rail, pi).setData(line(o.upper))
       chart.addSeries(LineSeries, rail, pi).setData(line(o.lower))
       const ln = chart.addSeries(BaselineSeries, {
-        ...quiet, lastValueVisible: true, baseValue: { type: 'price', price: 0 }, lineWidth: 1.5,
+        ...quiet, lastValueVisible: true, baseValue: { type: 'price', price: 0 }, lineWidth: 1.5, lineType: LineType.WithSteps,
         topLineColor: t.up, topFillColor1: alpha(t.up, 0.2), topFillColor2: alpha(t.up, 0.02),
         bottomLineColor: t.down, bottomFillColor1: alpha(t.down, 0.02), bottomFillColor2: alpha(t.down, 0.2),
         priceFormat: { type: 'custom', formatter: (v) => v.toFixed(0) },
@@ -351,7 +352,9 @@ export default function EntryChart({ bars, model, suite, panes, layers = [], onH
         <div key={k}>
           <div className="absolute left-3 right-[104px] pointer-events-none flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10.5px] leading-4 font-mono-tab"
             style={{ top: (tops[pi] ?? 0) + 6 }}>
-            <span className="bg-bg/80 rounded px-1 -mx-1 font-sans text-[11px] font-semibold tracking-tight text-violet-300">{PANE_TITLES[k]}</span>
+            <span className="bg-bg/80 rounded px-1 -mx-1 font-sans text-[11px] font-semibold tracking-tight text-violet-300">
+              {PANE_TITLES[k]}{suiteLabel && (k === 'echo' || k === 'tango') ? ` · ${suiteLabel}` : ''}
+            </span>
             {legends[k].map((l, li) => (
               <span key={li} className="inline-flex items-center gap-1.5 bg-bg/70 rounded px-1 -mx-1">
                 {l.swatch && <span className={`inline-block w-2.5 rounded-full ${l.thick ? 'h-[3px]' : 'h-[2px]'} ${l.swatch} ${l.dashed ? 'opacity-70' : ''}`} aria-hidden />}

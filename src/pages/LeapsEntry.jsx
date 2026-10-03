@@ -6,7 +6,7 @@ import { supabase } from '../lib/supabase'
 import { CHART_TICKERS } from '../lib/chartTickers'
 import { entryModel, DEFAULT_PARAMS, HORIZONS } from '../utils/indicators'
 import EntryChart, { LAYERS, PANE_TITLES, SUB_PANES } from '../components/EntryChart'
-import { suiteModel, forwardReturns, horizonStats } from '../utils/signalSuite'
+import { suiteModel, forwardReturns, horizonStats, normalizePeriods, suiteOnDays, SUITE_TIMEFRAMES } from '../utils/signalSuite'
 import TickerDrawer from '../components/TickerDrawer'
 import NumberInput from '../components/NumberInput'
 
@@ -21,10 +21,11 @@ const PARAMS_KEY = 'cm:entry-params'
 const PANES_KEY = 'cm:entry-panes:v2'
 const LAYERS_KEY = 'cm:entry-layers'
 const DEFAULT_LAYERS = ['hardening', 'exits']
-// A signal-suite event counts as current for this many trading days, and a
-// Hardening bull this close to a buy-zone signal (either side) confirms it.
-const RECENT_DAYS = 10
-const HARDENING_CONFIRM_DAYS = 10
+// The signal suite runs on weekly or monthly bars (owner, 2026-10-03: not
+// daily). A Hardening bull this many trading days from a buy-zone signal
+// (either side) confirms it.
+const SUITE_TF_KEY = 'cm:suite-tf'
+const CONFIRM_DAYS = { '1wk': 10, '1mo': 21 }
 // [key, label, min, max, decimals, suffix]
 const FIELDS = [
   ['bandPct', '200-day band', 0.5, 50, 1, '±%'],
@@ -141,7 +142,33 @@ export default function LeapsEntry() {
     saveJson(PANES_KEY, next)
   }
 
-  const suite = useMemo(() => (bars?.length ? suiteModel(bars, { spy: data.spy ?? [], vix: data.vix ?? [] }) : null), [bars, data])
+  // Signal suite on weekly / monthly bars (the ticker's whole history), with
+  // its events placed on the daily candles their period closes on.
+  const [suiteTf, setSuiteTf] = useState(() => { const v = loadJson(SUITE_TF_KEY); return SUITE_TIMEFRAMES[v] ? v : '1wk' })
+  const [suiteData, setSuiteData] = useState(null)
+  useEffect(() => {
+    let cancelled = false
+    setSuiteData(null)
+    supabase.functions.invoke('leaps-entry', { body: { ticker, suite: suiteTf } }).then(({ data: d, error }) => {
+      if (cancelled) return
+      setSuiteData(error || !d?.success ? { tf: suiteTf, error: true } : { tf: suiteTf, ...d })
+    })
+    return () => { cancelled = true }
+  }, [ticker, suiteTf])
+  const pickSuiteTf = (tf) => { setSuiteTf(tf); saveJson(SUITE_TF_KEY, tf) }
+  const suitePack = useMemo(() => {
+    if (!bars?.length || !suiteData?.bars?.length || suiteData.tf !== suiteTf) return null
+    const periods = normalizePeriods(suiteData.bars, suiteTf)
+    // SPY / VIX matched to the ticker's periods.
+    const onPeriods = (list) => {
+      const byKey = new Map(normalizePeriods(list ?? [], suiteTf).map((x) => [x.k, x.c]))
+      return periods.map((pb) => ({ t: pb.t, c: byKey.get(pb.k) })).filter((x) => x.c != null)
+    }
+    const raw = suiteModel(periods, { spy: onPeriods(suiteData.spy), vix: onPeriods(suiteData.vix) })
+    return { tf: suiteTf, info: SUITE_TIMEFRAMES[suiteTf], periods, raw, days: suiteOnDays(bars, periods, raw, suiteTf) }
+  }, [bars, suiteData, suiteTf])
+  const suite = suitePack?.days ?? null
+  const confirmDays = CONFIRM_DAYS[suiteTf]
   const s = model?.status
   const last = bars ? bars[bars.length - 1] : null
   const shown = hover != null && bars ? bars[hover] : last
@@ -178,8 +205,8 @@ export default function LeapsEntry() {
       ) : (
         <div className="md:grid md:grid-cols-[1fr_280px] md:gap-x-5 md:items-start">
           <div className="min-w-0 md:order-1">
-            <StatusPanel s={s} model={model} params={params} suite={suite} />
-            {suite && <SuitePanel suite={suite} bars={bars} holdings={holdings} onJump={jumpTo} onOpenPane={setExpanded}
+            <StatusPanel s={s} model={model} params={params} suite={suite} confirmDays={confirmDays} tfLabel={SUITE_TIMEFRAMES[suiteTf].label.toLowerCase()} />
+            {<SuitePanel pack={suitePack} failed={suiteData?.error && suiteData.tf === suiteTf} tf={suiteTf} onTf={pickSuiteTf} holdings={holdings} onJump={jumpTo} onOpenPane={setExpanded}
               bravoOn={layers.includes('bravo')} onBravo={() => { if (!layers.includes('bravo')) toggleLayer('bravo'); chartBox.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }} />}
           </div>
 
@@ -224,7 +251,7 @@ export default function LeapsEntry() {
                   </button>
                 ))}
               </div>
-              <EntryChart bars={bars} model={model} suite={suite} panes={panes} layers={layers} onHover={setHover} onExpand={setExpanded} jump={jump} />
+              <EntryChart bars={bars} model={model} suite={suite} suiteLabel={SUITE_TIMEFRAMES[suiteTf].label} panes={panes} layers={layers} onHover={setHover} onExpand={setExpanded} jump={jump} />
               <div className="px-5 py-3 border-t border-hairline flex flex-wrap gap-x-4 gap-y-1.5 text-[11px] text-muted">
                 <Key className="text-green-400" glyph="▲">Buy signal</Key>
                 <Key className="text-green-400/50" glyph="●">MACD confirms</Key>
@@ -243,14 +270,14 @@ export default function LeapsEntry() {
           </div>
 
           <div className="min-w-0 md:order-4 md:col-span-2">
-            <Backtest model={model} suite={suite} onJump={jumpTo} />
+            <Backtest model={model} suite={suite} pack={suitePack} confirmDays={confirmDays} onJump={jumpTo} />
           </div>
         </div>
       )}
 
       {expanded && model && (
         <FullPane title={`${ticker} · ${PANE_TITLES[expanded]}`} onClose={() => setExpanded(null)}>
-          {(h) => <EntryChart bars={bars} model={model} suite={suite} panes={panes} layers={layers} focus={expanded} fill={h} />}
+          {(h) => <EntryChart bars={bars} model={model} suite={suite} suiteLabel={SUITE_TIMEFRAMES[suiteTf].label} panes={panes} layers={layers} focus={expanded} fill={h} />}
         </FullPane>
       )}
 
@@ -310,7 +337,7 @@ function Key({ glyph, className, children }) {
   )
 }
 
-function StatusPanel({ s, model, params, suite }) {
+function StatusPanel({ s, model, params, suite, confirmDays, tfLabel }) {
   const c = s.cond
   const yes = c.all
   const met = countMet(c)
@@ -318,9 +345,10 @@ function StatusPanel({ s, model, params, suite }) {
   const lastIdx = model.closes.length - 1
   const macdAgo = lastConfirm == null ? null : lastIdx - lastConfirm
   const lastTrade = model.trades[model.trades.length - 1]
-  const hBull = suite?.bulls[suite.bulls.length - 1] ?? null
+  const onChart = suite?.bulls.filter((b) => b.i >= 0) ?? []
+  const hBull = onChart[onChart.length - 1] ?? null
   const hAgo = hBull ? lastIdx - hBull.i : null
-  const hOk = hAgo != null && hAgo <= HARDENING_CONFIRM_DAYS
+  const hOk = hAgo != null && hAgo <= confirmDays
   const rows = [
     {
       ok: c.band, label: `Within ±${params.bandPct}% of the 200-day`,
@@ -396,10 +424,10 @@ function StatusPanel({ s, model, params, suite }) {
               {hOk ? <Check size={12} strokeWidth={3} /> : <span className="text-[10px]">—</span>}
             </span>
             <span className="flex-1 min-w-0 text-sm text-subtle leading-snug">
-              Hardening confirmation <span className="text-muted">(optional)</span>
+              Hardening confirmation <span className="text-muted">({tfLabel}, optional)</span>
             </span>
             <span className="text-right shrink-0 text-[11px] text-muted font-mono-tab">
-              {!hBull ? 'no bull signal' : hOk ? `${'★'.repeat(hBull.stars)} ${hAgo === 0 ? 'today' : `${hAgo}d ago`}` : `none in ${HARDENING_CONFIRM_DAYS}d`}
+              {!hBull ? 'no bull signal' : hOk ? `${'★'.repeat(hBull.stars)} ${hAgo === 0 ? 'today' : `${hAgo}d ago`}` : `none in ${confirmDays}d`}
             </span>
           </li>
         )}
@@ -457,12 +485,12 @@ function Thresholds({ draft, setField, reset, isDefault }) {
 const BACKTEST_TABS = [['zone', 'Buy zone'], ['hardening', 'Hardening ▲'], ['sell', 'Sell signals']]
 const ROWS_SHOWN = 30
 
-function Backtest({ model, suite, onJump }) {
+function Backtest({ model, suite, pack, confirmDays, onJump }) {
   const [tab, setTab] = useState('zone')
   const [all, setAll] = useState(false)
   const view = useMemo(() => {
-    if (tab === 'zone' || !suite) {
-      const hNear = (i) => suite?.bulls.find((b) => Math.abs(b.i - i) <= HARDENING_CONFIRM_DAYS) ?? null
+    if (tab === 'zone' || !pack) {
+      const hNear = (i) => suite?.bulls.find((b) => b.i >= 0 && Math.abs(b.i - i) <= confirmDays) ?? null
       const trades = model.trades.map((tr) => {
         const h = hNear(tr.i)
         return { ...tr, hardening: !!h, tag: [tr.confirmed && 'MACD', h && `Hardening ${'★'.repeat(h.stars)}`].filter(Boolean).join(' · ') }
@@ -477,31 +505,47 @@ function Backtest({ model, suite, onJump }) {
         empty: 'No buy-zone signals in this history with these thresholds.',
       }
     }
+    // Hardening / sell signals: the suite's own weekly or monthly bars over
+    // the ticker's whole history; returns after 13 / 26 / 52 weeks (3 / 6 /
+    // 12 months). Rows on the daily chart jump to their close day.
+    const { raw, periods, info } = pack
+    const closes = periods.map((x) => x.c)
+    const cd = pack.days.closeDays
+    const since = periods[0]?.t?.slice(0, 4)
+    const periodLabel = (t) => (pack.tf === '1mo'
+      ? new Date(`${t}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', year: '2-digit', timeZone: 'UTC' }).replace(' ', ' ’')
+      : `Wk ${shortDay(t)}`)
+    const place = (list) => forwardReturns(closes, list, info.horizons).map((tr) => ({ ...tr, t: periods[tr.i].t, jumpI: cd[tr.i] }))
     if (tab === 'hardening') {
-      const trades = forwardReturns(model.closes, suite.bulls, HORIZONS).map((tr) => ({ ...tr, tag: '★'.repeat(tr.stars) }))
+      const trades = place(raw.bulls).map((tr) => ({ ...tr, tag: '★'.repeat(tr.stars) }))
       // Bull sets that lined up but failed a gate, by gate.
-      const missed = suite.candidates.filter((c) => c.side === 'bull' && !Object.values(c.gates).every(Boolean))
+      const missed = raw.candidates.filter((c) => c.side === 'bull' && !Object.values(c.gates).every(Boolean))
       const byGate = {}
       for (const c of missed) for (const [g, ok] of Object.entries(c.gates)) if (!ok) byGate[g] = (byGate[g] ?? 0) + 1
       const GATE = { volume: 'volume', regime: 'trend', velocity: 'Echo speed', atr: 'ATR expansion', vix: 'VIX' }
       const near = missed.length ? ` · ${missed.length} more lined up but failed ${Object.entries(byGate).map(([g, k]) => `${GATE[g]} ×${k}`).join(', ')}` : ''
       return {
-        trades, stats: horizonStats(trades, HORIZONS), sell: false,
-        sub: `${trades.length} Hardening bull signal${trades.length === 1 ? '' : 's'} in 5 years${near}`,
-        empty: 'No Hardening bull signals in this history — all three pillars rarely line up within 5 days.',
+        trades, stats: horizonStats(trades, info.horizons), sell: false, dateFmt: periodLabel,
+        sub: `${trades.length} ${info.label.toLowerCase()} Hardening bull signal${trades.length === 1 ? '' : 's'} since ${since}${near}`,
+        empty: `No ${info.label.toLowerCase()} Hardening bull signals since ${since}.`,
       }
     }
     const events = [
-      ...suite.bears.map((x) => ({ ...x, tag: `${'★'.repeat(x.stars)} bear` })),
-      ...suite.exits.map((x) => ({ ...x, tag: `Exit ${x.why.join('')}` })),
+      ...raw.bears.map((x) => ({ ...x, tag: `${'★'.repeat(x.stars)} bear` })),
+      ...raw.exits.map((x) => ({ ...x, tag: `Exit ${x.why.join('')}` })),
     ].sort((a, b) => a.i - b.i)
-    const trades = forwardReturns(model.closes, events, HORIZONS)
+    const trades = place(events)
     return {
-      trades, stats: horizonStats(trades, HORIZONS, (r) => r < 0), sell: true,
-      sub: `${suite.bears.length} Hardening bear + ${suite.exits.length} exit signals · a win = the stock fell after`,
-      empty: 'No sell signals in this history.',
+      trades, stats: horizonStats(trades, info.horizons, (r) => r < 0), sell: true, dateFmt: periodLabel,
+      sub: `${raw.bears.length} Hardening bear + ${raw.exits.length} exit signals (${info.label.toLowerCase()}) since ${since} · a win = the stock fell after`,
+      empty: `No ${info.label.toLowerCase()} sell signals since ${since}.`,
     }
-  }, [tab, model, suite])
+  }, [tab, model, suite, pack, confirmDays])
+  // Rows on the daily chart jump there; older ones (weekly / monthly history) don't.
+  const rowJump = (i, t) => (i >= 0 ? {
+    onClick: () => onJump?.(i), role: 'button', tabIndex: 0, 'aria-label': `Show ${shortDay(t)} on the chart`,
+    onKeyDown: (e) => { if (e.key === 'Enter') onJump?.(i) }, className: 'cursor-pointer hover:bg-card-hover/50 transition',
+  } : {})
   const rows = [...view.trades].reverse()
   const visible = all ? rows : rows.slice(0, ROWS_SHOWN)
   return (
@@ -574,10 +618,9 @@ function Backtest({ model, suite, onJump }) {
             </thead>
             <tbody className="divide-y divide-hairline">
               {visible.map((tr) => (
-                <tr key={`${tr.t}-${tr.tag}`} onClick={() => onJump?.(tr.i)} className="cursor-pointer hover:bg-card-hover/50 transition"
-                  role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') onJump?.(tr.i) }} aria-label={`Show ${shortDay(tr.t)} on the chart`}>
+                <tr key={`${tr.t}-${tr.tag}`} {...rowJump(tr.jumpI ?? tr.i, tr.t)}>
                   <td className="pl-5 pr-1 py-2.5 text-fg whitespace-nowrap">
-                    {shortDay(tr.t)}
+                    {view.dateFmt ? view.dateFmt(tr.t) : shortDay(tr.t)}
                     {tr.tag && <span className={clsx('block text-[10px] leading-3 mt-0.5',
                       view.sell ? 'text-rose-300/80' : tab === 'hardening' ? 'text-amber-300' : 'text-green-400/70')}>{tr.tag}</span>}
                   </td>
@@ -608,53 +651,81 @@ function Backtest({ model, suite, onJump }) {
 // bear, else fresh exit, else the latest) tiles — tap to see it on the chart —
 // then one row per pillar (Echo / Tango open their pane full screen; Bravo
 // turns its band on), then the user's positions in this ticker.
-function SuitePanel({ suite, bars, holdings, onJump, onOpenPane, onBravo, bravoOn }) {
-  const last = bars.length - 1
-  const ago = (i) => (i == null ? null : last - i)
-  const agoText = (n) => (n === 0 ? 'today' : n === 1 ? 'yesterday' : `${n}d ago`)
+function SuitePanel({ pack, failed, tf, onTf, holdings, onJump, onOpenPane, onBravo, bravoOn }) {
+  const header = (
+    <div className="px-5 pt-5 pb-4 flex items-center gap-3">
+      <h2 className="flex-1 text-sm font-semibold">Signal suite</h2>
+      <div className="flex gap-0.5 p-0.5 rounded-lg bg-bg-elev" role="tablist" aria-label="Suite timeframe">
+        {Object.entries(SUITE_TIMEFRAMES).map(([k, v]) => (
+          <button key={k} type="button" role="tab" aria-selected={tf === k} onClick={() => onTf(k)}
+            className={clsx('min-h-[32px] px-3 rounded-md text-[11px] font-semibold transition',
+              tf === k ? 'bg-card text-violet-300 shadow-sm' : 'text-muted hover:text-subtle')}>
+            {v.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+  if (!pack) {
+    return (
+      <section className="bg-card border border-border rounded-2xl mb-4 overflow-hidden">
+        {header}
+        {failed
+          ? <div className="px-5 pb-5 text-sm text-subtle">Couldn't load {SUITE_TIMEFRAMES[tf].label.toLowerCase()} bars for this ticker.</div>
+          : <div className="px-5 pb-5 grid grid-cols-2 gap-2.5" aria-busy="true">
+              <div className="h-[116px] rounded-xl bg-bg-elev animate-pulse" /><div className="h-[116px] rounded-xl bg-bg-elev animate-pulse" />
+            </div>}
+      </section>
+    )
+  }
+  const { raw, info, days: suite } = pack
+  const lastP = pack.periods.length - 1
+  const ago = (pi) => (pi == null ? null : lastP - pi)
+  const agoText = (n) => (n === 0 ? `this ${info.unit}` : n === 1 ? `last ${info.unit}` : `${n} ${info.unit}s ago`)
   const lastOf = (list) => list[list.length - 1] ?? null
   const bull = lastOf(suite.bulls)
   const bear = lastOf(suite.bears)
   const exit = lastOf(suite.exits)
-  const bullFresh = bull && ago(bull.i) <= RECENT_DAYS
-  const bearFresh = bear && ago(bear.i) <= RECENT_DAYS
-  const exitFresh = exit && ago(exit.i) <= RECENT_DAYS
+  const fresh = (e) => e && ago(e.pi) <= info.fresh
+  const bullFresh = fresh(bull)
+  const bearFresh = fresh(bear)
+  const exitFresh = fresh(exit)
   const sell = bearFresh ? { kind: 'bear', e: bear } : exitFresh ? { kind: 'exit', e: exit }
-    : bear && (!exit || bear.i >= exit.i) ? { kind: 'bear', e: bear } : exit ? { kind: 'exit', e: exit } : null
+    : bear && (!exit || bear.pi >= exit.pi) ? { kind: 'bear', e: bear } : exit ? { kind: 'exit', e: exit } : null
   const WHY = { E: 'Echo turned down', T: 'Tango turned down', B: 'Bravo trend flipped' }
-  const regime = suite.bravo.regime[last]
+  const jumpable = (e) => (e && e.i >= 0 ? () => onJump(e.i) : null)
+  const regime = raw.bravo.regime[lastP]
   const lastFlag = (flags) => { for (let i = flags.length - 1; i >= 0; i--) if (flags[i]) return i; return null }
   const pillar = (o) => {
-    const v = o.line[last]
-    const zone = v == null ? null : v >= o.upper[last] ? 'Above rail' : v <= o.lower[last] ? 'Below rail' : 'Mid-range'
+    const v = o.line[lastP]
+    const zone = v == null ? null : v >= o.upper[lastP] ? 'Above rail' : v <= o.lower[lastP] ? 'Below rail' : 'Mid-range'
     const b = lastFlag(o.bull)
-    const s = lastFlag(o.bear)
-    const latest = b != null && (s == null || b > s) ? { side: 'Bull', n: ago(b) } : s != null ? { side: 'Bear', n: ago(s) } : null
+    const sx = lastFlag(o.bear)
+    const latest = b != null && (sx == null || b > sx) ? { side: 'Bull', n: ago(b) } : sx != null ? { side: 'Bear', n: ago(sx) } : null
     return { v, zone, latest }
   }
-  const echo = pillar(suite.echo)
-  const tango = pillar(suite.tango)
-  const bravoB = lastFlag(suite.bravo.bull)
-  const bravoS = lastFlag(suite.bravo.bear)
+  const echo = pillar(raw.echo)
+  const tango = pillar(raw.tango)
+  const bravoB = lastFlag(raw.bravo.bull)
+  const bravoS = lastFlag(raw.bravo.bear)
   const bravoLatest = bravoB != null && (bravoS == null || bravoB > bravoS) ? { side: 'Bull', n: ago(bravoB) } : bravoS != null ? { side: 'Bear', n: ago(bravoS) } : null
   const tone = (side) => (side === 'Bull' ? 'up' : side === 'Bear' ? 'down' : 'flat')
+  const since = pack.periods[0]?.t?.slice(0, 4)
   return (
     <section className="bg-card border border-border rounded-2xl mb-4 overflow-hidden">
-      <div className="px-5 pt-5 pb-4">
-        <h2 className="text-sm font-semibold">Signal suite</h2>
-      </div>
+      {header}
       <div className="px-5 pb-5 grid grid-cols-2 gap-2.5">
         <SignalTile tone={bullFresh ? 'buy' : 'idle'} icon={ArrowUp} label="Entry"
-          onClick={bull ? () => onJump(bull.i) : null}
+          onClick={jumpable(bull)}
           title={bull ? 'Hardening bull' : 'No bull signal'}
           stars={bull?.stars}
-          sub={bull ? `${agoText(ago(bull.i))} · $${bull.price.toFixed(2)}` : 'None in 5 years'} />
+          sub={bull ? `${agoText(ago(bull.pi))} · $${bull.price.toFixed(2)}` : `None since ${since}`} />
         <SignalTile tone={!sell ? 'idle' : sell.kind === 'bear' && bearFresh ? 'sell' : exitFresh && sell.kind === 'exit' ? 'trim' : 'idle'} icon={ArrowDown} label="Sell"
-          onClick={sell ? () => onJump(sell.e.i) : null}
+          onClick={jumpable(sell?.e)}
           title={!sell ? 'No sell signal' : sell.kind === 'bear' ? 'Hardening bear' : 'Exit signal'}
           stars={sell?.kind === 'bear' ? sell.e.stars : null}
-          sub={!sell ? 'None in 5 years' : sell.kind === 'bear' ? `${agoText(ago(sell.e.i))} · $${sell.e.price.toFixed(2)}`
-            : `${agoText(ago(sell.e.i))} · ${sell.e.why.map((w) => WHY[w]).join(', ')}`} />
+          sub={!sell ? `None since ${since}` : sell.kind === 'bear' ? `${agoText(ago(sell.e.pi))} · $${sell.e.price.toFixed(2)}`
+            : `${agoText(ago(sell.e.pi))} · ${sell.e.why.map((w) => WHY[w]).join(', ')}`} />
       </div>
       <ul className="border-t border-hairline divide-y divide-hairline">
         <PillarRow name="Bravo" what="Trend" onClick={onBravo} action={bravoOn ? 'On chart' : 'Show band'}
