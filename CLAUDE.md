@@ -669,8 +669,14 @@ brand/gold  #f0b44c    gain/green  #2fd17c    loss/red #e5484d
 - Long Call → green
 - Watch → zinc/grey
 
-**Typography:** System monospace for hash values and trade data. Default
-Tailwind sans for UI copy.
+**Typography** (owner, 2026-10-03 — mono numbers clashed with the copy):
+one family, Inter Tight, for copy **and** numbers; numbers get tabular
+(fixed-width) digits via `.font-mono-tab` (the name is historical — it
+no longer sets a monospace font), so columns still line up. Monospace
+(`font-mono`, JetBrains Mono) only for hashes, commit SHAs and OCC
+symbols. Prefer one size scale per screen: 11px meta / eyebrows
+(uppercase + tracking only for eyebrows and badges), 12px secondary,
+14px body, 16px tile titles, larger only for hero numbers.
 
 **Line height** is opened up app-wide in `@theme` (text-xs 18px, text-sm
 22px). **No (i) info pop-ups for now** (removed 2026-10-02 at the
@@ -1122,6 +1128,63 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   Backtest: one trade per cluster (a signal counts when none fired in
   the previous 20 trading days), stock returns after 63 / 126 / 252 days,
   win rate and average per horizon — stock, not option, returns.
+- **Signal suite on the entry chart** (owner, 2026-10-03: "for better
+  entries and sell signals"). A JS port of the TradingView suite in
+  `plugforsuccess/wiley-indicator-suite` (Bravo trend, Echo momentum,
+  Tango money flow, Hardening ★ confluence, Exit Meta) in
+  `src/utils/signalSuite.js` (`suiteModel`; `npm run suite:check`), with
+  the Pine defaults. UI names: the pillar names only — never "Wiley"
+  (old brand). Two fixes vs the Pine: the Bravo "regime flip" exit and
+  Hardening's daily agreement read Bravo's **regime** (close and fast EMA
+  above / below the basis) instead of its cooldown-gated signal stream,
+  which dropped to 0 the bar after every signal. `leaps-entry` also
+  returns SPY + ^VIX daily closes (relative-strength booster, VIX < 30
+  gate for bulls). Entry chart: Echo and Tango panes (adaptive rails,
+  dots where they cross); price layers (`cm:entry-layers`) Hardening ★
+  (gold ▲ bull under the candle, red ▼ bear above), Exits (small red
+  squares, E / T / B) and the Bravo band (off by default); a **Signal
+  suite** card under the status panel — Entry (latest Hardening bull)
+  and Sell (fresh Hardening bear, else fresh exit, else the latest)
+  tiles, "fresh" = within 10 trading days, plus each pillar's state; the
+  backtest has tabs Buy zone / Hardening ▲ / Sell signals (sell "win" =
+  the stock fell after), and the Hardening tab lists near-misses by gate.
+  Every pane has a **violet title** (`PANE_TITLES`) and a small violet
+  maximize button at its top right that opens that pane alone full
+  screen (`FullPane` in `LeapsEntry.jsx`; Esc or X closes).
+  **Timeframe: weekly or monthly, never daily** (owner, 2026-10-03: daily
+  Hardening isn't needed). The card's Weekly | Monthly switch
+  (`cm:suite-tf`, default weekly) runs the whole suite on that interval:
+  `leaps-entry` with `suite: '1wk' | '1mo'` returns the ticker's full
+  Yahoo history ("max") plus SPY / ^VIX on the same interval (the
+  200-bar warm-ups need it). `normalizePeriods` merges Yahoo's live
+  duplicate bar; `suiteOnDays` places each period's values on the daily
+  candle its week / month closes on (the current period on today), so
+  nothing shows early, and the Echo / Tango panes ("Echo · Weekly") and
+  the Bravo band draw as steps. Ages read in weeks / months; "fresh" =
+  within 2 weeks / 1 month. The Hardening ▲ and Sell backtests use the
+  period bars over the full history, returns after 13 / 26 / 52 weeks or
+  3 / 6 / 12 months; rows on the daily chart jump to it. The buy-zone
+  confirmation window is 10 trading days (weekly) / 21 (monthly). No
+  yearly: the 200-bar warm-ups never finish on yearly bars.
+  **Everything in the Signal suite card is tappable** (owner, 2026-10-03):
+  the Entry / Sell tiles jump the chart to that signal ("View on chart":
+  ~3 months either side, crosshair on the bar — `jump` prop on
+  `EntryChart`); Echo / Tango rows open their pane full screen; the
+  Bravo row turns the Bravo band on; position rows open the holding in
+  Portfolio. Backtest rows jump the chart to their date too.
+  **Where the suite applies** (owner, 2026-10-03): its exits suit **GEX
+  spreads and share holdings**, not LEAPS. The Signal suite card lists the
+  user's open positions in the ticker: shares → "the sell signals apply";
+  LEAPS → "your exit plan decides". Charts' share-holding rows add a
+  violet "Signals" link to the entry chart. **Hardening is a
+  confirmation, not a buy-zone condition** (advised, owner asked): a
+  status row "Hardening confirmation (optional)" when a Hardening bull
+  fired within 10 trading days, and the Buy zone backtest splits trades
+  into with / without Hardening (avg 3M / 6M / 12M) — promote it to a
+  condition only if confirmed trades clearly do better across tickers.
+  **Advisory only:** sell signals don't change the LEAPS exit playbook
+  or the bot's decisions. With the Pine gates (ATR expansion ≥ 1.1× in 5
+  bars, Echo ≥ 15 points in 5 bars) daily Hardening signals are rare.
 - **LEAPS bot.** Mode (places trades only on managed accounts, else
   suggests), risk tier, **Today's checks** — one decision per holding
   from `dailyDecisions` in `src/lib/holdingChecks.jsx` (time stop →

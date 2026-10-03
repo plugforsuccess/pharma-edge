@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import clsx from 'clsx'
-import { ArrowLeft, Check, RotateCcw, Search, X } from 'lucide-react'
+import { ArrowDown, ArrowLeft, ArrowUp, Check, ChevronRight, Maximize2, RotateCcw, Search, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { CHART_TICKERS } from '../lib/chartTickers'
 import { entryModel, DEFAULT_PARAMS, HORIZONS } from '../utils/indicators'
-import EntryChart, { SUB_PANES } from '../components/EntryChart'
+import EntryChart, { LAYERS, PANE_TITLES, SUB_PANES } from '../components/EntryChart'
+import { suiteModel, forwardReturns, horizonStats, normalizePeriods, suiteOnDays, SUITE_TIMEFRAMES } from '../utils/signalSuite'
 import TickerDrawer from '../components/TickerDrawer'
 import NumberInput from '../components/NumberInput'
 
@@ -17,7 +18,14 @@ import NumberInput from '../components/NumberInput'
 // the math is utils/indicators.js, run here so thresholds apply live.
 
 const PARAMS_KEY = 'cm:entry-params'
-const PANES_KEY = 'cm:entry-panes'
+const PANES_KEY = 'cm:entry-panes:v2'
+const LAYERS_KEY = 'cm:entry-layers'
+const DEFAULT_LAYERS = ['hardening', 'exits']
+// The signal suite runs on weekly or monthly bars (owner, 2026-10-03: not
+// daily). A Hardening bull this many trading days from a buy-zone signal
+// (either side) confirms it.
+const SUITE_TF_KEY = 'cm:suite-tf'
+const CONFIRM_DAYS = { '1wk': 10, '1mo': 21 }
 // [key, label, min, max, decimals, suffix]
 const FIELDS = [
   ['bandPct', '200-day band', 0.5, 50, 1, '±%'],
@@ -78,6 +86,22 @@ export default function LeapsEntry() {
     return () => { cancelled = true }
   }, [ticker])
 
+  // The user's open positions in this ticker (shares get the sell signals;
+  // LEAPS follow their exit plan).
+  const [holdings, setHoldings] = useState([])
+  useEffect(() => {
+    let cancelled = false
+    supabase.from('leaps_positions').select('id, ticker, instrument_type, shares, contracts, option_type')
+      .eq('ticker', ticker).is('closed_at', null)
+      .then(({ data: rows }) => {
+        if (cancelled) return
+        setHoldings((rows ?? []).filter((r) => r.ticker === ticker && ['stock', 'equity_option', 'index_option_1256'].includes(r.instrument_type)).map((r) => (r.instrument_type === 'stock'
+          ? { id: r.id, kind: 'shares', qty: `${Number(r.shares).toLocaleString('en-US', { maximumFractionDigits: 2 })} shares` }
+          : { id: r.id, kind: 'leaps', qty: `${Number(r.contracts).toLocaleString('en-US')} ${r.option_type === 'P' ? 'put' : 'call'}${Number(r.contracts) === 1 ? '' : 's'}` })))
+      })
+    return () => { cancelled = true }
+  }, [ticker])
+
   const params = useMemo(() => parseParams(draft), [draft])
   const bars = data?.bars ?? null
   const model = useMemo(() => (bars?.length
@@ -95,12 +119,56 @@ export default function LeapsEntry() {
     saveJson(PARAMS_KEY, DEFAULT_PARAMS)
   }
   const isDefault = FIELDS.every(([k]) => params[k] === DEFAULT_PARAMS[k])
+  const [expanded, setExpanded] = useState(null) // a pane key shown full screen
+  // Jump the chart to a bar (from the Signal suite tiles or a backtest row).
+  const chartBox = useRef(null)
+  const [jump, setJump] = useState(null)
+  const jumpTo = (i) => {
+    setJump({ i, n: Date.now() })
+    chartBox.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+  const [layers, setLayers] = useState(() => {
+    const saved = loadJson(LAYERS_KEY)
+    return Array.isArray(saved) ? saved : DEFAULT_LAYERS
+  })
+  const toggleLayer = (k) => {
+    const next = layers.includes(k) ? layers.filter((x) => x !== k) : [...layers, k]
+    setLayers(next)
+    saveJson(LAYERS_KEY, next)
+  }
   const togglePane = (k) => {
     const next = panes.includes(k) ? panes.filter((x) => x !== k) : [...panes, k]
     setPanes(next)
     saveJson(PANES_KEY, next)
   }
 
+  // Signal suite on weekly / monthly bars (the ticker's whole history), with
+  // its events placed on the daily candles their period closes on.
+  const [suiteTf, setSuiteTf] = useState(() => { const v = loadJson(SUITE_TF_KEY); return SUITE_TIMEFRAMES[v] ? v : '1wk' })
+  const [suiteData, setSuiteData] = useState(null)
+  useEffect(() => {
+    let cancelled = false
+    setSuiteData(null)
+    supabase.functions.invoke('leaps-entry', { body: { ticker, suite: suiteTf } }).then(({ data: d, error }) => {
+      if (cancelled) return
+      setSuiteData(error || !d?.success ? { tf: suiteTf, error: true } : { tf: suiteTf, ...d })
+    })
+    return () => { cancelled = true }
+  }, [ticker, suiteTf])
+  const pickSuiteTf = (tf) => { setSuiteTf(tf); saveJson(SUITE_TF_KEY, tf) }
+  const suitePack = useMemo(() => {
+    if (!bars?.length || !suiteData?.bars?.length || suiteData.tf !== suiteTf) return null
+    const periods = normalizePeriods(suiteData.bars, suiteTf)
+    // SPY / VIX matched to the ticker's periods.
+    const onPeriods = (list) => {
+      const byKey = new Map(normalizePeriods(list ?? [], suiteTf).map((x) => [x.k, x.c]))
+      return periods.map((pb) => ({ t: pb.t, c: byKey.get(pb.k) })).filter((x) => x.c != null)
+    }
+    const raw = suiteModel(periods, { spy: onPeriods(suiteData.spy), vix: onPeriods(suiteData.vix) })
+    return { tf: suiteTf, info: SUITE_TIMEFRAMES[suiteTf], periods, raw, days: suiteOnDays(bars, periods, raw, suiteTf) }
+  }, [bars, suiteData, suiteTf])
+  const suite = suitePack?.days ?? null
+  const confirmDays = CONFIRM_DAYS[suiteTf]
   const s = model?.status
   const last = bars ? bars[bars.length - 1] : null
   const shown = hover != null && bars ? bars[hover] : last
@@ -137,12 +205,14 @@ export default function LeapsEntry() {
       ) : (
         <div className="md:grid md:grid-cols-[1fr_280px] md:gap-x-5 md:items-start">
           <div className="min-w-0 md:order-1">
-            <StatusPanel s={s} model={model} params={params} />
+            <StatusPanel s={s} model={model} params={params} suite={suite} confirmDays={confirmDays} tfLabel={SUITE_TIMEFRAMES[suiteTf].label.toLowerCase()} />
+            {<SuitePanel pack={suitePack} failed={suiteData?.error && suiteData.tf === suiteTf} tf={suiteTf} onTf={pickSuiteTf} holdings={holdings} onJump={jumpTo} onOpenPane={setExpanded}
+              bravoOn={layers.includes('bravo')} onBravo={() => { if (!layers.includes('bravo')) toggleLayer('bravo'); chartBox.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }} />}
           </div>
 
           {/* Chart */}
           <div className="min-w-0 md:order-3 md:col-span-2">
-            <section className="bg-card border border-border rounded-2xl mb-4 overflow-hidden">
+            <section ref={chartBox} className="bg-card border border-border rounded-2xl mb-4 overflow-hidden scroll-mt-4">
               <div className="px-5 pt-4 pb-2 flex items-end gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="text-2xl font-semibold font-mono-tab leading-none">{money(shown?.c)}</div>
@@ -171,13 +241,26 @@ export default function LeapsEntry() {
                   </button>
                 ))}
               </div>
-              <EntryChart bars={bars} model={model} panes={panes} onHover={setHover} />
+              <div className="px-3 pb-2 flex flex-wrap items-center gap-1.5" role="group" aria-label="On the price chart">
+                <span className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold px-1">On price</span>
+                {LAYERS.map(([k, label]) => (
+                  <button key={k} type="button" onClick={() => toggleLayer(k)} aria-pressed={layers.includes(k)}
+                    className={clsx('min-h-[32px] px-2.5 rounded-lg text-[11px] font-semibold border transition',
+                      layers.includes(k) ? 'bg-bg-elev border-border-hover text-fg' : 'border-hairline text-muted hover:text-subtle')}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <EntryChart bars={bars} model={model} suite={suite} suiteLabel={SUITE_TIMEFRAMES[suiteTf].label} panes={panes} layers={layers} onHover={setHover} onExpand={setExpanded} jump={jump} />
               <div className="px-5 py-3 border-t border-hairline flex flex-wrap gap-x-4 gap-y-1.5 text-[11px] text-muted">
                 <Key className="text-green-400" glyph="▲">Buy signal</Key>
                 <Key className="text-green-400/50" glyph="●">MACD confirms</Key>
                 <Key className="text-amber-300" glyph="●">Golden cross</Key>
                 <Key className="text-rose-300" glyph="●">Death cross</Key>
                 <Key glyph={<span className="inline-block w-3 h-2.5 rounded-sm bg-green-400/15 align-middle" />}>Buy zone</Key>
+                {layers.includes('hardening') && <Key className="text-amber-300" glyph="▲">Hardening bull</Key>}
+                {layers.includes('hardening') && <Key className="text-rose-300" glyph="▼">Hardening bear</Key>}
+                {layers.includes('exits') && <Key className="text-rose-300/60" glyph="■">Exit (E Echo · T Tango · B Bravo)</Key>}
               </div>
             </section>
           </div>
@@ -187,9 +270,15 @@ export default function LeapsEntry() {
           </div>
 
           <div className="min-w-0 md:order-4 md:col-span-2">
-            <Backtest model={model} />
+            <Backtest model={model} suite={suite} pack={suitePack} confirmDays={confirmDays} onJump={jumpTo} />
           </div>
         </div>
+      )}
+
+      {expanded && model && (
+        <FullPane title={`${ticker} · ${PANE_TITLES[expanded]}`} onClose={() => setExpanded(null)}>
+          {(h) => <EntryChart bars={bars} model={model} suite={suite} suiteLabel={SUITE_TIMEFRAMES[suiteTf].label} panes={panes} layers={layers} focus={expanded} fill={h} />}
+        </FullPane>
       )}
 
       <TickerDrawer
@@ -208,6 +297,36 @@ export default function LeapsEntry() {
 }
 const NO_GATES = new Set()
 
+// One pane full screen. Esc or X closes; the page doesn't scroll behind it.
+function FullPane({ title, onClose, children }) {
+  const body = useRef(null)
+  const close = useRef(onClose)
+  close.current = onClose
+  const [h, setH] = useState(null)
+  useEffect(() => {
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const key = (e) => { if (e.key === 'Escape') close.current() }
+    window.addEventListener('keydown', key)
+    const ro = new ResizeObserver(() => setH(body.current?.clientHeight ?? null))
+    if (body.current) ro.observe(body.current)
+    return () => { document.body.style.overflow = prev; window.removeEventListener('keydown', key); ro.disconnect() }
+  }, [])
+  return (
+    <div className="fixed inset-0 z-[70] bg-bg flex flex-col" role="dialog" aria-modal="true" aria-label={title}
+      style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}>
+      <div className="flex items-center gap-2 px-4 py-2 border-b border-hairline">
+        <h2 className="flex-1 min-w-0 truncate text-sm font-semibold text-violet-300">{title}</h2>
+        <button type="button" onClick={onClose} aria-label="Close"
+          className="min-h-[44px] min-w-[44px] -mr-2 flex items-center justify-center rounded-xl text-subtle hover:text-fg">
+          <X size={18} />
+        </button>
+      </div>
+      <div ref={body} className="flex-1 min-h-0">{h ? children(h) : null}</div>
+    </div>
+  )
+}
+
 const countMet = (c) => ['band', 'rising', 'trend', 'rsi', 'iv'].filter((k) => c[k]).length
 
 function Key({ glyph, className, children }) {
@@ -218,7 +337,7 @@ function Key({ glyph, className, children }) {
   )
 }
 
-function StatusPanel({ s, model, params }) {
+function StatusPanel({ s, model, params, suite, confirmDays, tfLabel }) {
   const c = s.cond
   const yes = c.all
   const met = countMet(c)
@@ -226,6 +345,10 @@ function StatusPanel({ s, model, params }) {
   const lastIdx = model.closes.length - 1
   const macdAgo = lastConfirm == null ? null : lastIdx - lastConfirm
   const lastTrade = model.trades[model.trades.length - 1]
+  const onChart = suite?.bulls.filter((b) => b.i >= 0) ?? []
+  const hBull = onChart[onChart.length - 1] ?? null
+  const hAgo = hBull ? lastIdx - hBull.i : null
+  const hOk = hAgo != null && hAgo <= confirmDays
   const rows = [
     {
       ok: c.band, label: `Within ±${params.bandPct}% of the 200-day`,
@@ -257,7 +380,7 @@ function StatusPanel({ s, model, params }) {
       <div className="relative px-5 pt-5 pb-4 flex items-center gap-4">
         <div className="flex-1 min-w-0">
           <div className="text-[11px] uppercase tracking-[0.14em] text-muted font-semibold">Buy zone · {day(s.t)}</div>
-          <div className={clsx('mt-1 text-3xl font-display font-semibold tracking-tight', yes ? 'text-green-400' : 'text-fg')}>
+          <div className={clsx('mt-1 text-3xl font-bold tracking-tight', yes ? 'text-green-400' : 'text-fg')}>
             {yes ? 'YES' : 'NO'}
           </div>
           <div className="text-xs text-subtle mt-0.5">
@@ -294,6 +417,20 @@ function StatusPanel({ s, model, params }) {
             {macdAgo == null ? 'no cross' : macdAgo === 0 ? 'crossed up today' : `crossed up ${macdAgo}d ago`}
           </span>
         </li>
+        {suite && (
+          <li className="px-5 py-2.5 flex items-center gap-3 min-h-[48px]">
+            <span className={clsx('shrink-0 h-6 w-6 rounded-full flex items-center justify-center border border-dashed',
+              hOk ? 'border-amber-400/60 text-amber-300' : 'border-border text-muted')} aria-hidden>
+              {hOk ? <Check size={12} strokeWidth={3} /> : <span className="text-[10px]">—</span>}
+            </span>
+            <span className="flex-1 min-w-0 text-sm text-subtle leading-snug">
+              Hardening confirmation <span className="text-muted">({tfLabel}, optional)</span>
+            </span>
+            <span className="text-right shrink-0 text-[11px] text-muted font-mono-tab">
+              {!hBull ? 'no bull signal' : hOk ? `${'★'.repeat(hBull.stars)} ${hAgo === 0 ? 'today' : `${hAgo}d ago`}` : `none in ${confirmDays}d`}
+            </span>
+          </li>
+        )}
       </ul>
     </section>
   )
@@ -345,18 +482,91 @@ function Thresholds({ draft, setField, reset, isDefault }) {
   )
 }
 
-function Backtest({ model }) {
-  const trades = [...model.trades].reverse()
+const BACKTEST_TABS = [['zone', 'Buy zone'], ['hardening', 'Hardening ▲'], ['sell', 'Sell signals']]
+const ROWS_SHOWN = 30
+
+function Backtest({ model, suite, pack, confirmDays, onJump }) {
+  const [tab, setTab] = useState('zone')
+  const [all, setAll] = useState(false)
+  const view = useMemo(() => {
+    if (tab === 'zone' || !pack) {
+      const hNear = (i) => suite?.bulls.find((b) => b.i >= 0 && Math.abs(b.i - i) <= confirmDays) ?? null
+      const trades = model.trades.map((tr) => {
+        const h = hNear(tr.i)
+        return { ...tr, hardening: !!h, tag: [tr.confirmed && 'MACD', h && `Hardening ${'★'.repeat(h.stars)}`].filter(Boolean).join(' · ') }
+      })
+      const split = suite ? [
+        { label: 'With', stats: horizonStats(trades.filter((x) => x.hardening), HORIZONS), n: trades.filter((x) => x.hardening).length },
+        { label: 'Without', stats: horizonStats(trades.filter((x) => !x.hardening), HORIZONS), n: trades.filter((x) => !x.hardening).length },
+      ] : null
+      return {
+        trades, stats: model.stats, sell: false, split,
+        sub: `${model.trades.length} trade${model.trades.length === 1 ? '' : 's'} in 5 years (${model.signals.length} signal days)`,
+        empty: 'No buy-zone signals in this history with these thresholds.',
+      }
+    }
+    // Hardening / sell signals: the suite's own weekly or monthly bars over
+    // the ticker's whole history; returns after 13 / 26 / 52 weeks (3 / 6 /
+    // 12 months). Rows on the daily chart jump to their close day.
+    const { raw, periods, info } = pack
+    const closes = periods.map((x) => x.c)
+    const cd = pack.days.closeDays
+    const since = periods[0]?.t?.slice(0, 4)
+    const periodLabel = (t) => (pack.tf === '1mo'
+      ? new Date(`${t}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', year: '2-digit', timeZone: 'UTC' }).replace(' ', ' ’')
+      : `Wk ${shortDay(t)}`)
+    const place = (list) => forwardReturns(closes, list, info.horizons).map((tr) => ({ ...tr, t: periods[tr.i].t, jumpI: cd[tr.i] }))
+    if (tab === 'hardening') {
+      const trades = place(raw.bulls).map((tr) => ({ ...tr, tag: '★'.repeat(tr.stars) }))
+      // Bull sets that lined up but failed a gate, by gate.
+      const missed = raw.candidates.filter((c) => c.side === 'bull' && !Object.values(c.gates).every(Boolean))
+      const byGate = {}
+      for (const c of missed) for (const [g, ok] of Object.entries(c.gates)) if (!ok) byGate[g] = (byGate[g] ?? 0) + 1
+      const GATE = { volume: 'volume', regime: 'trend', velocity: 'Echo speed', atr: 'ATR expansion', vix: 'VIX' }
+      const near = missed.length ? ` · ${missed.length} more lined up but failed ${Object.entries(byGate).map(([g, k]) => `${GATE[g]} ×${k}`).join(', ')}` : ''
+      return {
+        trades, stats: horizonStats(trades, info.horizons), sell: false, dateFmt: periodLabel,
+        sub: `${trades.length} ${info.label.toLowerCase()} Hardening bull signal${trades.length === 1 ? '' : 's'} since ${since}${near}`,
+        empty: `No ${info.label.toLowerCase()} Hardening bull signals since ${since}.`,
+      }
+    }
+    const events = [
+      ...raw.bears.map((x) => ({ ...x, tag: `${'★'.repeat(x.stars)} bear` })),
+      ...raw.exits.map((x) => ({ ...x, tag: `Exit ${x.why.join('')}` })),
+    ].sort((a, b) => a.i - b.i)
+    const trades = place(events)
+    return {
+      trades, stats: horizonStats(trades, info.horizons, (r) => r < 0), sell: true, dateFmt: periodLabel,
+      sub: `${raw.bears.length} Hardening bear + ${raw.exits.length} exit signals (${info.label.toLowerCase()}) since ${since} · a win = the stock fell after`,
+      empty: `No ${info.label.toLowerCase()} sell signals since ${since}.`,
+    }
+  }, [tab, model, suite, pack, confirmDays])
+  // Rows on the daily chart jump there; older ones (weekly / monthly history) don't.
+  const rowJump = (i, t) => (i >= 0 ? {
+    onClick: () => onJump?.(i), role: 'button', tabIndex: 0, 'aria-label': `Show ${shortDay(t)} on the chart`,
+    onKeyDown: (e) => { if (e.key === 'Enter') onJump?.(i) }, className: 'cursor-pointer hover:bg-card-hover/50 transition',
+  } : {})
+  const rows = [...view.trades].reverse()
+  const visible = all ? rows : rows.slice(0, ROWS_SHOWN)
   return (
     <section className="bg-card border border-border rounded-2xl mb-4 overflow-hidden">
       <div className="px-5 pt-5 pb-3">
-        <h2 className="text-sm font-semibold">Backtest</h2>
-        <div className="text-xs text-muted mt-0.5">
-          {model.trades.length} trade{model.trades.length === 1 ? '' : 's'} in 5 years ({model.signals.length} signal days) · stock return, not option return
+        <div className="flex items-center gap-3">
+          <h2 className="flex-1 text-sm font-semibold">Backtest</h2>
         </div>
+        <div className="mt-3 flex gap-1 p-1 rounded-xl bg-bg-elev" role="tablist" aria-label="Signal">
+          {BACKTEST_TABS.map(([k, label]) => (
+            <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => { setTab(k); setAll(false) }}
+              className={clsx('flex-1 min-h-[36px] rounded-lg text-xs font-semibold transition',
+                tab === k ? 'bg-card text-fg shadow-sm' : 'text-muted hover:text-subtle')}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="text-xs text-muted mt-2.5">{view.sub} · stock return, not option return</div>
       </div>
       <div className="px-5 pb-4 grid grid-cols-3 gap-2">
-        {model.stats.map((st) => (
+        {view.stats.map((st) => (
           <div key={st.label} className="rounded-xl bg-bg-elev px-3 py-3">
             <div className="text-[11px] text-muted font-semibold">{st.label}</div>
             <div className={clsx('mt-1 text-lg font-semibold font-mono-tab leading-none',
@@ -365,33 +575,61 @@ function Backtest({ model }) {
             </div>
             <div className="text-[11px] text-muted mt-1">avg return</div>
             <div className="mt-2 h-1 rounded-full bg-faint overflow-hidden" aria-hidden>
-              <div className="h-full bg-green-400" style={{ width: `${(st.winRate ?? 0) * 100}%` }} />
+              <div className={clsx('h-full', view.sell ? 'bg-red-400' : 'bg-green-400')} style={{ width: `${(st.winRate ?? 0) * 100}%` }} />
             </div>
             <div className="text-[11px] mt-1 font-mono-tab">
               <span className="text-fg">{st.winRate == null ? '—' : `${Math.round(st.winRate * 100)}%`}</span>
-              <span className="text-muted"> win · {st.n}</span>
+              <span className="text-muted"> {view.sell ? 'fell' : 'win'} · {st.n}</span>
             </div>
           </div>
         ))}
       </div>
-      {trades.length === 0 ? (
-        <div className="px-5 pb-5 text-sm text-subtle">No buy signals in this history with these thresholds.</div>
+      {view.split && rows.length > 0 && (
+        <div className="px-5 pb-4 -mt-1">
+          <table className="w-full text-xs font-mono-tab rounded-xl overflow-hidden border border-hairline border-separate border-spacing-0">
+            <thead>
+              <tr className="text-[11px] text-muted bg-bg-elev/60">
+                <th className="text-left font-semibold font-sans px-3 py-2">Hardening</th>
+                <th className="text-right font-semibold px-2 py-2">Trades</th>
+                {HORIZONS.map(([l]) => <th key={l} className="text-right font-semibold px-2 py-2 last:pr-3">{l}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {view.split.map((g) => (
+                <tr key={g.label}>
+                  <td className="font-sans text-subtle px-3 py-2 border-t border-hairline whitespace-nowrap">{g.label}</td>
+                  <td className="text-right text-subtle px-2 py-2 border-t border-hairline">{g.n}</td>
+                  {g.stats.map((st) => (
+                    <td key={st.label} className={clsx('text-right px-2 py-2 border-t border-hairline last:pr-3 whitespace-nowrap',
+                      st.avg == null ? 'text-muted' : st.avg < 0 ? 'text-rose-300' : 'text-green-400')}>
+                      {st.avg == null ? '—' : signed(st.avg * 100)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {rows.length === 0 ? (
+        <div className="px-5 pb-5 text-sm text-subtle">{view.empty}</div>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-xs font-mono-tab">
             <thead>
               <tr className="text-muted text-[11px] border-y border-hairline">
                 <th className="text-left font-semibold pl-5 pr-1 py-2">Date</th>
-                <th className="text-right font-semibold px-1.5 py-2">Entry</th>
+                <th className="text-right font-semibold px-1.5 py-2">{view.sell ? 'Price' : 'Entry'}</th>
                 {HORIZONS.map(([label]) => <th key={label} className="text-right font-semibold px-1.5 py-2 last:pr-5">{label}</th>)}
               </tr>
             </thead>
             <tbody className="divide-y divide-hairline">
-              {trades.map((tr) => (
-                <tr key={tr.t}>
+              {visible.map((tr) => (
+                <tr key={`${tr.t}-${tr.tag}`} {...rowJump(tr.jumpI ?? tr.i, tr.t)}>
                   <td className="pl-5 pr-1 py-2.5 text-fg whitespace-nowrap">
-                    {shortDay(tr.t)}
-                    {tr.confirmed && <span className="ml-1.5 text-green-400/60" title="MACD confirmed" aria-label="MACD confirmed">●</span>}
+                    {view.dateFmt ? view.dateFmt(tr.t) : shortDay(tr.t)}
+                    {tr.tag && <span className={clsx('block text-[11px] leading-4 mt-0.5',
+                      view.sell ? 'text-rose-300/80' : tab === 'hardening' ? 'text-amber-300' : 'text-green-400/70')}>{tr.tag}</span>}
                   </td>
                   <td className="px-1.5 py-2.5 text-right text-subtle">{money(tr.price)}</td>
                   {tr.returns.map((r, h) => (
@@ -404,8 +642,187 @@ function Backtest({ model }) {
               ))}
             </tbody>
           </table>
+          {rows.length > ROWS_SHOWN && (
+            <button type="button" onClick={() => setAll((v) => !v)}
+              className="w-full min-h-[44px] border-t border-hairline text-xs font-semibold text-subtle hover:text-fg">
+              {all ? 'Show fewer' : `Show all ${rows.length}`}
+            </button>
+          )}
         </div>
       )}
     </section>
+  )
+}
+
+// Signal suite today: Entry (latest Hardening bull) and Sell (fresh Hardening
+// bear, else fresh exit, else the latest) tiles — tap to see it on the chart —
+// then one row per pillar (Echo / Tango open their pane full screen; Bravo
+// turns its band on), then the user's positions in this ticker.
+function SuitePanel({ pack, failed, tf, onTf, holdings, onJump, onOpenPane, onBravo, bravoOn }) {
+  const header = (
+    <div className="px-5 pt-5 pb-4 flex items-center gap-3">
+      <h2 className="flex-1 text-sm font-semibold">Signal suite</h2>
+      <div className="flex gap-0.5 p-0.5 rounded-lg bg-bg-elev" role="tablist" aria-label="Suite timeframe">
+        {Object.entries(SUITE_TIMEFRAMES).map(([k, v]) => (
+          <button key={k} type="button" role="tab" aria-selected={tf === k} onClick={() => onTf(k)}
+            className={clsx('min-h-[32px] px-3 rounded-md text-[11px] font-semibold transition',
+              tf === k ? 'bg-card text-violet-300 shadow-sm' : 'text-muted hover:text-subtle')}>
+            {v.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+  if (!pack) {
+    return (
+      <section className="bg-card border border-border rounded-2xl mb-4 overflow-hidden">
+        {header}
+        {failed
+          ? <div className="px-5 pb-5 text-sm text-subtle">Couldn't load {SUITE_TIMEFRAMES[tf].label.toLowerCase()} bars for this ticker.</div>
+          : <div className="px-5 pb-5 grid grid-cols-2 gap-2.5" aria-busy="true">
+              <div className="h-[116px] rounded-xl bg-bg-elev animate-pulse" /><div className="h-[116px] rounded-xl bg-bg-elev animate-pulse" />
+            </div>}
+      </section>
+    )
+  }
+  const { raw, info, days: suite } = pack
+  const lastP = pack.periods.length - 1
+  const ago = (pi) => (pi == null ? null : lastP - pi)
+  const agoText = (n) => (n === 0 ? `this ${info.unit}` : n === 1 ? `last ${info.unit}` : `${n} ${info.unit}s ago`)
+  const lastOf = (list) => list[list.length - 1] ?? null
+  const bull = lastOf(suite.bulls)
+  const bear = lastOf(suite.bears)
+  const exit = lastOf(suite.exits)
+  const fresh = (e) => e && ago(e.pi) <= info.fresh
+  const bullFresh = fresh(bull)
+  const bearFresh = fresh(bear)
+  const exitFresh = fresh(exit)
+  const sell = bearFresh ? { kind: 'bear', e: bear } : exitFresh ? { kind: 'exit', e: exit }
+    : bear && (!exit || bear.pi >= exit.pi) ? { kind: 'bear', e: bear } : exit ? { kind: 'exit', e: exit } : null
+  const WHY = { E: 'Echo turned down', T: 'Tango turned down', B: 'Bravo trend flipped' }
+  const jumpable = (e) => (e && e.i >= 0 ? () => onJump(e.i) : null)
+  const regime = raw.bravo.regime[lastP]
+  const lastFlag = (flags) => { for (let i = flags.length - 1; i >= 0; i--) if (flags[i]) return i; return null }
+  const pillar = (o) => {
+    const v = o.line[lastP]
+    const zone = v == null ? null : v >= o.upper[lastP] ? 'Above rail' : v <= o.lower[lastP] ? 'Below rail' : 'Mid-range'
+    const b = lastFlag(o.bull)
+    const sx = lastFlag(o.bear)
+    const latest = b != null && (sx == null || b > sx) ? { side: 'Bull', n: ago(b) } : sx != null ? { side: 'Bear', n: ago(sx) } : null
+    return { v, zone, latest }
+  }
+  const echo = pillar(raw.echo)
+  const tango = pillar(raw.tango)
+  const bravoB = lastFlag(raw.bravo.bull)
+  const bravoS = lastFlag(raw.bravo.bear)
+  const bravoLatest = bravoB != null && (bravoS == null || bravoB > bravoS) ? { side: 'Bull', n: ago(bravoB) } : bravoS != null ? { side: 'Bear', n: ago(bravoS) } : null
+  const tone = (side) => (side === 'Bull' ? 'up' : side === 'Bear' ? 'down' : 'flat')
+  const since = pack.periods[0]?.t?.slice(0, 4)
+  // Short ages for the pillar rows: "now", "3w ago", "2mo ago".
+  const short = info.unit === 'week' ? 'w' : 'mo'
+  const agoShort = (n) => (n === 0 ? 'now' : `${n}${short} ago`)
+  return (
+    <section className="bg-card border border-border rounded-2xl mb-4 overflow-hidden">
+      {header}
+      <div className="px-5 pb-5 grid grid-cols-2 gap-2.5">
+        <SignalTile tone={bullFresh ? 'buy' : 'idle'} icon={ArrowUp} label="Entry"
+          onClick={jumpable(bull)}
+          title={bull ? 'Hardening bull' : 'No bull signal'}
+          stars={bull?.stars}
+          sub={bull ? `${agoText(ago(bull.pi))} · $${bull.price.toFixed(2)}` : `None since ${since}`} />
+        <SignalTile tone={!sell ? 'idle' : sell.kind === 'bear' && bearFresh ? 'sell' : exitFresh && sell.kind === 'exit' ? 'trim' : 'idle'} icon={ArrowDown} label="Sell"
+          onClick={jumpable(sell?.e)}
+          title={!sell ? 'No sell signal' : sell.kind === 'bear' ? 'Hardening bear' : 'Exit signal'}
+          stars={sell?.kind === 'bear' ? sell.e.stars : null}
+          sub={!sell ? `None since ${since}` : sell.kind === 'bear' ? `${agoText(ago(sell.e.pi))} · $${sell.e.price.toFixed(2)}`
+            : `${agoText(ago(sell.e.pi))} · ${sell.e.why.map((w) => WHY[w]).join(', ')}`} />
+      </div>
+      <ul className="border-t border-hairline divide-y divide-hairline">
+        <PillarRow name="Bravo" what="Trend" onClick={onBravo} action={bravoOn ? 'On chart' : 'Show band'}
+          value={regime === 1 ? 'Bull trend' : regime === -1 ? 'Bear trend' : 'No trend'} valueTone={regime === 1 ? 'up' : regime === -1 ? 'down' : 'flat'}
+          chip={regime === 1 ? 'Above basis' : regime === -1 ? 'Below basis' : 'Mixed'}
+          latest={bravoLatest && `${bravoLatest.side} ${agoShort(bravoLatest.n)}`} latestTone={tone(bravoLatest?.side)} />
+        <PillarRow name="Echo" what="Momentum" onClick={() => onOpenPane('echo')} action="Open" expand
+          value={echo.v == null ? '—' : echo.v.toFixed(1)} mono valueTone={echo.v == null ? 'flat' : echo.v >= 0 ? 'up' : 'down'} chip={echo.zone}
+          latest={echo.latest && `${echo.latest.side} ${agoShort(echo.latest.n)}`} latestTone={tone(echo.latest?.side)} />
+        <PillarRow name="Tango" what="Money flow" onClick={() => onOpenPane('tango')} action="Open" expand
+          value={tango.v == null ? '—' : tango.v.toFixed(1)} mono valueTone={tango.v == null ? 'flat' : tango.v >= 0 ? 'up' : 'down'} chip={tango.zone}
+          latest={tango.latest && `${tango.latest.side} ${agoShort(tango.latest.n)}`} latestTone={tone(tango.latest?.side)} />
+      </ul>
+      {holdings?.length > 0 && (
+        <ul className="border-t border-hairline divide-y divide-hairline">
+          {holdings.map((h) => (
+            <li key={h.id}>
+              <Link to={`/leaps?open=${h.id}`} className="px-5 py-3 flex items-center gap-3 min-h-[56px] hover:bg-card-hover/40 transition">
+                <span className={clsx('shrink-0 text-[10px] uppercase tracking-wider font-semibold px-2 py-1 rounded-md border',
+                  h.kind === 'shares' ? 'text-amber-300 border-amber-400/40 bg-amber-400/10' : 'text-subtle border-border bg-bg-elev')}>
+                  {h.kind === 'shares' ? 'Shares' : 'LEAPS'}
+                </span>
+                <span className="flex-1 min-w-0">
+                  <span className="block text-sm text-fg">You {h.kind === 'shares' ? 'own' : 'hold'} <span className="font-mono-tab">{h.qty}</span></span>
+                  <span className="block text-xs text-muted mt-0.5">{h.kind === 'shares' ? 'The sell signals apply to these shares.' : 'Your exit plan decides; these signals are for shares and spreads.'}</span>
+                </span>
+                <ChevronRight size={15} className="shrink-0 text-muted" aria-hidden />
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
+const TILE_TONE = {
+  buy: { box: 'border-amber-400/40 bg-amber-400/[0.06]', label: 'text-amber-300', icon: 'bg-amber-400/15 text-amber-300' },
+  sell: { box: 'border-red-400/40 bg-red-400/[0.07]', label: 'text-rose-300', icon: 'bg-red-400/15 text-rose-300' },
+  trim: { box: 'border-red-400/25 bg-red-400/[0.04]', label: 'text-rose-300', icon: 'bg-red-400/12 text-rose-300' },
+  idle: { box: 'border-hairline bg-bg-elev', label: 'text-muted', icon: 'bg-faint text-subtle' },
+}
+function SignalTile({ tone, icon: Icon, label, title, stars, sub, onClick }) {
+  const c = TILE_TONE[tone]
+  const Tag = onClick ? 'button' : 'div'
+  return (
+    <Tag type={onClick ? 'button' : undefined} onClick={onClick ?? undefined}
+      className={clsx('text-left rounded-xl border p-3.5 min-w-0 min-h-[116px] flex flex-col transition', c.box,
+        onClick && 'hover:border-border-hover active:scale-[0.99]')}>
+      <span className="flex items-center gap-2">
+        <span className={clsx('h-6 w-6 rounded-full flex items-center justify-center shrink-0', c.icon)} aria-hidden><Icon size={13} strokeWidth={2.5} /></span>
+        <span className={clsx('text-[11px] uppercase tracking-[0.12em] font-semibold', c.label)}>{label}</span>
+      </span>
+      <span className="mt-3 text-base font-semibold text-fg leading-tight">{title}</span>
+      {stars ? <span className="mt-0.5 text-xs text-amber-300 tracking-wider" aria-label={`${stars} stars`}>{'★'.repeat(stars)}<span className="text-faint">{'★'.repeat(4 - stars)}</span></span> : null}
+      <span className="mt-1 text-xs text-muted leading-4">{sub}</span>
+      {onClick && <span className="mt-auto pt-2 text-[11px] font-semibold text-subtle inline-flex items-center gap-0.5">View on chart <ChevronRight size={12} aria-hidden /></span>}
+    </Tag>
+  )
+}
+
+const TONE_TEXT = { up: 'text-green-400', down: 'text-rose-300', flat: 'text-subtle' }
+// Two aligned lines per row: name · value · latest signal on top, the role ·
+// state chip · action below — every column shares the same two baselines.
+function PillarRow({ name, what, value, valueTone, mono, chip, latest, latestTone, onClick, action, expand }) {
+  return (
+    <li>
+      <button type="button" onClick={onClick}
+        className="w-full text-left px-5 py-3 grid grid-cols-[8px_84px_minmax(0,1fr)_auto] items-start gap-x-3 hover:bg-card-hover/40 transition">
+        <span className={clsx('mt-[7px] h-2 w-2 rounded-full', valueTone === 'up' ? 'bg-green-400' : valueTone === 'down' ? 'bg-red-400' : 'bg-faint')} aria-hidden />
+        <span className="min-w-0">
+          <span className="block h-5 text-sm leading-5 text-fg font-medium truncate">{name}</span>
+          <span className="block h-4 mt-1 text-[11px] leading-4 text-muted truncate">{what}</span>
+        </span>
+        <span className="min-w-0">
+          <span className={clsx('block h-5 text-sm leading-5 font-semibold truncate', mono && 'font-mono-tab', TONE_TEXT[valueTone])}>{value}</span>
+          <span className="block h-4 mt-1">
+            {chip && <span className="inline-block max-w-full truncate whitespace-nowrap align-top text-[11px] leading-4 font-medium px-1.5 rounded bg-bg-elev text-subtle">{chip}</span>}
+          </span>
+        </span>
+        <span className="text-right">
+          <span className={clsx('block h-5 text-xs leading-5 font-mono-tab whitespace-nowrap', TONE_TEXT[latestTone])}>{latest ?? ''}</span>
+          <span className="flex h-4 mt-1 items-center justify-end gap-1 text-[11px] leading-4 text-violet-300 font-semibold whitespace-nowrap">
+            {expand ? <Maximize2 size={11} aria-hidden /> : null}{action}{!expand && <ChevronRight size={12} aria-hidden />}
+          </span>
+        </span>
+      </button>
+    </li>
   )
 }

@@ -183,10 +183,15 @@ body {
     font-feature-settings: "ss01", "ss02";
     letter-spacing: -0.02em;
   }
+  /* Numbers: the UI sans with tabular (fixed-width) digits, so figures line
+     up in columns without a second typeface next to the copy (owner,
+     2026-10-03: mono numbers clashed). Monospace (`font-mono`) is only for
+     hashes, commit SHAs and OCC symbols. The class name is historical. */
   .font-mono-tab {
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
     font-variant-numeric: tabular-nums;
-    letter-spacing: -0.01em;
+    font-feature-settings: "tnum" 1;
+    letter-spacing: 0;
   }
   .num-tab {
     font-variant-numeric: tabular-nums;

@@ -119,7 +119,7 @@ export default function Charts() {
         if (d.kind === 'hold' || !d.pos.ticker) continue
         const r = byId.get(d.pos.id)
         const { lines } = holdingLevels(r, d)
-        out.push({ id: `h:${d.pos.id}`, posId: d.pos.id, group: 'holdings', ticker: d.pos.ticker, crypto: d.pos.instrument_type === 'crypto',
+        out.push({ id: `h:${d.pos.id}`, posId: d.pos.id, shares: d.pos.instrument_type === 'stock', group: 'holdings', ticker: d.pos.ticker, crypto: d.pos.instrument_type === 'crypto',
           title: d.title, body: d.body, verdict: d.verdict, tone: d.tone, lines, from: 'Your plan' })
       }
     }
@@ -550,6 +550,12 @@ function TradeList({ title, items, current, onPick, onClear }) {
                   <ChartLine size={13} aria-hidden /> {on ? 'On the chart' : 'Show on chart'}
                 </button>
                 <span className="flex-1" />
+                {it.posId && it.shares && (
+                  <Link to={`/charts/entry/${encodeURIComponent(it.ticker)}`}
+                    className="min-h-[40px] px-2 inline-flex items-center gap-1 text-xs font-semibold text-violet-300 hover:text-violet-200 rounded-md">
+                    Signals <ChevronRight size={13} aria-hidden />
+                  </Link>
+                )}
                 {it.posId ? (
                   <Link to={`/leaps?open=${it.posId}`}
                     className="min-h-[40px] px-2 inline-flex items-center gap-1 text-xs font-semibold text-amber-300 hover:text-amber-200 rounded-md">

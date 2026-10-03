@@ -1,7 +1,12 @@
 // leaps-entry — data for the LEAPS entry chart (/charts/entry/:ticker).
 //
-// POST { ticker: "AAPL" }
-//   → { success, ticker, source: "yahoo", bars: [{ t, o, h, l, c, v }],
+// POST { ticker: "AAPL" }                      daily data for the chart
+// POST { ticker: "AAPL", suite: "1wk" | "1mo" }  the signal suite's bars:
+//   → { success, ticker, interval, bars, spy, vix } — the ticker's whole
+//   Yahoo history ("max") on that interval plus SPY / ^VIX on the same
+//   interval, so the 200-bar warm-ups have room (owner, 2026-10-03:
+//   Hardening reads weekly / monthly, not daily).
+//   daily → { success, ticker, source: "yahoo", bars: [{ t, o, h, l, c, v }],
 //       iv_points: [{ t, iv }], iv_today, iv_today_expiry }
 //   bars: 5 years of daily bars (the page shows the last 2; the rest warms
 //   up the 200-day SMA / 252-day ranks and feeds the backtest).
@@ -9,6 +14,8 @@
 //   2%–300% are dropped as bad samples.
 //   iv_today: today's ATM IV from Yahoo — the expiry nearest 30 days out,
 //   mean of the call and put IV at the strike nearest spot. null on failure.
+//   (The suite request's spy / vix: closes [{ t, c }] for the relative-
+//   strength booster and the VIX gate; empty on failure.)
 //
 // The indicators and the buy-zone signal are computed in the browser
 // (src/utils/indicators.js) so the thresholds can be adjusted live.
@@ -31,6 +38,22 @@ function json(body: unknown, status = 200): Response {
 const CACHE_MS = 15 * 60 * 1000
 const TICKER_RE = /^[A-Z][A-Z0-9.\-]{0,9}$/
 const cache = new Map<string, { at: number; body: Record<string, unknown> }>()
+const marketCache = new Map<string, { at: number; closes: Array<{ t: string; c: number }> }>()
+
+// SPY / VIX closes on the suite's weekly / monthly interval (whole
+// history), shared across tickers.
+async function marketCloses(symbol: string, interval: string): Promise<Array<{ t: string; c: number }>> {
+  const key = `${symbol}:${interval}`
+  const hit = marketCache.get(key)
+  if (hit && Date.now() - hit.at < CACHE_MS) return hit.closes
+  try {
+    const closes = (await yahooChart(symbol, 'max', interval)).bars.map((b) => ({ t: String(b.t), c: b.c }))
+    marketCache.set(key, { at: Date.now(), closes })
+    return closes
+  } catch {
+    return hit?.closes ?? []
+  }
+}
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? ''
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
@@ -82,11 +105,29 @@ serve(async (req) => {
   const ticker = String(body.ticker ?? '').trim().toUpperCase()
   if (!TICKER_RE.test(ticker)) return json({ success: false, error: 'invalid ticker' }, 400)
 
-  const hit = cache.get(ticker)
-  if (hit && Date.now() - hit.at < CACHE_MS) return json({ ...hit.body, cached: true })
-
   // Yahoo writes share classes with a dash (BRK.B → BRK-B).
   const symbol = ticker.replace(/\./g, '-')
+
+  const suite = body.suite == null ? null : String(body.suite)
+  if (suite != null) {
+    if (suite !== '1wk' && suite !== '1mo') return json({ success: false, error: 'invalid suite interval' }, 400)
+    const key = `${ticker}:${suite}`
+    const hitS = cache.get(key)
+    if (hitS && Date.now() - hitS.at < CACHE_MS) return json({ ...hitS.body, cached: true })
+    let sbars: Bar[]
+    try {
+      sbars = (await yahooChart(symbol, 'max', suite)).bars
+    } catch (e) {
+      return json({ success: false, error: (e as Error).message }, 502)
+    }
+    const [spyS, vixS] = await Promise.all([marketCloses('SPY', suite), marketCloses('^VIX', suite)])
+    const outS = { success: true, ticker, interval: suite, source: 'yahoo', bars: sbars, spy: spyS, vix: vixS }
+    cache.set(key, { at: Date.now(), body: outS })
+    return json(outS)
+  }
+
+  const hit = cache.get(ticker)
+  if (hit && Date.now() - hit.at < CACHE_MS) return json({ ...hit.body, cached: true })
   let bars: Bar[]
   try {
     bars = (await yahooChart(symbol, '5y', '1d')).bars
