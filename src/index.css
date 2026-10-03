@@ -128,6 +128,8 @@
      gains / losses stay green / red. */
   --color-suite-bull: #4d8dff;
   --color-suite-bear: #ff5fa2;
+  /* Confluence score + swing lows on the entry chart (canvas needs hex). */
+  --color-confluence: #a78bfa;
 
   /* Fonts — Space Grotesk reads modern + confident without the
      literary weight Fraunces carried (Pharma/Wiley Edge era). It

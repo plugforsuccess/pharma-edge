@@ -47,16 +47,19 @@ function alpha(hex, a) {
 export const SUB_PANES = [
   ['echo', 'Echo'],
   ['tango', 'Tango'],
+  ['conf', 'Confluence'],
   ['dist', '200-day'],
   ['rsi', 'RSI'],
   ['macd', 'MACD'],
   ['ivr', 'IV Rank'],
   ['ivhv', 'IV / HV'],
 ]
+// The Bravo band is gone (owner, 2026-10-03: not needed — the diamonds
+// carry the signal and the suite card shows the trend).
 export const LAYERS = [
   ['bravoSignals', 'Bravo ◆'],
   ['exits', 'Exits'],
-  ['bravo', 'Bravo band'],
+  ['swings', 'Swing lows'],
   ...(FEATURES.hardening ? [['hardening', 'Hardening ★']] : []),
 ]
 const PRICE_H = 340
@@ -66,8 +69,9 @@ const HEADER_PRICE = 46
 const HEADER_SUB = 30
 export const PANE_TITLES = {
   price: 'Price', dist: '% vs 200-day', rsi: 'RSI 14', macd: 'MACD 12·26·9', ivr: 'IV Rank',
-  ivhv: 'IV vs HV 20', echo: 'Echo', tango: 'Tango',
+  ivhv: 'IV vs HV 20', echo: 'Echo', tango: 'Tango', conf: 'Confluence',
 }
+const CONF_NAMES = { zone: 'Zone', bravo: 'Bravo', echo: 'Echo', tango: 'Tango', macd: 'MACD' }
 const SHOW_DAYS = 504 // two years of trading days in view by default
 // "% vs 200-day" reads "% vs 200-week" on weekly bars, etc.
 export function paneTitle(k, tf = '1d') {
@@ -89,11 +93,11 @@ export const INTERVALS = {
   '1wk': { unit: 'W', show: 260, jump: 26 },
   '1mo': { unit: 'M', show: 120, jump: 12 },
 }
-export const DAILY_ONLY_PANES = new Set(['ivr', 'ivhv'])
+export const DAILY_ONLY_PANES = new Set(['ivr', 'ivhv', 'conf'])
 // A date row under every pane but the last (which has the chart's own axis).
 const DATE_ROW = 16
 
-export default function EntryChart({ bars, model, suite, suiteLabel = null, panes, layers = [], onHover, onExpand, focus = null, fill = null, jump = null, tf = '1d' }) {
+export default function EntryChart({ bars, model, suite, conf = null, suiteLabel = null, panes, layers = [], onHover, onExpand, focus = null, fill = null, jump = null, tf = '1d' }) {
   const iv = INTERVALS[tf] ?? INTERVALS['1d']
   const daily = tf === '1d'
   const box = useRef(null)
@@ -119,6 +123,7 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
       suiteBull: token('--color-suite-bull'), suiteBear: token('--color-suite-bear'), bg: token('--color-bg'),
       goldHi: token('--color-amber-200'), fg: token('--color-fg'), muted: token('--color-muted'),
       subtle: token('--color-subtle'), faint: token('--color-faint'), border: token('--color-border'), borderHi: token('--color-border-hover'),
+      violet: token('--color-confluence'),
     }
     const chart = createChart(el, {
       autoSize: true,
@@ -228,6 +233,11 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
         markers.push({ time: time[i], position: 'belowBar', shape: 'arrowUp', color: t.up, size: signalSet.has(i - 1) ? 0.8 : 1.2 })
       }
     }
+    // Swing lows / highs (hindsight — they grade the signals, never feed them).
+    if (conf && layers.includes('swings')) {
+      for (const i of conf.swings.lows) markers.push({ time: time[i], position: 'belowBar', shape: 'circle', color: t.violet, size: 0.7 })
+      for (const i of conf.swings.highs) markers.push({ time: time[i], position: 'aboveBar', shape: 'circle', color: alpha(t.subtle, 0.8), size: 0.6 })
+    }
     markers.sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0))
     createSeriesMarkers(candles, markers)
     }
@@ -317,6 +327,18 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
     }
     osc('echo', suite?.echo)
     osc('tango', suite?.tango)
+
+    // Confluence: how many of the five signals agree (last N bars), 0–5.
+    if (conf && paneOf('conf') >= 0) {
+      const pi = paneOf('conf')
+      const tone = (sc) => (sc >= 4 ? t.up : sc === 3 ? t.violet : sc === 2 ? alpha(t.violet, 0.5) : alpha(t.subtle, 0.35))
+      const h = chart.addSeries(HistogramSeries, {
+        ...quiet, lastValueVisible: true, base: 0, autoscaleInfoProvider: fixed(0, 5),
+        priceFormat: { type: 'custom', formatter: (x) => (x > 5.2 || x < -0.2 ? '' : x.toFixed(0)) },
+      }, pi)
+      h.setData(conf.series.map((c, i) => (c.score ? { time: time[i], value: c.score, color: tone(c.score) } : { time: time[i], value: 0 })))
+      h.createPriceLine({ price: 3, color: alpha(t.violet, 0.6), lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: false })
+    }
 
     // Indicator panes: little padding, so 0–100 scales stay 0–100 when tall.
 
@@ -412,7 +434,7 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
       chartRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bars, model, suite, key, tf])
+  }, [bars, model, suite, conf, key, tf])
 
   useLayoutEffect(() => { setHover(null) }, [bars])
 
@@ -455,6 +477,10 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
     tango: [
       { label: '', value: fmt(v(suite?.tango.line), 1), cls: v(suite?.tango.line) < 0 ? 'text-suite-bear' : 'text-suite-bull' },
       { label: 'rails', value: `${fmt(v(suite?.tango.upper), 0)} / ${fmt(v(suite?.tango.lower), 0)}`, cls: 'text-subtle' },
+    ],
+    conf: [
+      { label: '', value: v(conf?.series)?.score != null ? `${v(conf?.series).score} of 5` : '—', cls: (v(conf?.series)?.score ?? 0) >= 3 ? 'text-violet-300' : 'text-subtle' },
+      { label: v(conf?.series)?.lit?.length ? v(conf?.series).lit.map((k) => CONF_NAMES[k]).join(' · ') : `last ${conf?.window ?? 5} days`, value: '', cls: 'text-muted' },
     ],
     ivhv: [
       { label: 'IV', value: v(model?.iv) == null ? '—' : `${(v(model?.iv) * 100).toFixed(1)}%`, cls: 'text-amber-300', swatch: 'bg-amber-400' },

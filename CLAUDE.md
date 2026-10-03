@@ -1237,6 +1237,32 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   Backtest: one trade per cluster (a signal counts when none fired in
   the previous 20 trading days), stock returns after 63 / 126 / 252 days,
   win rate and average per horizon — stock, not option, returns.
+- **Confluence** (owner, 2026-10-03: lows should line up with the suite;
+  confluence across panels; history should inform entries). Math in
+  `src/utils/confluence.js` (`npm run confluence:check`), always on the
+  **daily** signals: the score = how many of five fired within the last
+  **5 trading days** (look-back only, today included) — buy zone (all 5
+  conditions), Bravo bull ◆, Echo bull, Tango bull, MACD cross up. It sits
+  **beside** the YES / NO (advised, owner agreed — YES / NO stays the rule
+  and drives alerts): a "Confluence · last 5 days — N of 5" block in the
+  status card with the five chips and this setup's record on this ticker
+  ("This setup: 7× in 5 years · 50% near a low · 12M +31% avg, 83% win";
+  under 5 exact matches it falls back to every setup with at least today's
+  score and says so; one signal alone isn't a setup). **Swing lows /
+  highs** (lowest low / highest high 10 bars either side) are hindsight:
+  they only grade history (a setup is "at a low" with a swing low within
+  ±5 bars), never feed the live score. Setups = each cluster of
+  score ≥ 2 bars counts every distinct combination once, at its first bar.
+  Chart: a **Confluence** pane (0–5 bars, 3+ in violet / 4+ green, daily
+  only; panes key `cm:entry-panes:v3`) and a **Swing lows** price layer
+  (violet dots under lows, grey over highs). Backtest → **Confluence**:
+  every combination, how often it sat at a low, 3M / 6M / 12M averages;
+  plus the **agreement window** comparison (±3 / ±5 / ±10 days, all graded
+  on the same ±5 so a wider window can't win by being wider). Single-ticker
+  history is small — the card flags "few cases". Colour token
+  `--color-confluence` (hex — the chart canvas needs it). **The Bravo
+  band is gone** (owner: not needed); the suite card's Bravo row jumps to
+  the latest Bravo diamond.
 - **Signal suite on the entry chart** (owner, 2026-10-03: "for better
   entries and sell signals"). A JS port of the TradingView suite in
   `plugforsuccess/wiley-indicator-suite` (Bravo trend, Echo momentum,
