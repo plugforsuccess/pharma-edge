@@ -1007,19 +1007,30 @@ value, holding period) and must pass before any edit to that file lands.
 
 Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
 - **Charts** (owner, 2026-10-03) = **price charts of the stocks where
-  the app suggests a trade**, the trade drawn on the chart. Groups:
-  **LEAPS** — today's sell / roll / exit calls on your holdings
-  (`dailyDecisions`; options show strike + break-even, shares / crypto
-  your cost + the target's price per unit) and LEAPS bot suggestions
-  (`ldp_audit_log` kind `suggestion`, last 30 days, newest per ticker;
-  strike parsed from the OCC `payload.contract`); **Spread plays**
-  (Elite badge — no tier gating exists yet) — the latest
-  `top_plays_feed` within 2 days, top 8, legs as lines, the target king
-  node in gold, an iron condor's profit zone shaded, expiry marked when
-  close. 3M / 6M / 1Y. Prices: the **`price-history`** edge function
-  (`verify_jwt`; Polygon/Massive daily bars with `MASSIVE_API_KEY`,
-  Yahoo chart fallback; `crypto: true` prices the coin in USD; 15-min
-  in-instance cache, no table). Charts are plain SVG
+  the app suggests a LEAPS trade**, the trade drawn on the chart. **No
+  GEX plays here — they live on Pulse** (owner). Groups, ideas first:
+  **LEAPS ideas** — buys from the **`suggest-leaps`** edge function, and
+  LEAPS bot suggestions (`ldp_audit_log` kind `suggestion`, last 30
+  days, newest per ticker, skipped where an idea covers the ticker;
+  strike from the OCC `payload.contract`); **Your holdings** — today's
+  sell / roll / exit calls (`dailyDecisions`; options show strike +
+  break-even, shares / crypto your cost + the target's price per unit).
+  3M / 6M / 1Y. **`suggest-leaps`** (`verify_jwt`, Polygon/Massive with
+  `MASSIVE_API_KEY`, 30-min in-instance cache, market-wide) mirrors the
+  LDP core sleeve — keep it in sync with `ldp/scoring.py`,
+  `ldp/contracts.py` and `ldp/config.py`: the 11 SPDR sector ETFs scored
+  on 3m / 6m / 12m return + 12m relative strength vs SPY (0.20 / 0.30 /
+  0.30 / 0.20, min-max normalised), below the 200-day average = not
+  eligible, top 3; for each, the call clearing DTE ≥ 540, delta
+  0.70–0.80, vol rank ≤ 70, spread ≤ 10% of mid, OI ≥ 100, closest to
+  730 DTE → delta 0.75 → tightest spread. **Vol rank is the 20-day
+  historical-vol rank over a year of closes**, a stand-in for the
+  engine's IV rank (`iv_history` doesn't cover the sector ETFs). No pick
+  → a "Watch" row with the reason. The card shows strike, break-even
+  (strike + mid), cost per contract (mid × 100). Suggestions only;
+  nothing is ordered. Prices: the **`price-history`** edge function
+  (`verify_jwt`; Polygon daily bars, Yahoo fallback; `crypto: true`
+  prices the coin in USD; 15-min cache, no table). Charts are plain SVG
   (`components/LineChart.jsx`: series, flat lines with haloed labels,
   date markers, shaded bands; tap or drag to read a date). **Holding
   charts are hidden for now** (owner); `leaps_position_marks` (one value
