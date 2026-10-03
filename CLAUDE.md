@@ -702,7 +702,9 @@ symbols. Prefer one size scale per screen: 11px meta / eyebrows
 
 **Line height** is opened up app-wide in `@theme` (text-xs 18px, text-sm
 22px). **No (i) info pop-ups for now** (removed 2026-10-02 at the
-owner's request until the copy and the pop-up behavior are designed).
+owner's request until the copy and the pop-up behavior are designed;
+one exception: the entry chart's gold (i) beside each unmet buy-zone
+condition, which expands its "what it needs" line inline).
 `components/InfoTip.jsx` is kept but unused; don't add footnote
 paragraphs back under cards either. Tax screens keep one visible line:
 "All tax figures are estimates, not tax advice. Consult a tax
@@ -1154,8 +1156,9 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   same day: within ±band of the 200, 200 rising, 50 > 200, RSI below the
   level within the lookback and up today, IV Rank below the cutoff.
   MACD cross up within 5 days = optional confirmation. **Next entry**
-  (owner, 2026-10-03): each unmet condition shows what it still needs in
-  gold under its label (`entryGaps` in `indicators.js`: "Fall 3.2% to
+  (owner, 2026-10-03): each unmet condition gets a gold (i) after its
+  label; tapping it shows what it still needs in gold under the label
+  (hidden until tapped, owner) (`entryGaps` in `indicators.js`: "Fall 3.2% to
   $381.40 or lower", "Needs a dip below 40", "Needs to drop 7 points",
   "4.4% below — needs to cross above", "Still falling — needs to turn
   up"), and a NO shows the entry price zone (the ±band around the

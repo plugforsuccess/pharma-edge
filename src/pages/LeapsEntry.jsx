@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import clsx from 'clsx'
-import { ArrowDown, ArrowLeft, ArrowUp, Check, ChevronRight, Maximize2, Plus, RotateCcw, Search, X } from 'lucide-react'
+import { ArrowDown, ArrowLeft, ArrowUp, Check, ChevronRight, Info, Maximize2, Plus, RotateCcw, Search, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { CHART_TICKERS } from '../lib/chartTickers'
 import { entryModel, entryGaps, DEFAULT_PARAMS, HORIZONS } from '../utils/indicators'
@@ -363,7 +363,15 @@ function StatusPanel({ s, model, params, suite, confirmDays, tfLabel }) {
   const hAgo = hBull ? lastIdx - hBull.i : null
   const hOk = hAgo != null && hAgo <= confirmDays
   // What each unmet condition still needs (next entry).
+  // Hidden until the row's gold (i) is tapped (owner, 2026-10-03).
   const gaps = entryGaps(model) ?? {}
+  const [shown, setShown] = useState(() => new Set())
+  const toggle = (k) => setShown((prev) => {
+    const next = new Set(prev)
+    if (next.has(k)) next.delete(k)
+    else next.add(k)
+    return next
+  })
   const rows = [
     {
       key: 'band', ok: c.band, label: `Within ±${params.bandPct}% of the 200-day`,
@@ -419,8 +427,17 @@ function StatusPanel({ s, model, params, suite, confirmDays, tfLabel }) {
               {r.ok ? <Check size={14} strokeWidth={3} /> : <X size={13} strokeWidth={3} />}
             </span>
             <span className="flex-1 min-w-0">
-              <span className="block text-sm text-fg leading-snug">{r.label}</span>
-              {!r.ok && gaps[r.key]?.need && <span className="block text-xs text-amber-300/90 mt-0.5 leading-snug">{gaps[r.key].need}</span>}
+              <span className="block text-sm text-fg leading-snug">
+                {r.label}
+                {!r.ok && gaps[r.key]?.need && (
+                  <button type="button" onClick={() => toggle(r.key)}
+                    aria-expanded={shown.has(r.key)} aria-label="What it needs"
+                    className="inline-flex align-middle -my-3 ml-0.5 p-3 -mr-3 text-amber-300 hover:text-amber-200">
+                    <Info size={15} strokeWidth={2.25} />
+                  </button>
+                )}
+              </span>
+              {!r.ok && shown.has(r.key) && gaps[r.key]?.need && <span className="block text-xs text-amber-300/90 mt-0.5 leading-snug">{gaps[r.key].need}</span>}
             </span>
             <span className="text-right shrink-0">
               <span className="block text-sm font-mono-tab text-fg">{r.value}</span>
