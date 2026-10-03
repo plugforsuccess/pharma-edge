@@ -701,6 +701,11 @@ after tax · +6.7%/yr before tax", `annualizedReturn` in `afterTax.js`:
 (`cm:gain-mode`). Under a year the line just shows the total (no
 annualizing, no extra label); cash has
 no gain line).
+**Bought line** (owner, 2026-10-03): under the name it reads "Bought 5
+days ago" ("today" / "yesterday"; "Exercised …" for exercised stock);
+tapping it (dotted underline; doesn't open the card) flips every card to
+the date, "Bought Sep 28, 2026", remembered on the device
+(`cm:date-mode`). `BoughtLine` in `Leaps.jsx`.
 Open state is remembered on the device (`cm:holdings-open`); new
 holdings open; "Expand all / Collapse all" sits by the Holdings title.
 **Exit Targets rows** keep the original card format: "100% gain • 2x" /

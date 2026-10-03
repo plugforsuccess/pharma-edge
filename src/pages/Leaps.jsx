@@ -59,6 +59,55 @@ function useGainMode() {
   return [mode, flip]
 }
 
+// "Bought 5 days ago" ⇄ "Bought Sep 28, 2026" under each holding's name.
+// Tap to flip (it doesn't open the card); remembered on the device and
+// every card follows it.
+const DATE_MODE_KEY = 'cm:date-mode'
+function useDateMode() {
+  const [mode, setMode] = useState(() => {
+    try { return localStorage.getItem(DATE_MODE_KEY) === 'date' ? 'date' : 'ago' } catch { return 'ago' }
+  })
+  useEffect(() => {
+    const on = (e) => setMode(e.detail)
+    window.addEventListener(DATE_MODE_KEY, on)
+    return () => window.removeEventListener(DATE_MODE_KEY, on)
+  }, [])
+  const flip = () => {
+    const next = mode === 'date' ? 'ago' : 'date'
+    try { localStorage.setItem(DATE_MODE_KEY, next) } catch { /* this visit only */ }
+    window.dispatchEvent(new CustomEvent(DATE_MODE_KEY, { detail: next }))
+  }
+  return [mode, flip]
+}
+const daysSince = (ymd) => {
+  const [y, m, d] = String(ymd).slice(0, 10).split('-').map(Number)
+  const [ty, tm, td] = todayYmd().split('-').map(Number)
+  return Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(y, m - 1, d)) / 86400000)
+}
+function agoLabel(ymd) {
+  const n = daysSince(ymd)
+  if (!Number.isFinite(n)) return ''
+  if (n <= 0) return 'today'
+  if (n === 1) return 'yesterday'
+  return `${n.toLocaleString('en-US')} days ago`
+}
+function BoughtLine({ verb = 'Bought', date, suffix }) {
+  const [mode, flip] = useDateMode()
+  if (!date) return null
+  const tap = (e) => { e.stopPropagation(); e.preventDefault(); flip() }
+  return (
+    <div className="text-xs text-muted mt-0.5">
+      <span role="button" tabIndex={0} onClick={tap}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') tap(e) }}
+        aria-label={mode === 'date' ? 'Show days since bought' : 'Show the date bought'}
+        className="cursor-pointer hover:text-subtle underline decoration-dotted decoration-muted/60 underline-offset-[3px]">
+        {verb} {mode === 'date' ? shortDate(date) : agoLabel(date)}
+      </span>
+      {suffix && <span> · {suffix}</span>}
+    </div>
+  )
+}
+
 function GainLine({ afterGain, beforeGain, cost, purchaseDate }) {
   const [mode, flip] = useGainMode()
   const asOf = todayYmd()
@@ -997,7 +1046,8 @@ const shortDate = (ymd, withYear = true) => {
 
 // Two lines under the position name:
 //   "$5 Call • Exp Jan 21, 2028"        (options only)
-//   "Bought Sep 28, 2026"               (+ "· value Sep 28" when the
+//   "Bought 5 days ago"                 (tap → "Bought Sep 28, 2026"; plus
+//                                         "· value Sep 28" when the
 //                                         stored value isn't from today)
 function positionMeta(pos) {
   const contract = []
@@ -1007,12 +1057,12 @@ function positionMeta(pos) {
       pos.option_type === 'P' ? 'Put' : 'Call'].filter(Boolean).join(' '))
     if (pos.expiration) contract.push(`Exp ${shortDate(pos.expiration)}`)
   }
-  const held = [`${pos.exercised_from_id ? 'Exercised' : 'Bought'} ${shortDate(pos.purchase_date)}`]
+  let asOfLabel = null
   if (pos.value_as_of) {
     const asOf = todayYmd(new Date(pos.value_as_of))
-    if (asOf !== todayYmd()) held.push(`value ${shortDate(asOf, asOf.slice(0, 4) !== todayYmd().slice(0, 4))}`)
+    if (asOf !== todayYmd()) asOfLabel = `value ${shortDate(asOf, asOf.slice(0, 4) !== todayYmd().slice(0, 4))}`
   }
-  return [contract.join(' • '), held.join(' · ')].filter(Boolean)
+  return { contract: contract.join(' • '), verb: pos.exercised_from_id ? 'Exercised' : 'Bought', asOf: asOfLabel }
 }
 
 function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTerm, runner, dividend, income, plan, previewFor, selectedTargetPct, onSave, onDelete, onExercise, open, onToggle }) {
@@ -1049,6 +1099,7 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
   const stop = isStock ? null : timeStop(pos.expiration, todayYmd(), plan)
   const ltFits = longTermFitsPlan(calc.long_term_date, isStock ? null : pos.expiration, plan)
   const up = calc.gain >= 0
+  const meta = positionMeta(pos)
   return (
     <div className="bg-card border border-border rounded-2xl mb-4">
       {/* Header — always visible; tap to expand or collapse. */}
@@ -1061,9 +1112,8 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
       >
         <div className="flex-1 min-w-0">
           <div className="text-base font-semibold break-words">{label}</div>
-          {positionMeta(pos).map((line) => (
-            <div key={line} className="text-xs text-muted mt-0.5">{line}</div>
-          ))}
+          {meta.contract && <div className="text-xs text-muted mt-0.5">{meta.contract}</div>}
+          <BoughtLine verb={meta.verb} date={pos.purchase_date} suffix={meta.asOf} />
           <span
             className={clsx(
               'inline-block mt-2 text-[10px] uppercase tracking-wider px-2 py-1 rounded-md border font-semibold',
@@ -1246,7 +1296,9 @@ function HoldingShell({ pos, open, onToggle, title, meta, badge, badgeTone = 'ne
         className="w-full text-left flex items-start gap-3 p-5 rounded-2xl hover:bg-card-hover/40 transition">
         <div className="flex-1 min-w-0">
           <div className="text-base font-semibold break-words">{title}</div>
-          {meta.filter(Boolean).map((line) => <div key={line} className="text-xs text-muted mt-0.5">{line}</div>)}
+          {meta.filter(Boolean).map((line, i) => (typeof line === 'string'
+            ? <div key={line} className="text-xs text-muted mt-0.5">{line}</div>
+            : <div key={i}>{line}</div>))}
           <span className={clsx('inline-block mt-2 text-[10px] uppercase tracking-wider px-2 py-1 rounded-md border font-semibold',
             BADGE_TONE[badgeTone] ?? BADGE_TONE.neutral)}>
             {badge}
@@ -1323,7 +1375,7 @@ function RealEstateCard({ pos, re, open, onToggle, onSave, onDelete }) {
       form={<PositionForm initial={pos} onCancel={() => setEditing(false)}
         onSave={async (row) => { const err = await onSave(row); if (!err) setEditing(false); return err }} />}
       title={open ? `${pos.name} • ${rental ? 'Rental' : 'Primary home'}` : pos.name}
-      meta={[`Bought ${shortDate(pos.purchase_date)}`]}
+      meta={[<BoughtLine date={pos.purchase_date} />]}
       badge="Real Estate" badgeTone="realEstate"
       value={usd(re.after_tax_equity)} valueLabel={`${gainPct(reAfterTaxGain, re.basis)} after tax`} valueUp={reAfterTaxGain >= 0}
     >
