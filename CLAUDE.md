@@ -1004,8 +1004,10 @@ value, holding period) and must pass before any edit to that file lands.
 - **Retirement accounts are an account, not a holding type** (owner,
   2026-10-03: "the 6 we have now are sufficient"). Options, Shares,
   Income, Crypto and Cash carry `leaps_positions.account_type`
-  (`ACCOUNT_TYPES`: taxable — default — / traditional / roth / hsa; the
-  add form's **Account** row; real estate is always taxable). The tax
+  (`ACCOUNT_TYPES`: taxable — default — / traditional / roth / hsa,
+  labelled **Taxable · Traditional IRA · Roth IRA · HSA** (owner: those
+  are the labels; 401(k) / 403(b) and Roth 401(k) ride along in the hint);
+  the add form's **Account** row, 2 × 2; real estate is always taxable). The tax
   follows the account, not the asset: **traditional** (401(k) / 403(b) /
   traditional or SEP IRA) — nothing taxed inside (sales, dividends,
   interest); after tax = value × (1 − federal − state ordinary rate), as
@@ -1014,7 +1016,7 @@ value, holding period) and must pass before any edit to that file lands.
   card's after-tax % uses it; the 10% before-59½ penalty shows in the tax
   detail line, never taken off. **Roth / HSA** — tax-free. No long /
   short-term countdown, wait-for-long-term notices or capital-gains
-  netting for any of them; badges read Traditional / Roth / HSA (teal).
+  netting for any of them; badges read Traditional IRA / Roth IRA / HSA (teal).
   `accountRates` (the rate resolver per account), `shelteredPosition`,
   `withdrawalRate` in `afterTax.js`; `useHoldings` runs every holding
   on its account's rates (goals, exit targets, runner, payouts too).

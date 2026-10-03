@@ -786,13 +786,13 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
       {/* Where it's held — the tax follows the account, not the asset. */}
       {!isRE && (
         <div className="mt-4">
-          <Segmented label="Account" value={f.account_type} onChange={setV('account_type')} columns={4}
+          <Segmented label="Account" value={f.account_type} onChange={setV('account_type')} columns={2}
             options={ACCOUNT_TYPES.map((a) => ({ value: a.value, label: a.label }))} />
           {f.account_type !== 'taxable' && (
             <p className="mt-2 text-xs text-muted">
               {f.account_type === 'traditional'
-                ? '401(k) / 403(b) / IRA: no tax inside; withdrawals are taxed as ordinary income.'
-                : f.account_type === 'roth' ? 'Roth 401(k) / Roth IRA: qualified withdrawals are tax-free.'
+                ? 'Also 401(k) / 403(b): no tax inside; withdrawals are taxed as ordinary income.'
+                : f.account_type === 'roth' ? 'Also Roth 401(k): qualified withdrawals are tax-free.'
                   : 'HSA: tax-free for medical costs.'}
             </p>
           )}
@@ -1211,7 +1211,7 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
           <div className="mt-1 text-xs text-muted font-mono-tab">
             {calc.account_type === 'traditional'
               ? `No tax inside the account · est. ${usd(calc.estimated_tax)} at ${ratePct(calc.tax_rate)} when withdrawn · before 59½ +${usd(calc.early_penalty)} penalty`
-              : calc.sheltered ? `No tax inside a ${accountLabel(calc.account_type)}`
+              : calc.sheltered ? `No tax inside ${calc.account_type === 'hsa' ? 'an' : 'a'} ${accountLabel(calc.account_type)}`
               : calc.gain > 0
               ? `${usd(income?.after_tax_gain ?? calc.after_tax_gain)} after-tax gain · est. tax ${usd(calc.estimated_tax)} at ${ratePct(calc.tax_rate)}`
               : 'Loss — no tax on sale'}
@@ -1393,7 +1393,7 @@ function CashCard({ pos, cash, open, onToggle, onSave, onDelete }) {
         onSave={async (row) => { const err = await onSave(row); if (!err) setEditing(false); return err }} />}
       title={`${pos.name} • ${cashKindLabel(kind)}`}
       meta={[cash.apy > 0 ? `${ratePct(cash.apy)} APY` : 'No yield entered',
-        isSheltered(cash.account_type) && `In a ${accountLabel(cash.account_type)} account`]}
+        isSheltered(cash.account_type) && `In ${cash.account_type === 'hsa' ? 'an' : 'a'} ${accountLabel(cash.account_type)}`]}
       badge="Cash" badgeTone="cash"
       value={usd(cash.after_tax_value)} valueLabel={cash.account_type === 'traditional' ? 'after tax' : 'balance'}
     >

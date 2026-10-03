@@ -1103,8 +1103,8 @@ export function portfolioProjection({ sleeves = [], monthly = 0, years, priceGro
 
 export const ACCOUNT_TYPES = [
   { value: 'taxable', label: 'Taxable', long: 'Taxable (brokerage / bank)' },
-  { value: 'traditional', label: 'Traditional', long: '401(k) / 403(b) / IRA' },
-  { value: 'roth', label: 'Roth', long: 'Roth 401(k) / Roth IRA' },
+  { value: 'traditional', label: 'Traditional IRA', long: 'Traditional IRA, 401(k) / 403(b)' },
+  { value: 'roth', label: 'Roth IRA', long: 'Roth IRA, Roth 401(k)' },
   { value: 'hsa', label: 'HSA', long: 'HSA' },
 ]
 export const EARLY_WITHDRAWAL_PENALTY = 0.10
