@@ -69,11 +69,33 @@ export const PANE_TITLES = {
   ivhv: 'IV vs HV 20', echo: 'Echo', tango: 'Tango',
 }
 const SHOW_DAYS = 504 // two years of trading days in view by default
+// "% vs 200-day" reads "% vs 200-week" on weekly bars, etc.
+export function paneTitle(k, tf = '1d') {
+  if (k === 'dist' && tf === '1wk') return '% vs 200-week'
+  if (k === 'dist' && tf === '1mo') return '% vs 200-month'
+  return PANE_TITLES[k]
+}
 
 const fmt = (v, d = 2) => (v == null || !Number.isFinite(v) ? '—' : v.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }))
 const pct = (v, d = 1) => (v == null ? '—' : `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(d)}%`)
 
-export default function EntryChart({ bars, model, suite, suiteLabel = null, panes, layers = [], onHover, onExpand, focus = null, fill = null, jump = null }) {
+// Bar intervals the chart can draw. Weekly / monthly (owner, 2026-10-03:
+// the candles follow the Signal suite's timeframe) run the same indicator
+// math on those bars — 50 / 200-week averages, weekly RSI and MACD — and
+// drop what only exists daily: the buy-zone shading and arrows, the IV
+// panes and the weekly-50-on-days line.
+export const INTERVALS = {
+  '1d': { unit: '', show: SHOW_DAYS, jump: 63 },
+  '1wk': { unit: 'W', show: 260, jump: 26 },
+  '1mo': { unit: 'M', show: 120, jump: 12 },
+}
+export const DAILY_ONLY_PANES = new Set(['ivr', 'ivhv'])
+// A date row under every pane but the last (which has the chart's own axis).
+const DATE_ROW = 16
+
+export default function EntryChart({ bars, model, suite, suiteLabel = null, panes, layers = [], onHover, onExpand, focus = null, fill = null, jump = null, tf = '1d' }) {
+  const iv = INTERVALS[tf] ?? INTERVALS['1d']
+  const daily = tf === '1d'
   const box = useRef(null)
   const hoverRef = useRef(onHover)
   hoverRef.current = onHover
@@ -82,10 +104,11 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
   const holdRef = useRef(0)
   const [hover, setHover] = useState(null)
   const [tops, setTops] = useState([])
-  const shown = focus ? [focus] : ['price', ...SUB_PANES.map(([k]) => k).filter((k) => panes.includes(k))]
+  const [ticks, setTicks] = useState([])
+  const shown = focus ? [focus] : ['price', ...SUB_PANES.map(([k]) => k).filter((k) => panes.includes(k) && (daily || !DAILY_ONLY_PANES.has(k)))]
   const showPrice = shown[0] === 'price'
   const height = fill ?? (showPrice ? PRICE_H : 0) + (shown.length - (showPrice ? 1 : 0)) * SUB_H
-  const key = `${shown.join(',')}|${layers.join(',')}`
+  const key = `${shown.join(',')}|${layers.join(',')}|${tf}`
 
   useEffect(() => {
     const el = box.current
@@ -133,7 +156,7 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
     // Buy-zone shading: full-height columns on signal days, its own scale.
     const zone = chart.addSeries(HistogramSeries, { ...quiet, priceScaleId: 'zone', base: 0 }, 0)
     chart.priceScale('zone', 0).applyOptions({ visible: false, scaleMargins: { top: 0, bottom: 0 } })
-    zone.setData(bars.map((b, i) => (model.cond[i]?.all
+    zone.setData(bars.map((b, i) => (daily && model.cond[i]?.all
       ? { time: b.t, value: 1, color: alpha(t.up, 0.13) }
       : { time: b.t })))
 
@@ -144,8 +167,10 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
     candles.setData(bars.map((b) => ({ time: b.t, open: b.o, high: b.h, low: b.l, close: b.c })))
     chart.priceScale('right', 0).applyOptions({ scaleMargins: { top: 0.06, bottom: 0.08 } })
 
-    const wema = chart.addSeries(LineSeries, { ...quiet, color: alpha(t.fg, 0.7), lineWidth: 1, lineStyle: LineStyle.Dashed }, 0)
-    wema.setData(line(model.wema))
+    if (daily) {
+      const wema = chart.addSeries(LineSeries, { ...quiet, color: alpha(t.fg, 0.7), lineWidth: 1, lineStyle: LineStyle.Dashed }, 0)
+      wema.setData(line(model.wema))
+    }
     const s50 = chart.addSeries(LineSeries, { ...quiet, color: t.gold, lineWidth: 1.5 }, 0)
     s50.setData(line(model.s50))
     const s200 = chart.addSeries(LineSeries, { ...quiet, color: t.up, lineWidth: 3 }, 0)
@@ -160,7 +185,7 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
       chart.addSeries(LineSeries, { ...quiet, color: t.goldHi, lineWidth: 1.5, lineType: LineType.WithSteps }, 0).setData(line(suite.bravo.fast))
     }
 
-    const signalSet = new Set(model.signals)
+    const signalSet = new Set(daily ? model.signals : [])
     const markers = []
     const stars = (n) => '★'.repeat(n)
     if (FEATURES.hardening && on('hardening')) {
@@ -194,11 +219,14 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
     }
     for (const i of model.golden) markers.push({ time: time[i], position: 'aboveBar', shape: 'circle', color: t.gold, text: 'Golden cross', size: 1 })
     for (const i of model.death) markers.push({ time: time[i], position: 'aboveBar', shape: 'circle', color: t.down, text: 'Death cross', size: 1 })
-    for (const i of model.confirms) {
-      if (!signalSet.has(i)) markers.push({ time: time[i], position: 'belowBar', shape: 'circle', color: alpha(t.up, 0.45), size: 0.6 })
-    }
-    for (const i of model.signals) {
-      markers.push({ time: time[i], position: 'belowBar', shape: 'arrowUp', color: t.up, size: signalSet.has(i - 1) ? 0.8 : 1.2 })
+    // Buy-zone arrows and MACD confirmations: daily only.
+    if (daily) {
+      for (const i of model.confirms) {
+        if (!signalSet.has(i)) markers.push({ time: time[i], position: 'belowBar', shape: 'circle', color: alpha(t.up, 0.45), size: 0.6 })
+      }
+      for (const i of model.signals) {
+        markers.push({ time: time[i], position: 'belowBar', shape: 'arrowUp', color: t.up, size: signalSet.has(i - 1) ? 0.8 : 1.2 })
+      }
     }
     markers.sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0))
     createSeriesMarkers(candles, markers)
@@ -212,11 +240,13 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
     if (paneOf('dist') >= 0) {
       const pi = paneOf('dist')
       // The ±band: a flat line at +band filled down to a baseline at −band.
-      chart.addSeries(BaselineSeries, {
-        ...quiet, baseValue: { type: 'price', price: -p.bandPct }, lineWidth: 1, lineStyle: LineStyle.Dotted,
-        topLineColor: alpha(t.up, 0.35), topFillColor1: alpha(t.up, 0.08), topFillColor2: alpha(t.up, 0.08),
-        bottomLineColor: 'transparent', bottomFillColor1: 'transparent', bottomFillColor2: 'transparent',
-      }, pi).setData(bars.map((b) => ({ time: b.t, value: p.bandPct })))
+      if (daily) {
+        chart.addSeries(BaselineSeries, {
+          ...quiet, baseValue: { type: 'price', price: -p.bandPct }, lineWidth: 1, lineStyle: LineStyle.Dotted,
+          topLineColor: alpha(t.up, 0.35), topFillColor1: alpha(t.up, 0.08), topFillColor2: alpha(t.up, 0.08),
+          bottomLineColor: 'transparent', bottomFillColor1: 'transparent', bottomFillColor2: 'transparent',
+        }, pi).setData(bars.map((b) => ({ time: b.t, value: p.bandPct })))
+      }
       const d = chart.addSeries(BaselineSeries, {
         ...quiet, lastValueVisible: true, baseValue: { type: 'price', price: 0 }, lineWidth: 1.5,
         topLineColor: t.up, topFillColor1: alpha(t.up, 0.22), topFillColor2: alpha(t.up, 0.02),
@@ -233,7 +263,7 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
       r.setData(line(model.rsi))
       r.createPriceLine({ price: 70, color: alpha(t.down, 0.6), lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: false })
       r.createPriceLine({ price: 30, color: alpha(t.up, 0.6), lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: false })
-      r.createPriceLine({ price: p.rsiLevel, color: t.gold, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, axisLabelColor: alpha(t.gold, 0.85), axisLabelTextColor: '#000' })
+      if (daily) r.createPriceLine({ price: p.rsiLevel, color: t.gold, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, axisLabelColor: alpha(t.gold, 0.85), axisLabelTextColor: '#000' })
     }
     if (paneOf('macd') >= 0) {
       const pi = paneOf('macd')
@@ -280,7 +310,8 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
       const pts = []
       o.bull.forEach((f, i) => { if (f) pts.push({ time: time[i], color: t.suiteBull }) })
       o.bear.forEach((f, i) => { if (f) pts.push({ time: time[i], color: t.suiteBear }) })
-      const dia = new DiamondMarkers({ outline: t.bg, lane: true, size: 8 })
+      // Keep the lane above the pane's date row (every pane but the last).
+      const dia = new DiamondMarkers({ outline: t.bg, lane: true, size: 8, laneOffset: pi < shown.length - 1 ? DATE_ROW : 0 })
       ln.attachPrimitive(dia)
       dia.setPoints(pts)
     }
@@ -295,8 +326,43 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
 
     // Zoom: keep the last view on rebuilds; default to the last two years.
     const n = bars.length
-    chart.timeScale().setVisibleLogicalRange(rangeRef.current ?? { from: Math.max(0, n - SHOW_DAYS), to: n - 1 + 4 })
-    const keep = (r) => { if (r) rangeRef.current = r }
+    // A new interval starts from its default window (bar indexes differ).
+    if (rangeRef.current?.tf !== tf) rangeRef.current = null
+    chart.timeScale().setVisibleLogicalRange(rangeRef.current ?? { from: Math.max(0, n - iv.show), to: n - 1 + 4 })
+
+    // Date rows under the panes: month (or year) starts in view, at least
+    // 64px apart — the same kind of labels as the chart's own axis.
+    const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    let tickRaf = 0
+    const computeTicks = () => {
+      tickRaf = 0
+      const r = chart.timeScale().getVisibleLogicalRange()
+      if (!r) return
+      const from = Math.max(1, Math.ceil(r.from))
+      const to = Math.min(n - 1, Math.floor(r.to))
+      const span = to >= from ? (Date.parse(bars[to].t) - Date.parse(bars[from].t)) / 86400000 : 0
+      // Years first (always labelled when they fit), then months in the gaps
+      // when the view is under two years.
+      const years = []
+      const months = []
+      for (let k = from; k <= to; k++) {
+        const a = String(bars[k - 1].t)
+        const b = String(bars[k].t)
+        const x = chart.timeScale().logicalToCoordinate(k)
+        if (x == null) continue
+        if (a.slice(0, 4) !== b.slice(0, 4)) years.push({ x, label: b.slice(0, 4), strong: true })
+        else if (span < 730 && a.slice(5, 7) !== b.slice(5, 7)) months.push({ x, label: MONTHS[+b.slice(5, 7) - 1] })
+      }
+      const out = []
+      const fits = (x) => out.every((o) => Math.abs(o.x - x) >= 56)
+      for (const y of years) if (fits(y.x)) out.push(y)
+      for (const m of months) if (fits(m.x)) out.push(m)
+      setTicks(out)
+    }
+    const keep = (r) => {
+      if (r) rangeRef.current = { ...r, tf }
+      if (!tickRaf) tickRaf = requestAnimationFrame(computeTicks)
+    }
     chart.timeScale().subscribeVisibleLogicalRangeChange(keep)
 
     const index = new Map(time.map((x, i) => [x, i]))
@@ -323,11 +389,14 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
         const top = Math.min(0.45, (shown[pi] === 'price' ? HEADER_PRICE : HEADER_SUB) / h)
         // Echo / Tango keep a signal lane under their line.
         const lane = shown[pi] === 'echo' || shown[pi] === 'tango'
-        const bottom = shown[pi] === 'price' ? 0.06 : Math.min(0.45, lane ? (LANE_PX + 6) / h : 0.05)
+        // Room for the date row under every pane but the last.
+        const dates = pi < ps.length - 1 ? DATE_ROW : 0
+        const bottom = shown[pi] === 'price' ? Math.min(0.45, 0.06 + dates / h) : Math.min(0.45, ((lane ? LANE_PX + 6 : h * 0.05) + dates) / h)
         chart.priceScale('right', pi).applyOptions({ scaleMargins: { top, bottom } })
         if (shown[pi] === 'price') chart.priceScale('zone', pi).applyOptions({ scaleMargins: { top, bottom: 0 } })
       })
       setTops(ps.map((pane) => { const top = y; y += pane.getHeight() + 1; return top }))
+      computeTicks()
     }
     const raf = requestAnimationFrame(measure)
     const ro = new ResizeObserver(() => requestAnimationFrame(measure))
@@ -335,6 +404,7 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
 
     return () => {
       cancelAnimationFrame(raf)
+      if (tickRaf) cancelAnimationFrame(tickRaf)
       ro.disconnect()
       chart.unsubscribeCrosshairMove(move)
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(keep)
@@ -342,7 +412,7 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
       chartRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bars, model, suite, key])
+  }, [bars, model, suite, key, tf])
 
   useLayoutEffect(() => { setHover(null) }, [bars])
 
@@ -351,13 +421,13 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
   useEffect(() => {
     const chart = chartRef.current
     if (!chart || !jump || !bars?.length) return
-    const r = { from: Math.max(0, jump.i - 63), to: Math.min(bars.length - 1 + 4, jump.i + 63) }
+    const r = { from: Math.max(0, jump.i - iv.jump), to: Math.min(bars.length - 1 + 4, jump.i + iv.jump), tf }
     rangeRef.current = r
     holdRef.current = Date.now() + 1200
     chart.timeScale().setVisibleLogicalRange(r)
     setHover(jump.i)
     hoverRef.current?.(jump.i)
-  }, [jump, bars])
+  }, [jump, bars, tf, iv.jump])
 
   // Legends follow the crosshair; off the chart they show the latest day.
   const i = hover ?? (bars?.length ? bars.length - 1 : null)
@@ -365,11 +435,12 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
   const slope = v(model?.slope200)
   const legends = {
     price: [
-      { label: '200', value: fmt(v(model?.s200)), cls: slope == null ? 'text-subtle' : slope > 0 ? 'text-green-400' : 'text-rose-300', swatch: slope > 0 ? 'bg-green-400' : 'bg-red-400', thick: true },
-      { label: '50', value: fmt(v(model?.s50)), cls: 'text-amber-300', swatch: 'bg-amber-400' },
-      { label: 'W50', value: fmt(v(model?.wema)), cls: 'text-subtle', swatch: 'bg-fg/70', dashed: true },
+      { label: `200${iv.unit}`, value: fmt(v(model?.s200)), cls: slope == null ? 'text-subtle' : slope > 0 ? 'text-green-400' : 'text-rose-300', swatch: slope > 0 ? 'bg-green-400' : 'bg-red-400', thick: true },
+      { label: `50${iv.unit}`, value: fmt(v(model?.s50)), cls: 'text-amber-300', swatch: 'bg-amber-400' },
+      ...(daily ? [{ label: 'W50', value: fmt(v(model?.wema)), cls: 'text-subtle', swatch: 'bg-fg/70', dashed: true }] : []),
     ],
-    dist: [{ label: '', value: pct(v(model?.dist)), cls: v(model?.dist) < 0 ? 'text-rose-300' : 'text-green-400' }, { label: `±${model?.params.bandPct}% band`, value: '', cls: 'text-muted' }],
+    dist: [{ label: '', value: pct(v(model?.dist)), cls: v(model?.dist) < 0 ? 'text-rose-300' : 'text-green-400' },
+      ...(daily ? [{ label: `±${model?.params.bandPct}% band`, value: '', cls: 'text-muted' }] : [])],
     rsi: [{ label: '', value: fmt(v(model?.rsi), 1), cls: 'text-fg' }],
     macd: [
       { label: '', value: fmt(v(model?.macd.line)), cls: 'text-amber-300', swatch: 'bg-amber-400' },
@@ -395,6 +466,15 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
     <div className="relative" style={{ height }}>
       <div ref={box} className="absolute inset-0" />
       {/* Pane dividers: a 2px line over the chart's 1px separator, so panes read as separate. */}
+      {/* Date rows under every pane but the last (the chart's own axis is there). */}
+      {shown.map((k, pi) => (pi < shown.length - 1 && tops[pi + 1] != null ? (
+        <div key={`dates-${k}`} className="absolute inset-x-0 pointer-events-none text-[10px] leading-none font-mono-tab text-muted"
+          style={{ top: tops[pi + 1] - DATE_ROW + 2, height: DATE_ROW - 4 }} aria-hidden>
+          {ticks.map((tk) => (
+            <span key={tk.x} className={`absolute -translate-x-1/2 whitespace-nowrap ${tk.strong ? 'text-subtle font-semibold' : ''}`} style={{ left: tk.x }}>{tk.label}</span>
+          ))}
+        </div>
+      ) : null))}
       {shown.map((k, pi) => (pi > 0 && tops[pi] != null ? (
         <div key={`sep-${k}`} className="absolute inset-x-0 h-[2px] bg-border-hover pointer-events-none" style={{ top: tops[pi] - 1.5 }} aria-hidden />
       ) : null))}
@@ -403,7 +483,7 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
           <div className={`absolute left-3 right-[104px] pointer-events-none flex items-center gap-x-3 gap-y-0.5 text-[11px] leading-4 font-mono-tab ${k === 'price' ? 'flex-wrap' : 'flex-nowrap overflow-hidden whitespace-nowrap !gap-x-2'}`}
             style={{ top: (tops[pi] ?? 0) + 7 }}>
             <span className="bg-bg/80 rounded px-1 -mx-1 text-[11px] font-semibold text-violet-300">
-              {PANE_TITLES[k]}{suiteLabel && (k === 'echo' || k === 'tango') ? ` · ${suiteLabel}` : ''}
+              {paneTitle(k, tf)}{suiteLabel && (k === 'echo' || k === 'tango' || (k === 'price' && !daily)) ? ` · ${suiteLabel}` : ''}
             </span>
             {legends[k].map((l, li) => (
               <span key={li} className="inline-flex items-center gap-1.5 bg-bg/70 rounded px-1 -mx-1">
@@ -414,7 +494,7 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
             ))}
           </div>
           {onExpand && !focus && (
-            <button type="button" onClick={() => onExpand(k)} aria-label={`Expand ${PANE_TITLES[k]}`}
+            <button type="button" onClick={() => onExpand(k)} aria-label={`Expand ${paneTitle(k, tf)}`}
               className="absolute right-[60px] z-10 h-7 w-7 flex items-center justify-center rounded-md bg-bg/80 border border-border text-violet-300 hover:text-violet-200 hover:border-violet-400/50 transition"
               style={{ top: (tops[pi] ?? 0) + 4 }}>
               <Maximize2 size={13} aria-hidden />

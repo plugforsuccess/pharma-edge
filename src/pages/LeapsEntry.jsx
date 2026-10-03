@@ -5,8 +5,8 @@ import { ArrowDown, ArrowLeft, ArrowUp, Check, ChevronRight, Info, Maximize2, Pl
 import { supabase } from '../lib/supabase'
 import { CHART_TICKERS } from '../lib/chartTickers'
 import { entryModel, entryGaps, DEFAULT_PARAMS, HORIZONS } from '../utils/indicators'
-import EntryChart, { LAYERS, PANE_TITLES, SUB_PANES } from '../components/EntryChart'
-import { suiteModel, forwardReturns, horizonStats, normalizePeriods, suiteOnDays, SUITE_TIMEFRAMES } from '../utils/signalSuite'
+import EntryChart, { LAYERS, SUB_PANES, DAILY_ONLY_PANES, paneTitle } from '../components/EntryChart'
+import { suiteModel, forwardReturns, horizonStats, normalizePeriods, suiteOnDays, periodKey, SUITE_TIMEFRAMES } from '../utils/signalSuite'
 import TickerDrawer from '../components/TickerDrawer'
 import NumberInput from '../components/NumberInput'
 import { FEATURES } from '../lib/features'
@@ -127,6 +127,7 @@ export default function LeapsEntry() {
   const chartBox = useRef(null)
   const [jump, setJump] = useState(null)
   const jumpTo = (i) => {
+    if (!(i >= 0)) return
     setJump({ i, n: Date.now() })
     chartBox.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
@@ -180,10 +181,28 @@ export default function LeapsEntry() {
   }, [bars, suiteData, suiteTf])
   const suite = suitePack?.days ?? null
   const confirmDays = CONFIRM_DAYS[suiteTf]
+  // The chart's candles follow the suite timeframe (owner, 2026-10-03):
+  // weekly / monthly draw those bars, with the indicator math run on them
+  // and the suite on its own bars. The status card stays daily.
+  const periodMode = suiteTf !== '1d' && !!suitePack
+  const chart = useMemo(() => {
+    if (!model) return null
+    if (!periodMode) return { bars, model, suite, tf: '1d' }
+    const pbars = suitePack.periods.map(({ k, ...b }) => b)
+    const pmodel = entryModel(pbars, { params })
+    const psuite = suiteOnDays(pbars, suitePack.periods, suitePack.raw, suiteTf)
+    // Daily bar → its period's index (for buy-zone backtest rows).
+    const byKey = new Map(suitePack.periods.map((pp, pi) => [pp.k, pi]))
+    return { bars: pbars, model: pmodel, suite: psuite, tf: suiteTf, periodOfDay: (i) => byKey.get(periodKey(bars[i].t, suiteTf)) ?? -1 }
+  }, [periodMode, bars, model, suite, suitePack, suiteTf, params])
   const s = model?.status
-  const last = bars ? bars[bars.length - 1] : null
-  const shown = hover != null && bars ? bars[hover] : last
-  const prev = hover != null && bars ? bars[hover - 1] : bars?.[bars.length - 2]
+  // Jumps: a daily bar (buy-zone rows) or a suite period (tiles, suite rows).
+  const jumpDay = (i) => jumpTo(chart?.periodOfDay ? chart.periodOfDay(i) : i)
+  const jumpPeriod = (pi) => jumpTo(periodMode || suiteTf === '1d' ? pi : suite?.closeDays?.[pi] ?? -1)
+  const cbars = chart?.bars ?? bars
+  const last = cbars ? cbars[cbars.length - 1] : null
+  const shown = hover != null && cbars ? cbars[hover] : last
+  const prev = hover != null && cbars ? cbars[hover - 1] : cbars?.[cbars.length - 2]
   const dayChange = shown && prev ? shown.c / prev.c - 1 : null
 
   return (
@@ -217,7 +236,7 @@ export default function LeapsEntry() {
         <div className="md:grid md:grid-cols-[1fr_280px] md:gap-x-5 md:items-start">
           <div className="min-w-0 md:order-1">
             <StatusPanel s={s} model={model} params={params} suite={suite} confirmDays={confirmDays} tfLabel={SUITE_TIMEFRAMES[suiteTf].label.toLowerCase()} />
-            {<SuitePanel pack={suitePack} failed={suiteData?.error && suiteData.tf === suiteTf} tf={suiteTf} onTf={pickSuiteTf} holdings={holdings} onJump={jumpTo} onOpenPane={setExpanded}
+            {<SuitePanel pack={suitePack} failed={suiteData?.error && suiteData.tf === suiteTf} tf={suiteTf} onTf={pickSuiteTf} holdings={holdings} onJump={jumpPeriod} onOpenPane={setExpanded}
               bravoOn={layers.includes('bravo')} onBravo={() => { if (!layers.includes('bravo')) toggleLayer('bravo'); chartBox.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }} />}
           </div>
 
@@ -234,7 +253,7 @@ export default function LeapsEntry() {
                     )}
                   </div>
                 </div>
-                {hover != null && model.cond[hover] && (
+                {hover != null && !periodMode && model.cond[hover] && (
                   <div className="text-right text-[11px] font-mono-tab">
                     <div className="text-muted">Conditions</div>
                     <div className={model.cond[hover].all ? 'text-green-400 font-semibold' : 'text-subtle'}>
@@ -245,16 +264,16 @@ export default function LeapsEntry() {
               </div>
               {/* What's drawn: indicator panels, then layers on the price chart. */}
               <div className="px-5 pb-3 space-y-3">
-                <ToggleGroup label="Panels" items={SUB_PANES} isOn={(k) => panes.includes(k)} onToggle={togglePane} />
+                <ToggleGroup label="Panels" items={periodMode ? SUB_PANES.filter(([k]) => !DAILY_ONLY_PANES.has(k)) : SUB_PANES} isOn={(k) => panes.includes(k)} onToggle={togglePane} />
                 <ToggleGroup label="On price" items={LAYERS} isOn={(k) => layers.includes(k)} onToggle={toggleLayer} />
               </div>
-              <EntryChart bars={bars} model={model} suite={suite} suiteLabel={SUITE_TIMEFRAMES[suiteTf].label} panes={panes} layers={layers} onHover={setHover} onExpand={setExpanded} jump={jump} />
+              <EntryChart bars={chart.bars} model={chart.model} suite={chart.suite} tf={chart.tf} suiteLabel={SUITE_TIMEFRAMES[suiteTf].label} panes={panes} layers={layers} onHover={setHover} onExpand={setExpanded} jump={jump} />
               <div className="px-5 py-3 border-t border-hairline flex flex-wrap gap-x-4 gap-y-1.5 text-[11px] text-muted">
-                <Key className="text-green-400" glyph="▲">Buy signal</Key>
-                <Key className="text-green-400/50" glyph="●">MACD confirms</Key>
+                {!periodMode && <Key className="text-green-400" glyph="▲">Buy signal</Key>}
+                {!periodMode && <Key className="text-green-400/50" glyph="●">MACD confirms</Key>}
                 <Key className="text-amber-300" glyph="●">Golden cross</Key>
                 <Key className="text-rose-300" glyph="●">Death cross</Key>
-                <Key glyph={<span className="inline-block w-3 h-2.5 rounded-sm bg-green-400/15 align-middle" />}>Buy zone</Key>
+                {!periodMode && <Key glyph={<span className="inline-block w-3 h-2.5 rounded-sm bg-green-400/15 align-middle" />}>Buy zone</Key>}
                 {layers.includes('hardening') && <Key className="text-amber-300" glyph="▲">Hardening bull</Key>}
                 {layers.includes('hardening') && <Key className="text-rose-300" glyph="▼">Hardening bear</Key>}
                 {layers.includes('bravoSignals') && <Key className="text-suite-bull" glyph="◆">Bravo bull</Key>}
@@ -271,14 +290,14 @@ export default function LeapsEntry() {
           </div>
 
           <div className="min-w-0 md:order-4 md:col-span-2">
-            <Backtest model={model} suite={suite} pack={suitePack} confirmDays={confirmDays} onJump={jumpTo} />
+            <Backtest model={model} suite={suite} pack={suitePack} confirmDays={confirmDays} onJumpDay={jumpDay} onJumpPeriod={jumpPeriod} />
           </div>
         </div>
       )}
 
-      {expanded && model && (
-        <FullPane title={`${ticker} · ${PANE_TITLES[expanded]}`} onClose={() => setExpanded(null)}>
-          {(h) => <EntryChart bars={bars} model={model} suite={suite} suiteLabel={SUITE_TIMEFRAMES[suiteTf].label} panes={panes} layers={layers} focus={expanded} fill={h} />}
+      {expanded && chart && (
+        <FullPane title={`${ticker} · ${paneTitle(expanded, chart.tf)}`} onClose={() => setExpanded(null)}>
+          {(h) => <EntryChart bars={chart.bars} model={chart.model} suite={chart.suite} tf={chart.tf} suiteLabel={SUITE_TIMEFRAMES[suiteTf].label} panes={panes} layers={layers} focus={expanded} fill={h} />}
         </FullPane>
       )}
 
@@ -538,7 +557,7 @@ const BACKTEST_TABS = FEATURES.hardening
   : [['zone', 'Buy zone'], ['bravo', 'Bravo ◆'], ['sell', 'Sell signals']]
 const ROWS_SHOWN = 30
 
-function Backtest({ model, suite, pack, confirmDays, onJump }) {
+function Backtest({ model, suite, pack, confirmDays, onJumpDay, onJumpPeriod }) {
   const [tab, setTab] = useState('zone')
   const [all, setAll] = useState(false)
   const view = useMemo(() => {
@@ -563,12 +582,11 @@ function Backtest({ model, suite, pack, confirmDays, onJump }) {
     // 12 months). Rows on the daily chart jump to their close day.
     const { raw, periods, info } = pack
     const closes = periods.map((x) => x.c)
-    const cd = pack.days.closeDays
     const since = periods[0]?.t?.slice(0, 4)
     const periodLabel = (t) => (pack.tf === '1d' ? shortDay(t) : pack.tf === '1mo'
       ? new Date(`${t}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', year: '2-digit', timeZone: 'UTC' }).replace(' ', ' ’')
       : `Wk ${shortDay(t)}`)
-    const place = (list) => forwardReturns(closes, list, info.horizons).map((tr) => ({ ...tr, t: periods[tr.i].t, jumpI: cd[tr.i] }))
+    const place = (list) => forwardReturns(closes, list, info.horizons).map((tr) => ({ ...tr, t: periods[tr.i].t, period: true }))
     // Bravo bull diamonds (the same events as on the chart).
     const flagged = (flags, extra) => flags.map((f, i) => (f ? { i, price: periods[i].c, ...extra } : null)).filter(Boolean)
     if (tab === 'bravo') {
@@ -605,11 +623,15 @@ function Backtest({ model, suite, pack, confirmDays, onJump }) {
       empty: `No ${info.label.toLowerCase()} sell signals since ${since}.`,
     }
   }, [tab, model, suite, pack, confirmDays])
-  // Rows on the daily chart jump there; older ones (weekly / monthly history) don't.
-  const rowJump = (i, t) => (i >= 0 ? {
-    onClick: () => onJump?.(i), role: 'button', tabIndex: 0, 'aria-label': `Show ${shortDay(t)} on the chart`,
-    onKeyDown: (e) => { if (e.key === 'Enter') onJump?.(i) }, className: 'cursor-pointer hover:bg-card-hover/50 transition',
-  } : {})
+  // Every row jumps the chart to its bar (daily rows map to their week /
+  // month when the chart shows weekly / monthly candles).
+  const rowJump = (tr) => {
+    const go = () => (tr.period ? onJumpPeriod?.(tr.i) : onJumpDay?.(tr.i))
+    return {
+      onClick: go, role: 'button', tabIndex: 0, 'aria-label': `Show ${shortDay(tr.t)} on the chart`,
+      onKeyDown: (e) => { if (e.key === 'Enter') go() }, className: 'cursor-pointer hover:bg-card-hover/50 transition',
+    }
+  }
   const rows = [...view.trades].reverse()
   const visible = all ? rows : rows.slice(0, ROWS_SHOWN)
   return (
@@ -689,7 +711,7 @@ function Backtest({ model, suite, pack, confirmDays, onJump }) {
             </thead>
             <tbody className="divide-y divide-hairline">
               {visible.map((tr) => (
-                <tr key={`${tr.t}-${tr.tag}`} {...rowJump(tr.jumpI ?? tr.i, tr.t)}>
+                <tr key={`${tr.t}-${tr.tag}`} {...rowJump(tr)}>
                   <td className="pl-5 pr-1 py-2.5 text-fg whitespace-nowrap">
                     {view.dateFmt ? view.dateFmt(tr.t) : shortDay(tr.t)}
                     {tr.tag && <span className={clsx('block text-[11px] leading-4 mt-0.5',
@@ -768,7 +790,8 @@ function SuitePanel({ pack, failed, tf, onTf, holdings, onJump, onOpenPane, onBr
   const sell = bearFresh ? { kind: 'bear', e: bear } : exitFresh ? { kind: 'exit', e: exit }
     : bear && (!exit || bear.pi >= exit.pi) ? { kind: 'bear', e: bear } : exit ? { kind: 'exit', e: exit } : null
   const WHY = { E: 'Echo turned down', T: 'Tango turned down', B: 'Bravo trend flipped' }
-  const jumpable = (e) => (e && e.i >= 0 ? () => onJump(e.i) : null)
+  // Tiles jump to their period (the chart draws the suite's own bars).
+  const jumpable = (e) => (e && e.pi >= 0 ? () => onJump(e.pi) : null)
   const regime = raw.bravo.regime[lastP]
   const lastFlag = (flags) => { for (let i = flags.length - 1; i >= 0; i--) if (flags[i]) return i; return null }
   const pillar = (o) => {

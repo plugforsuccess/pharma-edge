@@ -1300,7 +1300,19 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   **Timeframe: Daily (default) · Weekly · Monthly** (owner, 2026-10-03;
   daily = the chart's own bars, like TradingView on a daily chart — no
   extra fetch; Daily came back once Hardening was hidden). The card's
-  switch (`cm:suite-tf:v2`) runs the whole suite on that interval:
+  switch (`cm:suite-tf:v2`) runs the whole suite on that interval, and
+  **the candles follow it** (owner, 2026-10-03): Weekly / Monthly draw
+  those bars with the same indicator math run on them (200W / 50W
+  averages, "% vs 200-week", weekly RSI / MACD, the suite on its own bars;
+  `INTERVALS` / `paneTitle` in `EntryChart.jsx`) and drop what only exists
+  daily — buy-zone shading and arrows, MACD-confirm dots, the IV Rank /
+  IV vs HV panes, the W50 line; the status card stays daily. Tiles and
+  backtest rows jump to their bar on whichever chart is shown (daily rows
+  map to their week / month). **Every pane has a date row** under it
+  (owner: dates missing on the minimized view) — years always, months in
+  the gaps under a two-year view, ≥ 56px apart; Echo / Tango lanes sit
+  above it (`laneOffset`); the last pane keeps the chart's own axis.
+  Older notes on the interval:
   `leaps-entry` with `suite: '1wk' | '1mo'` returns the ticker's full
   Yahoo history ("max") plus SPY / ^VIX on the same interval (the
   200-bar warm-ups need it). `normalizePeriods` merges Yahoo's live
