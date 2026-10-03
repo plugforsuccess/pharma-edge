@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import clsx from 'clsx'
-import { ArrowDown, ArrowLeft, ArrowUp, Check, RotateCcw, Search, X } from 'lucide-react'
+import { ArrowDown, ArrowLeft, ArrowUp, Check, ChevronRight, Maximize2, RotateCcw, Search, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { CHART_TICKERS } from '../lib/chartTickers'
 import { entryModel, DEFAULT_PARAMS, HORIZONS } from '../utils/indicators'
@@ -119,6 +119,13 @@ export default function LeapsEntry() {
   }
   const isDefault = FIELDS.every(([k]) => params[k] === DEFAULT_PARAMS[k])
   const [expanded, setExpanded] = useState(null) // a pane key shown full screen
+  // Jump the chart to a bar (from the Signal suite tiles or a backtest row).
+  const chartBox = useRef(null)
+  const [jump, setJump] = useState(null)
+  const jumpTo = (i) => {
+    setJump({ i, n: Date.now() })
+    chartBox.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
   const [layers, setLayers] = useState(() => {
     const saved = loadJson(LAYERS_KEY)
     return Array.isArray(saved) ? saved : DEFAULT_LAYERS
@@ -172,12 +179,13 @@ export default function LeapsEntry() {
         <div className="md:grid md:grid-cols-[1fr_280px] md:gap-x-5 md:items-start">
           <div className="min-w-0 md:order-1">
             <StatusPanel s={s} model={model} params={params} suite={suite} />
-            {suite && <SuitePanel suite={suite} bars={bars} holdings={holdings} />}
+            {suite && <SuitePanel suite={suite} bars={bars} holdings={holdings} onJump={jumpTo} onOpenPane={setExpanded}
+              bravoOn={layers.includes('bravo')} onBravo={() => { if (!layers.includes('bravo')) toggleLayer('bravo'); chartBox.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }} />}
           </div>
 
           {/* Chart */}
           <div className="min-w-0 md:order-3 md:col-span-2">
-            <section className="bg-card border border-border rounded-2xl mb-4 overflow-hidden">
+            <section ref={chartBox} className="bg-card border border-border rounded-2xl mb-4 overflow-hidden scroll-mt-4">
               <div className="px-5 pt-4 pb-2 flex items-end gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="text-2xl font-semibold font-mono-tab leading-none">{money(shown?.c)}</div>
@@ -216,7 +224,7 @@ export default function LeapsEntry() {
                   </button>
                 ))}
               </div>
-              <EntryChart bars={bars} model={model} suite={suite} panes={panes} layers={layers} onHover={setHover} onExpand={setExpanded} />
+              <EntryChart bars={bars} model={model} suite={suite} panes={panes} layers={layers} onHover={setHover} onExpand={setExpanded} jump={jump} />
               <div className="px-5 py-3 border-t border-hairline flex flex-wrap gap-x-4 gap-y-1.5 text-[11px] text-muted">
                 <Key className="text-green-400" glyph="▲">Buy signal</Key>
                 <Key className="text-green-400/50" glyph="●">MACD confirms</Key>
@@ -235,7 +243,7 @@ export default function LeapsEntry() {
           </div>
 
           <div className="min-w-0 md:order-4 md:col-span-2">
-            <Backtest model={model} suite={suite} />
+            <Backtest model={model} suite={suite} onJump={jumpTo} />
           </div>
         </div>
       )}
@@ -449,7 +457,7 @@ function Thresholds({ draft, setField, reset, isDefault }) {
 const BACKTEST_TABS = [['zone', 'Buy zone'], ['hardening', 'Hardening ▲'], ['sell', 'Sell signals']]
 const ROWS_SHOWN = 30
 
-function Backtest({ model, suite }) {
+function Backtest({ model, suite, onJump }) {
   const [tab, setTab] = useState('zone')
   const [all, setAll] = useState(false)
   const view = useMemo(() => {
@@ -566,7 +574,8 @@ function Backtest({ model, suite }) {
             </thead>
             <tbody className="divide-y divide-hairline">
               {visible.map((tr) => (
-                <tr key={`${tr.t}-${tr.tag}`}>
+                <tr key={`${tr.t}-${tr.tag}`} onClick={() => onJump?.(tr.i)} className="cursor-pointer hover:bg-card-hover/50 transition"
+                  role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') onJump?.(tr.i) }} aria-label={`Show ${shortDay(tr.t)} on the chart`}>
                   <td className="pl-5 pr-1 py-2.5 text-fg whitespace-nowrap">
                     {shortDay(tr.t)}
                     {tr.tag && <span className={clsx('block text-[10px] leading-3 mt-0.5',
@@ -595,12 +604,14 @@ function Backtest({ model, suite }) {
   )
 }
 
-// Signal suite today: the latest entry (Hardening bull) and sell (Hardening
-// bear, or an Exit Meta exit) with how long ago, then each pillar's state.
-function SuitePanel({ suite, bars, holdings }) {
+// Signal suite today: Entry (latest Hardening bull) and Sell (fresh Hardening
+// bear, else fresh exit, else the latest) tiles — tap to see it on the chart —
+// then one row per pillar (Echo / Tango open their pane full screen; Bravo
+// turns its band on), then the user's positions in this ticker.
+function SuitePanel({ suite, bars, holdings, onJump, onOpenPane, onBravo, bravoOn }) {
   const last = bars.length - 1
   const ago = (i) => (i == null ? null : last - i)
-  const agoText = (n) => (n === 0 ? 'today' : n === 1 ? '1 day ago' : `${n} days ago`)
+  const agoText = (n) => (n === 0 ? 'today' : n === 1 ? 'yesterday' : `${n}d ago`)
   const lastOf = (list) => list[list.length - 1] ?? null
   const bull = lastOf(suite.bulls)
   const bear = lastOf(suite.bears)
@@ -608,89 +619,124 @@ function SuitePanel({ suite, bars, holdings }) {
   const bullFresh = bull && ago(bull.i) <= RECENT_DAYS
   const bearFresh = bear && ago(bear.i) <= RECENT_DAYS
   const exitFresh = exit && ago(exit.i) <= RECENT_DAYS
-  // Sell tile: a fresh Hardening bear first, then a fresh exit, else the latest of either.
   const sell = bearFresh ? { kind: 'bear', e: bear } : exitFresh ? { kind: 'exit', e: exit }
     : bear && (!exit || bear.i >= exit.i) ? { kind: 'bear', e: bear } : exit ? { kind: 'exit', e: exit } : null
+  const WHY = { E: 'Echo turned down', T: 'Tango turned down', B: 'Bravo trend flipped' }
   const regime = suite.bravo.regime[last]
   const lastFlag = (flags) => { for (let i = flags.length - 1; i >= 0; i--) if (flags[i]) return i; return null }
   const pillar = (o) => {
     const v = o.line[last]
-    const zone = v == null ? '—' : v >= o.upper[last] ? 'above upper rail' : v <= o.lower[last] ? 'below lower rail' : 'between rails'
+    const zone = v == null ? null : v >= o.upper[last] ? 'Above rail' : v <= o.lower[last] ? 'Below rail' : 'Mid-range'
     const b = lastFlag(o.bull)
     const s = lastFlag(o.bear)
-    const latest = b != null && (s == null || b > s) ? { side: 'bull', n: ago(b) } : s != null ? { side: 'bear', n: ago(s) } : null
+    const latest = b != null && (s == null || b > s) ? { side: 'Bull', n: ago(b) } : s != null ? { side: 'Bear', n: ago(s) } : null
     return { v, zone, latest }
   }
   const echo = pillar(suite.echo)
   const tango = pillar(suite.tango)
   const bravoB = lastFlag(suite.bravo.bull)
   const bravoS = lastFlag(suite.bravo.bear)
+  const bravoLatest = bravoB != null && (bravoS == null || bravoB > bravoS) ? { side: 'Bull', n: ago(bravoB) } : bravoS != null ? { side: 'Bear', n: ago(bravoS) } : null
+  const tone = (side) => (side === 'Bull' ? 'up' : side === 'Bear' ? 'down' : 'flat')
   return (
     <section className="bg-card border border-border rounded-2xl mb-4 overflow-hidden">
-      <div className="px-5 pt-5 pb-3 flex items-baseline gap-2">
-        <h2 className="flex-1 text-sm font-semibold">Signal suite</h2>
-        <span className="text-[11px] text-muted">Bravo · Echo · Tango · Hardening</span>
+      <div className="px-5 pt-5 pb-4">
+        <h2 className="text-sm font-semibold">Signal suite</h2>
       </div>
-      <div className="px-5 pb-4 grid grid-cols-2 gap-2">
+      <div className="px-5 pb-5 grid grid-cols-2 gap-2.5">
         <SignalTile tone={bullFresh ? 'buy' : 'idle'} icon={ArrowUp} label="Entry"
-          title={bull ? `${'★'.repeat(bull.stars)} Hardening bull` : 'No bull signal'}
-          sub={bull ? `${agoText(ago(bull.i))} · $${bull.price.toFixed(2)}${bull.boosters.length ? ` · ${bull.boosters.join(' ')}` : ''}` : 'in 5 years'} />
-        <SignalTile tone={bearFresh ? 'sell' : exitFresh ? 'trim' : 'idle'} icon={ArrowDown} label="Sell"
-          title={!sell ? 'No sell signal' : sell.kind === 'bear' ? `${'★'.repeat(sell.e.stars)} Hardening bear` : 'Exit signal'}
-          sub={!sell ? 'in 5 years' : sell.kind === 'bear' ? `${agoText(ago(sell.e.i))} · $${sell.e.price.toFixed(2)}`
-            : `${agoText(ago(sell.e.i))} · ${sell.e.why.map((w) => ({ E: 'Echo', T: 'Tango', B: 'Bravo flip' })[w]).join(', ')}`} />
+          onClick={bull ? () => onJump(bull.i) : null}
+          title={bull ? 'Hardening bull' : 'No bull signal'}
+          stars={bull?.stars}
+          sub={bull ? `${agoText(ago(bull.i))} · $${bull.price.toFixed(2)}` : 'None in 5 years'} />
+        <SignalTile tone={!sell ? 'idle' : sell.kind === 'bear' && bearFresh ? 'sell' : exitFresh && sell.kind === 'exit' ? 'trim' : 'idle'} icon={ArrowDown} label="Sell"
+          onClick={sell ? () => onJump(sell.e.i) : null}
+          title={!sell ? 'No sell signal' : sell.kind === 'bear' ? 'Hardening bear' : 'Exit signal'}
+          stars={sell?.kind === 'bear' ? sell.e.stars : null}
+          sub={!sell ? 'None in 5 years' : sell.kind === 'bear' ? `${agoText(ago(sell.e.i))} · $${sell.e.price.toFixed(2)}`
+            : `${agoText(ago(sell.e.i))} · ${sell.e.why.map((w) => WHY[w]).join(', ')}`} />
       </div>
       <ul className="border-t border-hairline divide-y divide-hairline">
-        <PillarRow name="Bravo" state={regime === 1 ? 'Bull trend' : regime === -1 ? 'Bear trend' : 'No trend'} tone={regime === 1 ? 'up' : regime === -1 ? 'down' : 'flat'}
-          detail={bravoB != null && (bravoS == null || bravoB > bravoS) ? `bull signal ${agoText(ago(bravoB))}` : bravoS != null ? `bear signal ${agoText(ago(bravoS))}` : ''} />
-        <PillarRow name="Echo" state={echo.v == null ? '—' : echo.v.toFixed(1)} tone={echo.v == null ? 'flat' : echo.v >= 0 ? 'up' : 'down'}
-          detail={[echo.zone, echo.latest && `${echo.latest.side} ${agoText(echo.latest.n)}`].filter(Boolean).join(' · ')} />
-        <PillarRow name="Tango" state={tango.v == null ? '—' : tango.v.toFixed(1)} tone={tango.v == null ? 'flat' : tango.v >= 0 ? 'up' : 'down'}
-          detail={[tango.zone, tango.latest && `${tango.latest.side} ${agoText(tango.latest.n)}`].filter(Boolean).join(' · ')} />
+        <PillarRow name="Bravo" what="Trend" onClick={onBravo} action={bravoOn ? 'On chart' : 'Show band'}
+          value={regime === 1 ? 'Bull trend' : regime === -1 ? 'Bear trend' : 'No trend'} valueTone={regime === 1 ? 'up' : regime === -1 ? 'down' : 'flat'}
+          latest={bravoLatest && `${bravoLatest.side} ${agoText(bravoLatest.n)}`} latestTone={tone(bravoLatest?.side)} />
+        <PillarRow name="Echo" what="Momentum" onClick={() => onOpenPane('echo')} action="Open" expand
+          value={echo.v == null ? '—' : echo.v.toFixed(1)} mono valueTone={echo.v == null ? 'flat' : echo.v >= 0 ? 'up' : 'down'} chip={echo.zone}
+          latest={echo.latest && `${echo.latest.side} ${agoText(echo.latest.n)}`} latestTone={tone(echo.latest?.side)} />
+        <PillarRow name="Tango" what="Money flow" onClick={() => onOpenPane('tango')} action="Open" expand
+          value={tango.v == null ? '—' : tango.v.toFixed(1)} mono valueTone={tango.v == null ? 'flat' : tango.v >= 0 ? 'up' : 'down'} chip={tango.zone}
+          latest={tango.latest && `${tango.latest.side} ${agoText(tango.latest.n)}`} latestTone={tone(tango.latest?.side)} />
       </ul>
       {holdings?.length > 0 && (
-        <div className="px-5 py-3 border-t border-hairline text-xs text-subtle leading-5">
+        <ul className="border-t border-hairline divide-y divide-hairline">
           {holdings.map((h) => (
-            <div key={h.id} className="flex items-start gap-2">
-              <span className={clsx('mt-1.5 h-1.5 w-1.5 rounded-full shrink-0', h.kind === 'shares' ? 'bg-amber-400' : 'bg-subtle')} aria-hidden />
-              <span className="flex-1">
-                {h.kind === 'shares'
-                  ? <>You own <span className="text-fg font-mono-tab">{h.qty}</span> — the sell signals apply to these shares.</>
-                  : <>You hold <span className="text-fg font-mono-tab">{h.qty}</span> — your exit plan decides these; the sell signals are for shares and spreads.</>}
-              </span>
-              <Link to={`/leaps?open=${h.id}`} className="shrink-0 text-amber-300 hover:text-amber-200 font-semibold">Portfolio</Link>
-            </div>
+            <li key={h.id}>
+              <Link to={`/leaps?open=${h.id}`} className="px-5 py-3 flex items-center gap-3 min-h-[56px] hover:bg-card-hover/40 transition">
+                <span className={clsx('shrink-0 text-[10px] uppercase tracking-wider font-semibold px-2 py-1 rounded-md border',
+                  h.kind === 'shares' ? 'text-amber-300 border-amber-400/40 bg-amber-400/10' : 'text-subtle border-border bg-bg-elev')}>
+                  {h.kind === 'shares' ? 'Shares' : 'LEAPS'}
+                </span>
+                <span className="flex-1 min-w-0">
+                  <span className="block text-sm text-fg">You {h.kind === 'shares' ? 'own' : 'hold'} <span className="font-mono-tab">{h.qty}</span></span>
+                  <span className="block text-xs text-muted mt-0.5">{h.kind === 'shares' ? 'The sell signals apply to these shares.' : 'Your exit plan decides; these signals are for shares and spreads.'}</span>
+                </span>
+                <ChevronRight size={15} className="shrink-0 text-muted" aria-hidden />
+              </Link>
+            </li>
           ))}
-        </div>
+        </ul>
       )}
     </section>
   )
 }
 
 const TILE_TONE = {
-  buy: 'border-amber-400/40 bg-amber-400/[0.06] text-amber-300',
-  sell: 'border-red-400/40 bg-red-400/[0.07] text-rose-300',
-  trim: 'border-red-400/25 bg-red-400/[0.04] text-rose-300/90',
-  idle: 'border-hairline bg-bg-elev text-subtle',
+  buy: { box: 'border-amber-400/40 bg-amber-400/[0.06]', label: 'text-amber-300', icon: 'bg-amber-400/15 text-amber-300' },
+  sell: { box: 'border-red-400/40 bg-red-400/[0.07]', label: 'text-rose-300', icon: 'bg-red-400/15 text-rose-300' },
+  trim: { box: 'border-red-400/25 bg-red-400/[0.04]', label: 'text-rose-300', icon: 'bg-red-400/12 text-rose-300' },
+  idle: { box: 'border-hairline bg-bg-elev', label: 'text-muted', icon: 'bg-faint text-subtle' },
 }
-function SignalTile({ tone, icon: Icon, label, title, sub }) {
+function SignalTile({ tone, icon: Icon, label, title, stars, sub, onClick }) {
+  const c = TILE_TONE[tone]
+  const Tag = onClick ? 'button' : 'div'
   return (
-    <div className={clsx('rounded-xl border px-3.5 py-3 min-w-0', TILE_TONE[tone])}>
-      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-semibold opacity-90">
-        <Icon size={12} aria-hidden /> {label}
-      </div>
-      <div className="mt-1 text-sm font-semibold text-fg leading-snug">{title}</div>
-      <div className="text-[11px] text-muted mt-0.5 leading-4">{sub}</div>
-    </div>
+    <Tag type={onClick ? 'button' : undefined} onClick={onClick ?? undefined}
+      className={clsx('text-left rounded-xl border p-3.5 min-w-0 min-h-[116px] flex flex-col transition', c.box,
+        onClick && 'hover:border-border-hover active:scale-[0.99]')}>
+      <span className="flex items-center gap-2">
+        <span className={clsx('h-6 w-6 rounded-full flex items-center justify-center shrink-0', c.icon)} aria-hidden><Icon size={13} strokeWidth={2.5} /></span>
+        <span className={clsx('text-[11px] uppercase tracking-[0.12em] font-semibold', c.label)}>{label}</span>
+      </span>
+      <span className="mt-3 text-[15px] font-semibold text-fg leading-tight">{title}</span>
+      {stars ? <span className="mt-0.5 text-xs text-amber-300 tracking-wider" aria-label={`${stars} stars`}>{'★'.repeat(stars)}<span className="text-faint">{'★'.repeat(4 - stars)}</span></span> : null}
+      <span className="mt-1 text-xs text-muted leading-4">{sub}</span>
+      {onClick && <span className="mt-auto pt-2 text-[11px] font-semibold text-subtle inline-flex items-center gap-0.5">View on chart <ChevronRight size={12} aria-hidden /></span>}
+    </Tag>
   )
 }
-function PillarRow({ name, state, tone, detail }) {
+
+const TONE_TEXT = { up: 'text-green-400', down: 'text-rose-300', flat: 'text-subtle' }
+function PillarRow({ name, what, value, valueTone, mono, chip, latest, latestTone, onClick, action, expand }) {
   return (
-    <li className="px-5 py-2.5 flex items-center gap-3 min-h-[48px]">
-      <span className={clsx('h-2 w-2 rounded-full shrink-0', tone === 'up' ? 'bg-green-400' : tone === 'down' ? 'bg-red-400' : 'bg-faint')} aria-hidden />
-      <span className="w-14 shrink-0 text-sm text-fg">{name}</span>
-      <span className={clsx('text-sm font-mono-tab shrink-0', tone === 'up' ? 'text-green-400' : tone === 'down' ? 'text-rose-300' : 'text-subtle')}>{state}</span>
-      <span className="flex-1 min-w-0 text-right text-[11px] text-muted truncate">{detail}</span>
+    <li>
+      <button type="button" onClick={onClick}
+        className="w-full text-left px-5 py-3 flex items-center gap-3 min-h-[60px] hover:bg-card-hover/40 transition">
+        <span className={clsx('h-2 w-2 rounded-full shrink-0', valueTone === 'up' ? 'bg-green-400' : valueTone === 'down' ? 'bg-red-400' : 'bg-faint')} aria-hidden />
+        <span className="w-[88px] shrink-0">
+          <span className="block text-sm text-fg font-medium leading-tight">{name}</span>
+          <span className="block text-[11px] text-muted leading-tight mt-0.5">{what}</span>
+        </span>
+        <span className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
+          <span className={clsx('text-sm font-semibold', mono && 'font-mono-tab', TONE_TEXT[valueTone])}>{value}</span>
+          {chip && <span className="text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-bg-elev text-muted">{chip}</span>}
+        </span>
+        <span className="shrink-0 text-right">
+          {latest && <span className={clsx('block text-xs font-mono-tab', TONE_TEXT[latestTone])}>{latest}</span>}
+          <span className="flex items-center justify-end gap-1 text-[11px] text-violet-300 mt-0.5 font-semibold">
+            {expand ? <Maximize2 size={11} aria-hidden /> : null}{action}{!expand && <ChevronRight size={12} aria-hidden />}
+          </span>
+        </span>
+      </button>
     </li>
   )
 }

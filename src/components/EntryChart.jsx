@@ -66,12 +66,13 @@ const SHOW_DAYS = 504 // two years of trading days in view by default
 const fmt = (v, d = 2) => (v == null || !Number.isFinite(v) ? '—' : v.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }))
 const pct = (v, d = 1) => (v == null ? '—' : `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(d)}%`)
 
-export default function EntryChart({ bars, model, suite, panes, layers = [], onHover, onExpand, focus = null, fill = null }) {
+export default function EntryChart({ bars, model, suite, panes, layers = [], onHover, onExpand, focus = null, fill = null, jump = null }) {
   const box = useRef(null)
   const hoverRef = useRef(onHover)
   hoverRef.current = onHover
   const rangeRef = useRef(null)      // keeps zoom / pan across rebuilds
   const chartRef = useRef(null)
+  const holdRef = useRef(0)
   const [hover, setHover] = useState(null)
   const [tops, setTops] = useState([])
   const shown = focus ? [focus] : ['price', ...SUB_PANES.map(([k]) => k).filter((k) => panes.includes(k))]
@@ -266,6 +267,8 @@ export default function EntryChart({ bars, model, suite, panes, layers = [], onH
     const index = new Map(time.map((x, i) => [x, i]))
     const timeKey = (x) => (x && typeof x === 'object' ? `${x.year}-${String(x.month).padStart(2, '0')}-${String(x.day).padStart(2, '0')}` : x)
     const move = (param) => {
+      // Right after a jump the page scrolls under a resting mouse; keep the jump's bar.
+      if (Date.now() < holdRef.current) return
       const i = param.time != null ? index.get(timeKey(param.time)) : undefined
       const v = i == null ? null : i
       setHover(v)
@@ -294,6 +297,19 @@ export default function EntryChart({ bars, model, suite, panes, layers = [], onH
   }, [bars, model, suite, key])
 
   useLayoutEffect(() => { setHover(null) }, [bars])
+
+  // jump = { i, n } (n changes per request): center the view on bar i,
+  // about three months either side, and put the crosshair there.
+  useEffect(() => {
+    const chart = chartRef.current
+    if (!chart || !jump || !bars?.length) return
+    const r = { from: Math.max(0, jump.i - 63), to: Math.min(bars.length - 1 + 4, jump.i + 63) }
+    rangeRef.current = r
+    holdRef.current = Date.now() + 1200
+    chart.timeScale().setVisibleLogicalRange(r)
+    setHover(jump.i)
+    hoverRef.current?.(jump.i)
+  }, [jump, bars])
 
   // Legends follow the crosshair; off the chart they show the latest day.
   const i = hover ?? (bars?.length ? bars.length - 1 : null)

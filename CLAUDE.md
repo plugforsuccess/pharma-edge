@@ -1145,6 +1145,12 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   Every pane has a **violet title** (`PANE_TITLES`) and a small violet
   maximize button at its top right that opens that pane alone full
   screen (`FullPane` in `LeapsEntry.jsx`; Esc or X closes).
+  **Everything in the Signal suite card is tappable** (owner, 2026-10-03):
+  the Entry / Sell tiles jump the chart to that signal ("View on chart":
+  ~3 months either side, crosshair on the bar — `jump` prop on
+  `EntryChart`); Echo / Tango rows open their pane full screen; the
+  Bravo row turns the Bravo band on; position rows open the holding in
+  Portfolio. Backtest rows jump the chart to their date too.
   **Where the suite applies** (owner, 2026-10-03): its exits suit **GEX
   spreads and share holdings**, not LEAPS. The Signal suite card lists the
   user's open positions in the ticker: shares → "the sell signals apply";
