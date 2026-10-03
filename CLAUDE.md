@@ -1034,7 +1034,9 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   → a "Watch" row with the reason. The card shows strike, break-even
   (strike + mid), cost per contract (mid × 100). Suggestions only;
   nothing is ordered. Prices: the **`price-history`** edge function
-  (`verify_jwt`; Yahoo daily OHLC + volume, 1M–2Y; `crypto: true` prices
+  (`verify_jwt`; Yahoo OHLC + volume: **1D = 5-minute and 1W = 30-minute
+  candles** (times as ET wall clock read as UTC, 2-min cache; 1D change is
+  vs the previous close), 1M–2Y daily; `crypto: true` prices
   the coin in USD; 15-min cache, no table). **The chart is TradingView
   Lightweight Charts** (`lightweight-charts`, Apache-2.0). Its on-chart logo is
   **off** (owner); the licence then requires the attribution notice
@@ -1044,7 +1046,8 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   `components/PriceChart.jsx`: **candlesticks only** (owner — no line
   chart, no toggle), volume band, magnet crosshair driving the quote
   header's OHLC / volume / day change, the trade's levels as dashed price
-  lines with axis tags (autoscale widened so every level stays in view),
+  lines with axis tags (autoscale widened so every level stays in view —
+  except 1D / 1W, where it would flatten the candles),
   pinch / drag to zoom and pan; colors read from the theme tokens at
   runtime. Pass it a stable `levels` array (memoized) or it rebuilds on
   every hover. `components/LineChart.jsx` (plain SVG) is kept for the

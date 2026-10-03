@@ -20,14 +20,17 @@ import PriceChart from '../components/PriceChart'
 // Yahoo fallback). Holding charts are hidden for now; their history
 // (leaps_position_marks) keeps collecting.
 
-const RANGES = [['1mo', '1M'], ['3mo', '3M'], ['6mo', '6M'], ['1y', '1Y'], ['2y', '2Y']]
+const RANGES = [['1d', '1D'], ['5d', '1W'], ['1mo', '1M'], ['3mo', '3M'], ['6mo', '6M'], ['1y', '1Y'], ['2y', '2Y']]
 const DAY_MS = 86400000
 const BOT_DAYS = 30
 const price = (n) => (Number.isFinite(n)
   ? `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: n < 10 ? 4 : 2 })}`
   : '—')
 const shortDate = (ymd) => new Date(`${ymd}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
-const dayLabel = (ymd) => new Date(`${ymd}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
+// Daily bars carry a date; intraday bars carry ET wall-clock seconds (read as UTC).
+const dayLabel = (t) => (typeof t === 'number'
+  ? new Date(t * 1000).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'UTC' })
+  : new Date(`${t}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }))
 const num = (n) => (Number.isFinite(n) ? n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—')
 const compact = (n) => Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(n)
 const pctSigned = (r) => (Number.isFinite(r) ? `${r >= 0 ? '+' : '−'}${Math.abs(r * 100).toFixed(1)}%` : '—')
@@ -158,9 +161,13 @@ export default function Charts() {
   const lastBar = ohlc?.[ohlc.length - 1]
   const firstBar = ohlc?.[0]
   const shown = hover ?? lastBar
-  // Change over the range, or for the hovered day vs the day before.
+  // Change over the range (1D: since the previous close). Hovering a daily
+  // candle shows that day's change; hovering intraday, the change since
+  // the range's start.
+  const intraday = typeof firstBar?.t === 'number'
   const prevOf = (b) => { const i = ohlc?.indexOf(b) ?? -1; return i > 0 ? ohlc[i - 1].c : null }
-  const base = hover ? prevOf(hover) : firstBar?.c
+  const rangeBase = range === '1d' && data?.prev_close > 0 ? data.prev_close : firstBar?.c
+  const base = hover && !intraday ? prevOf(hover) : rangeBase
   const change = shown && base > 0 ? shown.c - base : null
   // Stable per pick, so hovering doesn't rebuild the chart.
   const levels = useMemo(() => (current?.lines ?? []).map((l) => ({ price: l.v, label: l.label, gold: l.gold })), [current])
@@ -208,7 +215,7 @@ export default function Charts() {
                       {change != null && (
                         <div className={clsx('mt-1 text-xs font-mono-tab', change < 0 ? 'text-rose-300' : 'text-green-400')}>
                           {change >= 0 ? '+' : '−'}{Math.abs(change).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({change >= 0 ? '+' : '−'}{Math.abs((change / base) * 100).toFixed(2)}%)
-                          <span className="text-muted"> {hover ? 'day' : RANGES.find(([v]) => v === range)?.[1]}</span>
+                          <span className="text-muted"> {hover && !intraday ? 'day' : RANGES.find(([v]) => v === range)?.[1]}</span>
                         </div>
                       )}
                     </div>
@@ -233,7 +240,7 @@ export default function Charts() {
                 ) : data.error || !ohlc ? (
                   <div className="h-[300px] flex items-center justify-center text-xs text-muted">Couldn't load prices for {current.ticker}.</div>
                 ) : (
-                  <PriceChart bars={ohlc} levels={levels} height={300} onHover={setHover} />
+                  <PriceChart bars={ohlc} levels={levels} fitLevels={!intraday} height={300} onHover={setHover} />
                 )}
               </div>
 
@@ -242,7 +249,7 @@ export default function Charts() {
                 <div className="flex-1 flex items-center" role="tablist" aria-label="Range">
                   {RANGES.map(([v, label]) => (
                     <button key={v} type="button" role="tab" aria-selected={range === v} onClick={() => { setHover(null); setRange(v) }}
-                      className={clsx('min-h-[36px] min-w-[40px] px-2 rounded-md text-xs font-semibold transition',
+                      className={clsx('flex-1 min-h-[36px] min-w-0 px-1 rounded-md text-xs font-semibold transition',
                         range === v ? 'bg-bg-elev text-fg' : 'text-muted hover:text-fg')}>
                       {label}
                     </button>

@@ -3,7 +3,8 @@
 // Used by price-history and suggest-leaps (owner, 2026-10-03: Yahoo is
 // the market-data source; the Polygon subscription was cancelled).
 //
-//   yahooBars(symbol, range)        /v8/finance/chart — no auth needed
+//   yahooChart(symbol, range, interval) /v8/finance/chart — no auth needed
+//   yahooBars(symbol, range)        daily bars only
 //   yahooOptions(symbol, dateUnix?) /v7/finance/options — cookie + crumb
 //
 // The options endpoint is gated behind a cookie+crumb pair (the same flow
@@ -18,7 +19,9 @@ const UA =
 const CRUMB_TTL_MS = 30 * 60 * 1000
 const HOSTS = ['query1.finance.yahoo.com', 'query2.finance.yahoo.com']
 
-export interface Bar { t: string; o: number; h: number; l: number; c: number; v: number }
+// t: 'YYYY-MM-DD' for daily bars; for intraday bars, unix seconds of the
+// New York wall-clock time read as UTC (so charts label times in ET).
+export interface Bar { t: string | number; o: number; h: number; l: number; c: number; v: number }
 
 export class YahooError extends Error {
   status?: number
@@ -30,9 +33,23 @@ export class YahooError extends Error {
 
 // Exchange-day date for a bar timestamp (bars are stamped in ET).
 const etDay = (ms: number) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date(ms))
+const ET_PARTS = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/New_York', hourCycle: 'h23',
+  year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+})
+// Unix seconds of the ET wall-clock time, read as UTC.
+function etWallSeconds(ms: number): number {
+  const p = Object.fromEntries(ET_PARTS.formatToParts(new Date(ms)).map((x) => [x.type, x.value]))
+  return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) / 1000
+}
 
 export async function yahooBars(symbol: string, range: string): Promise<Bar[]> {
-  const path = `/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=1d&includePrePost=false`
+  return (await yahooChart(symbol, range, '1d')).bars
+}
+
+export async function yahooChart(symbol: string, range: string, interval: string): Promise<{ bars: Bar[]; prevClose: number | null }> {
+  const intraday = interval !== '1d'
+  const path = `/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=${interval}&includePrePost=false`
   let last = 'no response'
   for (const host of HOSTS) {
     try {
@@ -47,12 +64,13 @@ export async function yahooBars(symbol: string, range: string): Promise<Bar[]> {
         const c = Number(q.close?.[i])
         if (!Number.isFinite(c) || c <= 0) return
         bars.push({
-          t: etDay(s * 1000), c,
+          t: intraday ? etWallSeconds(s * 1000) : etDay(s * 1000), c,
           o: Number(q.open?.[i]) || c, h: Number(q.high?.[i]) || c, l: Number(q.low?.[i]) || c,
           v: Number(q.volume?.[i]) || 0,
         })
       })
-      if (bars.length) return bars
+      const prev = Number(r?.meta?.chartPreviousClose ?? r?.meta?.previousClose)
+      if (bars.length) return { bars, prevClose: Number.isFinite(prev) && prev > 0 ? prev : null }
       last = 'empty'
     } catch (e) {
       last = (e as Error).message
