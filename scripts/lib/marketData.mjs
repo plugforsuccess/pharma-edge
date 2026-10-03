@@ -50,10 +50,10 @@ function parseChart(body) {
   return out
 }
 
-async function fromYahoo(ticker, range) {
+async function fromYahoo(ticker, range, attempts = 3) {
   const symbol = ticker.replace(/\./g, '-')
   let last = 'no response'
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
     const a = await getAuth(attempt > 0)
     for (const host of HOSTS) {
       const crumb = a ? `&crumb=${encodeURIComponent(a.crumb)}` : ''
@@ -69,7 +69,7 @@ async function fromYahoo(ticker, range) {
         last = 'empty'
       } catch (e) { last = e.message }
     }
-    await sleep(2000 * 2 ** attempt)
+    if (attempt < attempts - 1) await sleep(1500 * 2 ** attempt)
   }
   return { bars: null, error: last }
 }
@@ -83,7 +83,7 @@ async function fromEdge(ticker) {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, apikey: key, 'Content-Type': 'application/json' },
       body: JSON.stringify({ ticker }),
-      signal: AbortSignal.timeout(30000),
+      signal: AbortSignal.timeout(45000),
     })
     const body = await resp.json().catch(() => null)
     if (!resp.ok || !body?.success) return { bars: null, error: `edge ${resp.status} ${body?.error ?? ''}`.trim() }
@@ -91,20 +91,34 @@ async function fromEdge(ticker) {
   } catch (e) { return { bars: null, error: `edge ${e.message}` } }
 }
 
-export const sources = { yahoo: 0, edge: 0 }
+export const sources = { yahoo: 0, edge: 0, blocked: false }
+// Once Yahoo refuses a few tickers in a row the runner is rate-limited for
+// the rest of the job: retrying every ticker three times would take hours,
+// so from then on the edge function goes first and Yahoo is skipped.
+let refusals = 0
 
 // 5 years of daily bars: Yahoo with a session, else the edge function.
 export async function dailyBars(ticker, { range = '5y' } = {}) {
-  const y = await fromYahoo(ticker, range)
-  if (y.bars) { sources.yahoo++; return y.bars }
-  if (y.error === 'not found') throw new Error(`${ticker}: not found`)
+  if (!sources.blocked) {
+    const y = await fromYahoo(ticker, range, refusals >= 2 ? 1 : 3)
+    if (y.bars) { sources.yahoo++; refusals = 0; return y.bars }
+    if (y.error === 'not found') throw new Error(`${ticker}: not found`)
+    if (/^(429|403|401)$/.test(y.error ?? '')) {
+      refusals++
+      if (refusals >= 4 && !sources.blocked) { sources.blocked = true; console.log('  Yahoo is refusing this runner — using the edge function for the rest.') }
+    }
+    const e = await fromEdge(ticker)
+    if (e.bars) { sources.edge++; return e.bars }
+    throw new Error(`${ticker}: yahoo ${y.error}; ${e.error}`)
+  }
   const e = await fromEdge(ticker)
   if (e.bars) { sources.edge++; return e.bars }
-  throw new Error(`${ticker}: yahoo ${y.error}; ${e.error}`)
+  if (/not found|404/.test(e.error ?? '')) throw new Error(`${ticker}: not found`)
+  throw new Error(`${ticker}: ${e.error}`)
 }
 
 // Run fn over items with `limit` workers and a pause between calls.
-export async function mapLimit(items, limit, fn, pauseMs = 250) {
+export async function mapLimit(items, limit, fn, pauseMs = 100) {
   const out = new Array(items.length)
   let next = 0
   await Promise.all(Array.from({ length: limit }, async () => {

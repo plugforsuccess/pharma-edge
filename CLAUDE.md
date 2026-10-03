@@ -1027,8 +1027,8 @@ value, holding period) and must pass before any edit to that file lands.
   mortgages stay on the property). Both count in net worth (debts
   subtract) on Portfolio and Home (`others.after` / `others.before` in
   `useHoldings`); the Total card lists only the parts the user has.
-- **Peers** (owner, 2026-10-03; **free**): the Total card has two pages,
-  Totals and Peers — swipe it sideways or tap one of the **two dots above
+- **Rank** (owner, 2026-10-03; **free**; named "Rank", not "Peers" — owner): the Total card has two pages,
+  Totals and Rank (title "Your rank", eyebrow "vs. US households") — swipe it sideways or tap one of the **two dots above
   "N holdings"** (top right; owner chose dots over pills), remembered in
   `cm:totals-view`. Peers shows net worth **before tax** against
   US households from the Federal Reserve's **Survey of Consumer Finances

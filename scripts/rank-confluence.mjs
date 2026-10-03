@@ -38,7 +38,7 @@ import { dailyBars, mapLimit, sources } from './lib/marketData.mjs'
 const args = process.argv.slice(2)
 const MODE = (args[args.indexOf('--mode') + 1] && args.includes('--mode')) ? args[args.indexOf('--mode') + 1] : 'dry-run'
 if (!['full', 'rank-only', 'dry-run'].includes(MODE)) throw new Error(`unknown mode ${MODE}`)
-const CONCURRENCY = Number(process.env.CONCURRENCY) || 3
+const CONCURRENCY = Number(process.env.CONCURRENCY) || 6
 const TOP = 10
 
 const universe = (process.env.TICKERS ? process.env.TICKERS.split(',') : CHART_TICKERS.map((t) => t.symbol))
