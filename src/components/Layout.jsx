@@ -155,14 +155,20 @@ export default function Layout() {
       <InstallPrompt />
       <OnboardingGate />
 
-      {/* Mobile-only bottom nav: five equal tabs. */}
+      {/* Mobile-only bottom nav: five equal tabs, pinned to the bottom
+          edge. Anchored with insets, not a centering transform — a
+          transform on a fixed, blurred bar makes iOS Safari let it drift
+          while scrolling. Solid, so page text never shows through the
+          labels. The bar spans the screen; the tabs stay in the 448px
+          column. */}
       <nav
-        className="lg:hidden fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md
-                   glass border-t border-border/80 px-2 pt-2 z-50"
-        style={{ paddingBottom: 'calc(0.6rem + env(safe-area-inset-bottom))' }}
+        className="lg:hidden fixed inset-x-0 bottom-0 z-50 bg-bg border-t border-border/80"
+        style={{
+          paddingBottom: 'calc(0.6rem + env(safe-area-inset-bottom))',
+        }}
         aria-label="Primary"
       >
-        <div className="grid grid-cols-5 items-end">
+        <div className="mx-auto max-w-md px-2 pt-2 grid grid-cols-5 items-end">
           {navTabs.map(({ to, icon: Icon, label }) => (
             <BottomTab key={to} to={to} icon={Icon} label={label} />
           ))}

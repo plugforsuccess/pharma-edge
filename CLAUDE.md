@@ -791,7 +791,10 @@ only after the adviser-registration question is settled with counsel.
 
 Nav (owner, 2026-10-03): **Home · Portfolio · Charts · Pulse · Taxes**
 — five equal tabs; Charts is the middle tab and looks like the others
-(no raised button). Pulse is Elite (locked teaser for Pro). Portfolio is
+(no raised button). The mobile bar is solid (`bg-bg`, no glass) and
+pinned with `fixed inset-x-0 bottom-0` — no centering transform, which
+lets a fixed bar drift on iOS — and the page doesn't rubber-band
+(`overscroll-behavior-y: none`). Pulse is Elite (locked teaser for Pro). Portfolio is
 `/leaps` (page title "Portfolio"). The desktop rail adds LEAPS bot,
 Simulator, Settings and an "Add a holding" CTA; on mobile the Simulator
 and the bot are reached from Home. Research (`/reasoning`) is out of
