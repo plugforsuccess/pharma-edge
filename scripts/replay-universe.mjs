@@ -22,7 +22,8 @@
 // → one row in replay_runs (mode write), or printed (dry-run).
 //
 // Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, TICKERS (subset),
-//      SPOTLIGHT=NOW,PLTR, CONCURRENCY (default 3).
+//      SPOTLIGHT=NOW,PLTR, CONCURRENCY (default 3), REPLAY_OUT=file.json
+//      (also write the summary to a file).
 
 import { CHART_TICKERS } from '../src/lib/chartTickers.js'
 import { entryModel, HORIZONS } from '../src/utils/indicators.js'
@@ -170,6 +171,7 @@ async function main() {
     for (const tr of s.runs['confluence:targets'].trades) console.log(`  ${tr.entry} → ${tr.end}${tr.open ? ' (open)' : ''}  option ${pct(tr.option)}  stock ${pct(tr.stockRet)}  ${tr.exits.map((x) => `${x.reason}@${x.mult.toFixed(2)}x`).join(' ')}`)
     for (const m of s.moves) console.log(`  move ${m.low} → ${m.peak} ${pct(m.gain)}: ${m.caught ? `caught, kept ${pct(m.kept)}` : m.held ? 'held' : `missed (${m.why})`}`)
   }
+  if (process.env.REPLAY_OUT) { const { writeFileSync } = await import('node:fs'); writeFileSync(process.env.REPLAY_OUT, JSON.stringify(summary)) }
   if (MODE === 'dry-run') return
 
   const { createClient } = await import('@supabase/supabase-js')

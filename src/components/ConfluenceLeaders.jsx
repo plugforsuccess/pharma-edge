@@ -100,7 +100,11 @@ export default function ConfluenceLeaders({ mine = [] }) {
           ))}
         </ul>
       )}
-      <p className="px-5 py-3 border-t border-hairline text-[11px] text-muted">
+      <Link to="/charts/record" className="px-5 py-3 border-t border-hairline flex items-center gap-2 text-xs text-subtle hover:text-fg">
+        <span className="flex-1">Signal record: how these signals traded as LEAPS, every ticker</span>
+        <ChevronRight size={14} aria-hidden />
+      </Link>
+      <p className="px-5 pb-3 text-[11px] text-muted">
         Past stock returns, not option returns, and not advice. Rankings change after every close.
       </p>
     </section>

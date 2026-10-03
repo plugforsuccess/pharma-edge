@@ -30,14 +30,14 @@ export const OPTION_MODEL = Object.freeze({
 })
 
 export const ENTRY_RULES = [
-  ['confluence', 'Confluence 2+'],
-  ['zone', 'Buy zone YES'],
+  ['confluence', 'Confluence'],
+  ['zone', 'Buy zone'],
   ['bravo', 'Bravo ◆'],
 ]
 export const EXIT_RULES = [
-  ['targets', 'Exit targets'],
-  ['signals', 'Sell signals'],
-  ['both', 'Targets + signals'],
+  ['targets', 'Targets'],
+  ['signals', 'Signals'],
+  ['both', 'Both'],
 ]
 export const MOVE = Object.freeze({ minGain: 0.3, horizon: 126, early: 10 })
 

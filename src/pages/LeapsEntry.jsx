@@ -10,6 +10,7 @@ import { suiteModel, forwardReturns, horizonStats, normalizePeriods, suiteOnDays
 import TickerDrawer from '../components/TickerDrawer'
 import NumberInput from '../components/NumberInput'
 import { FEATURES } from '../lib/features'
+import ReplayCard from '../components/ReplayCard'
 import { confluenceModel, COMPONENTS, MIN_MATCHES } from '../utils/confluence'
 
 // /charts/entry/:ticker — the LEAPS entry chart. Price with 200 / 50 SMA and
@@ -320,6 +321,10 @@ export default function LeapsEntry() {
 
           <div className="min-w-0 md:order-4 md:col-span-2">
             <Backtest model={model} suite={suite} pack={suitePack} conf={conf} confirmDays={confirmDays} onJumpDay={jumpDay} onJumpPeriod={jumpPeriod} />
+          </div>
+
+          <div className="min-w-0 md:order-5 md:col-span-2">
+            <ReplayCard ticker={ticker} bars={bars} model={model} suite={dailySuite} onJumpDay={jumpDay} />
           </div>
         </div>
       )}
