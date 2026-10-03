@@ -741,6 +741,13 @@ at the same price either way). The form toggle reads "Default" /
 "Custom". Titles read "RXRX • 50 contracts" / "NAUT • 3,500 shares" / "BTC • 0.5 $BTC" (crypto counts in `$TICKER`, never "coins": "sell 0.35 $BTC");
 options show "$5 Call • Exp Jan 21, 2028" below, then "Bought …".
 
+**No page zoom** (owner, 2026-10-03): viewport `maximum-scale=1,
+user-scalable=no`, `html { touch-action: pan-x pan-y }` (no pinch /
+double-tap zoom, scrolling unaffected), Safari `gesturestart` /
+`gesturechange` cancelled in `main.jsx`, and inputs stay 16px on phones
+so iOS doesn't zoom into a focused field. Charts keep their own pinch
+zoom (lightweight-charts handles touches in JS).
+
 **Mobile-first.** Max width 448px (max-w-md) centered. Bottom navigation
 on mobile, sidebar on desktop. All tap targets minimum 44px.
 

@@ -154,6 +154,19 @@ body {
   overscroll-behavior-y: none;
 }
 
+/* No page zoom (owner, 2026-10-03): pinch and double-tap zoom off, so the
+   app stays at its laid-out size. Scrolling still works, and charts keep
+   their own pinch-to-zoom (lightweight-charts handles touches in JS). */
+html {
+  touch-action: pan-x pan-y;
+}
+/* iOS zooms into any focused field under 16px — keep fields at 16px on phones. */
+@media (max-width: 767px) {
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+}
+
 /* Ambient page texture — subtle radial vignette + grain */
 body {
   background-image:
