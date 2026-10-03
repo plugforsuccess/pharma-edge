@@ -36,11 +36,17 @@ const dayLabel = (t) => (typeof t === 'number'
 const num = (n) => (Number.isFinite(n) ? n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—')
 const TOOLS_KEY = (ticker) => `cm:chart-tools:${ticker}`
 // "54 trading days · 78 days" / "12 candles" between the pins.
+// The span between the pins: main line + an optional calendar-days line.
 function spanLabel(m, range) {
-  if (range === '1d' || range === '5d') return `${m.candles} candles`
+  if (range === '1d' || range === '5d') return { main: `${m.candles} candle${m.candles === 1 ? '' : 's'}`, sub: null }
   const unit = range === '5y' ? 'week' : range === 'max' ? 'month' : 'trading day'
-  return `${m.candles} ${unit}${m.candles === 1 ? '' : 's'}${unit === 'trading day' ? ` · ${m.days} days` : ''}`
+  return {
+    main: `${m.candles.toLocaleString('en-US')} ${unit}${m.candles === 1 ? '' : 's'}`,
+    sub: unit === 'trading day' ? `${m.days.toLocaleString('en-US')} calendar days` : null,
+  }
 }
+// A pin's date: with the year for daily candles, with the time intraday.
+const pinDate = (t) => (typeof t === 'number' ? dayLabel(t) : shortDate(t))
 const compact = (n) => Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(n)
 const pctSigned = (r) => (Number.isFinite(r) ? `${r >= 0 ? '+' : '−'}${Math.abs(r * 100).toFixed(1)}%` : '—')
 const money = (n) => `$${Math.round(n).toLocaleString('en-US')}`
@@ -331,18 +337,24 @@ export default function Charts() {
               {(picking || move || offRange) && (
                 <div className="px-5 pb-3 -mt-1 text-xs">
                   {move ? (
-                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                      <span className={clsx('text-sm font-semibold font-mono-tab', move.change < 0 ? 'text-rose-300' : 'text-green-400')}>
-                        {move.change >= 0 ? '+' : '−'}{Math.abs(move.pct * 100).toFixed(2)}%
-                      </span>
-                      <span className={clsx('font-mono-tab', move.change < 0 ? 'text-rose-300' : 'text-green-400')}>
-                        {move.change >= 0 ? '+' : '−'}{num(Math.abs(move.change))}
-                      </span>
-                      <span className="text-muted">
-                        A {dayLabel(move.from.t)} <span className="font-mono-tab text-subtle">{num(move.from.p)}</span>
-                        {' → '}B {dayLabel(move.to.t)} <span className="font-mono-tab text-subtle">{num(move.to.p)}</span>
-                        {' · '}{spanLabel(move, range)}
-                      </span>
+                    <div className="rounded-xl bg-bg-elev px-4 py-3">
+                      {/* The move, and how long it took */}
+                      <div className="flex items-start gap-3">
+                        <div className={clsx('flex-1 min-w-0 font-mono-tab', move.change < 0 ? 'text-rose-300' : 'text-green-400')}>
+                          <span className="text-lg font-semibold">{move.change >= 0 ? '+' : '−'}{Math.abs(move.pct * 100).toFixed(2)}%</span>
+                          <span className="ml-2 text-sm">{move.change >= 0 ? '+' : '−'}${num(Math.abs(move.change))}</span>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <div className="text-sm text-fg">{spanLabel(move, range).main}</div>
+                          {spanLabel(move, range).sub && <div className="text-[11px] text-muted">{spanLabel(move, range).sub}</div>}
+                        </div>
+                      </div>
+                      {/* From A to B */}
+                      <div className="mt-3 pt-3 border-t border-hairline grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+                        <PinCell letter="A" label="From" date={pinDate(move.from.t)} price={num(move.from.p)} />
+                        <span className="text-muted text-sm" aria-hidden>→</span>
+                        <PinCell letter="B" label="To" date={pinDate(move.to.t)} price={num(move.to.p)} />
+                      </div>
                     </div>
                   ) : offRange ? (
                     <span className="text-muted">Your pins are outside this range.</span>
@@ -408,6 +420,19 @@ const VERDICT_TONE = {
 
 // "PLTR hit 100% gain" → "hit 100% gain" (the ticker is already shown).
 const withoutTicker = (it) => (it.title.startsWith(it.ticker) ? it.title.slice(it.ticker.length).replace(/^[:\s]+/, '') : it.title)
+
+function PinCell({ letter, label, date, price }) {
+  return (
+    <div className="min-w-0">
+      <div className="flex items-center gap-1.5 text-[11px] text-muted">
+        <span className="h-4 w-4 rounded-full bg-amber-400 text-bg text-[10px] font-bold flex items-center justify-center" aria-hidden>{letter}</span>
+        {label}
+      </div>
+      <div className="mt-1 text-xs text-subtle truncate">{date}</div>
+      <div className="text-sm font-mono-tab text-fg">${price}</div>
+    </div>
+  )
+}
 
 function ToolButton({ active, onClick, label, icon: Icon, disabled }) {
   return (
