@@ -1155,6 +1155,17 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   tiles, "fresh" = within 10 trading days, plus each pillar's state; the
   backtest has tabs Buy zone / Hardening ▲ / Sell signals (sell "win" =
   the stock fell after), and the Hardening tab lists near-misses by gate.
+  Each pane has a **header strip above its data** (owner, 2026-10-03):
+  the title and live values sit on their own row — the pane's top scale
+  margin is the header height (46px price, 30px others) over the pane
+  height, recomputed on resize; 0–100 scales blank tick labels past 100.
+  **Pillar signals are diamonds in the suite's colors** (owner,
+  2026-10-03): blue = bull, pink = bear (`--color-suite-bull` /
+  `--color-suite-bear` tokens, signals only — gains / losses stay green /
+  red). Echo / Tango diamonds sit on the rail they crossed; exits are
+  pink diamonds above the candle, lettered E / T / B. Drawn by
+  `components/chartDiamonds.js` (a series primitive — the library has no
+  diamond marker). Hardening keeps its gold ▲ / red ▼ arrows.
   Every pane has a **violet title** (`PANE_TITLES`) and a small violet
   maximize button at its top right that opens that pane alone full
   screen (`FullPane` in `LeapsEntry.jsx`; Esc or X closes).

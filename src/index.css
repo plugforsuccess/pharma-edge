@@ -123,6 +123,12 @@
   --color-red-400: #e5484d;
   --color-red-500: #d33a40;
 
+  /* Signal suite pillar signals (Bravo / Echo / Tango): the suite's own
+     blue = bull, pink = bear diamonds (owner, 2026-10-03). Signals only —
+     gains / losses stay green / red. */
+  --color-suite-bull: #4d8dff;
+  --color-suite-bear: #ff5fa2;
+
   /* Fonts — Space Grotesk reads modern + confident without the
      literary weight Fraunces carried (Pharma/Wiley Edge era). It
      pairs well with Inter Tight at body sizes since both are
