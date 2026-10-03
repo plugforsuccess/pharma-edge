@@ -6,7 +6,7 @@ import { useAuth } from '../context/AuthContext'
 import { useHoldings, isQuantity } from '../hooks/useHoldings'
 import { todayYmd } from '../utils/afterTax'
 import { dailyDecisions, exitRows } from '../lib/holdingChecks'
-import { Crosshair, Ruler, Search, Sparkles, X } from 'lucide-react'
+import { ChartLine, ChevronRight, Crosshair, Ruler, Search, Sparkles, X } from 'lucide-react'
 import TickerDrawer from '../components/TickerDrawer'
 import { CHART_TICKERS } from '../lib/chartTickers'
 import PriceChart from '../components/PriceChart'
@@ -119,7 +119,7 @@ export default function Charts() {
         if (d.kind === 'hold' || !d.pos.ticker) continue
         const r = byId.get(d.pos.id)
         const { lines } = holdingLevels(r, d)
-        out.push({ id: `h:${d.pos.id}`, group: 'holdings', ticker: d.pos.ticker, crypto: d.pos.instrument_type === 'crypto',
+        out.push({ id: `h:${d.pos.id}`, posId: d.pos.id, group: 'holdings', ticker: d.pos.ticker, crypto: d.pos.instrument_type === 'crypto',
           title: d.title, body: d.body, verdict: d.verdict, tone: d.tone, lines, from: 'Your plan' })
       }
     }
@@ -195,6 +195,12 @@ export default function Charts() {
   }
 
   const current = allItems.find((x) => x.id === selected) ?? allItems[0] ?? null
+  // Picking a row charts it and brings the chart into view.
+  const chartRef = useRef(null)
+  const showItem = (id) => {
+    setSelected(id)
+    requestAnimationFrame(() => chartRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+  }
   const key = current ? `${current.crypto ? 'X:' : ''}${current.ticker}:${range}` : null
 
   // One request per ticker + range; results stay cached for the visit.
@@ -294,7 +300,7 @@ export default function Charts() {
       ) : (
         <>
           {current && (
-            <section className="bg-card border border-border rounded-2xl mb-5 overflow-hidden">
+            <section ref={chartRef} className="bg-card border border-border rounded-2xl mb-5 overflow-hidden scroll-mt-4">
               {/* Quote header: last price and the range's change; while the
                   crosshair is on the chart, that day's OHLC and volume. */}
               <div className="px-5 pt-5">
@@ -440,13 +446,13 @@ export default function Charts() {
           )}
 
           {ideaItems.length > 0 && (
-            <TradeList title="LEAPS ideas" items={ideaItems} current={current} onPick={setSelected} />
+            <TradeList title="LEAPS ideas" items={ideaItems} current={current} onPick={showItem} />
           )}
           {holdingItems.length > 0 && (
-            <TradeList title="Your holdings" items={holdingItems} current={current} onPick={setSelected} />
+            <TradeList title="Your holdings" items={holdingItems} current={current} onPick={showItem} />
           )}
           {searchedItems.length > 0 && (
-            <TradeList title="Searched" items={searchedItems} current={current} onPick={setSelected}
+            <TradeList title="Searched" items={searchedItems} current={current} onPick={showItem}
               onClear={() => { saveRecent([]); if (current?.group === 'search') setSelected(null) }} />
           )}
 
@@ -518,22 +524,47 @@ function TradeList({ title, items, current, onPick, onClear }) {
           <button type="button" onClick={onClear} className="-my-2 min-h-[44px] px-2 text-xs text-muted hover:text-fg">Clear</button>
         )}
       </div>
-      <ul className="space-y-1">
-        {items.map((it) => (
-          <li key={it.id}>
-            <button type="button" onClick={() => onPick(it.id)} aria-pressed={it === current}
-              className={clsx('w-full text-left flex items-start gap-3 min-h-[44px] -mx-2 px-2 py-2 rounded-lg transition',
-                it === current ? 'bg-amber-400/5' : 'hover:bg-card-hover/40')}>
-              <span className="flex-1 min-w-0">
-                <span className="block text-sm text-fg">{it.ticker} <span className="text-muted">· {withoutTicker(it)}</span></span>
-                <span className="block text-xs text-muted mt-0.5 truncate">{it.from}</span>
+      <ul className="space-y-2.5">
+        {items.map((it) => {
+          const on = it === current
+          const what = withoutTicker(it)
+          return (
+            <li key={it.id} className={clsx('rounded-xl border transition',
+              on ? 'border-amber-400/40 bg-amber-400/[0.04]' : 'border-hairline bg-bg-elev/40')}>
+              {/* The row charts this ticker. */}
+              <button type="button" onClick={() => onPick(it.id)} aria-pressed={on}
+                className="w-full text-left px-4 pt-3.5 pb-3 rounded-t-xl hover:bg-card-hover/40 transition">
+                <span className="flex items-center gap-2">
+                  <span className="flex-1 min-w-0 text-[15px] font-semibold text-fg">{it.ticker}</span>
+                  <span className={clsx('shrink-0 text-[10px] uppercase tracking-wider font-semibold px-2 py-1 rounded-md border', VERDICT_TONE[it.tone])}>
+                    {it.verdict}
+                  </span>
+                </span>
+                {what && <span className="block text-sm text-subtle mt-0.5">{what[0].toUpperCase() + what.slice(1)}</span>}
+                {it.body && <span className="block text-xs text-muted mt-1 line-clamp-2">{it.body}</span>}
+              </button>
+              <span className="flex items-center gap-1 px-2 pb-1.5 border-t border-hairline">
+                <button type="button" onClick={() => onPick(it.id)} disabled={on}
+                  className={clsx('min-h-[40px] px-2 inline-flex items-center gap-1.5 text-xs font-semibold rounded-md transition',
+                    on ? 'text-amber-300' : 'text-subtle hover:text-fg')}>
+                  <ChartLine size={13} aria-hidden /> {on ? 'On the chart' : 'Show on chart'}
+                </button>
+                <span className="flex-1" />
+                {it.posId ? (
+                  <Link to={`/leaps?open=${it.posId}`}
+                    className="min-h-[40px] px-2 inline-flex items-center gap-1 text-xs font-semibold text-amber-300 hover:text-amber-200 rounded-md">
+                    Open in Portfolio <ChevronRight size={13} aria-hidden />
+                  </Link>
+                ) : !it.crypto && (
+                  <Link to={`/charts/entry/${encodeURIComponent(it.ticker)}`}
+                    className="min-h-[40px] px-2 inline-flex items-center gap-1 text-xs font-semibold text-amber-300 hover:text-amber-200 rounded-md">
+                    Entry chart <ChevronRight size={13} aria-hidden />
+                  </Link>
+                )}
               </span>
-              <span className={clsx('shrink-0 mt-0.5 text-[10px] uppercase tracking-wider font-semibold px-2 py-1 rounded-md border', VERDICT_TONE[it.tone])}>
-                {it.verdict}
-              </span>
-            </button>
-          </li>
-        ))}
+            </li>
+          )
+        })}
       </ul>
     </section>
   )

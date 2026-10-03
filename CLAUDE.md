@@ -701,6 +701,11 @@ after tax · +6.7%/yr before tax", `annualizedReturn` in `afterTax.js`:
 (`cm:gain-mode`). Under a year the line just shows the total (no
 annualizing, no extra label); cash has
 no gain line).
+**Bought line** (owner, 2026-10-03): under the name it reads "Bought 5
+days ago" ("today" / "yesterday"; "Exercised …" for exercised stock);
+tapping it (dotted underline; doesn't open the card) flips every card to
+the date, "Bought Sep 28, 2026", remembered on the device
+(`cm:date-mode`). `BoughtLine` in `Leaps.jsx`.
 Open state is remembered on the device (`cm:holdings-open`); new
 holdings open; "Expand all / Collapse all" sits by the Holdings title.
 **Exit Targets rows** keep the original card format: "100% gain • 2x" /
@@ -1019,6 +1024,14 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   ("No suggested trade"), the last 8 kept on this device
   (`cm:chart-recent`, Clear). `price-history` maps share classes to
   Yahoo's form (BRK.B → BRK-B).
+  **List rows** (owner, 2026-10-03) are cards: ticker + verdict badge,
+  what happened ("Hit 100% gain"), the instruction ("Sell 7 contracts ·
+  +$2,982 after taxes"), then actions — "Show on chart" (also a tap on
+  the row; scrolls up to the chart, "On the chart" when shown) and
+  "Open in Portfolio" for holdings (`/leaps?open=<id>`: expands that
+  holding and scrolls to it; Home's Needs action / Next exit targets and
+  the LEAPS bot's checks link the same way) or "Entry chart" for ideas
+  and searches.
   **LEAPS ideas** — buys from the **`suggest-leaps`** edge function, and
   LEAPS bot suggestions (`ldp_audit_log` kind `suggestion`, last 30
   days, newest per ticker, skipped where an idea covers the ticker;

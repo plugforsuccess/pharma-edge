@@ -102,7 +102,7 @@ export default function Bot() {
           <ol className="space-y-3">
             {decisions.map((d) => (
               <li key={d.pos.id}>
-                <Link to="/leaps" className="flex items-start gap-3 min-h-[44px]">
+                <Link to={`/leaps?open=${d.pos.id}`} className="flex items-start gap-3 min-h-[44px]">
                   <span className={clsx('mt-1.5 h-2 w-2 rounded-full shrink-0', TONE_DOT[d.tone])} aria-hidden />
                   <span className="flex-1 min-w-0">
                     <span className="block text-sm text-fg">{d.title}</span>
