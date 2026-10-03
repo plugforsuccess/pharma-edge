@@ -4,7 +4,7 @@ import clsx from 'clsx'
 import { ArrowDown, ArrowLeft, ArrowUp, Check, ChevronRight, Maximize2, Plus, RotateCcw, Search, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { CHART_TICKERS } from '../lib/chartTickers'
-import { entryModel, DEFAULT_PARAMS, HORIZONS } from '../utils/indicators'
+import { entryModel, entryGaps, DEFAULT_PARAMS, HORIZONS } from '../utils/indicators'
 import EntryChart, { LAYERS, PANE_TITLES, SUB_PANES } from '../components/EntryChart'
 import { suiteModel, forwardReturns, horizonStats, normalizePeriods, suiteOnDays, SUITE_TIMEFRAMES } from '../utils/signalSuite'
 import TickerDrawer from '../components/TickerDrawer'
@@ -362,26 +362,28 @@ function StatusPanel({ s, model, params, suite, confirmDays, tfLabel }) {
   const hBull = onChart[onChart.length - 1] ?? null
   const hAgo = hBull ? lastIdx - hBull.i : null
   const hOk = hAgo != null && hAgo <= confirmDays
+  // What each unmet condition still needs (next entry).
+  const gaps = entryGaps(model) ?? {}
   const rows = [
     {
-      ok: c.band, label: `Within ±${params.bandPct}% of the 200-day`,
+      key: 'band', ok: c.band, label: `Within ±${params.bandPct}% of the 200-day`,
       value: signed(s.dist), sub: `200-day ${money(s.sma200)}`,
     },
     {
-      ok: c.rising, label: '200-day rising',
+      key: 'rising', ok: c.rising, label: '200-day rising',
       value: s.slope200 == null ? '—' : `${s.slope200 >= 0 ? '+' : '−'}${money(Math.abs(s.slope200))}`, sub: 'over 20 days',
     },
     {
-      ok: c.trend, label: '50-day above 200-day',
+      key: 'trend', ok: c.trend, label: '50-day above 200-day',
       value: money(s.sma50), sub: s.sma50 && s.sma200 ? `${signed((s.sma50 / s.sma200 - 1) * 100)} vs 200` : '',
     },
     {
-      ok: c.rsi, label: `RSI dipped below ${params.rsiLevel}, now rising`,
+      key: 'rsi', ok: c.rsi, label: `RSI dipped below ${params.rsiLevel}, now rising`,
       value: s.rsi == null ? '—' : `${s.rsiPrev?.toFixed(1) ?? '—'} → ${s.rsi.toFixed(1)}`,
       sub: Number.isFinite(s.rsiMinLookback) ? `low ${s.rsiMinLookback.toFixed(1)} in ${params.lookback}d` : '',
     },
     {
-      ok: c.iv, label: `IV Rank below ${params.ivRankMax}`,
+      key: 'iv', ok: c.iv, label: `IV Rank below ${params.ivRankMax}`,
       value: s.ivRank == null ? '—' : s.ivRank.toFixed(0),
       sub: model.ivSource === 'iv' ? (s.iv ? `IV ${(s.iv * 100).toFixed(1)}%` : '') : 'HV rank stand-in',
     },
@@ -400,6 +402,11 @@ function StatusPanel({ s, model, params, suite, confirmDays, tfLabel }) {
             {yes ? 'Every condition is met today.' : `${met} of 5 conditions met.`}
             {lastTrade && !yes && <span className="text-muted"> Last signal {day(lastTrade.t)}.</span>}
           </div>
+          {!yes && s.sma200 && (
+            <div className="text-xs mt-1.5 text-subtle">
+              Entry price zone <span className="font-mono-tab text-fg">{money(s.sma200 * (1 - params.bandPct / 100))}–{money(s.sma200 * (1 + params.bandPct / 100))}</span>
+            </div>
+          )}
         </div>
         <Meter met={met} yes={yes} />
       </div>
@@ -411,7 +418,10 @@ function StatusPanel({ s, model, params, suite, confirmDays, tfLabel }) {
               aria-label={r.ok ? 'Met' : 'Not met'}>
               {r.ok ? <Check size={14} strokeWidth={3} /> : <X size={13} strokeWidth={3} />}
             </span>
-            <span className="flex-1 min-w-0 text-sm text-fg leading-snug">{r.label}</span>
+            <span className="flex-1 min-w-0">
+              <span className="block text-sm text-fg leading-snug">{r.label}</span>
+              {!r.ok && gaps[r.key]?.need && <span className="block text-xs text-amber-300/90 mt-0.5 leading-snug">{gaps[r.key].need}</span>}
+            </span>
             <span className="text-right shrink-0">
               <span className="block text-sm font-mono-tab text-fg">{r.value}</span>
               {r.sub && <span className="block text-[11px] text-muted font-mono-tab">{r.sub}</span>}

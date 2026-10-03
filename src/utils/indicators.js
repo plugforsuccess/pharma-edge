@@ -230,3 +230,32 @@ export function entryModel(bars, { ivPoints = [], ivToday = null, params = DEFAU
     golden, death, macdUp, cond, signals, confirms, trades, stats, status,
   }
 }
+
+// What today is missing for an entry: for each condition that isn't met,
+// a plain-English "needs" line (and a number, for checks). null when met.
+export function entryGaps(model) {
+  const s = model?.status
+  if (!s) return null
+  const p = model.params
+  const money = (v) => `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  const out = {}
+  // Band: how far price must move to land inside ±band of the 200-day.
+  if (s.cond.band || s.dist == null || !s.sma200) out.band = null
+  else if (s.dist > p.bandPct) {
+    const to = s.sma200 * (1 + p.bandPct / 100)
+    out.band = { need: `Fall ${(100 * (1 - to / s.close)).toFixed(1)}% to ${money(to)} or lower`, move: to / s.close - 1, price: to }
+  } else {
+    const to = s.sma200 * (1 - p.bandPct / 100)
+    out.band = { need: `Rise ${(100 * (to / s.close - 1)).toFixed(1)}% to ${money(to)} or higher`, move: to / s.close - 1, price: to }
+  }
+  out.rising = s.cond.rising || s.slope200 == null ? null
+    : { need: 'Still falling — needs to turn up' }
+  out.trend = s.cond.trend || !s.sma50 || !s.sma200 ? null
+    : { need: `${(100 * (1 - s.sma50 / s.sma200)).toFixed(1)}% below — needs to cross above`, gap: s.sma50 / s.sma200 - 1 }
+  if (s.cond.rsi || s.rsi == null) out.rsi = null
+  else if (!(s.rsiMinLookback < p.rsiLevel)) out.rsi = { need: `Needs a dip below ${p.rsiLevel}`, points: s.rsi - p.rsiLevel }
+  else out.rsi = { need: 'Dipped — needs to tick up from here' }
+  out.iv = s.cond.iv || s.ivRank == null ? null
+    : { need: `Needs to drop ${Math.ceil(s.ivRank - p.ivRankMax + 0.0001)} points`, points: s.ivRank - p.ivRankMax }
+  return out
+}

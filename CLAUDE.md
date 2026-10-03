@@ -1131,7 +1131,13 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   "add", never as disabled. **Buy zone** = every condition on the
   same day: within ±band of the 200, 200 rising, 50 > 200, RSI below the
   level within the lookback and up today, IV Rank below the cutoff.
-  MACD cross up within 5 days = optional confirmation. Thresholds (band,
+  MACD cross up within 5 days = optional confirmation. **Next entry**
+  (owner, 2026-10-03): each unmet condition shows what it still needs in
+  gold under its label (`entryGaps` in `indicators.js`: "Fall 3.2% to
+  $381.40 or lower", "Needs a dip below 40", "Needs to drop 7 points",
+  "4.4% below — needs to cross above", "Still falling — needs to turn
+  up"), and a NO shows the entry price zone (the ±band around the
+  200-day) under the headline. Thresholds (band,
   RSI level, IV Rank cutoff, lookback) are inputs saved on the device
   (`cm:entry-params`). **IV Rank falls back to the 20-day HV rank** until
   200 of the last 252 days have real IV (labelled "HV rank stand-in").
