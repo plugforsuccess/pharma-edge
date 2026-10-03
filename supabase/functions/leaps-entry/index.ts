@@ -9,6 +9,8 @@
 //   2%–300% are dropped as bad samples.
 //   iv_today: today's ATM IV from Yahoo — the expiry nearest 30 days out,
 //   mean of the call and put IV at the strike nearest spot. null on failure.
+//   spy, vix: 5 years of daily closes [{ t, c }] for the signal suite's
+//   relative-strength booster and VIX gate (empty on failure).
 //
 // The indicators and the buy-zone signal are computed in the browser
 // (src/utils/indicators.js) so the thresholds can be adjusted live.
@@ -31,6 +33,20 @@ function json(body: unknown, status = 200): Response {
 const CACHE_MS = 15 * 60 * 1000
 const TICKER_RE = /^[A-Z][A-Z0-9.\-]{0,9}$/
 const cache = new Map<string, { at: number; body: Record<string, unknown> }>()
+const marketCache = new Map<string, { at: number; closes: Array<{ t: string; c: number }> }>()
+
+// SPY / VIX daily closes, shared across tickers.
+async function marketCloses(symbol: string): Promise<Array<{ t: string; c: number }>> {
+  const hit = marketCache.get(symbol)
+  if (hit && Date.now() - hit.at < CACHE_MS) return hit.closes
+  try {
+    const closes = (await yahooChart(symbol, '5y', '1d')).bars.map((b) => ({ t: String(b.t), c: b.c }))
+    marketCache.set(symbol, { at: Date.now(), closes })
+    return closes
+  } catch {
+    return hit?.closes ?? []
+  }
+}
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? ''
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
@@ -95,10 +111,10 @@ serve(async (req) => {
   }
   if (bars.length < 60) return json({ success: false, error: 'not enough price history' }, 404)
 
-  const [ivPoints, today] = await Promise.all([storedIv(ticker), atmIv(symbol)])
+  const [ivPoints, today, spy, vix] = await Promise.all([storedIv(ticker), atmIv(symbol), marketCloses('SPY'), marketCloses('^VIX')])
   const out = {
     success: true, ticker, source: 'yahoo', bars,
-    iv_points: ivPoints, iv_today: today.iv, iv_today_expiry: today.expiry,
+    iv_points: ivPoints, iv_today: today.iv, iv_today_expiry: today.expiry, spy, vix,
   }
   cache.set(ticker, { at: Date.now(), body: out })
   return json(out)

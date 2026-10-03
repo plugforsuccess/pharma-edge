@@ -13,6 +13,7 @@
     "aftertax:check": "node scripts/check-after-tax.mjs",
     "charttools:check": "node scripts/check-chart-tools.mjs",
     "indicators:check": "node scripts/check-indicators.mjs",
+    "suite:check": "node scripts/check-signal-suite.mjs",
     "ldp:risk:check": "node --experimental-strip-types --no-warnings scripts/check-ldp-risk-tier.ts"
   },
   "dependencies": {

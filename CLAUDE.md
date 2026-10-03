@@ -1122,6 +1122,29 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   Backtest: one trade per cluster (a signal counts when none fired in
   the previous 20 trading days), stock returns after 63 / 126 / 252 days,
   win rate and average per horizon — stock, not option, returns.
+- **Signal suite on the entry chart** (owner, 2026-10-03: "for better
+  entries and sell signals"). A JS port of the TradingView suite in
+  `plugforsuccess/wiley-indicator-suite` (Bravo trend, Echo momentum,
+  Tango money flow, Hardening ★ confluence, Exit Meta) in
+  `src/utils/signalSuite.js` (`suiteModel`; `npm run suite:check`), with
+  the Pine defaults. UI names: the pillar names only — never "Wiley"
+  (old brand). Two fixes vs the Pine: the Bravo "regime flip" exit and
+  Hardening's daily agreement read Bravo's **regime** (close and fast EMA
+  above / below the basis) instead of its cooldown-gated signal stream,
+  which dropped to 0 the bar after every signal. `leaps-entry` also
+  returns SPY + ^VIX daily closes (relative-strength booster, VIX < 30
+  gate for bulls). Entry chart: Echo and Tango panes (adaptive rails,
+  dots where they cross); price layers (`cm:entry-layers`) Hardening ★
+  (gold ▲ bull under the candle, red ▼ bear above), Exits (small red
+  squares, E / T / B) and the Bravo band (off by default); a **Signal
+  suite** card under the status panel — Entry (latest Hardening bull)
+  and Sell (fresh Hardening bear, else fresh exit, else the latest)
+  tiles, "fresh" = within 10 trading days, plus each pillar's state; the
+  backtest has tabs Buy zone / Hardening ▲ / Sell signals (sell "win" =
+  the stock fell after), and the Hardening tab lists near-misses by gate.
+  **Advisory only:** sell signals don't change the LEAPS exit playbook
+  or the bot's decisions. With the Pine gates (ATR expansion ≥ 1.1× in 5
+  bars, Echo ≥ 15 points in 5 bars) daily Hardening signals are rare.
 - **LEAPS bot.** Mode (places trades only on managed accounts, else
   suggests), risk tier, **Today's checks** — one decision per holding
   from `dailyDecisions` in `src/lib/holdingChecks.jsx` (time stop →

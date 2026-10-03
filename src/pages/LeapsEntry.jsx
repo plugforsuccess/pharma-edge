@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import clsx from 'clsx'
-import { ArrowLeft, Check, RotateCcw, Search, X } from 'lucide-react'
+import { ArrowDown, ArrowLeft, ArrowUp, Check, RotateCcw, Search, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { CHART_TICKERS } from '../lib/chartTickers'
 import { entryModel, DEFAULT_PARAMS, HORIZONS } from '../utils/indicators'
-import EntryChart, { SUB_PANES } from '../components/EntryChart'
+import EntryChart, { LAYERS, SUB_PANES } from '../components/EntryChart'
+import { suiteModel, forwardReturns, horizonStats } from '../utils/signalSuite'
 import TickerDrawer from '../components/TickerDrawer'
 import NumberInput from '../components/NumberInput'
 
@@ -17,7 +18,11 @@ import NumberInput from '../components/NumberInput'
 // the math is utils/indicators.js, run here so thresholds apply live.
 
 const PARAMS_KEY = 'cm:entry-params'
-const PANES_KEY = 'cm:entry-panes'
+const PANES_KEY = 'cm:entry-panes:v2'
+const LAYERS_KEY = 'cm:entry-layers'
+const DEFAULT_LAYERS = ['hardening', 'exits']
+// A signal-suite event counts as current for this many trading days.
+const RECENT_DAYS = 10
 // [key, label, min, max, decimals, suffix]
 const FIELDS = [
   ['bandPct', '200-day band', 0.5, 50, 1, '±%'],
@@ -95,12 +100,22 @@ export default function LeapsEntry() {
     saveJson(PARAMS_KEY, DEFAULT_PARAMS)
   }
   const isDefault = FIELDS.every(([k]) => params[k] === DEFAULT_PARAMS[k])
+  const [layers, setLayers] = useState(() => {
+    const saved = loadJson(LAYERS_KEY)
+    return Array.isArray(saved) ? saved : DEFAULT_LAYERS
+  })
+  const toggleLayer = (k) => {
+    const next = layers.includes(k) ? layers.filter((x) => x !== k) : [...layers, k]
+    setLayers(next)
+    saveJson(LAYERS_KEY, next)
+  }
   const togglePane = (k) => {
     const next = panes.includes(k) ? panes.filter((x) => x !== k) : [...panes, k]
     setPanes(next)
     saveJson(PANES_KEY, next)
   }
 
+  const suite = useMemo(() => (bars?.length ? suiteModel(bars, { spy: data.spy ?? [], vix: data.vix ?? [] }) : null), [bars, data])
   const s = model?.status
   const last = bars ? bars[bars.length - 1] : null
   const shown = hover != null && bars ? bars[hover] : last
@@ -138,6 +153,7 @@ export default function LeapsEntry() {
         <div className="md:grid md:grid-cols-[1fr_280px] md:gap-x-5 md:items-start">
           <div className="min-w-0 md:order-1">
             <StatusPanel s={s} model={model} params={params} />
+            {suite && <SuitePanel suite={suite} bars={bars} />}
           </div>
 
           {/* Chart */}
@@ -171,13 +187,26 @@ export default function LeapsEntry() {
                   </button>
                 ))}
               </div>
-              <EntryChart bars={bars} model={model} panes={panes} onHover={setHover} />
+              <div className="px-3 pb-2 flex flex-wrap items-center gap-1.5" role="group" aria-label="On the price chart">
+                <span className="text-[10px] uppercase tracking-wider text-muted font-semibold px-1">On price</span>
+                {LAYERS.map(([k, label]) => (
+                  <button key={k} type="button" onClick={() => toggleLayer(k)} aria-pressed={layers.includes(k)}
+                    className={clsx('min-h-[32px] px-2.5 rounded-lg text-[11px] font-semibold border transition',
+                      layers.includes(k) ? 'bg-bg-elev border-border-hover text-fg' : 'border-hairline text-muted hover:text-subtle')}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <EntryChart bars={bars} model={model} suite={suite} panes={panes} layers={layers} onHover={setHover} />
               <div className="px-5 py-3 border-t border-hairline flex flex-wrap gap-x-4 gap-y-1.5 text-[11px] text-muted">
                 <Key className="text-green-400" glyph="▲">Buy signal</Key>
                 <Key className="text-green-400/50" glyph="●">MACD confirms</Key>
                 <Key className="text-amber-300" glyph="●">Golden cross</Key>
                 <Key className="text-rose-300" glyph="●">Death cross</Key>
                 <Key glyph={<span className="inline-block w-3 h-2.5 rounded-sm bg-green-400/15 align-middle" />}>Buy zone</Key>
+                {layers.includes('hardening') && <Key className="text-amber-300" glyph="▲">Hardening bull</Key>}
+                {layers.includes('hardening') && <Key className="text-rose-300" glyph="▼">Hardening bear</Key>}
+                {layers.includes('exits') && <Key className="text-rose-300/60" glyph="■">Exit (E Echo · T Tango · B Bravo)</Key>}
               </div>
             </section>
           </div>
@@ -187,7 +216,7 @@ export default function LeapsEntry() {
           </div>
 
           <div className="min-w-0 md:order-4 md:col-span-2">
-            <Backtest model={model} />
+            <Backtest model={model} suite={suite} />
           </div>
         </div>
       )}
@@ -345,18 +374,66 @@ function Thresholds({ draft, setField, reset, isDefault }) {
   )
 }
 
-function Backtest({ model }) {
-  const trades = [...model.trades].reverse()
+const BACKTEST_TABS = [['zone', 'Buy zone'], ['hardening', 'Hardening ▲'], ['sell', 'Sell signals']]
+const ROWS_SHOWN = 30
+
+function Backtest({ model, suite }) {
+  const [tab, setTab] = useState('zone')
+  const [all, setAll] = useState(false)
+  const view = useMemo(() => {
+    if (tab === 'zone' || !suite) {
+      return {
+        trades: model.trades.map((tr) => ({ ...tr, tag: tr.confirmed ? 'MACD' : '' })), stats: model.stats, sell: false,
+        sub: `${model.trades.length} trade${model.trades.length === 1 ? '' : 's'} in 5 years (${model.signals.length} signal days)`,
+        empty: 'No buy-zone signals in this history with these thresholds.',
+      }
+    }
+    if (tab === 'hardening') {
+      const trades = forwardReturns(model.closes, suite.bulls, HORIZONS).map((tr) => ({ ...tr, tag: '★'.repeat(tr.stars) }))
+      // Bull sets that lined up but failed a gate, by gate.
+      const missed = suite.candidates.filter((c) => c.side === 'bull' && !Object.values(c.gates).every(Boolean))
+      const byGate = {}
+      for (const c of missed) for (const [g, ok] of Object.entries(c.gates)) if (!ok) byGate[g] = (byGate[g] ?? 0) + 1
+      const GATE = { volume: 'volume', regime: 'trend', velocity: 'Echo speed', atr: 'ATR expansion', vix: 'VIX' }
+      const near = missed.length ? ` · ${missed.length} more lined up but failed ${Object.entries(byGate).map(([g, k]) => `${GATE[g]} ×${k}`).join(', ')}` : ''
+      return {
+        trades, stats: horizonStats(trades, HORIZONS), sell: false,
+        sub: `${trades.length} Hardening bull signal${trades.length === 1 ? '' : 's'} in 5 years${near}`,
+        empty: 'No Hardening bull signals in this history — all three pillars rarely line up within 5 days.',
+      }
+    }
+    const events = [
+      ...suite.bears.map((x) => ({ ...x, tag: `${'★'.repeat(x.stars)} bear` })),
+      ...suite.exits.map((x) => ({ ...x, tag: `Exit ${x.why.join('')}` })),
+    ].sort((a, b) => a.i - b.i)
+    const trades = forwardReturns(model.closes, events, HORIZONS)
+    return {
+      trades, stats: horizonStats(trades, HORIZONS, (r) => r < 0), sell: true,
+      sub: `${suite.bears.length} Hardening bear + ${suite.exits.length} exit signals · a win = the stock fell after`,
+      empty: 'No sell signals in this history.',
+    }
+  }, [tab, model, suite])
+  const rows = [...view.trades].reverse()
+  const visible = all ? rows : rows.slice(0, ROWS_SHOWN)
   return (
     <section className="bg-card border border-border rounded-2xl mb-4 overflow-hidden">
       <div className="px-5 pt-5 pb-3">
-        <h2 className="text-sm font-semibold">Backtest</h2>
-        <div className="text-xs text-muted mt-0.5">
-          {model.trades.length} trade{model.trades.length === 1 ? '' : 's'} in 5 years ({model.signals.length} signal days) · stock return, not option return
+        <div className="flex items-center gap-3">
+          <h2 className="flex-1 text-sm font-semibold">Backtest</h2>
         </div>
+        <div className="mt-3 flex gap-1 p-1 rounded-xl bg-bg-elev" role="tablist" aria-label="Signal">
+          {BACKTEST_TABS.map(([k, label]) => (
+            <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => { setTab(k); setAll(false) }}
+              className={clsx('flex-1 min-h-[36px] rounded-lg text-xs font-semibold transition',
+                tab === k ? 'bg-card text-fg shadow-sm' : 'text-muted hover:text-subtle')}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="text-xs text-muted mt-2.5">{view.sub} · stock return, not option return</div>
       </div>
       <div className="px-5 pb-4 grid grid-cols-3 gap-2">
-        {model.stats.map((st) => (
+        {view.stats.map((st) => (
           <div key={st.label} className="rounded-xl bg-bg-elev px-3 py-3">
             <div className="text-[11px] text-muted font-semibold">{st.label}</div>
             <div className={clsx('mt-1 text-lg font-semibold font-mono-tab leading-none',
@@ -365,33 +442,34 @@ function Backtest({ model }) {
             </div>
             <div className="text-[11px] text-muted mt-1">avg return</div>
             <div className="mt-2 h-1 rounded-full bg-faint overflow-hidden" aria-hidden>
-              <div className="h-full bg-green-400" style={{ width: `${(st.winRate ?? 0) * 100}%` }} />
+              <div className={clsx('h-full', view.sell ? 'bg-red-400' : 'bg-green-400')} style={{ width: `${(st.winRate ?? 0) * 100}%` }} />
             </div>
             <div className="text-[11px] mt-1 font-mono-tab">
               <span className="text-fg">{st.winRate == null ? '—' : `${Math.round(st.winRate * 100)}%`}</span>
-              <span className="text-muted"> win · {st.n}</span>
+              <span className="text-muted"> {view.sell ? 'fell' : 'win'} · {st.n}</span>
             </div>
           </div>
         ))}
       </div>
-      {trades.length === 0 ? (
-        <div className="px-5 pb-5 text-sm text-subtle">No buy signals in this history with these thresholds.</div>
+      {rows.length === 0 ? (
+        <div className="px-5 pb-5 text-sm text-subtle">{view.empty}</div>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-xs font-mono-tab">
             <thead>
               <tr className="text-muted text-[11px] border-y border-hairline">
                 <th className="text-left font-semibold pl-5 pr-1 py-2">Date</th>
-                <th className="text-right font-semibold px-1.5 py-2">Entry</th>
+                <th className="text-right font-semibold px-1.5 py-2">{view.sell ? 'Price' : 'Entry'}</th>
                 {HORIZONS.map(([label]) => <th key={label} className="text-right font-semibold px-1.5 py-2 last:pr-5">{label}</th>)}
               </tr>
             </thead>
             <tbody className="divide-y divide-hairline">
-              {trades.map((tr) => (
-                <tr key={tr.t}>
+              {visible.map((tr) => (
+                <tr key={`${tr.t}-${tr.tag}`}>
                   <td className="pl-5 pr-1 py-2.5 text-fg whitespace-nowrap">
                     {shortDay(tr.t)}
-                    {tr.confirmed && <span className="ml-1.5 text-green-400/60" title="MACD confirmed" aria-label="MACD confirmed">●</span>}
+                    {tr.tag && <span className={clsx('block text-[10px] leading-3 mt-0.5',
+                      view.sell ? 'text-rose-300/80' : tab === 'hardening' ? 'text-amber-300' : 'text-green-400/70')}>{tr.tag}</span>}
                   </td>
                   <td className="px-1.5 py-2.5 text-right text-subtle">{money(tr.price)}</td>
                   {tr.returns.map((r, h) => (
@@ -404,8 +482,99 @@ function Backtest({ model }) {
               ))}
             </tbody>
           </table>
+          {rows.length > ROWS_SHOWN && (
+            <button type="button" onClick={() => setAll((v) => !v)}
+              className="w-full min-h-[44px] border-t border-hairline text-xs font-semibold text-subtle hover:text-fg">
+              {all ? 'Show fewer' : `Show all ${rows.length}`}
+            </button>
+          )}
         </div>
       )}
     </section>
+  )
+}
+
+// Signal suite today: the latest entry (Hardening bull) and sell (Hardening
+// bear, or an Exit Meta exit) with how long ago, then each pillar's state.
+function SuitePanel({ suite, bars }) {
+  const last = bars.length - 1
+  const ago = (i) => (i == null ? null : last - i)
+  const agoText = (n) => (n === 0 ? 'today' : n === 1 ? '1 day ago' : `${n} days ago`)
+  const lastOf = (list) => list[list.length - 1] ?? null
+  const bull = lastOf(suite.bulls)
+  const bear = lastOf(suite.bears)
+  const exit = lastOf(suite.exits)
+  const bullFresh = bull && ago(bull.i) <= RECENT_DAYS
+  const bearFresh = bear && ago(bear.i) <= RECENT_DAYS
+  const exitFresh = exit && ago(exit.i) <= RECENT_DAYS
+  // Sell tile: a fresh Hardening bear first, then a fresh exit, else the latest of either.
+  const sell = bearFresh ? { kind: 'bear', e: bear } : exitFresh ? { kind: 'exit', e: exit }
+    : bear && (!exit || bear.i >= exit.i) ? { kind: 'bear', e: bear } : exit ? { kind: 'exit', e: exit } : null
+  const regime = suite.bravo.regime[last]
+  const lastFlag = (flags) => { for (let i = flags.length - 1; i >= 0; i--) if (flags[i]) return i; return null }
+  const pillar = (o) => {
+    const v = o.line[last]
+    const zone = v == null ? '—' : v >= o.upper[last] ? 'above upper rail' : v <= o.lower[last] ? 'below lower rail' : 'between rails'
+    const b = lastFlag(o.bull)
+    const s = lastFlag(o.bear)
+    const latest = b != null && (s == null || b > s) ? { side: 'bull', n: ago(b) } : s != null ? { side: 'bear', n: ago(s) } : null
+    return { v, zone, latest }
+  }
+  const echo = pillar(suite.echo)
+  const tango = pillar(suite.tango)
+  const bravoB = lastFlag(suite.bravo.bull)
+  const bravoS = lastFlag(suite.bravo.bear)
+  return (
+    <section className="bg-card border border-border rounded-2xl mb-4 overflow-hidden">
+      <div className="px-5 pt-5 pb-3 flex items-baseline gap-2">
+        <h2 className="flex-1 text-sm font-semibold">Signal suite</h2>
+        <span className="text-[11px] text-muted">Bravo · Echo · Tango · Hardening</span>
+      </div>
+      <div className="px-5 pb-4 grid grid-cols-2 gap-2">
+        <SignalTile tone={bullFresh ? 'buy' : 'idle'} icon={ArrowUp} label="Entry"
+          title={bull ? `${'★'.repeat(bull.stars)} Hardening bull` : 'No bull signal'}
+          sub={bull ? `${agoText(ago(bull.i))} · $${bull.price.toFixed(2)}${bull.boosters.length ? ` · ${bull.boosters.join(' ')}` : ''}` : 'in 5 years'} />
+        <SignalTile tone={bearFresh ? 'sell' : exitFresh ? 'trim' : 'idle'} icon={ArrowDown} label="Sell"
+          title={!sell ? 'No sell signal' : sell.kind === 'bear' ? `${'★'.repeat(sell.e.stars)} Hardening bear` : 'Exit signal'}
+          sub={!sell ? 'in 5 years' : sell.kind === 'bear' ? `${agoText(ago(sell.e.i))} · $${sell.e.price.toFixed(2)}`
+            : `${agoText(ago(sell.e.i))} · ${sell.e.why.map((w) => ({ E: 'Echo', T: 'Tango', B: 'Bravo flip' })[w]).join(', ')}`} />
+      </div>
+      <ul className="border-t border-hairline divide-y divide-hairline">
+        <PillarRow name="Bravo" state={regime === 1 ? 'Bull trend' : regime === -1 ? 'Bear trend' : 'No trend'} tone={regime === 1 ? 'up' : regime === -1 ? 'down' : 'flat'}
+          detail={bravoB != null && (bravoS == null || bravoB > bravoS) ? `bull signal ${agoText(ago(bravoB))}` : bravoS != null ? `bear signal ${agoText(ago(bravoS))}` : ''} />
+        <PillarRow name="Echo" state={echo.v == null ? '—' : echo.v.toFixed(1)} tone={echo.v == null ? 'flat' : echo.v >= 0 ? 'up' : 'down'}
+          detail={[echo.zone, echo.latest && `${echo.latest.side} ${agoText(echo.latest.n)}`].filter(Boolean).join(' · ')} />
+        <PillarRow name="Tango" state={tango.v == null ? '—' : tango.v.toFixed(1)} tone={tango.v == null ? 'flat' : tango.v >= 0 ? 'up' : 'down'}
+          detail={[tango.zone, tango.latest && `${tango.latest.side} ${agoText(tango.latest.n)}`].filter(Boolean).join(' · ')} />
+      </ul>
+    </section>
+  )
+}
+
+const TILE_TONE = {
+  buy: 'border-amber-400/40 bg-amber-400/[0.06] text-amber-300',
+  sell: 'border-red-400/40 bg-red-400/[0.07] text-rose-300',
+  trim: 'border-red-400/25 bg-red-400/[0.04] text-rose-300/90',
+  idle: 'border-hairline bg-bg-elev text-subtle',
+}
+function SignalTile({ tone, icon: Icon, label, title, sub }) {
+  return (
+    <div className={clsx('rounded-xl border px-3.5 py-3 min-w-0', TILE_TONE[tone])}>
+      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-semibold opacity-90">
+        <Icon size={12} aria-hidden /> {label}
+      </div>
+      <div className="mt-1 text-sm font-semibold text-fg leading-snug">{title}</div>
+      <div className="text-[11px] text-muted mt-0.5 leading-4">{sub}</div>
+    </div>
+  )
+}
+function PillarRow({ name, state, tone, detail }) {
+  return (
+    <li className="px-5 py-2.5 flex items-center gap-3 min-h-[48px]">
+      <span className={clsx('h-2 w-2 rounded-full shrink-0', tone === 'up' ? 'bg-green-400' : tone === 'down' ? 'bg-red-400' : 'bg-faint')} aria-hidden />
+      <span className="w-14 shrink-0 text-sm text-fg">{name}</span>
+      <span className={clsx('text-sm font-mono-tab shrink-0', tone === 'up' ? 'text-green-400' : tone === 'down' ? 'text-rose-300' : 'text-subtle')}>{state}</span>
+      <span className="flex-1 min-w-0 text-right text-[11px] text-muted truncate">{detail}</span>
+    </li>
   )
 }

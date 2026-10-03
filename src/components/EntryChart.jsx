@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   createChart, createSeriesMarkers, BaselineSeries, CandlestickSeries, HistogramSeries, LineSeries,
-  ColorType, CrosshairMode, LineStyle,
+  ColorType, CrosshairMode, LineStyle, LineType,
 } from 'lightweight-charts'
 
 // LEAPS entry chart for /charts/entry/:ticker, on TradingView Lightweight
@@ -19,8 +19,14 @@ import {
 //   macd      MACD(12, 26, 9) line, signal, histogram
 //   ivr       IV Rank (252), line at the cutoff
 //   ivhv      IV vs 20-day historical vol
-// `model` comes from entryModel() in utils/indicators.js; `panes` lists the
-// sub-panes to show. Colors are the theme tokens, read at runtime.
+//   echo      Echo momentum (signal suite) with its adaptive rails + diamonds
+//   tango     Tango money flow, same layout
+// Price layers (`layers`): Bravo's envelope + fast EMA, Hardening ★ signals
+// (gold ▲ under the candle = bull, red ▼ above = bear) and Exit Meta exits
+// (small red squares, E / T / B).
+// `model` comes from entryModel() in utils/indicators.js, `suite` from
+// suiteModel() in utils/signalSuite.js; `panes` lists the sub-panes to
+// show. Colors are the theme tokens, read at runtime.
 
 function token(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim()
@@ -37,15 +43,22 @@ export const SUB_PANES = [
   ['macd', 'MACD'],
   ['ivr', 'IV Rank'],
   ['ivhv', 'IV / HV'],
+  ['echo', 'Echo'],
+  ['tango', 'Tango'],
+]
+export const LAYERS = [
+  ['hardening', 'Hardening ★'],
+  ['exits', 'Exits'],
+  ['bravo', 'Bravo band'],
 ]
 const PRICE_H = 320
-const SUB_H = 104
+const SUB_H = 96
 const SHOW_DAYS = 504 // two years of trading days in view by default
 
 const fmt = (v, d = 2) => (v == null || !Number.isFinite(v) ? '—' : v.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }))
 const pct = (v, d = 1) => (v == null ? '—' : `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(d)}%`)
 
-export default function EntryChart({ bars, model, panes, onHover }) {
+export default function EntryChart({ bars, model, suite, panes, layers = [], onHover }) {
   const box = useRef(null)
   const hoverRef = useRef(onHover)
   hoverRef.current = onHover
@@ -55,11 +68,12 @@ export default function EntryChart({ bars, model, panes, onHover }) {
   const [tops, setTops] = useState([])
   const shown = ['price', ...SUB_PANES.map(([k]) => k).filter((k) => panes.includes(k))]
   const height = PRICE_H + (shown.length - 1) * SUB_H
-  const key = shown.join(',')
+  const key = `${shown.join(',')}|${layers.join(',')}`
 
   useEffect(() => {
     const el = box.current
     if (!el || !bars?.length || !model) return undefined
+    const on = (k) => layers.includes(k) && suite
     const t = {
       up: token('--color-green-400'), down: token('--color-red-400'), gold: token('--color-amber-400'),
       goldHi: token('--color-amber-200'), fg: token('--color-fg'), muted: token('--color-muted'),
@@ -114,8 +128,27 @@ export default function EntryChart({ bars, model, panes, onHover }) {
     s200.setData(model.s200.map((v, i) => (v == null ? { time: time[i] }
       : { time: time[i], value: v, color: model.slope200[i] == null ? t.subtle : model.slope200[i] > 0 ? t.up : t.down })))
 
+    if (on('bravo')) {
+      const band = { ...quiet, color: alpha(t.subtle, 0.45), lineWidth: 1 }
+      chart.addSeries(LineSeries, band, 0).setData(line(suite.bravo.upperBand))
+      chart.addSeries(LineSeries, band, 0).setData(line(suite.bravo.lowerBand))
+      chart.addSeries(LineSeries, { ...quiet, color: alpha(t.subtle, 0.6), lineWidth: 1, lineStyle: LineStyle.Dotted }, 0).setData(line(suite.bravo.basis))
+      chart.addSeries(LineSeries, { ...quiet, color: t.goldHi, lineWidth: 1.5 }, 0).setData(line(suite.bravo.fast))
+    }
+
     const signalSet = new Set(model.signals)
     const markers = []
+    const stars = (n) => '★'.repeat(n)
+    if (on('hardening')) {
+      for (const sg of suite.signals) {
+        markers.push(sg.side === 'bull'
+          ? { time: time[sg.i], position: 'belowBar', shape: 'arrowUp', color: t.gold, size: 1.5, text: stars(sg.stars) }
+          : { time: time[sg.i], position: 'aboveBar', shape: 'arrowDown', color: t.down, size: 1.5, text: stars(sg.stars) })
+      }
+    }
+    if (on('exits')) {
+      for (const x of suite.exits) markers.push({ time: time[x.i], position: 'aboveBar', shape: 'square', color: alpha(t.down, 0.6), size: 0.6, text: x.why.join('') })
+    }
     for (const i of model.golden) markers.push({ time: time[i], position: 'aboveBar', shape: 'circle', color: t.gold, text: 'Golden cross', size: 1 })
     for (const i of model.death) markers.push({ time: time[i], position: 'aboveBar', shape: 'circle', color: t.down, text: 'Death cross', size: 1 })
     for (const i of model.confirms) {
@@ -182,6 +215,30 @@ export default function EntryChart({ bars, model, panes, onHover }) {
       }, pi).setData(line(model.iv))
     }
 
+    // Echo / Tango: the line around zero, the adaptive rails as steps, and
+    // the pillar's diamonds (dots) on the rail they crossed.
+    const osc = (k, o) => {
+      if (!suite || paneOf(k) <= 0) return
+      const pi = paneOf(k)
+      const rail = { ...quiet, color: alpha(t.subtle, 0.55), lineWidth: 1, lineType: LineType.WithSteps, lineStyle: LineStyle.Dashed }
+      chart.addSeries(LineSeries, rail, pi).setData(line(o.upper))
+      chart.addSeries(LineSeries, rail, pi).setData(line(o.lower))
+      const ln = chart.addSeries(BaselineSeries, {
+        ...quiet, lastValueVisible: true, baseValue: { type: 'price', price: 0 }, lineWidth: 1.5,
+        topLineColor: t.up, topFillColor1: alpha(t.up, 0.2), topFillColor2: alpha(t.up, 0.02),
+        bottomLineColor: t.down, bottomFillColor1: alpha(t.down, 0.02), bottomFillColor2: alpha(t.down, 0.2),
+        priceFormat: { type: 'custom', formatter: (v) => v.toFixed(0) },
+      }, pi)
+      ln.setData(line(o.line))
+      const dots = []
+      o.bull.forEach((f, i) => { if (f) dots.push({ time: time[i], position: 'atPriceMiddle', price: o.lower[i], shape: 'circle', color: t.up, size: 0.7 }) })
+      o.bear.forEach((f, i) => { if (f) dots.push({ time: time[i], position: 'atPriceMiddle', price: o.upper[i], shape: 'circle', color: t.down, size: 0.7 }) })
+      dots.sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0))
+      createSeriesMarkers(ln, dots)
+    }
+    osc('echo', suite?.echo)
+    osc('tango', suite?.tango)
+
     // Pane heights: price first, the rest equal.
     const all = chart.panes()
     all.forEach((pane, i) => pane.setStretchFactor(i === 0 ? PRICE_H / SUB_H : 1))
@@ -220,7 +277,7 @@ export default function EntryChart({ bars, model, panes, onHover }) {
       chartRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bars, model, key])
+  }, [bars, model, suite, key])
 
   useLayoutEffect(() => { setHover(null) }, [bars])
 
@@ -242,6 +299,14 @@ export default function EntryChart({ bars, model, panes, onHover }) {
       { label: 'Hist', value: fmt(v(model?.macd.hist)), cls: v(model?.macd.hist) < 0 ? 'text-rose-300' : 'text-green-400' },
     ],
     ivr: [{ label: model?.ivSource === 'iv' ? 'IV Rank' : 'IV Rank (HV)', value: fmt(v(model?.ivRank), 0), cls: v(model?.ivRank) < model?.params.ivRankMax ? 'text-green-400' : 'text-amber-300' }],
+    echo: [
+      { label: 'Echo', value: fmt(v(suite?.echo.line), 1), cls: v(suite?.echo.line) < 0 ? 'text-rose-300' : 'text-green-400' },
+      { label: 'rails', value: `${fmt(v(suite?.echo.upper), 0)} / ${fmt(v(suite?.echo.lower), 0)}`, cls: 'text-subtle' },
+    ],
+    tango: [
+      { label: 'Tango', value: fmt(v(suite?.tango.line), 1), cls: v(suite?.tango.line) < 0 ? 'text-rose-300' : 'text-green-400' },
+      { label: 'rails', value: `${fmt(v(suite?.tango.upper), 0)} / ${fmt(v(suite?.tango.lower), 0)}`, cls: 'text-subtle' },
+    ],
     ivhv: [
       { label: 'IV', value: v(model?.iv) == null ? '—' : `${(v(model?.iv) * 100).toFixed(1)}%`, cls: 'text-amber-300', swatch: 'bg-amber-400' },
       { label: 'HV 20', value: v(model?.hv) == null ? '—' : `${(v(model?.hv) * 100).toFixed(1)}%`, cls: 'text-subtle', swatch: 'bg-subtle' },
