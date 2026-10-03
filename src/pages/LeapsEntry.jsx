@@ -496,7 +496,7 @@ function Backtest({ model, suite, pack, confirmDays, onJump }) {
         return { ...tr, hardening: !!h, tag: [tr.confirmed && 'MACD', h && `Hardening ${'★'.repeat(h.stars)}`].filter(Boolean).join(' · ') }
       })
       const split = suite ? [
-        { label: 'With Hardening', stats: horizonStats(trades.filter((x) => x.hardening), HORIZONS), n: trades.filter((x) => x.hardening).length },
+        { label: 'With', stats: horizonStats(trades.filter((x) => x.hardening), HORIZONS), n: trades.filter((x) => x.hardening).length },
         { label: 'Without', stats: horizonStats(trades.filter((x) => !x.hardening), HORIZONS), n: trades.filter((x) => !x.hardening).length },
       ] : null
       return {
@@ -586,22 +586,29 @@ function Backtest({ model, suite, pack, confirmDays, onJump }) {
       </div>
       {view.split && rows.length > 0 && (
         <div className="px-5 pb-4 -mt-1">
-          <div className="rounded-xl border border-hairline overflow-hidden text-xs font-mono-tab">
-            <div className="grid grid-cols-[1fr_repeat(3,auto)] gap-x-3 px-3 py-2 text-[11px] text-muted bg-bg-elev/60">
-              <span className="font-sans">Confirmed by Hardening?</span>
-              {HORIZONS.map(([l]) => <span key={l} className="w-14 text-right">{l} avg</span>)}
-            </div>
-            {view.split.map((g) => (
-              <div key={g.label} className="grid grid-cols-[1fr_repeat(3,auto)] gap-x-3 px-3 py-2 border-t border-hairline items-baseline">
-                <span className="font-sans text-subtle">{g.label} <span className="text-muted">· {g.n}</span></span>
-                {g.stats.map((st) => (
-                  <span key={st.label} className={clsx('w-14 text-right', st.avg == null ? 'text-muted' : st.avg < 0 ? 'text-rose-300' : 'text-green-400')}>
-                    {st.avg == null ? '—' : signed(st.avg * 100)}
-                  </span>
-                ))}
-              </div>
-            ))}
-          </div>
+          <table className="w-full text-xs font-mono-tab rounded-xl overflow-hidden border border-hairline border-separate border-spacing-0">
+            <thead>
+              <tr className="text-[11px] text-muted bg-bg-elev/60">
+                <th className="text-left font-semibold font-sans px-3 py-2">Hardening</th>
+                <th className="text-right font-semibold px-2 py-2">Trades</th>
+                {HORIZONS.map(([l]) => <th key={l} className="text-right font-semibold px-2 py-2 last:pr-3">{l}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {view.split.map((g) => (
+                <tr key={g.label}>
+                  <td className="font-sans text-subtle px-3 py-2 border-t border-hairline whitespace-nowrap">{g.label}</td>
+                  <td className="text-right text-subtle px-2 py-2 border-t border-hairline">{g.n}</td>
+                  {g.stats.map((st) => (
+                    <td key={st.label} className={clsx('text-right px-2 py-2 border-t border-hairline last:pr-3 whitespace-nowrap',
+                      st.avg == null ? 'text-muted' : st.avg < 0 ? 'text-rose-300' : 'text-green-400')}>
+                      {st.avg == null ? '—' : signed(st.avg * 100)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
       {rows.length === 0 ? (
