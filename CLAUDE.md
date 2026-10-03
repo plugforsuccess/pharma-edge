@@ -1024,6 +1024,14 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   ("No suggested trade"), the last 8 kept on this device
   (`cm:chart-recent`, Clear). `price-history` maps share classes to
   Yahoo's form (BRK.B → BRK-B).
+  **List rows** (owner, 2026-10-03) are cards: ticker + verdict badge,
+  what happened ("Hit 100% gain"), the instruction ("Sell 7 contracts ·
+  +$2,982 after taxes"), then actions — "Show on chart" (also a tap on
+  the row; scrolls up to the chart, "On the chart" when shown) and
+  "Open in Portfolio" for holdings (`/leaps?open=<id>`: expands that
+  holding and scrolls to it; Home's Needs action / Next exit targets and
+  the LEAPS bot's checks link the same way) or "Entry chart" for ideas
+  and searches.
   **LEAPS ideas** — buys from the **`suggest-leaps`** edge function, and
   LEAPS bot suggestions (`ldp_audit_log` kind `suggestion`, last 30
   days, newest per ticker, skipped where an idea covers the ticker;

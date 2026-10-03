@@ -135,7 +135,7 @@ export default function Home() {
                   <ol className="space-y-3 pr-3">
                     {actions.map((a, i) => (
                       <li key={i}>
-                        <Link to="/leaps" className="flex items-start gap-3 min-h-[44px]">
+                        <Link to={a.pos?.id ? `/leaps?open=${a.pos.id}` : '/leaps'} className="flex items-start gap-3 min-h-[44px]">
                           <span className={clsx('mt-1.5 h-2 w-2 rounded-full shrink-0', {
                             'bg-rose-400': a.tone === 'red', 'bg-green-400': a.tone === 'green',
                             'bg-amber-400': a.tone === 'amber', 'bg-subtle': a.tone === 'neutral',
@@ -164,7 +164,7 @@ export default function Home() {
                   <ol className="space-y-4">
                     {nextUp.map(({ r, row, needs }) => (
                       <li key={r.pos.id}>
-                        <Link to="/leaps" className="block">
+                        <Link to={`/leaps?open=${r.pos.id}`} className="block">
                           <div className="flex items-baseline gap-3">
                             <span className="flex-1 min-w-0 text-sm text-fg truncate">{nameOf(r.pos)} · {gainLabel(row)}</span>
                             <span className="text-sm font-mono-tab font-semibold text-fg">{usd(row.exit_value)}</span>

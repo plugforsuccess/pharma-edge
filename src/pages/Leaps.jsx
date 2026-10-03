@@ -231,6 +231,21 @@ export default function Leaps() {
   }
 
   const allIds = [...results, ...cashResults, ...realEstateResults].map((r) => r.pos.id)
+
+  // /leaps?open=<id> (from Home, Charts or the LEAPS bot): expand that
+  // holding and scroll to it, then drop the param.
+  const openParam = searchParams.get('open')
+  useEffect(() => {
+    if (!openParam || !allIds.includes(openParam)) return
+    if (!openIds.has(openParam)) setOpen(new Set([...openIds, openParam]))
+    // After the route's own scroll-to-top and the card's expansion.
+    setTimeout(() => {
+      document.querySelector(`[aria-controls="holding-${CSS.escape(openParam)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 250)
+    searchParams.delete('open')
+    setSearchParams(searchParams, { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openParam, allIds.join(',')])
   const allOpen = allIds.length > 0 && allIds.every((id) => openIds.has(id))
 
   async function deletePosition(id) {
@@ -1108,7 +1123,7 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
         onClick={onToggle}
         aria-expanded={open}
         aria-controls={`holding-${pos.id}`}
-        className="w-full text-left flex items-start gap-3 p-5 rounded-2xl hover:bg-card-hover/40 transition"
+        className="w-full text-left flex items-start gap-3 p-5 rounded-2xl hover:bg-card-hover/40 transition scroll-mt-4"
       >
         <div className="flex-1 min-w-0">
           <div className="text-base font-semibold break-words">{label}</div>
@@ -1293,7 +1308,7 @@ function HoldingShell({ pos, open, onToggle, title, meta, badge, badgeTone = 'ne
   return (
     <div className="bg-card border border-border rounded-2xl mb-4">
       <button type="button" onClick={onToggle} aria-expanded={open} aria-controls={`holding-${pos.id}`}
-        className="w-full text-left flex items-start gap-3 p-5 rounded-2xl hover:bg-card-hover/40 transition">
+        className="w-full text-left flex items-start gap-3 p-5 rounded-2xl hover:bg-card-hover/40 transition scroll-mt-4">
         <div className="flex-1 min-w-0">
           <div className="text-base font-semibold break-words">{title}</div>
           {meta.filter(Boolean).map((line, i) => (typeof line === 'string'
