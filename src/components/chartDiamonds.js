@@ -6,13 +6,15 @@
 //
 //   const d = new DiamondMarkers({ outline: bg, lane: true })
 //   series.attachPrimitive(d)
-//   d.setPoints([{ time, color, price?, offset?, text? }])
+//   d.setPoints([{ time, color, price?, offset?, label?, hollow? }])
 //
 // lane: true puts every diamond in a strip along the bottom of the pane
 // (a faint band, like TradingView's signal row) — give the series a bottom
 // scale margin so the line stays above it. Otherwise `price` places the
 // diamond on the series' scale and `offset` nudges it in pixels (negative =
-// up), e.g. above a candle's high; `text` is a small label beyond it.
+// up), e.g. above a candle's high. `label` is drawn inside the diamond
+// (one or two letters); `hollow` draws the outline only (exits), so it
+// reads apart from the solid signal diamonds.
 
 export const LANE_PX = 30
 
@@ -64,11 +66,11 @@ export class DiamondMarkers {
           if (!chart || !series) return
           target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
             const ts = chart.timeScale()
-            const r = self._r
+            const r0 = self._r
             ctx.save()
             ctx.lineJoin = 'round'
-            ctx.font = '600 10px ui-sans-serif, system-ui, sans-serif'
             ctx.textAlign = 'center'
+            ctx.textBaseline = 'middle'
             for (const p of self._points) {
               const x = ts.timeToCoordinate(p.time)
               if (x == null) continue
@@ -79,21 +81,21 @@ export class DiamondMarkers {
                 if (yBase == null) continue
                 y = yBase + (p.offset ?? 0)
               }
+              const r = p.label && p.label.length > 1 ? r0 + 2 : r0
               // Ring in the background color, then fill, then the bright outline.
               diamond(ctx, x, y, r + 1.5)
               ctx.fillStyle = self._outline
               ctx.fill()
               diamond(ctx, x, y, r)
-              ctx.fillStyle = rgba(p.color, 0.78)
+              ctx.fillStyle = p.hollow ? self._outline : rgba(p.color, 0.78)
               ctx.fill()
-              ctx.lineWidth = 2
-              ctx.strokeStyle = tint(p.color, 0.45)
+              ctx.lineWidth = p.hollow ? 1.75 : 2
+              ctx.strokeStyle = p.hollow ? p.color : tint(p.color, 0.45)
               ctx.stroke()
-              if (p.text) {
-                const up = (p.offset ?? 0) <= 0
-                ctx.fillStyle = tint(p.color, 0.3)
-                ctx.textBaseline = up ? 'bottom' : 'top'
-                ctx.fillText(p.text, x, up ? y - r - 3 : y + r + 3)
+              if (p.label) {
+                ctx.font = `700 ${p.label.length > 1 ? 8 : 9}px ui-sans-serif, system-ui, sans-serif`
+                ctx.fillStyle = p.hollow ? tint(p.color, 0.2) : '#ffffff'
+                ctx.fillText(p.label, x, y + 0.5)
               }
             }
             ctx.restore()

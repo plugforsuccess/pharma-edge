@@ -20,7 +20,7 @@ import NumberInput from '../components/NumberInput'
 const PARAMS_KEY = 'cm:entry-params'
 const PANES_KEY = 'cm:entry-panes:v2'
 const LAYERS_KEY = 'cm:entry-layers'
-const DEFAULT_LAYERS = ['hardening', 'exits']
+const DEFAULT_LAYERS = ['hardening', 'bravoSignals', 'exits']
 // The signal suite runs on weekly or monthly bars (owner, 2026-10-03: not
 // daily). A Hardening bull this many trading days from a buy-zone signal
 // (either side) confirms it.
@@ -260,7 +260,9 @@ export default function LeapsEntry() {
                 <Key glyph={<span className="inline-block w-3 h-2.5 rounded-sm bg-green-400/15 align-middle" />}>Buy zone</Key>
                 {layers.includes('hardening') && <Key className="text-amber-300" glyph="▲">Hardening bull</Key>}
                 {layers.includes('hardening') && <Key className="text-rose-300" glyph="▼">Hardening bear</Key>}
-                {layers.includes('exits') && <Key className="text-suite-bear" glyph="◆">Exit (E Echo · T Tango · B Bravo)</Key>}
+                {layers.includes('bravoSignals') && <Key className="text-suite-bull" glyph="◆">Bravo bull</Key>}
+                {layers.includes('bravoSignals') && <Key className="text-suite-bear" glyph="◆">Bravo bear</Key>}
+                {layers.includes('exits') && <Key className="text-suite-bear" glyph="◇">Exit (E Echo · T Tango · B Bravo)</Key>}
                 {(panes.includes('echo') || panes.includes('tango')) && <Key className="text-suite-bull" glyph="◆">Echo / Tango bull</Key>}
                 {(panes.includes('echo') || panes.includes('tango')) && <Key className="text-suite-bear" glyph="◆">Echo / Tango bear</Key>}
               </div>

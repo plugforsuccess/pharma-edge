@@ -1166,8 +1166,13 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   bright outline in the same hue and a thin background-color ring. Echo /
   Tango diamonds sit in a **signal lane** along the bottom of their pane
   (a faint strip; the line keeps a bottom margin above it), and their
-  areas are blue above zero / pink below; exits are smaller pink
-  diamonds above the candle, lettered E / T / B. Drawn by
+  areas are blue above zero / pink below. On the price chart (owner,
+  2026-10-03): **Bravo diamonds** (layer "Bravo ◆", on by default) — solid,
+  "B" inside, blue under the candle where Bravo's bull condition turns on,
+  pink above where the bear one does, at most one per 5-bar cooldown
+  (`bravo.bullOn` / `bearOn`); **exits** are hollow pink diamonds above
+  the candle with the reason inside (E / T / B), stacked over a Bravo
+  bear diamond on the same day. Letters go inside the diamond. Drawn by
   `components/chartDiamonds.js` (a series primitive — the library has no
   diamond marker). Hardening keeps its gold ▲ / red ▼ arrows.
   Every pane has a **violet title** (`PANE_TITLES`) and a small violet

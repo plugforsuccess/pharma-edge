@@ -53,6 +53,7 @@ export const SUB_PANES = [
 ]
 export const LAYERS = [
   ['hardening', 'Hardening ★'],
+  ['bravoSignals', 'Bravo ◆'],
   ['exits', 'Exits'],
   ['bravo', 'Bravo band'],
 ]
@@ -164,12 +165,26 @@ export default function EntryChart({ bars, model, suite, suiteLabel = null, pane
           : { time: time[sg.i], position: 'aboveBar', shape: 'arrowDown', color: t.down, size: 1.5, text: stars(sg.stars) })
       }
     }
-    // Exits: pink diamonds above the candle, lettered E / T / B.
+    // Bravo signals: solid diamonds with a B — blue under the candle when its
+    // bull trend turns on, pink above when the bear one does. Exits: hollow
+    // pink diamonds above the candle with the reason inside (E / T / B),
+    // stacked over a Bravo bear diamond on the same day.
+    const priceDiamonds = []
+    const bravoBearDays = new Set()
+    if (on('bravoSignals')) {
+      suite.bravo.bullOn.forEach((f, i) => { if (f) priceDiamonds.push({ time: time[i], price: bars[i].l, offset: 15, color: t.suiteBull, label: 'B' }) })
+      suite.bravo.bearOn.forEach((f, i) => { if (f) { bravoBearDays.add(i); priceDiamonds.push({ time: time[i], price: bars[i].h, offset: -15, color: t.suiteBear, label: 'B' }) } })
+    }
     if (on('exits')) {
-      const exitDiamonds = new DiamondMarkers({ outline: t.bg, size: 6 })
-      candles.attachPrimitive(exitDiamonds)
-      exitDiamonds.setPoints(suite.exits.filter((x) => x.i >= 0)
-        .map((x) => ({ time: time[x.i], price: bars[x.i].h, offset: -14, color: t.suiteBear, text: x.why.join('') })))
+      for (const x of suite.exits) {
+        if (x.i < 0) continue
+        priceDiamonds.push({ time: time[x.i], price: bars[x.i].h, offset: bravoBearDays.has(x.i) ? -36 : -15, color: t.suiteBear, label: x.why.join(''), hollow: true })
+      }
+    }
+    if (priceDiamonds.length) {
+      const pd = new DiamondMarkers({ outline: t.bg, size: 7 })
+      candles.attachPrimitive(pd)
+      pd.setPoints(priceDiamonds)
     }
     for (const i of model.golden) markers.push({ time: time[i], position: 'aboveBar', shape: 'circle', color: t.gold, text: 'Golden cross', size: 1 })
     for (const i of model.death) markers.push({ time: time[i], position: 'aboveBar', shape: 'circle', color: t.down, text: 'Death cross', size: 1 })
