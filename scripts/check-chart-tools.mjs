@@ -1,7 +1,7 @@
 // Checks for src/utils/chartTools.js (Measure, Fibonacci, Auto swing).
 // Run: npm run charttools:check
 import {
-  barMs, nearestBarIndex, snapPin, placePins, measure, fibLevels, autoSwing,
+  barMs, nearestBarIndex, snapPin, placePins, measure, fibLevels, autoSwing, stepPin,
 } from '../src/utils/chartTools.js'
 
 let passed = 0
@@ -66,6 +66,16 @@ eq('auto to the high', auto[1], { t: day(9), p: 162 })
 const falling = [50, 48, 45, 40, 35, 30].map((c, i) => ({ t: day(i + 1), o: c, h: c + 1, l: c - 1, c }))
 eq('auto on a fall', autoSwing(falling), [{ t: day(1), p: 51 }, { t: day(6), p: 29 }])
 eq('auto needs 3 bars', autoSwing(bars.slice(0, 2)), null)
+
+// Step a pin one candle, keeping its side; no crossing, no running off the ends.
+const pair = placePins(bars, [{ t: day(4), p: 98 }, { t: day(9), p: 162 }])
+eq('step A later keeps the low', stepPin(bars, pair, 0, 1)[0], { t: day(5), p: bars[4].l })
+eq('step B earlier keeps the high', stepPin(bars, pair, 1, -1)[1], { t: day(8), p: bars[7].h })
+eq('step leaves the other pin', stepPin(bars, pair, 0, 1)[1], { t: day(9), p: 162 })
+eq('A cannot reach B', stepPin(bars, [{ i: 3, t: day(4), p: 98 }, { i: 4, t: day(5), p: 1 }], 0, 1), null)
+eq('B cannot pass A', stepPin(bars, [{ i: 3, t: day(4), p: 98 }, { i: 4, t: day(5), p: 1 }], 1, -1), null)
+eq('no step before the first bar', stepPin(bars, [{ i: 0, t: day(1), p: 1 }, { i: 4, t: day(5), p: 1 }], 0, -1), null)
+eq('no step past the last bar', stepPin(bars, [{ i: 0, t: day(1), p: 1 }, { i: bars.length - 1, t: bars[bars.length - 1].t, p: 1 }], 1, 1), null)
 
 console.log(`chart-tools checks: ${passed} passed, ${failures.length} failed`)
 if (failures.length) {

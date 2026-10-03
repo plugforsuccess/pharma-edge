@@ -1116,7 +1116,11 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   every hover. **Drawing tools** (owner, 2026-10-03), a row under the
   ranges: **Measure** — tap a candle for pin A, another for B (each snaps
   to that candle's high or low, whichever is nearer the tap; with both
-  set, a tap moves the nearer pin); the readout shows % and $ change,
+  set, a tap moves the nearer pin; **drag a pin** to move it — a press
+  within 24px grabs it, the chart's pan / zoom is held off until release,
+  and it snaps to each candle's high or low as it moves; the readout's
+  ‹ › step a pin one candle, same side, never crossing the other —
+  `stepPin`); the readout shows % and $ change,
   both dates and prices, and trading days / calendar days (candles on
   1D / 1W, weeks on 5Y, months on All). **Auto** — the biggest swing in
   view (largest % rise from a low to a later high, or fall from a high
@@ -1132,7 +1136,13 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   and Fib draw on the live chart (markers, a line series, price lines),
   so zoom survives a new pin. Math is pure in `src/utils/chartTools.js`
   (`snapPin`, `placePins`, `measure`, `fibLevels`, `autoSwing`);
-  `npm run charttools:check` must pass before changing it. `components/LineChart.jsx` (plain SVG) is kept for the
+  `npm run charttools:check` must pass before changing it. **Full
+  screen** (owner, 2026-10-03): the violet maximize button at the end of
+  the OHLC line opens the chart over the whole screen (ranges, tools and
+  readout stay; the trade card hides; Esc or the minimize button closes).
+  The axis price tag is a price line at the **latest close** — the
+  library's own last-value tag followed the last candle in view, so a
+  panned-back chart showed an old price. `components/LineChart.jsx` (plain SVG) is kept for the
   hidden holding charts. **Holding
   charts are hidden for now** (owner); `leaps_position_marks` (one value
   per holding per day, SECURITY DEFINER trigger on `leaps_positions`,

@@ -103,3 +103,18 @@ export function autoSwing(bars) {
   if (!best || best.a === best.b) return null
   return [{ t: bars[best.a].t, p: best.ap }, { t: bars[best.b].t, p: best.bp }]
 }
+
+// Step one placed pin a candle earlier (dir −1) or later (+1), keeping it
+// on the same side (high or low). Pins can't cross or share a candle.
+// Returns the new pair as { t, p } pins, or null when the step isn't allowed.
+export function stepPin(bars, placed, k, dir) {
+  if (!bars?.length || !placed || placed.length !== 2 || (k !== 0 && k !== 1)) return null
+  const pin = placed[k]
+  const j = pin.i + dir
+  if (j < 0 || j >= bars.length) return null
+  if (k === 0 ? j >= placed[1].i : j <= placed[0].i) return null
+  const was = bars[pin.i]
+  const high = was ? Math.abs(pin.p - was.h) <= Math.abs(pin.p - was.l) : true
+  const moved = { t: bars[j].t, p: high ? bars[j].h : bars[j].l }
+  return placed.map((x, i) => (i === k ? moved : { t: x.t, p: x.p }))
+}

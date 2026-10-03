@@ -29,6 +29,10 @@ import { snapPin } from '../utils/chartTools'
 //   fib:     [{ kind, ratio, price, label, up }] Fibonacci levels (chartTools)
 //   picking: when true, a tap calls onPick with a pin snapped to that
 //            candle's high or low
+//   onPinsChange: (pins) => void — a pin was dragged; called live with the
+//            new [{ t, p }] pins (the dragged pin snaps to each candle's
+//            high or low). A drag that starts on a pin moves it; anywhere
+//            else it pans the chart as usual.
 // Pins and Fib levels are drawn on the existing chart (no rebuild), so
 // zoom and pan survive setting a pin.
 
@@ -42,12 +46,17 @@ function alpha(hex, a) {
   return `rgba(${parseInt(m[1], 16)}, ${parseInt(m[2], 16)}, ${parseInt(m[3], 16)}, ${a})`
 }
 
-export default function PriceChart({ bars, levels = [], fitLevels = true, height = 300, onHover, pins, fib, picking = false, onPick }) {
+// How close (px) a touch has to land to grab a pin.
+const GRAB_PX = 24
+
+export default function PriceChart({ bars, levels = [], fitLevels = true, height = 300, onHover, pins, fib, picking = false, onPick, onPinsChange }) {
   const box = useRef(null)
   const hoverRef = useRef(onHover)
   hoverRef.current = onHover
   const pickRef = useRef({ picking, onPick })
   pickRef.current = { picking, onPick }
+  const pinsRef = useRef({ pins, onPinsChange })
+  pinsRef.current = { pins, onPinsChange }
   // The live chart, for the overlay effect below; a new version after each rebuild.
   const live = useRef(null)
   const [version, setVersion] = useState(0)
@@ -88,9 +97,15 @@ export default function PriceChart({ bars, levels = [], fitLevels = true, height
     const trend = last >= first ? t.up : t.down
     const price = chart.addSeries(CandlestickSeries, {
       upColor: t.up, downColor: t.down, wickUpColor: t.up, wickDownColor: t.down, borderVisible: false,
-      priceLineColor: trend, priceLineStyle: LineStyle.Dotted,
+      // The library's last-value tag follows the last candle in view, so a
+      // panned-back chart showed an old close; tag the latest close instead.
+      lastValueVisible: false, priceLineVisible: false,
     })
     price.setData(bars.map((b) => ({ time: b.t, open: b.o, high: b.h, low: b.l, close: b.c })))
+    price.createPriceLine({
+      price: last, color: trend, lineWidth: 1, lineStyle: LineStyle.Dotted,
+      axisLabelVisible: true, axisLabelColor: trend, axisLabelTextColor: t.card,
+    })
 
     // Volume in its own band under the price (its own scale, no axis).
     if (bars.some((b) => b.v > 0)) {
@@ -151,12 +166,103 @@ export default function PriceChart({ bars, levels = [], fitLevels = true, height
     }
     chart.subscribeClick(onClick)
 
+    // Drag a pin: a press within GRAB_PX of one grabs it (the chart's own
+    // pan / zoom is held off until release); the pin follows the finger,
+    // snapping to the candle under it. Capture-phase listeners run before
+    // the chart's, so a grab never pans.
+    const ts = chart.timeScale()
+    const pinXY = (pin) => ({ x: ts.timeToCoordinate(pin.t), y: price.priceToCoordinate(pin.p) })
+    const local = (cx, cy) => { const r = el.getBoundingClientRect(); return { x: cx - r.left, y: cy - r.top } }
+    const grabAt = (pt) => {
+      const list = pinsRef.current.pins ?? []
+      let best = -1
+      let bestD = GRAB_PX
+      list.forEach((pin, k) => {
+        const q = pinXY(pin)
+        if (q.x == null || q.y == null) return
+        const d = Math.hypot(q.x - pt.x, q.y - pt.y)
+        if (d <= bestD) { bestD = d; best = k }
+      })
+      return best
+    }
+    const pinAt = (pt) => {
+      const logical = ts.coordinateToLogical(pt.x)
+      if (logical == null) return null
+      const i = Math.max(0, Math.min(bars.length - 1, Math.round(logical)))
+      return snapPin(bars[i], price.coordinateToPrice(pt.y))
+    }
+    let drag = null
+    const start = (pt) => {
+      if (!pinsRef.current.onPinsChange) return false
+      const k = grabAt(pt)
+      if (k < 0) return false
+      const list = pinsRef.current.pins
+      drag = { other: list.length === 2 ? list[1 - k] : null, last: list[k] }
+      chart.applyOptions({ handleScroll: false, handleScale: false })
+      el.style.cursor = 'grabbing'
+      return true
+    }
+    const moveTo = (pt) => {
+      if (!drag) return
+      const pin = pinAt(pt)
+      if (!pin || (pin.t === drag.last.t && pin.p === drag.last.p)) return
+      drag.last = pin
+      const other = drag.other ? { t: drag.other.t, p: drag.other.p } : null
+      pinsRef.current.onPinsChange?.(other ? [other, pin] : [pin])
+    }
+    const end = () => {
+      if (!drag) return
+      drag = null
+      chart.applyOptions({ handleScroll: true, handleScale: { axisPressedMouseMove: false } })
+      el.style.cursor = ''
+    }
+    const onTouchStart = (e) => {
+      if (e.touches.length !== 1) return
+      const tch = e.touches[0]
+      if (!start(local(tch.clientX, tch.clientY))) return
+      e.preventDefault(); e.stopPropagation()
+    }
+    const onTouchMove = (e) => {
+      if (!drag) return
+      const tch = e.touches[0]
+      e.preventDefault(); e.stopPropagation()
+      if (tch) moveTo(local(tch.clientX, tch.clientY))
+    }
+    const onTouchEnd = (e) => { if (drag) { e.stopPropagation(); end() } }
+    const onMouseDown = (e) => {
+      if (e.button !== 0 || !start(local(e.clientX, e.clientY))) return
+      e.preventDefault(); e.stopPropagation()
+      const mm = (ev) => moveTo(local(ev.clientX, ev.clientY))
+      const mu = () => { window.removeEventListener('mousemove', mm); window.removeEventListener('mouseup', mu); end() }
+      window.addEventListener('mousemove', mm)
+      window.addEventListener('mouseup', mu)
+    }
+    // A grab cursor over a pin (mouse).
+    const onHoverCursor = (e) => {
+      if (drag) return
+      el.style.cursor = pinsRef.current.onPinsChange && grabAt(local(e.clientX, e.clientY)) >= 0 ? 'grab' : ''
+    }
+    const cap = { capture: true, passive: false }
+    el.addEventListener('touchstart', onTouchStart, cap)
+    el.addEventListener('touchmove', onTouchMove, cap)
+    el.addEventListener('touchend', onTouchEnd, cap)
+    el.addEventListener('touchcancel', onTouchEnd, cap)
+    el.addEventListener('mousedown', onMouseDown, cap)
+    el.addEventListener('mousemove', onHoverCursor)
+
     const markers = createSeriesMarkers(price, [])
     live.current = { chart, price, markers, extra, t, line: null, fibLines: [] }
     setVersion((v) => v + 1)
     return () => {
       chart.unsubscribeCrosshairMove(onMove)
       chart.unsubscribeClick(onClick)
+      el.removeEventListener('touchstart', onTouchStart, cap)
+      el.removeEventListener('touchmove', onTouchMove, cap)
+      el.removeEventListener('touchend', onTouchEnd, cap)
+      el.removeEventListener('touchcancel', onTouchEnd, cap)
+      el.removeEventListener('mousedown', onMouseDown, cap)
+      el.removeEventListener('mousemove', onHoverCursor)
+      el.style.cursor = ''
       live.current = null
       chart.remove()
     }
@@ -173,7 +279,7 @@ export default function PriceChart({ bars, levels = [], fitLevels = true, height
 
     const placed = pins ?? []
     markers.setMarkers(placed.map((pin, i) => ({
-      time: pin.t, position: 'atPriceMiddle', price: pin.p, shape: 'circle', color: t.gold, size: 1.4, text: i === 0 ? 'A' : 'B',
+      time: pin.t, position: 'atPriceMiddle', price: pin.p, shape: 'circle', color: t.gold, size: 1.8, text: i === 0 ? 'A' : 'B',
     })))
     if (placed.length === 2) {
       L.line = chart.addSeries(LineSeries, {
