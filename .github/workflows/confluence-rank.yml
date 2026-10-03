@@ -1,0 +1,54 @@
+# Nightly confluence ranking (owner, 2026-10-03): scores every ticker in the
+# app's universe for lows (buy) and extended highs (sell), writes
+# confluence_ranks + confluence_pool, and (full mode) alerts users whose
+# Tracking / holding tickers entered a top 10 — the bell, plus an email via
+# Resend once RESEND_API_KEY is set (placeholder until then).
+# See scripts/rank-confluence.mjs.
+
+name: Confluence ranking
+
+on:
+  schedule:
+    - cron: '40 21 * * 1-5'   # 21:40 UTC = 5:40pm ET (DST) / 4:40pm ET — after entry-scan
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'full = ranks + alerts · rank-only = ranks, no alerts · dry-run = print only'
+        type: choice
+        options: [rank-only, full, dry-run]
+        default: rank-only
+  # A change to the ranking on a feature branch re-ranks (no alerts), so the
+  # Charts list can be checked before merging.
+  push:
+    branches-ignore: [main]
+    paths:
+      - scripts/rank-confluence.mjs
+      - src/utils/confluence.js
+      - .github/workflows/confluence-rank.yml
+
+concurrency:
+  group: confluence-rank
+  cancel-in-progress: false
+
+jobs:
+  rank:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Rank
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RESEND_FROM: ${{ vars.RESEND_FROM }}
+          APP_URL: ${{ vars.APP_URL }}
+        run: |
+          MODE="${{ github.event_name == 'schedule' && 'full' || github.event_name == 'push' && 'rank-only' || inputs.mode }}"
+          echo "mode=$MODE"
+          node scripts/rank-confluence.mjs --mode "$MODE"

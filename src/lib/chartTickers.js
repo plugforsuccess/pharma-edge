@@ -1,4 +1,4 @@
-import { TICKER_UNIVERSE } from './tickerUniverse'
+import { TICKER_UNIVERSE } from './tickerUniverse.js'
 
 // Tickers the Charts search lists: the 11 SPDR sector ETFs the LEAPS ideas
 // rank (suggest-leaps) first under "Popular", then the app's ticker list.

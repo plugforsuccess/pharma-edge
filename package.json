@@ -18,7 +18,8 @@
     "suite:check": "node scripts/check-signal-suite.mjs",
     "ldp:risk:check": "node --experimental-strip-types --no-warnings scripts/check-ldp-risk-tier.ts",
     "peers:check": "node scripts/check-peers.mjs",
-    "confluence:check": "node scripts/check-confluence.mjs"
+    "confluence:check": "node scripts/check-confluence.mjs",
+    "rank:dry": "node scripts/rank-confluence.mjs --mode dry-run"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
