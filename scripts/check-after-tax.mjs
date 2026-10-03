@@ -18,7 +18,7 @@ import {
   isValidTaxRate, isValidBasis, exerciseCall, blended1256Rate, suggestInstrumentType, bracketTax,
   exitLadder, allocateContracts, rateAtGainFor, customExitTargets, validateCustomTargets,
   cashAfterTax, cashYieldComparison, realEstateAfterTax, interestTaxRate,
-  dividendAfterTax, incomeTaxRate, incomeYieldComparison, growthProjection, runnerAfterTax, annualizedReturn, portfolioProjection,
+  dividendAfterTax, incomeTaxRate, incomeYieldComparison, growthProjection, runnerAfterTax, annualizedReturn, portfolioProjection, incomeHoldingReturn, rocAdjustedBasis,
   EXIT_PLAYBOOK, allocateWithRunner, playbookTargets, runnerPlan, timeStop, longTermFitsPlan, entryRunwayDays,
 } from '../src/utils/afterTax.js'
 
@@ -432,6 +432,45 @@ const round2 = (x) => Math.round(x * 100) / 100
   eq('non-ROC: nothing deferred', q.deferred_tax, 0)
   const rocCmp = incomeYieldComparison({ balance: 100000, rateForGain: ga, options: [{ kind: 'roc', apy: 0.11 }] })
   eq('ROC compared after tax at sale', rocCmp[0].after_tax_yield, 0.11 * (1 - 0.2879), 1e-9)
+}
+
+// ── Payouts received (income holdings) ───────────────────────────
+{
+  const flat = () => ({ long_term: { total: 0.2 }, short_term: { total: 0.4, federal: 0.3, niit: 0.04, state: 0.06 } })
+  // ROC, actual $12,000 received: basis drops to $88,000; long-term sale.
+  const roc = incomeHoldingReturn({ cost: 100000, value: 101000, yieldPct: 0.12, kind: 'roc',
+    purchaseDate: '2025-01-02', asOf: '2026-10-02', payoutsReceived: 12000, rateForGain: flat })
+  eq('ROC: actual payouts used', roc.payouts, 12000)
+  eq('ROC: not estimated', roc.payouts_estimated, false)
+  eq('ROC: basis lowered by payouts', roc.adjusted_basis, 88000)
+  eq('ROC: sale gain on lowered basis', roc.sale_gain, 13000)
+  eq('ROC: sale tax LT', roc.sale_tax, 13000 * 0.2, 1e-9)
+  eq('ROC: no tax on payouts', roc.payout_tax, 0)
+  eq('ROC: gain includes payouts', roc.gain, 13000)
+  eq('ROC: after-tax gain', roc.after_tax_gain, 101000 - 2600 + 12000 - 100000, 1e-9)
+  // Estimated: yield × value × years held (one year here).
+  const est = incomeHoldingReturn({ cost: 100000, value: 100000, yieldPct: 0.1, kind: 'roc',
+    purchaseDate: '2025-10-02', asOf: '2026-10-02', rateForGain: flat })
+  eq('estimate = yield × value × years', est.payouts, 10000 * 365 / 365.25, 1e-6)
+  eq('estimate flagged', est.payouts_estimated, true)
+  eq('held 365 days → short-term sale', est.sale_rate, 0.4)
+  eq('waiting saves ST − LT on sale gain', est.tax_saved_by_waiting, est.sale_gain * 0.2, 1e-9)
+  // ROC past the full cost: basis floors at 0, the excess is a gain when paid.
+  const over = incomeHoldingReturn({ cost: 10000, value: 10000, yieldPct: 0.1, kind: 'roc',
+    purchaseDate: '2010-01-01', asOf: '2026-10-02', payoutsReceived: 12000, rateForGain: flat })
+  eq('ROC basis floors at 0', over.adjusted_basis, 0)
+  eq('ROC past cost taxed at LT', over.payout_tax, 2000 * 0.2, 1e-9)
+  // Qualified: payouts taxed when paid, basis unchanged.
+  const q = incomeHoldingReturn({ cost: 100000, value: 110000, yieldPct: 0.03, kind: 'qualified',
+    purchaseDate: '2024-01-02', asOf: '2026-10-02', payoutsReceived: 8000, rateForGain: flat })
+  eq('qualified: basis unchanged', q.adjusted_basis, 100000)
+  eq('qualified: payouts taxed at LT', q.payout_tax, 1600, 1e-9)
+  eq('qualified: gain = price + payouts', q.gain, 18000)
+  eq('qualified: after-tax gain', q.after_tax_gain, 110000 - 2000 + 6400 - 100000, 1e-9)
+  eq('ROC adjusted basis from the holding', rocAdjustedBasis({ instrument_type: 'stock', cost_basis: 100000, current_value: 101000,
+    purchase_date: '2025-01-02', details: { dividend_kind: 'roc', dividend_yield: 0.12, payouts_received: 12000 } }, '2026-10-02'), 88000)
+  eq('non-ROC basis unchanged', rocAdjustedBasis({ instrument_type: 'stock', cost_basis: 5, details: { dividend_kind: 'qualified' } }, '2026-10-02'), 5)
+  eq('blank actual → estimate', incomeHoldingReturn({ cost: 1, value: 1, yieldPct: 0, purchaseDate: '2026-01-01', asOf: '2026-10-02', payoutsReceived: '', rateForGain: flat }).payouts_estimated, true)
 }
 
 // ── Contributions (Simulator) ────────────────────────────────────

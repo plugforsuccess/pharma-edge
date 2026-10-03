@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import {
   DEFAULT_TARGET_PCTS, makeRateResolver, deriveRates, applyRateOverride, targetRow, positionAfterTax,
   portfolioSummary, todayYmd, rateAtGainFor, EXIT_PLAYBOOK, playbookTargets, runnerPlan, runnerAfterTax,
-  DEFAULT_SELLING_COST_PCT, cashAfterTax, realEstateAfterTax, dividendAfterTax, customExitTargets,
+  DEFAULT_SELLING_COST_PCT, cashAfterTax, realEstateAfterTax, dividendAfterTax, incomeHoldingReturn, customExitTargets,
 } from '../utils/afterTax'
 
 // The user's holdings with every after-tax figure worked out — shared by
@@ -195,7 +195,8 @@ export function useHoldings() {
       return targetRow({ portfolio: basis, basis, targetPct: goalPct, rateForGain })
     }
 
-    function withLadder(pos, calc) {
+    function withLadder(pos, calcIn) {
+      let calc = calcIn
       if (!calc) return { pos, calc, ladder: [], ladderLongTerm: null, custom: [], customLongTerm: null, runner: null }
       const isStock = isQuantity(pos.instrument_type)
       // Targets split whole contracts — or whole shares / coins.
@@ -206,6 +207,17 @@ export function useHoldings() {
       const dividend = pos.instrument_type === 'stock' && dy > 0
         ? dividendAfterTax({ value: calc.current_value, yieldPct: dy, kind: pos.details?.dividend_kind ?? 'qualified', rateForGain })
         : null
+      // Payouts since purchase: in the return, and (ROC) off the basis.
+      const income = dividend
+        ? incomeHoldingReturn({ cost: calc.basis, value: calc.current_value, yieldPct: dy, kind: dividend.kind,
+          purchaseDate: pos.purchase_date, asOf, payoutsReceived: pos.details?.payouts_received, rateForGain })
+        : null
+      if (income && income.kind === 'roc') {
+        // The sale is taxed on the lowered basis.
+        calc = { ...calc, gain: income.sale_gain, estimated_tax: income.sale_tax, tax_rate: income.sale_rate,
+          after_tax_value: income.after_tax_value, after_tax_gain: income.after_tax_value - calc.basis,
+          tax_saved_by_waiting: income.tax_saved_by_waiting }
+      }
       if (own) {
         return {
           pos,
@@ -222,6 +234,7 @@ export function useHoldings() {
               peakUnitValue: pos.peak_unit_value, currentValue: calc.current_value, trailPct: Number(pos.runner_trail_pct) }), calc, units)
             : null,
           dividend,
+          income,
         }
       }
       return {
@@ -237,13 +250,19 @@ export function useHoldings() {
         runner: withRunnerTax(runnerPlan({ fractions: plan.fractions, contracts, units, peakUnitValue: pos.peak_unit_value,
           currentValue: calc.current_value, trailPct: plan.runnerTrailPct }), calc, units),
         dividend,
+        income,
       }
     }
   }, [positions, investments, rateForGain, asOf, selectedPct, ladderFor, customFor, plan])
 
   const summary = useMemo(() => {
     if (!rateForGain || results.length === 0) return null
-    return portfolioSummary(results.map((r) => r.calc), totalCost, rateForGain)
+    const s = portfolioSummary(results.map((r) => r.calc), totalCost, rateForGain)
+    // Payouts already received (after their tax) count toward the return.
+    const payouts = results.reduce((sum, r) => sum + (r.income?.after_tax_payouts ?? 0), 0)
+    if (!(payouts > 0)) return s
+    const gain = s.after_tax_gain + payouts
+    return { ...s, after_tax_gain: gain, after_tax_return_pct: totalCost > 0 ? gain / totalCost : null, payouts_after_tax: payouts }
   }, [results, totalCost, rateForGain])
 
   // Breakdown is shown at the user's current unrealized gain — it moves

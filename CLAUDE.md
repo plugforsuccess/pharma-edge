@@ -974,6 +974,20 @@ value, holding period) and must pass before any edit to that file lands.
   dividends). The income comparison lists categories (dividend ETF,
   REIT, covered-call, muni, Treasury fund, BTC preferred), marked
   "prices can move" — categories only, user-entered yields.
+- **Payouts received** (owner, 2026-10-03). Income holdings count what
+  they've paid since purchase: `details.payouts_received` (optional,
+  the 1099 total, Income editor's "Payouts received so far"), else an
+  estimate = yield × today's value × years held (shown "Received
+  (est.)"). The gain line is price change + payouts (after tax: sale
+  proceeds after tax + payouts after their tax − cost). Taxed kinds
+  keep basis at cost (card: Received / Tax paid / Kept). **ROC lowers
+  basis by the payouts** (floor 0; ROC past cost is a gain when paid),
+  so the sale gain, sale tax and after-tax value use the lowered basis
+  (card: Received / Cost basis now / Tax if sold). Portfolio and Home
+  after-tax return add payouts after tax; net worth doesn't (the cash
+  already went wherever it went). `incomeHoldingReturn`, `payoutsSoFar`,
+  `rocAdjustedBasis` in `afterTax.js`; the Simulator starts ROC
+  holdings from the lowered basis.
 - Per-position values are never netted; the portfolio card shows a
   netted figure labeled as an estimate.
 - Every tax figure in the UI is labeled an estimate with a

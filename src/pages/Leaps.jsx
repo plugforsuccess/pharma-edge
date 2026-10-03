@@ -268,7 +268,7 @@ export default function Leaps() {
                 </div>
               )}
 
-              {results.map(({ pos, calc, ladder, ladderLongTerm, custom, customLongTerm, runner, dividend }) => (
+              {results.map(({ pos, calc, ladder, ladderLongTerm, custom, customLongTerm, runner, dividend, income }) => (
                 <PositionCard
                   key={pos.id}
                   pos={pos}
@@ -279,6 +279,7 @@ export default function Leaps() {
                   customLongTerm={customLongTerm}
                   runner={runner}
                   dividend={dividend}
+                  income={income}
                   plan={plan}
                   open={openIds.has(pos.id)}
                   onToggle={() => toggleOpen(pos.id)}
@@ -484,6 +485,7 @@ function emptyForm(initial) {
     // Income (shares with a yield)
     div_yield: d.dividend_yield != null ? String(+(Number(d.dividend_yield) * 100).toFixed(4)) : '',
     div_kind: d.dividend_kind ?? 'qualified',
+    payouts: d.payouts_received != null ? String(d.payouts_received) : '',
     // After-tax goal for this holding ('' = account default)
     goal: initial?.goal_pct != null ? String(+(Number(initial.goal_pct) * 100).toFixed(2)) : '',
     // Cash
@@ -677,13 +679,15 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
     if (isIncome && !(divYield > 0 && divYield <= 50)) {
       return setError('Enter the yield as a % between 0 and 50.')
     }
+    const payouts = isIncome ? num(f.payouts) : null
+    if (payouts != null && !(payouts >= 0)) return setError('Enter payouts received as a dollar amount (or leave it blank).')
     const goal = num(f.goal)
     if (goal != null && !(goal > 0 && goal <= 1000)) return setError('Enter the after-tax goal as a % above 0 (or leave it blank).')
     return finish({
       ticker: f.ticker,
       name: null,
       details: isIncome
-        ? { dividend_yield: exact(divYield / 100), dividend_kind: f.div_kind }
+        ? { dividend_yield: exact(divYield / 100), dividend_kind: f.div_kind, payouts_received: payouts }
         : null,
       // Left at the default (and never set) → NULL, so it keeps following Settings.
       goal_pct: rocIncome || !(goal > 0) || (initial?.goal_pct == null && defaultGoal != null && Math.abs(goal / 100 - defaultGoal) < 1e-9)
@@ -876,6 +880,10 @@ function PositionForm({ initial, onSave, onCancel, preview, allowAddAnother }) {
             <Field label="Yield" wide>
               <Affix suffix="%"><NumberInput decimals={4} value={f.div_yield} onChange={setV('div_yield')} placeholder={f.div_kind === 'roc' ? '11' : '3.5'} className={clsx(inputCls, 'pr-8')} /></Affix>
             </Field>
+            {/* Blank = estimated from the yield and how long it's been held. */}
+            <Field label="Payouts received so far" wide>
+              <Affix prefix="$"><NumberInput value={f.payouts} onChange={setV('payouts')} placeholder="Estimated from yield" className={clsx(inputCls, 'pl-7')} /></Affix>
+            </Field>
           </div>
         )}
         {!isShares && shortRunway && (
@@ -1058,7 +1066,7 @@ function positionMeta(pos) {
   return [contract.join(' • '), held.join(' · ')].filter(Boolean)
 }
 
-function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTerm, runner, dividend, plan, previewFor, selectedTargetPct, onSave, onDelete, onExercise, open, onToggle }) {
+function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTerm, runner, dividend, income, plan, previewFor, selectedTargetPct, onSave, onDelete, onExercise, open, onToggle }) {
   const [editing, setEditing] = useState(false)
   const [exercising, setExercising] = useState(false)
   const [showTaxDetail, setShowTaxDetail] = useState(false)
@@ -1126,7 +1134,7 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
               <div className={clsx('text-base font-semibold font-mono-tab', up ? 'text-green-400' : 'text-rose-300')}>
                 {usd(calc.after_tax_value)}
               </div>
-              <div className="text-xs text-muted mt-0.5">{gainPct(calc.after_tax_gain, calc.basis)} after tax</div>
+              <div className="text-xs text-muted mt-0.5">{gainPct(income?.after_tax_gain ?? calc.after_tax_gain, calc.basis)} after tax</div>
               {stop && stop.level !== 'ok' && (
                 <div className={clsx('text-xs mt-1 font-semibold', stop.level === 'act' ? 'text-rose-300' : 'text-amber-300')}>
                   {stop.level === 'act' ? 'Time stop' : 'Roll window'}
@@ -1157,11 +1165,11 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
           </span>
           <ChevronDown size={14} className={clsx('text-muted transition-transform', showTaxDetail && 'rotate-180')} />
         </button>
-        <GainLine afterGain={calc.after_tax_gain} beforeGain={calc.gain} cost={calc.basis} purchaseDate={pos.purchase_date} />
+        <GainLine afterGain={income?.after_tax_gain ?? calc.after_tax_gain} beforeGain={income?.gain ?? calc.gain} cost={calc.basis} purchaseDate={pos.purchase_date} />
         {showTaxDetail && (
           <div className="mt-1 text-xs text-muted font-mono-tab">
             {calc.gain > 0
-              ? `${usd(calc.after_tax_gain)} after-tax gain · est. tax ${usd(calc.estimated_tax)} at ${ratePct(calc.tax_rate)}`
+              ? `${usd(income?.after_tax_gain ?? calc.after_tax_gain)} after-tax gain · est. tax ${usd(calc.estimated_tax)} at ${ratePct(calc.tax_rate)}`
               : 'Loss — no tax on sale'}
           </div>
         )}
@@ -1180,11 +1188,25 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
           <Stat label="Tax at sale / yr" value={usd(dividend.deferred_tax)} />
         </div>
       )}
+      {income && income.kind === 'roc' && (
+        <div className="grid grid-cols-3 gap-3 mb-4 pb-3 border-b border-hairline">
+          <Stat label={income.payouts_estimated ? 'Received (est.)' : 'Received'} value={usd(income.payouts)} />
+          <Stat label="Cost basis now" value={usd(income.adjusted_basis)} />
+          <Stat label="Tax if sold" value={usd(income.sale_tax)} />
+        </div>
+      )}
       {dividend && dividend.kind !== 'roc' && (
         <div className="grid grid-cols-3 gap-3 mb-4 pb-3 border-b border-hairline">
           <Stat label="Dividends / yr" value={usd(dividend.income)} />
           <Stat label="After tax / yr" value={usd(dividend.after_tax_income)} />
           <Stat label="After-tax yield" value={yieldPct(dividend.after_tax_yield)} />
+        </div>
+      )}
+      {income && income.kind !== 'roc' && (
+        <div className="grid grid-cols-3 gap-3 mb-4 pb-3 border-b border-hairline">
+          <Stat label={income.payouts_estimated ? 'Received (est.)' : 'Received'} value={usd(income.payouts)} />
+          <Stat label="Tax paid" value={usd(income.payout_tax)} />
+          <Stat label="Kept" value={usd(income.after_tax_payouts)} />
         </div>
       )}
 

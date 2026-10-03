@@ -4,7 +4,7 @@ import clsx from 'clsx'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import {
-  FILING_STATUSES, INCOME_KINDS, makeRateResolver, growthProjection, portfolioProjection, positionAfterTax,
+  FILING_STATUSES, INCOME_KINDS, makeRateResolver, growthProjection, portfolioProjection, positionAfterTax, rocAdjustedBasis,
 } from '../utils/afterTax'
 import NumberInput from '../components/NumberInput'
 
@@ -136,7 +136,7 @@ function fromHolding(pos, x) {
   return {
     ...x,
     start: String(Number(pos.current_value) || 0),
-    cost: String(Number(pos.cost_basis) || 0),
+    cost: String(+rocAdjustedBasis(pos, todayYmd()).toFixed(2)),
     yield: d.dividend_yield != null ? String(+(Number(d.dividend_yield) * 100).toFixed(4)) : '0',
     kind: d.dividend_kind ?? 'qualified',
     // Income holdings (preferreds, dividend funds) start with flat prices.
@@ -154,7 +154,7 @@ function sleevesFor(positions, cash) {
       const d = pos.details ?? {}
       return {
         startValue: Number(pos.current_value) || 0,
-        startBasis: Number(pos.cost_basis) || 0,
+        startBasis: rocAdjustedBasis(pos, todayYmd()),
         yieldPct: Number(d.dividend_yield) || 0,
         kind: d.dividend_kind ?? 'qualified',
         ...(d.dividend_kind === 'roc' ? { priceGrowth: 0 } : {}),
@@ -308,7 +308,7 @@ function GrowSim({ positions, cash = [], rateForGain }) {
 
 // ── Sell: one sale, two tax setups ────────────────────────────────
 
-const sellFrom = (pos, x) => ({ ...x, cost: String(Number(pos.cost_basis) || 0), value: String(Number(pos.current_value) || 0),
+const sellFrom = (pos, x) => ({ ...x, cost: String(+rocAdjustedBasis(pos, todayYmd()).toFixed(2)), value: String(Number(pos.current_value) || 0),
   bought: pos.purchase_date ?? '', type: pos.instrument_type })
 
 function SellSim({ positions, setup, states, resolverFor }) {
