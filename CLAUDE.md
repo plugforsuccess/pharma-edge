@@ -1038,8 +1038,8 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   the coin in USD; 15-min cache, no table). **The chart is TradingView
   Lightweight Charts** (`lightweight-charts`, Apache-2.0 — keep its
   attribution logo on, the licence requires it) in
-  `components/PriceChart.jsx`: candles or area line (choice remembered,
-  `cm:chart-mode`), volume band, magnet crosshair driving the quote
+  `components/PriceChart.jsx`: **candlesticks only** (owner — no line
+  chart, no toggle), volume band, magnet crosshair driving the quote
   header's OHLC / volume / day change, the trade's levels as dashed price
   lines with axis tags (autoscale widened so every level stays in view),
   pinch / drag to zoom and pan; colors read from the theme tokens at

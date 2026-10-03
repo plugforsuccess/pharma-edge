@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import clsx from 'clsx'
-import { ChartCandlestick, ChartSpline } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { useHoldings, isQuantity } from '../hooks/useHoldings'
@@ -22,7 +21,6 @@ import PriceChart from '../components/PriceChart'
 // (leaps_position_marks) keeps collecting.
 
 const RANGES = [['1mo', '1M'], ['3mo', '3M'], ['6mo', '6M'], ['1y', '1Y'], ['2y', '2Y']]
-const MODE_KEY = 'cm:chart-mode'
 const DAY_MS = 86400000
 const BOT_DAYS = 30
 const price = (n) => (Number.isFinite(n)
@@ -73,13 +71,6 @@ export default function Charts() {
   const [range, setRange] = useState('6mo')
   const [bars, setBars] = useState({})
   const [hover, setHover] = useState(null)
-  const [mode, setMode] = useState(() => {
-    try { return localStorage.getItem(MODE_KEY) === 'line' ? 'line' : 'candles' } catch { return 'candles' }
-  })
-  const pickMode = (m) => {
-    setMode(m)
-    try { localStorage.setItem(MODE_KEY, m) } catch { /* this visit only */ }
-  }
   const today = todayYmd()
 
   useEffect(() => {
@@ -242,11 +233,11 @@ export default function Charts() {
                 ) : data.error || !ohlc ? (
                   <div className="h-[300px] flex items-center justify-center text-xs text-muted">Couldn't load prices for {current.ticker}.</div>
                 ) : (
-                  <PriceChart bars={ohlc} levels={levels} mode={mode} height={300} onHover={setHover} />
+                  <PriceChart bars={ohlc} levels={levels} height={300} onHover={setHover} />
                 )}
               </div>
 
-              {/* Range + chart type */}
+              {/* Range */}
               <div className="px-3 py-2 flex items-center gap-2 border-t border-hairline">
                 <div className="flex-1 flex items-center" role="tablist" aria-label="Range">
                   {RANGES.map(([v, label]) => (
@@ -254,15 +245,6 @@ export default function Charts() {
                       className={clsx('min-h-[36px] min-w-[40px] px-2 rounded-md text-xs font-semibold transition',
                         range === v ? 'bg-bg-elev text-fg' : 'text-muted hover:text-fg')}>
                       {label}
-                    </button>
-                  ))}
-                </div>
-                <div className="flex items-center rounded-md bg-bg-elev p-0.5" role="group" aria-label="Chart type">
-                  {[['candles', ChartCandlestick, 'Candles'], ['line', ChartSpline, 'Line']].map(([m, Icon, label]) => (
-                    <button key={m} type="button" onClick={() => pickMode(m)} aria-pressed={mode === m} aria-label={label}
-                      className={clsx('min-h-[32px] min-w-[36px] flex items-center justify-center rounded transition',
-                        mode === m ? 'bg-card text-amber-300' : 'text-muted hover:text-fg')}>
-                      <Icon size={15} aria-hidden />
                     </button>
                   ))}
                 </div>

@@ -1,11 +1,11 @@
 import { useEffect, useRef } from 'react'
 import {
-  createChart, CandlestickSeries, AreaSeries, HistogramSeries, ColorType, CrosshairMode, LineStyle,
+  createChart, CandlestickSeries, HistogramSeries, ColorType, CrosshairMode, LineStyle,
 } from 'lightweight-charts'
 
 // Stock price chart for /charts, on TradingView Lightweight Charts
 // (Apache-2.0 — its attribution logo stays on, per the licence).
-// Candles or an area line, a volume pane under the price, a magnet
+// Candlesticks (owner: candles, not a line), a volume band under the price, a magnet
 // crosshair, and the trade's levels (strike, break-even, cost, target)
 // as dashed price lines with tags on the price axis. Pinch / drag to
 // zoom and pan. Colors come from the theme tokens in index.css, read at
@@ -13,7 +13,6 @@ import {
 //
 //   bars:    [{ t: 'YYYY-MM-DD', o, h, l, c, v }]
 //   levels:  [{ price, label, gold? }]
-//   mode:    'candles' | 'line'
 //   onHover: (bar | null) => void — the bar under the crosshair
 
 function token(name) {
@@ -26,7 +25,7 @@ function alpha(hex, a) {
   return `rgba(${parseInt(m[1], 16)}, ${parseInt(m[2], 16)}, ${parseInt(m[3], 16)}, ${a})`
 }
 
-export default function PriceChart({ bars, levels = [], mode = 'candles', height = 300, onHover }) {
+export default function PriceChart({ bars, levels = [], height = 300, onHover }) {
   const box = useRef(null)
   const hoverRef = useRef(onHover)
   hoverRef.current = onHover
@@ -62,20 +61,11 @@ export default function PriceChart({ bars, levels = [], mode = 'candles', height
     const first = bars[0].c
     const last = bars[bars.length - 1].c
     const trend = last >= first ? t.up : t.down
-    let price
-    if (mode === 'line') {
-      price = chart.addSeries(AreaSeries, {
-        lineColor: trend, lineWidth: 2, topColor: alpha(trend, 0.28), bottomColor: alpha(trend, 0),
-        priceLineColor: trend, priceLineStyle: LineStyle.Dotted,
-      })
-      price.setData(bars.map((b) => ({ time: b.t, value: b.c })))
-    } else {
-      price = chart.addSeries(CandlestickSeries, {
-        upColor: t.up, downColor: t.down, wickUpColor: t.up, wickDownColor: t.down, borderVisible: false,
-        priceLineColor: trend, priceLineStyle: LineStyle.Dotted,
-      })
-      price.setData(bars.map((b) => ({ time: b.t, open: b.o, high: b.h, low: b.l, close: b.c })))
-    }
+    const price = chart.addSeries(CandlestickSeries, {
+      upColor: t.up, downColor: t.down, wickUpColor: t.up, wickDownColor: t.down, borderVisible: false,
+      priceLineColor: trend, priceLineStyle: LineStyle.Dotted,
+    })
+    price.setData(bars.map((b) => ({ time: b.t, open: b.o, high: b.h, low: b.l, close: b.c })))
 
     // Volume in its own band under the price (its own scale, no axis).
     if (bars.some((b) => b.v > 0)) {
@@ -125,7 +115,7 @@ export default function PriceChart({ bars, levels = [], mode = 'candles', height
       chart.unsubscribeCrosshairMove(onMove)
       chart.remove()
     }
-  }, [bars, levels, mode])
+  }, [bars, levels])
 
   return <div ref={box} style={{ height }} className="w-full" role="img" aria-label="Price chart" />
 }
