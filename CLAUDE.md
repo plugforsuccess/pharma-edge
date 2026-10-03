@@ -1313,6 +1313,18 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   the low to the half-way bar; misses say why (200-day falling / no or one
   signal / late / already holding). The entry chart's **Replay** card runs
   it live (rules saved in `cm:replay-rules`; rows jump the chart).
+  **Puts** (owner, 2026-10-03: "have we considered puts?" — advised: test
+  before suggesting; long-dated puts fight the drift, so the test is
+  **put debit spreads under the spread rules**): `replayPutSpreads` —
+  entry = the sell score reaching 2 (`BEAR_RULES`: 200-day falling / any
+  trend), ~90 DTE, long put at the money, short put one expected move
+  lower (S·σ·√T), debit ≤ 40% of width or skipped, +100% sell half, +200%
+  another quarter, −50% out, 2+ buy signals = thesis flip → out, out at 21
+  DTE (`PUT_MODEL`). Graded against big drops (swing high → −20% within
+  63 bars, `bigDrops` / `gradeDrops`). Shown as a Puts strip on the
+  Replay card and a Puts card on Signal record. **Nothing suggests a put
+  yet** — the LEAPS bot stays long only; bear trades would sit with the
+  spread rules if the test holds up.
   **Universe:** `scripts/replay-universe.mjs` in
   `.github/workflows/replay-universe.yml` (Saturdays, dispatch, branch
   pushes touching it) replays every ticker, pools trades per rule pair,

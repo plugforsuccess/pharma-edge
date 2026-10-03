@@ -41,6 +41,19 @@ export const EXIT_RULES = [
 ]
 export const MOVE = Object.freeze({ minGain: 0.3, horizon: 126, early: 10 })
 
+// Puts (owner, 2026-10-03: "have we considered puts?" — tested, not
+// suggested). A put debit spread on 2+ sell signals, under the app's
+// spread rules: ~90 DTE, long put at the money, short put one expected
+// move lower (S·σ·√T), debit ≤ 40% of the width or no trade; +100% → sell
+// half, +200% → sell another quarter, −50% → out, out at 21 DTE, and out
+// when 2+ buy signals say the thesis flipped. Never held to expiry.
+export const PUT_MODEL = Object.freeze({ dte: 90, closeDte: 21, maxDebit: 0.4, stop: -0.5, takes: [[1, 0.5], [2, 0.25]] })
+export const BEAR_RULES = [
+  ['falling', '200-day falling'],
+  ['any', 'Any trend'],
+]
+export const DROP = Object.freeze({ minDrop: 0.2, horizon: 63, early: 10 })
+
 const DAY_MS = 86400000
 const dayMs = (t) => Date.parse(`${t}T00:00:00Z`)
 
@@ -79,6 +92,13 @@ export function bsCall(S, K, T, vol, r = OPTION_MODEL.rate) {
 }
 
 // The strike whose call delta is `delta`.
+// Put via put-call parity.
+export function bsPut(S, K, T, vol, r = OPTION_MODEL.rate) {
+  if (!(S > 0 && K > 0)) return 0
+  if (!(T > 0) || !(vol > 0)) return Math.max(0, K - S)
+  return bsCall(S, K, T, vol, r) - S + K * Math.exp(-r * T)
+}
+
 export function strikeForDelta(S, T, vol, delta, r = OPTION_MODEL.rate) {
   const d1 = normInv(delta)
   return S * Math.exp(-(d1 * vol * Math.sqrt(T) - (r + vol * vol / 2) * T))
@@ -112,12 +132,18 @@ export function replaySignals(bars, model, suite, window = DEFAULT_WINDOW) {
   const buy = confluenceSeries(flags.buy, n, window, COMPONENTS.buy.map(([k]) => k))
   const sellS = confluenceSeries(flags.sell, n, window, COMPONENTS.sell.map(([k]) => k))
   const rising = model.slope200.map((s) => s != null && s > 0)
+  const falling = model.slope200.map((s) => s != null && s < 0)
   const zone = model.cond.map((c) => !!c?.all)
+  const sellOn = sellS.map((s, i) => s.score >= MIN_SCORE && (i === 0 || sellS[i - 1].score < MIN_SCORE))
   return {
     buyScore: buy.map((s) => s.score),
     buyKey: buy.map((s) => s.key),
     sellScore: sellS.map((s) => s.score),
-    rising,
+    sellKey: sellS.map((s) => s.key),
+    rising, falling,
+    // Bear entries: the sell score reaching MIN_SCORE (from below).
+    bear: { falling: sellOn.map((x, i) => x && falling[i]), any: sellOn },
+    buyOn: buy.map((s) => s.score >= MIN_SCORE),
     entry: {
       confluence: buy.map((s, i) => rising[i] && s.score >= MIN_SCORE && (i === 0 || buy[i - 1].score < MIN_SCORE)),
       zone: zone.map((z, i) => z && !zone[i - 1]),
@@ -210,7 +236,137 @@ export function replayTrades(bars, sig, { entryRule = 'confluence', exitRule = '
   return trades
 }
 
-export function tradeStats(trades) {
+// Put debit spreads on the bear entries (see PUT_MODEL). One at a time; a
+// signal at bar i's close opens at bar i+1's open. Each later close:
+// stop (−50% of the debit) → take-profits (+100% sell half, +200% sell a
+// quarter) → thesis flip (2+ buy signals) → 21 DTE: whatever is left goes.
+export function replayPutSpreads(bars, sig, { rule = 'falling', pm = PUT_MODEL, opt = OPTION_MODEL, vol = null } = {}) {
+  const n = bars.length
+  const closes = bars.map((b) => b.c)
+  const sigma = vol ?? trailingVol(closes, opt.volBars)
+  const entries = sig.bear[rule]
+  const trades = []
+  let skipped = 0
+  let i = 0
+  while (i < n - 1) {
+    if (!entries[i] || sigma[i] == null) { i++; continue }
+    const e = i + 1
+    const S0 = bars[e].o || bars[e].c
+    const v0 = Math.max(opt.volFloor, sigma[i])
+    const T0 = pm.dte / 365
+    const K1 = S0
+    const K2 = S0 * (1 - v0 * Math.sqrt(T0))
+    const width = K1 - K2
+    const price = (S, T, v) => Math.max(0, bsPut(S, K1, T, v, opt.rate) - bsPut(S, K2, T, v, opt.rate))
+    const cost = price(S0, T0, v0) * (1 + opt.slippage)
+    // The spread rule: pay at most 40% of the width.
+    if (!(width > 0) || cost > pm.maxDebit * width) { skipped++; i = e; continue }
+    const expiry = dayMs(bars[e].t) + pm.dte * DAY_MS
+    let left = 1
+    let proceeds = 0
+    let stockOut = 0
+    let minLow = bars[e].l
+    const took = pm.takes.map(() => false)
+    const exits = []
+    const sell = (j, frac, value, reason) => {
+      const f = Math.min(frac, left)
+      if (f <= 1e-9) return
+      proceeds += f * value * (1 - opt.slippage)
+      stockOut += f * closes[j]
+      left -= f
+      exits.push({ i: j, t: bars[j].t, frac: f, value, mult: value / cost, reason })
+    }
+    let j = e
+    for (; j < n && left > 1e-9; j++) {
+      minLow = Math.min(minLow, bars[j].l)
+      const daysLeft = (expiry - dayMs(bars[j].t)) / DAY_MS
+      const v = price(closes[j], Math.max(0, daysLeft) / 365, Math.max(opt.volFloor, sigma[j] ?? v0))
+      if (j > e && v <= cost * (1 + pm.stop)) { sell(j, left, v, 'stop'); break }
+      pm.takes.forEach(([gain, frac], k) => {
+        if (!took[k] && v >= cost * (1 + gain)) { took[k] = true; sell(j, frac, v, `t${k + 1}`) }
+      })
+      if (left <= 1e-9) break
+      if (j > e && sig.buyOn[j]) { sell(j, left, v, 'flip'); break }
+      if (daysLeft <= pm.closeDte) { sell(j, left, v, 'time'); break }
+    }
+    let open = false
+    if (left > 1e-9) {
+      const daysLeft = (expiry - dayMs(bars[n - 1].t)) / DAY_MS
+      const v = price(closes[n - 1], Math.max(0, daysLeft) / 365, Math.max(opt.volFloor, sigma[n - 1] ?? v0))
+      proceeds += left * v
+      stockOut += left * closes[n - 1]
+      open = true
+    }
+    const end = open ? n - 1 : exits[exits.length - 1].i
+    trades.push({
+      signalI: i, signalT: bars[i].t, i: e, t: bars[e].t, stock: S0, long: K1, short: K2, width, cost, vol: v0,
+      exits, open, endI: end, endT: bars[end].t,
+      optionReturn: proceeds / cost - 1,
+      stockReturn: stockOut / S0 - 1,
+      bestStock: minLow / S0 - 1,
+      days: Math.round((dayMs(bars[end].t) - dayMs(bars[e].t)) / DAY_MS),
+      key: sig.sellKey?.[i] ?? null,
+    })
+    i = Math.max(Math.min(j, n - 1), e) + 1
+  }
+  trades.skipped = skipped
+  return trades
+}
+
+// Big drops: a swing high followed by a fall of at least minDrop within
+// `horizon` bars (to the lowest low in that span). Drops don't overlap.
+export function bigDrops(bars, { minDrop = DROP.minDrop, horizon = DROP.horizon, swing = 10 } = {}) {
+  const { highs } = swingPoints(bars, swing)
+  const drops = []
+  let after = -1
+  for (const H of highs) {
+    if (H <= after) continue
+    let p = H
+    for (let k = H + 1; k <= Math.min(bars.length - 1, H + horizon); k++) if (bars[k].l < bars[p].l) p = k
+    const drop = 1 - bars[p].l / bars[H].h
+    if (drop < minDrop) continue
+    let half = p
+    for (let k = H + 1; k <= p; k++) if (bars[k].l <= bars[H].h * (1 - drop / 2)) { half = k; break }
+    drops.push({ highI: H, highT: bars[H].t, high: bars[H].h, lowI: p, lowT: bars[p].t, low: bars[p].l, drop, halfI: half, halfT: bars[half].t })
+    after = p
+  }
+  return drops
+}
+
+// Each drop: caught when a bear entry fired from `early` bars before the
+// high up to the bar half the drop was done; else why not.
+export function gradeDrops(drops, trades, sig, { early = DROP.early } = {}) {
+  return drops.map((d) => {
+    const tr = trades.find((t) => t.signalI >= d.highI - early && t.signalI <= d.halfI)
+    if (tr) {
+      const range = d.high - d.low
+      const exitStock = tr.stock * (1 + tr.stockReturn)
+      return { ...d, caught: true, trade: tr, kept: range > 0 ? (tr.stock - exitStock) / range : null }
+    }
+    let best = 0
+    let falling = false
+    for (let k = Math.max(0, d.highI - early); k <= d.halfI; k++) {
+      if (sig.sellScore[k] > best) best = sig.sellScore[k]
+      if (sig.falling[k]) falling = true
+    }
+    const held = trades.some((t) => t.i <= d.highI && t.endI >= d.halfI)
+    const why = held ? 'already in a trade' : best < MIN_SCORE ? (best ? `only ${best} signal` : 'no sell signals') : !falling ? '200-day rising' : 'signals came late'
+    return { ...d, caught: false, held, bestScore: best, why }
+  })
+}
+
+export function dropStats(graded) {
+  const open = graded.filter((g) => !g.held)
+  const caught = open.filter((g) => g.caught)
+  const kept = caught.map((g) => g.kept).filter((x) => x != null)
+  return {
+    drops: graded.length, held: graded.length - open.length, caught: caught.length,
+    catchRate: open.length ? caught.length / open.length : null,
+    avgKept: kept.length ? kept.reduce((s, x) => s + x, 0) / kept.length : null,
+  }
+}
+
+export function tradeStats(trades, { bear = false } = {}) {
   const done = trades.filter((t) => !t.open)
   const r = done.map((t) => t.optionReturn).sort((a, b) => a - b)
   const avg = (xs) => (xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : null)
@@ -223,7 +379,9 @@ export function tradeStats(trades) {
     avgStock: avg(done.map((t) => t.stockReturn)),
     avgDays: avg(done.map((t) => t.days)),
     // How much of the best stock move inside each trade the exit kept.
-    capture: avg(done.filter((t) => t.bestStock > 0.05).map((t) => Math.max(-1, Math.min(1, t.stockReturn / t.bestStock)))),
+    capture: bear
+      ? avg(done.filter((t) => t.bestStock < -0.05).map((t) => Math.max(-1, Math.min(1, t.stockReturn / t.bestStock))))
+      : avg(done.filter((t) => t.bestStock > 0.05).map((t) => Math.max(-1, Math.min(1, t.stockReturn / t.bestStock)))),
   }
 }
 
@@ -307,5 +465,12 @@ export function replayModel({ bars, model, suite, opt = OPTION_MODEL, plan = EXI
     const g = gradeMoves(moves, runs[`${entryRule}:targets`].trades, sig, bars)
     return [entryRule, { graded: g, stats: moveStats(g) }]
   }))
-  return { sig, moves, runs, graded }
+  // Puts: put debit spreads on the sell side, per bear rule.
+  const drops = bigDrops(bars)
+  const puts = Object.fromEntries(BEAR_RULES.map(([rule]) => {
+    const trades = replayPutSpreads(bars, sig, { rule, opt, vol })
+    const g = gradeDrops(drops, trades, sig)
+    return [rule, { rule, trades, skipped: trades.skipped, stats: tradeStats(trades, { bear: true }), graded: g, dropStats: dropStats(g) }]
+  }))
+  return { sig, moves, runs, graded, drops, puts }
 }

@@ -145,6 +145,30 @@ export default function SignalRecord() {
             </Card>
           )}
 
+          {s.puts && (
+            <Card title="Puts">
+              <div className="text-xs text-muted -mt-1 mb-3">Put debit spreads on 2+ sell signals, under the spread rules: 90 days out, pay ≤ 40% of the width, +100% sell half, −50% out, out at 21 days</div>
+              <ul className="space-y-4">
+                {Object.values(s.puts).map((r) => {
+                  const open = r.drops.drops - r.drops.held
+                  return (
+                    <li key={r.rule} className="flex items-center gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm text-fg">{r.label}</div>
+                        <div className="mt-1 text-xs text-subtle font-mono-tab">{share(r.winRate)} win · {r.n} trades · {Math.round(r.avgDays ?? 0)} days · {share(r.bigLoss)} lost ½+</div>
+                        {open > 0 && <div className="text-[11px] text-muted">Caught {r.drops.caught} of {open} drops of −{share(s.drop_rule.minDrop)} in 3 months</div>}
+                      </div>
+                      <div className="text-right shrink-0">
+                        <div className={clsx('text-2xl font-semibold tracking-tight font-mono-tab leading-none', tone(r.avg))}>{pctS(r.avg)}</div>
+                        <div className="mt-1 text-[11px] text-muted">avg · median {pctS(r.median)}</div>
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            </Card>
+          )}
+
           {entry === 'confluence' && s.missed?.length > 0 && (
             <Card title="Biggest misses" flush>
               <ul className="divide-y divide-hairline">

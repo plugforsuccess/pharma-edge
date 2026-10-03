@@ -58,6 +58,7 @@ export default function ReplayCard({ bars, model, suite, onJumpDay }) {
   })
 
   const caughtOf = graded.stats.moves - graded.stats.held
+  const put = rp.puts?.falling ?? null
   return (
     <section className="bg-card border border-border rounded-2xl mb-4 overflow-hidden">
       <div className="px-5 pt-5">
@@ -85,6 +86,19 @@ export default function ReplayCard({ bars, model, suite, onJumpDay }) {
             <div className="h-full rounded-full bg-confluence" style={{ width: `${(graded.stats.caught / caughtOf) * 100}%` }} />
           </div>
           {graded.stats.avgKept != null && <div className="mt-1 text-[11px] text-muted">Kept {share(graded.stats.avgKept)} of each move caught</div>}
+        </div>
+      )}
+
+      {put && put.stats.n > 0 && (
+        <div className="px-5 pb-4">
+          <div className="flex items-baseline text-xs">
+            <span className="flex-1 text-subtle">Puts <span className="text-muted">· spreads on 2+ sell signals, 200-day falling</span></span>
+            <span className={clsx('font-mono-tab', put.stats.avg == null ? 'text-muted' : put.stats.avg < 0 ? 'text-rose-300' : 'text-green-400')}>{pctS(put.stats.avg)} avg</span>
+          </div>
+          <div className="mt-1 text-[11px] text-muted font-mono-tab">
+            {put.stats.n} trades · {share(put.stats.winRate)} win · {Math.round(put.stats.avgDays ?? 0)} days
+            {put.dropStats.drops - put.dropStats.held > 0 && <> · drops caught {put.dropStats.caught} of {put.dropStats.drops - put.dropStats.held}</>}
+          </div>
         </div>
       )}
 

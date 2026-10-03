@@ -18,6 +18,9 @@
 //                 before its signal (own record blended toward the pool,
 //                 like the ranking) — does "history says yes" beat "no"?
 //   by_year       the default strategy's trades by entry year (stability)
+//   puts          put debit spreads on 2+ sell signals (200-day falling /
+//                 any trend) under the spread rules: the same stats, big
+//                 drops (swing high then −20% within 3 months) caught
 //   spotlight     every trade for SPOTLIGHT tickers (default NOW)
 // → one row in replay_runs (mode write), or printed (dry-run).
 //
@@ -29,7 +32,7 @@ import { CHART_TICKERS } from '../src/lib/chartTickers.js'
 import { entryModel, HORIZONS } from '../src/utils/indicators.js'
 import { suiteModel } from '../src/utils/signalSuite.js'
 import { confluenceModel, blend, SHRINK_K } from '../src/utils/confluence.js'
-import { replayModel, tradeStats, moveStats, ENTRY_RULES, EXIT_RULES, OPTION_MODEL, MOVE } from '../src/utils/replay.js'
+import { replayModel, tradeStats, moveStats, dropStats, ENTRY_RULES, EXIT_RULES, BEAR_RULES, OPTION_MODEL, PUT_MODEL, MOVE, DROP } from '../src/utils/replay.js'
 import { EXIT_PLAYBOOK } from '../src/utils/afterTax.js'
 import { dailyBars, mapLimit, sources } from './lib/marketData.mjs'
 
@@ -46,7 +49,7 @@ const universe = (process.env.TICKERS ? process.env.TICKERS.split(',') : CHART_T
 
 const r4 = (x) => (x == null || !Number.isFinite(x) ? null : Math.round(x * 1e4) / 1e4)
 const compactTrade = (ticker, t) => ({
-  ticker, signal: t.signalT, entry: t.t, end: t.endT, open: t.open, stock: r4(t.stock), strike: r4(t.strike), cost: r4(t.cost),
+  ticker, signal: t.signalT, entry: t.t, end: t.endT, open: t.open, stock: r4(t.stock), strike: r4(t.strike ?? t.long), short: r4(t.short), cost: r4(t.cost),
   vol: r4(t.vol), option: r4(t.optionReturn), stockRet: r4(t.stockReturn), best: r4(t.bestStock), days: t.days, key: t.key,
   exits: t.exits.map((x) => ({ t: x.t, frac: r4(x.frac), mult: r4(x.mult), reason: x.reason })),
 })
@@ -135,6 +138,21 @@ async function main() {
 
   const walk = Object.fromEntries(EXIT_RULES.map(([exitRule]) => [exitRule, walkForward(results, exitRule)]))
 
+  const puts = {}
+  for (const [rule, label] of BEAR_RULES) {
+    const all = results.flatMap((r) => r.rp.puts[rule].trades.map((t) => ({ ...t, ticker: r.ticker })))
+    const closed = all.filter((t) => !t.open).sort((a, b) => b.optionReturn - a.optionReturn)
+    const graded = results.flatMap((r) => r.rp.puts[rule].graded.map((g) => ({ ...g, ticker: r.ticker })))
+    const why = {}
+    for (const g of graded) if (!g.caught && !g.held) why[g.why] = (why[g.why] ?? 0) + 1
+    const skipped = results.reduce((a, r) => a + (r.rp.puts[rule].skipped ?? 0), 0)
+    puts[rule] = {
+      rule, label, ...tradeStats(all, { bear: true }), skipped, drops: { ...dropStats(graded), why },
+      best: closed.slice(0, 5).map((t) => compactTrade(t.ticker, t)),
+      worst: closed.slice(-5).reverse().map((t) => compactTrade(t.ticker, t)),
+    }
+  }
+
   const byYear = {}
   for (const r of results) for (const t of r.rp.runs['confluence:targets'].trades) {
     const y = t.t.slice(0, 4)
@@ -147,6 +165,7 @@ async function main() {
     spotlight[r.ticker] = {
       runs: Object.fromEntries(Object.entries(r.rp.runs).map(([k, v]) => [k, { stats: v.stats, trades: v.trades.map((t) => compactTrade(r.ticker, t)) }])),
       moves: r.rp.graded.confluence.graded.map((g) => ({ low: g.lowT, peak: g.peakT, gain: r4(g.gain), caught: g.caught, held: !!g.held, why: g.why ?? null, kept: r4(g.kept ?? null) })),
+      puts: Object.fromEntries(Object.entries(r.rp.puts).map(([k, v]) => [k, { stats: v.stats, trades: v.trades.map((t) => compactTrade(r.ticker, t)) }])),
     }
   }
 
@@ -154,7 +173,7 @@ async function main() {
     as_of: asOf, tickers: results.length, universe: universe.length, failed: failed.length,
     sources: { ...sources }, seconds: Math.round((Date.now() - t0) / 1000),
     option_model: OPTION_MODEL, plan: { targets: EXIT_PLAYBOOK.targets, fractions: EXIT_PLAYBOOK.fractions, runnerTrailPct: EXIT_PLAYBOOK.runnerTrailPct, rollDays: EXIT_PLAYBOOK.rollDays },
-    move_rule: MOVE, runs, moves, missed, walk_forward: walk, by_year: years, spotlight,
+    move_rule: MOVE, drop_rule: DROP, put_model: PUT_MODEL, runs, moves, missed, walk_forward: walk, by_year: years, puts, spotlight,
   }
 
   const pct = (x) => (x == null ? '—' : `${x >= 0 ? '+' : ''}${(x * 100).toFixed(1)}%`)
@@ -166,6 +185,8 @@ async function main() {
   for (const [k, m] of Object.entries(moves)) console.log(`  ${k.padEnd(11)} ${m.caught}/${m.moves - m.held} caught (${pct(m.catchRate)}), kept ${pct(m.avgKept)} of the move · misses: ${JSON.stringify(m.why)}`)
   console.log('\nWalk-forward (confluence entries, history known before each signal):')
   for (const [k, w] of Object.entries(walk)) console.log(`  ${k.padEnd(8)} yes ${w.yes.n} avg ${pct(w.yes.avg)} win ${pct(w.yes.winRate)} · no ${w.no.n} avg ${pct(w.no.avg)} win ${pct(w.no.winRate)} · unknown ${w.unknown.n}`)
+  console.log('\nPuts (put debit spreads on 2+ sell signals):')
+  for (const [k, r] of Object.entries(puts)) console.log(`  ${k.padEnd(8)} ${String(r.n).padStart(5)} trades  win ${pct(r.winRate)}  avg ${pct(r.avg)}  median ${pct(r.median)}  ≤−50% ${pct(r.bigLoss)}  days ${Math.round(r.avgDays ?? 0)}  skipped ${r.skipped} · drops caught ${r.drops.caught}/${r.drops.drops - r.drops.held} (${pct(r.drops.catchRate)})`)
   for (const [t, s] of Object.entries(spotlight)) {
     console.log(`\n${t}:`)
     for (const tr of s.runs['confluence:targets'].trades) console.log(`  ${tr.entry} → ${tr.end}${tr.open ? ' (open)' : ''}  option ${pct(tr.option)}  stock ${pct(tr.stockRet)}  ${tr.exits.map((x) => `${x.reason}@${x.mult.toFixed(2)}x`).join(' ')}`)
