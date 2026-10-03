@@ -2,14 +2,16 @@ import { Suspense } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import {
   Activity,
+  Bot,
   Calculator,
+  ChartLine,
   Flame,
   Home,
-  Landmark,
   Plus,
+  Receipt,
   Settings,
-  Sparkles,
   Shield,
+  Wallet,
 } from 'lucide-react'
 import InstallPrompt from './InstallPrompt'
 import OnboardingGate from './OnboardingGate'
@@ -19,36 +21,32 @@ import clsx from 'clsx'
 import { FEATURES } from '../lib/features'
 
 // Bottom nav (mobile) + sidebar nav (desktop). LEAPS-first structure
-// (decided 2026-10-02, see CLAUDE.md "Product tiers & page plan"):
+// (owner, 2026-10-03, see CLAUDE.md "Product tiers & page plan"):
 //   /           → "Home"       (LEAPS dashboard)
-//   /leaps      → "Positions"  (after-tax value + Exit Targets)
-//   /simulator  → "Simulator"  (after-tax what-if sandbox, Pro)
-//   /reasoning  → "Research"   (research bot)
+//   /leaps      → "Portfolio"  (after-tax value + Exit Targets)
+//   /charts     → "Charts"     (holdings over time, after tax)
 //   /markets    → "Pulse"      (HeatPulse™ + King Board — Elite)
+//   /taxes      → "Taxes"      (tax if sold, long-term timing, losses)
 //   /settings   → "Settings"   (desktop rail; mobile via the Home header)
 //
-// Mobile: 4 tabs split 2/2 around a prominent center button, which is
-// the Simulator:  [Home] [Positions] (SIMULATOR) [Research] [Pulse]
+// Mobile: five equal tabs — Charts sits in the middle as a normal tab,
+// not a raised button. The Simulator and the LEAPS bot (/bot) are reached
+// from Home and the desktop rail.
 //
 // Hidden indefinitely (src/lib/features.js): Wheel, Picks, Log a Move,
 // signal / play detail, Flow, Leaderboard.
-const navLeft = [
+const navTabs = [
   { to: '/', icon: Home, label: 'Home' },
-  { to: '/leaps', icon: Landmark, label: 'Positions' },
-]
-const navRight = [
-  { to: '/reasoning', icon: Sparkles, label: 'Research' },
+  { to: '/leaps', icon: Wallet, label: 'Portfolio' },
+  { to: '/charts', icon: ChartLine, label: 'Charts' },
   { to: '/markets', icon: Activity, label: 'Pulse' },
+  { to: '/taxes', icon: Receipt, label: 'Taxes' },
 ]
-// Mobile center button (prominent, FAB-style).
-const navCenter = { to: '/simulator', icon: Calculator, label: 'Simulator' }
-// Desktop sidebar — every primary is a normal rail item.
+// Desktop sidebar — the tabs plus the tools.
 const navFull = [
-  { to: '/', icon: Home, label: 'Home' },
-  { to: '/leaps', icon: Landmark, label: 'Positions' },
+  ...navTabs,
+  { to: '/bot', icon: Bot, label: 'LEAPS bot' },
   { to: '/simulator', icon: Calculator, label: 'Simulator' },
-  { to: '/reasoning', icon: Sparkles, label: 'Research' },
-  { to: '/markets', icon: Activity, label: 'Pulse' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ]
 
@@ -133,7 +131,7 @@ export default function Layout() {
           ))}
         </nav>
         <div className="mt-auto px-3 text-[10px] text-muted leading-relaxed">
-          After-tax LEAPS, Exit Targets, research.
+          What you actually keep, after tax.
         </div>
       </aside>
 
@@ -157,32 +155,21 @@ export default function Layout() {
       <InstallPrompt />
       <OnboardingGate />
 
-      {/* Mobile-only bottom nav: 4 tabs split 2/2 around the
-          Simulator center button. */}
+      {/* Mobile-only bottom nav: five equal tabs, pinned to the bottom
+          edge. Anchored with insets, not a centering transform — a
+          transform on a fixed, blurred bar makes iOS Safari let it drift
+          while scrolling. Solid, so page text never shows through the
+          labels. The bar spans the screen; the tabs stay in the 448px
+          column. */}
       <nav
-        className="lg:hidden fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md
-                   glass border-t border-border/80 px-2 pt-2 z-50"
-        style={{ paddingBottom: 'calc(0.6rem + env(safe-area-inset-bottom))' }}
+        className="lg:hidden fixed inset-x-0 bottom-0 z-50 bg-bg border-t border-border/80"
+        style={{
+          paddingBottom: 'calc(0.6rem + env(safe-area-inset-bottom))',
+        }}
         aria-label="Primary"
       >
-        <div className="grid grid-cols-5 items-end relative">
-          {navLeft.map(({ to, icon: Icon, label }) => (
-            <BottomTab key={to} to={to} icon={Icon} label={label} />
-          ))}
-          <div className="flex justify-center relative">
-            <button
-              type="button"
-              onClick={() => navigate(navCenter.to)}
-              aria-label={navCenter.label}
-              className="tap-bounce absolute -top-7 w-14 h-14 rounded-full bg-amber-400 hover:bg-amber-300 text-bg shadow-[0_4px_16px_rgba(240, 180, 76,0.45)] hover:shadow-[0_6px_22px_rgba(240, 180, 76,0.55)] flex items-center justify-center"
-            >
-              <navCenter.icon size={22} strokeWidth={2.5} />
-            </button>
-            <span className="text-[10px] font-medium tracking-wide text-muted mt-7">
-              {navCenter.label}
-            </span>
-          </div>
-          {navRight.map(({ to, icon: Icon, label }) => (
+        <div className="mx-auto max-w-md px-2 pt-2 grid grid-cols-5 items-end">
+          {navTabs.map(({ to, icon: Icon, label }) => (
             <BottomTab key={to} to={to} icon={Icon} label={label} />
           ))}
         </div>

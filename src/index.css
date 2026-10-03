@@ -147,6 +147,13 @@ body,
   -webkit-tap-highlight-color: transparent;
 }
 
+/* No rubber-band bounce past the page ends — it drags the fixed bottom
+   nav off the screen edge on iOS. */
+html,
+body {
+  overscroll-behavior-y: none;
+}
+
 /* Ambient page texture — subtle radial vignette + grain */
 body {
   background-image:
