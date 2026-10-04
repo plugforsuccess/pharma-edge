@@ -1372,6 +1372,36 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   latest. Both Actions jobs fetch bars through `scripts/lib/marketData.mjs`:
   Yahoo with the cookie + crumb session (runners get 429 without it), else
   the `leaps-entry` edge function with the service-role key.
+- **Rule optimizer** (owner, 2026-10-04: "do everything mathematically
+  possible to get the guarantee closest to 1.0" — advised: 1.0 is a
+  statement about the future; what can be pushed is out-of-sample
+  expectancy). `src/utils/optimizer.js` (`npm run optimizer:check`):
+  entry grid (minScore 2|3 × window 3|5|10 × trend rising|any|above50|
+  rising50 × required signal none|zone|bravo|echo|tango|macd = 144) ×
+  exit grid (t1 × t2 × trail × targets|both × delta 0.6|0.75|0.9 × DTE
+  540|730 = 432), searched in stages (entries with the default exit →
+  top 5 per fold × every exit → entries again with the best exit).
+  Score = mean option return (open marked) − 0.5 × share lost ≥ 50%,
+  × n/(n+30). **Walk-forward** by signal date: fold A trains < 2024,
+  tests 2024; fold B trains < 2025, tests 2025→. The rule is chosen on
+  train and reported on test; the final rule is chosen on everything but
+  its expected numbers are the folds' test results. Also the Pareto
+  frontier (catch rate vs average) and by-year. `scripts/optimize-entries.mjs`
+  in `.github/workflows/optimize-entries.yml` (Sundays, dispatch, branch
+  pushes) → one `optimizer_runs` row (authenticated SELECT). Signal
+  record shows it first as **Best rule found** (vs today's rule, fold by
+  fold, the trade-off list). **It never changes the app's rules** —
+  adopting a found rule is the owner's call, after it holds up out of
+  sample. No tuning to one chart (the NOW rally): a rule tuned to one
+  chart fits that chart and fails forward. **First run (2026-10-04,
+  545 tickers, 4,588 candidates, 9 min):** best rule = 3+ buy signals
+  within 3 days with MACD among them, 200-day rising → 60-delta call,
+  sell 70% at 3x, 15% at 5x, trail 40%. Out of sample +38% avg / 46%
+  win / 31% lost half / catch 11% on 441 trades vs today's rule +18% /
+  48% / 26% / catch 20% on 948. Both folds picked the same exit but
+  different entries (`stable: false`); the lift is in the average (fat
+  right tail), not the median (−10% vs −5%) or the win rate — not
+  adopted.
 - **Signal suite on the entry chart** (owner, 2026-10-03: "for better
   entries and sell signals"). A JS port of the TradingView suite in
   `plugforsuccess/wiley-indicator-suite` (Bravo trend, Echo momentum,
@@ -1603,6 +1633,9 @@ Periodic   — monitor-positions.yml
 5:40pm ET  — confluence-rank.yml (weekdays, 21:40 UTC)
              Ranks ~564 tickers on buy / sell confluence → confluence_ranks
              + confluence_pool; top-10 alerts (bell + Resend email placeholder)
+
+Sunday     — optimize-entries.yml (15:23 UTC)
+             Entry × exit rule search, walk-forward → optimizer_runs (/charts/record)
 
 Saturday   — replay-universe.yml (14:17 UTC)
              Day-by-day LEAPS replay of every ticker → replay_runs (/charts/record)
