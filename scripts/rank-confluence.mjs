@@ -32,7 +32,7 @@ import { entryModel, HORIZONS } from '../src/utils/indicators.js'
 import { suiteModel } from '../src/utils/signalSuite.js'
 import { confluenceModel, poolStats, blendedEstimate, MIN_SCORE, SIDES } from '../src/utils/confluence.js'
 import { dailyBars, mapLimit, sources } from './lib/marketData.mjs'
-import { blockers, buyVerdict, sellVerdict, tradeSpec, structureStop } from './lib/verdict.mjs'
+import { blockers, buyVerdict, sellVerdict, tradeSpec, structureStop, momentum } from './lib/verdict.mjs'
 
 const args = process.argv.slice(2)
 const MODE = (args[args.indexOf('--mode') + 1] && args.includes('--mode')) ? args[args.indexOf('--mode') + 1] : 'dry-run'
@@ -59,7 +59,7 @@ export function analyze(ticker, bars) {
     trendUp: model.status.slope200 != null && model.status.slope200 > 0,
     conditionsMet: ['band', 'rising', 'trend', 'rsi', 'iv'].filter((k) => c[k]).length,
     etbConvergence: etbToday,
-    cond: c, blockers: blockers(model), trade: tradeSpec(bars), stop: structureStop(bars),
+    cond: c, blockers: blockers(model), trade: tradeSpec(bars), stop: structureStop(bars), momentum: momentum(suite),
     buy: { today: conf.buy.today, setups: conf.buy.setups, lastSignal: lastSignal(conf.buy.flags) },
     sell: { today: conf.sell.today, setups: conf.sell.setups, lastSignal: lastSignal(conf.sell.flags) },
   }
@@ -88,7 +88,7 @@ export function rankAll(results, pools) {
         last_signal: r[side].lastSignal, etb_convergence: side === 'buy' ? r.etbConvergence : false, rank: null,
         verdict: side === 'buy' ? buyVerdict({ score: now?.score ?? 0, trendUp: r.trendUp, cond: r.cond }) : sellVerdict({ score: now?.score ?? 0, lit: now?.lit ?? [] }),
         blockers: side === 'buy' ? r.blockers : null, trade: side === 'buy' ? r.trade : null,
-        stop_price: r.stop?.price ?? null, stop_date: r.stop?.date ?? null,
+        stop_price: r.stop?.price ?? null, stop_date: r.stop?.date ?? null, momentum: r.momentum,
       }
       rows.push(row)
       // Eligible: 2+ signals (buy: with the 200-day rising). The setup's

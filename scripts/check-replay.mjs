@@ -232,7 +232,7 @@ eq('put at expiry = intrinsic', bsPut(80, 100, 0, 0.2), 20)
 {
   const bars = market(1000, 11)
   const m = replayModel({ bars, model: entryModel(bars), suite: suiteModel(bars) })
-  eq('fifteen entry × exit runs', Object.keys(m.runs).length, 15)
+  eq('eighteen entry × exit runs', Object.keys(m.runs).length, 18)
   eq('two put runs', Object.keys(m.puts).length, 2)
   eq('put trades enter after their signal', Object.values(m.puts).every((r) => r.trades.every((t) => t.i === t.signalI + 1)), true)
   eq('every trade enters after its signal', Object.values(m.runs).every((r) => r.trades.every((t) => t.i === t.signalI + 1)), true)

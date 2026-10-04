@@ -47,7 +47,7 @@ export default function ConfluenceLeaders({ mine = [] }) {
     let cancelled = false
     setRows(null)
     let q = supabase.from('confluence_ranks')
-      .select('ticker, side, as_of, close, score, lit, rank, est_3m, est_6m, own_n, pool_n, verdict, blockers, trade, stop_price')
+      .select('ticker, side, as_of, close, score, lit, rank, est_3m, est_6m, own_n, pool_n, verdict, blockers, trade, stop_price, momentum')
       .eq('side', side)
     q = scope === 'all'
       ? q.not('rank', 'is', null).order('rank').limit(10)
@@ -114,7 +114,7 @@ export default function ConfluenceLeaders({ mine = [] }) {
                     <span className="flex-1 min-w-0">
                       <span className="flex items-center gap-2">
                         <span className="text-sm font-semibold text-fg">{r.ticker}</span>
-                        {v && <span className={clsx('px-1.5 rounded border text-[11px] font-semibold tracking-wide', v[1])}>{v[0]}</span>}
+                        {v && <span className={clsx('px-1.5 rounded border text-[11px] font-semibold tracking-wide', v[1])}>{v[0]}{r.verdict === 'enter' && (r.momentum === 'up' ? ' · confirmed' : r.momentum === 'down' ? ' · early' : '')}</span>}
                         <span className="text-xs text-muted font-mono-tab">{money(r.close)}</span>
                       </span>
                       <span className="block mt-0.5 text-xs text-subtle">
@@ -128,6 +128,11 @@ export default function ConfluenceLeaders({ mine = [] }) {
                         <span className="block mt-0.5 text-xs text-fg font-mono-tab">
                           Call · {money(trade.strike, 0)} strike · {monthYear(trade.expiry)} · ~{money(trade.cost)}/sh · {k(perContract)} a contract
                           {accountSize && <> · {(perContract / accountSize * 100).toFixed(1)}% of account</>}
+                        </span>
+                      )}
+                      {r.verdict === 'enter' && r.momentum && (
+                        <span className={clsx('block mt-0.5 text-xs', r.momentum === 'up' ? 'text-green-400' : 'text-amber-400')}>
+                          {r.momentum === 'up' ? 'Momentum has turned up.' : 'Momentum still down — the rule enters now; a cautious entry waits for it to turn up.'}
                         </span>
                       )}
                       {side === 'buy' && r.verdict && r.stop_price != null && (

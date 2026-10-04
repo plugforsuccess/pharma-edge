@@ -14,7 +14,7 @@ const pctS = (x) => (x == null ? '—' : Math.abs(x) < 0.005 ? '0%' : `${x >= 0 
 const share = (x) => (x == null ? '—' : `${Math.round(x * 100)}%`)
 const day = (t) => (t ? new Date(`${t}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit', timeZone: 'UTC' }).replace(/, (\d\d)$/, ' ’$1') : '')
 const tone = (x) => (x == null ? 'text-muted' : x < 0 ? 'text-rose-300' : 'text-green-400')
-const ENTRIES = [['confluence', 'Confluence'], ['zone', 'Buy zone'], ['bravo', 'Bravo ◆'], ['recovery', 'Recovery']]
+const ENTRIES = [['confluence', 'Confluence'], ['zone', 'Buy zone'], ['zoneConfirmed', 'Buy zone · momentum up'], ['bravo', 'Bravo ◆'], ['recovery', 'Recovery']]
 const EXITS = [
   ['targets', 'Exit targets', '70% at 2x · 15% at 3x · trail the rest'],
   ['signals', 'Sell signals', 'All out on 2+ sell signals'],

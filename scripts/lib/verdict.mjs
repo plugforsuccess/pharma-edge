@@ -48,6 +48,14 @@ export function buyVerdict({ score, trendUp, cond }) {
   return cond?.all ? 'enter' : 'wait'
 }
 
+// Bravo's regime at the close: 'up' = close and fast EMA above the basis.
+// ENTER + down is an early entry (the dip is still in progress); ENTER + up
+// is confirmed.
+export function momentum(suite) {
+  const r = suite?.bravo?.regime
+  return Array.isArray(r) && r[r.length - 1] === 1 ? 'up' : 'down'
+}
+
 export function sellVerdict({ score, lit }) {
   if (score < MIN_SCORE) return null
   return lit.includes('ext') ? 'extended' : 'turning'
