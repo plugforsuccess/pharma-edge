@@ -175,7 +175,9 @@ async function main() {
   for (let i = 0; i < rows.length; i += batchSize) {
     const batch = rows.slice(i, i + batchSize)
     try {
-      await db.from('confluence_ranks').upsert(batch, { onConflict: 'side,ticker,as_of' })
+      const { data, error, status } = await db.from('confluence_ranks').upsert(batch, { onConflict: 'side,ticker,as_of' })
+      console.log(`confluence_ranks batch ${Math.floor(i / batchSize) + 1}: status=${status}, rows=${data?.length ?? '?'}, error=${error?.message ?? 'none'}`)
+      if (error) throw error
     } catch (e) {
       throw new Error(`confluence_ranks batch ${Math.floor(i / batchSize) + 1} failed: ${e.message}`)
     }
@@ -186,7 +188,9 @@ async function main() {
     for (let i = 0; i < pool.length; i += batchSize) {
       const batch = pool.slice(i, i + batchSize)
       try {
-        await db.from('confluence_pool').upsert(batch, { onConflict: 'side,combo' })
+        const { data, error, status } = await db.from('confluence_pool').upsert(batch, { onConflict: 'side,combo' })
+        console.log(`confluence_pool batch ${Math.floor(i / batchSize) + 1}: status=${status}, rows=${data?.length ?? '?'}, error=${error?.message ?? 'none'}`)
+        if (error) throw error
       } catch (e) {
         throw new Error(`confluence_pool batch ${Math.floor(i / batchSize) + 1} failed: ${e.message}`)
       }
