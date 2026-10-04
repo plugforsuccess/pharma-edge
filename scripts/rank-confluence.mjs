@@ -30,7 +30,7 @@
 import { CHART_TICKERS } from '../src/lib/chartTickers.js'
 import { entryModel, HORIZONS } from '../src/utils/indicators.js'
 import { suiteModel } from '../src/utils/signalSuite.js'
-import { confluenceModel, poolStats, blendedEstimate, MIN_SCORE, SIDES, etbConvergence } from '../src/utils/confluence.js'
+import { confluenceModel, poolStats, blendedEstimate, MIN_SCORE, SIDES } from '../src/utils/confluence.js'
 import { dailyBars, mapLimit, sources } from './lib/marketData.mjs'
 
 const args = process.argv.slice(2)
@@ -49,11 +49,10 @@ export function analyze(ticker, bars) {
   const suite = suiteModel(bars)
   const conf = confluenceModel({ bars, model, suite, horizons: HORIZONS })
   const lastIdx = bars.length - 1
-  const lastSignal = (flags) => { for (let i = lastIdx; i >= Math.max(0, lastIdx - 10); i--) if (Object.values(flags).some((f) => f[i])) return bars[i].t; return null }
+  const lastSignal = (flags) => { for (let i = lastIdx; i >= Math.max(0, lastIdx - 10); i--) if (Object.values(flags).filter((f) => f && Array.isArray(f)).some((f) => f[i])) return bars[i].t; return null }
   const c = model.status.cond
-  // E+T+B convergence: today's setup is an E+T+B convergence if all three fired within 10 bars
-  const buyEtb = etbConvergence(conf.buy.flags, 10)
-  const etbToday = buyEtb[lastIdx]?.fired ?? false
+  // E+T+B convergence already computed in confluenceFlags; get today's value
+  const etbToday = conf.buy.flags.etb?.[lastIdx]?.fired ?? false
   return {
     ticker, asOf: bars[lastIdx].t, close: bars[lastIdx].c,
     trendUp: model.status.slope200 != null && model.status.slope200 > 0,
