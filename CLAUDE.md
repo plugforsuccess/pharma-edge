@@ -1305,8 +1305,12 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   each ticker's own record of today's combination toward the pool
   (`blendedEstimate`: (n·own + 10·pool) / (n + 10)) and ranks
   (`confluence_ranks`, one row per side × ticker, rank NULL = not
-  eligible): **buy** = score ≥ 2, 200-day rising, blended 6M avg > 0, best
-  6M first; **sell** = score ≥ 2, blended 3M avg < 0, most negative first.
+  eligible): **buy** = score ≥ 2, 200-day rising; **sell** = score ≥ 2;
+  most signals first, then buy-zone conditions, then the fresher signal,
+  then the blended history **as a tiebreaker only** (owner, 2026-10-04:
+  the universe replay's walk-forward test found "history says yes"
+  trades did no better than "history says no" — +40% vs +52% avg on the
+  targets exit — so history no longer gates or sorts the ranking).
   Both tables are shared market data (authenticated SELECT, service-role
   write). Charts opens with **Confluence leaders** (Buy · lows / Sell ·
   highs, Top 10 / Yours = Tracking + holdings; rows open the entry chart);
@@ -1324,7 +1328,11 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   (`npm run replay:check`, which also proves no look-ahead: each day's
   signals equal a model built on the bars up to that day) walks a ticker
   day by day: entry rules **Confluence** (buy score reaching 2, 200-day
-  rising), **Buy zone** (turns YES), **Bravo ◆** (200-day rising); a signal
+  rising), **Buy zone** (turns YES), **Bravo ◆** (200-day rising),
+  **Recovery** (owner, 2026-10-04: buy score reaching 2 while the 200-day
+  is falling and the close is above the 50-day — the first universe run
+  showed the trend rule refusing 985 of 1,451 +30% rallies, NOW's Jun 2026
+  +84% among them; a test, not a suggestion); a signal
   at a close buys the next open; the call is ~730 DTE at 0.75 delta,
   **priced with Black-Scholes** from trailing 60-day vol (floor 15%), 2%
   slippage per fill — estimates, not quotes. Exits: **Targets** (the exit
@@ -1336,6 +1344,11 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   the low to the half-way bar; misses say why (200-day falling / no or one
   signal / late / already holding). The entry chart's **Replay** card runs
   it live (rules saved in `cm:replay-rules`; rows jump the chart).
+  **First universe results (2026-10-03, 545 tickers):** Confluence →
+  Targets 1,424 trades, 61% win, +37% avg; → Both 66% win, +40% avg,
+  +93% median; sell-signal-only exits lose (−1% to −2%, 20–30 days);
+  big moves caught 22%, kept 67% of each; puts (spreads on 2+ sell
+  signals) lose: 29% win, −9% avg, a third lost half — **not suggested**.
   **Puts** (owner, 2026-10-03: "have we considered puts?" — advised: test
   before suggesting; long-dated puts fight the drift, so the test is
   **put debit spreads under the spread rules**): `replayPutSpreads` —

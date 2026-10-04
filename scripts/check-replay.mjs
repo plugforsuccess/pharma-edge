@@ -68,7 +68,7 @@ function market(n, seed = 7) {
   for (let t = 320; t < bars.length; t += 37) {
     const pre = bars.slice(0, t + 1)
     const s = replaySignals(pre, entryModel(pre), suiteModel(pre))
-    for (const rule of ['confluence', 'zone', 'bravo']) if (s.entry[rule][t] !== full.entry[rule][t]) mismatches++
+    for (const rule of ['confluence', 'zone', 'bravo', 'recovery']) if (s.entry[rule][t] !== full.entry[rule][t]) mismatches++
     if (s.sell[t] !== full.sell[t]) mismatches++
     if (s.bear.falling[t] !== full.bear.falling[t] || s.bear.any[t] !== full.bear.any[t] || s.buyOn[t] !== full.buyOn[t]) mismatches++
     if (s.buyScore[t] !== full.buyScore[t] || s.sellScore[t] !== full.sellScore[t]) mismatches++
@@ -78,6 +78,10 @@ function market(n, seed = 7) {
   eq('no look-ahead in any signal', mismatches, 0)
   const anyEntry = ['confluence', 'zone', 'bravo'].some((r) => full.entry[r].some(Boolean))
   eq('the synthetic market produces entries', anyEntry, true)
+  // Recovery never fires while the 200-day is rising, and never on the
+  // same bar as a confluence entry.
+  eq('recovery only while the 200-day falls', full.entry.recovery.every((x, i) => !x || !full.rising[i]), true)
+  eq('recovery and confluence are disjoint', full.entry.recovery.every((x, i) => !(x && full.entry.confluence[i])), true)
 }
 
 // Trade mechanics on a hand-made path: flat 300 bars, then a steady rise.
@@ -228,7 +232,7 @@ eq('put at expiry = intrinsic', bsPut(80, 100, 0, 0.2), 20)
 {
   const bars = market(1000, 11)
   const m = replayModel({ bars, model: entryModel(bars), suite: suiteModel(bars) })
-  eq('nine entry × exit runs', Object.keys(m.runs).length, 9)
+  eq('twelve entry × exit runs', Object.keys(m.runs).length, 12)
   eq('two put runs', Object.keys(m.puts).length, 2)
   eq('put trades enter after their signal', Object.values(m.puts).every((r) => r.trades.every((t) => t.i === t.signalI + 1)), true)
   eq('every trade enters after its signal', Object.values(m.runs).every((r) => r.trades.every((t) => t.i === t.signalI + 1)), true)

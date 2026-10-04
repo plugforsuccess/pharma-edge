@@ -22,6 +22,7 @@ const RULE_TEXT = {
   confluence: '2+ buy signals, 200-day rising',
   zone: 'Buy zone turns YES',
   bravo: 'Bravo bull ◆, 200-day rising',
+  recovery: '2+ buy signals, 200-day falling, close above the 50-day',
   targets: `${share(p.fractions[0])} at ${1 + p.targets[0]}x · ${share(p.fractions[1])} at ${1 + p.targets[1]}x · trail the rest ${share(p.runnerTrailPct)}`,
   signals: 'All out on 2+ sell signals',
   both: `${share(p.fractions[0])} at ${1 + p.targets[0]}x, then 2+ sell signals`,
