@@ -175,18 +175,40 @@ async function main() {
   const now = new Date().toISOString()
   const rowsWithTimestamp = rows.map((r) => ({ ...r, updated_at: now }))
 
+  console.log(`Upserting ${rowsWithTimestamp.length} rank rows in batches of ${batchSize}...`)
   for (let i = 0; i < rowsWithTimestamp.length; i += batchSize) {
     const batch = rowsWithTimestamp.slice(i, i + batchSize)
-    const { error } = await db.from('confluence_ranks').upsert(batch, { onConflict: 'side,ticker' })
-    if (error) throw new Error(`confluence_ranks batch ${Math.floor(i / batchSize) + 1}: ${error.message}`)
+    const batchNum = Math.floor(i / batchSize) + 1
+    try {
+      const { data, error, status } = await db.from('confluence_ranks').upsert(batch, { onConflict: 'side,ticker' })
+      if (error) {
+        console.error(`Batch ${batchNum} error (status ${status}):`, error)
+        throw new Error(`confluence_ranks batch ${batchNum}: ${error.message || JSON.stringify(error)}`)
+      }
+      console.log(`  Batch ${batchNum}/${Math.ceil(rowsWithTimestamp.length / batchSize)} done`)
+    } catch (e) {
+      console.error(`Batch ${batchNum} exception:`, e.message)
+      throw e
+    }
   }
 
   // Same for pool (already has updated_at from poolRows)
   if (pool.length > 0) {
+    console.log(`Upserting ${pool.length} pool rows in batches of ${batchSize}...`)
     for (let i = 0; i < pool.length; i += batchSize) {
       const batch = pool.slice(i, i + batchSize)
-      const { error } = await db.from('confluence_pool').upsert(batch, { onConflict: 'side,combo' })
-      if (error) throw new Error(`confluence_pool batch ${Math.floor(i / batchSize) + 1}: ${error.message}`)
+      const batchNum = Math.floor(i / batchSize) + 1
+      try {
+        const { data, error, status } = await db.from('confluence_pool').upsert(batch, { onConflict: 'side,combo' })
+        if (error) {
+          console.error(`Pool batch ${batchNum} error (status ${status}):`, error)
+          throw new Error(`confluence_pool batch ${batchNum}: ${error.message || JSON.stringify(error)}`)
+        }
+        console.log(`  Pool batch ${batchNum}/${Math.ceil(pool.length / batchSize)} done`)
+      } catch (e) {
+        console.error(`Pool batch ${batchNum} exception:`, e.message)
+        throw e
+      }
     }
   }
   console.log(`\nWrote ${rows.length} rank rows and ${pool.length} pool rows.`)
