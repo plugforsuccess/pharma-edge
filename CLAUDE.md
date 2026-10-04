@@ -1323,8 +1323,19 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   price (0.75Δ, ~730 DTE, Black-Scholes on 60-day vol — an estimate, not
   a quote), its cost per contract and % of `profiles.account_size`, and
   the structure stop (last confirmed swing low under the close).
+  **Momentum beside the verdict** (owner, 2026-10-04: AMCR showed a buy
+  zone YES next to a Bravo bear — not a contradiction: the buy zone is a
+  dip-buying model and fires while short-term momentum is still down):
+  `confluence_ranks.momentum` = 'up' when Bravo's regime is bull at the
+  close, else 'down'; ENTER rows read "ENTER · early" / "ENTER · confirmed"
+  with a one-line explanation, the entry chart's status card says the same
+  under YES, and the Signal suite's "Sell" tile is labelled "Momentum" while
+  the buy zone is YES (nobody without a position has anything to sell).
+  The cautious entry is a replay rule, `zoneConfirmed` (zone YES and Bravo
+  regime bull) — measured against the plain zone on Signal record, never
+  assumed better (the Hardening confirmation test cost more than it saved).
   Computed nightly in `scripts/lib/verdict.mjs` → `confluence_ranks.verdict
-  / blockers / trade / stop_price / stop_date`;
+  / blockers / trade / stop_price / stop_date / momentum`;
   the entry card falls back to the pool's record ("across 564 tickers:
   312×") when the ticker has < 5 cases. **Alerts** (full mode, users with
   entry alerts on): a Tracking / holding ticker entering the buy top 10

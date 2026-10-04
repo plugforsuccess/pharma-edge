@@ -264,9 +264,9 @@ export default function LeapsEntry() {
       ) : (
         <div className="md:grid md:grid-cols-[1fr_280px] md:gap-x-5 md:items-start">
           <div className="min-w-0 md:order-1">
-            <StatusPanel s={s} model={model} params={params} suite={suite} confirmDays={confirmDays} tfLabel={SUITE_TIMEFRAMES[suiteTf].label.toLowerCase()} conf={conf} pool={pool} />
+            <StatusPanel s={s} model={model} params={params} suite={suite} dailySuite={dailySuite} confirmDays={confirmDays} tfLabel={SUITE_TIMEFRAMES[suiteTf].label.toLowerCase()} conf={conf} pool={pool} />
             {<SuitePanel pack={suitePack} failed={suiteData?.error && suiteData.tf === suiteTf} tf={suiteTf} onTf={pickSuiteTf} holdings={holdings} onJump={jumpPeriod} onOpenPane={setExpanded}
-              />}
+              buyZone={!!s?.cond?.all} />}
           </div>
 
           {/* Chart */}
@@ -414,7 +414,10 @@ function Key({ glyph, className, children }) {
   )
 }
 
-function StatusPanel({ s, model, params, suite, confirmDays, tfLabel, conf, pool }) {
+function StatusPanel({ s, model, params, suite, dailySuite, confirmDays, tfLabel, conf, pool }) {
+  // Momentum beside the verdict (owner, 2026-10-04): a YES next to a Bravo
+  // bear is an early entry (the dip is still in progress), not a contradiction.
+  const momentumUp = dailySuite?.bravo?.regime?.[dailySuite.bravo.regime.length - 1] === 1
   const c = s.cond
   const yes = c.all
   const met = countMet(c)
@@ -474,6 +477,13 @@ function StatusPanel({ s, model, params, suite, confirmDays, tfLabel, conf, pool
             {yes ? 'Every condition is met today.' : `${met} of 5 conditions met.`}
             {lastTrade && !yes && <span className="text-muted"> Last signal {day(lastTrade.t)}.</span>}
           </div>
+          {yes && dailySuite && (
+            <div className={clsx('text-xs mt-1.5', momentumUp ? 'text-green-400' : 'text-amber-400')}>
+              {momentumUp
+                ? 'Momentum has turned up — a confirmed entry.'
+                : 'Short-term momentum is still down (Bravo below its basis). The rule enters now; a cautious entry waits for Bravo to turn up.'}
+            </div>
+          )}
           {!yes && s.sma200 && (
             <div className="text-xs mt-1.5 text-subtle">
               Entry price zone <span className="font-mono-tab text-fg">{money(s.sma200 * (1 - params.bandPct / 100))}–{money(s.sma200 * (1 + params.bandPct / 100))}</span>
@@ -777,7 +787,7 @@ function Backtest({ model, suite, pack, conf, confirmDays, onJumpDay, onJumpPeri
 // fresh exit, else the latest) tiles — tap to see it on the chart —
 // then one row per pillar (Echo / Tango open their pane full screen; Bravo
 // turns its band on), then the user's positions in this ticker.
-function SuitePanel({ pack, failed, tf, onTf, holdings, onJump, onOpenPane }) {
+function SuitePanel({ pack, failed, tf, onTf, holdings, onJump, onOpenPane, buyZone = false }) {
   const header = (
     <div className="px-5 pt-5 pb-4 flex items-center gap-3">
       <h2 className="flex-1 text-sm font-semibold">Signal suite</h2>
@@ -857,9 +867,9 @@ function SuitePanel({ pack, failed, tf, onTf, holdings, onJump, onOpenPane }) {
           title={bull ? (FEATURES.hardening ? 'Hardening bull' : 'Bravo bull') : 'No bull signal'}
           stars={bull?.stars}
           sub={bull ? `${agoText(ago(bull.pi))} · $${bull.price.toFixed(2)}` : `None since ${since}`} />
-        <SignalTile tone={!sell ? 'idle' : sell.kind === 'bear' && bearFresh ? 'sell' : exitFresh && sell.kind === 'exit' ? 'trim' : 'idle'} icon={ArrowDown} label="Sell"
+        <SignalTile tone={!sell ? 'idle' : sell.kind === 'bear' && bearFresh ? 'sell' : exitFresh && sell.kind === 'exit' ? 'trim' : 'idle'} icon={ArrowDown} label={buyZone ? 'Momentum' : 'Sell'}
           onClick={jumpable(sell?.e)}
-          title={!sell ? 'No sell signal' : sell.kind === 'bear' ? (FEATURES.hardening ? 'Hardening bear' : 'Bravo bear') : 'Exit signal'}
+          title={!sell ? (buyZone ? 'No down signal' : 'No sell signal') : sell.kind === 'bear' ? (buyZone ? 'Down · Bravo bear' : FEATURES.hardening ? 'Hardening bear' : 'Bravo bear') : buyZone ? 'Down · exit signal' : 'Exit signal'}
           stars={sell?.kind === 'bear' ? sell.e.stars : null}
           sub={!sell ? `None since ${since}` : sell.kind === 'bear' ? `${agoText(ago(sell.e.pi))} · $${sell.e.price.toFixed(2)}`
             : `${agoText(ago(sell.e.pi))} · ${sell.e.why.map((w) => WHY[w]).join(', ')}`} />

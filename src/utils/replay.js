@@ -33,6 +33,10 @@ export const ENTRY_RULES = [
   ['confluence', 'Confluence'],
   ['etb', 'E+T+B (1–2 week convergence)'],
   ['zone', 'Buy zone'],
+  // Confirmed (owner, 2026-10-04: a buy zone YES beside a Bravo bear read as
+  // a contradiction): the zone is YES *and* Bravo's regime is bull — the
+  // cautious entry, to be measured against the plain zone, not assumed better.
+  ['zoneConfirmed', 'Buy zone · momentum up'],
   ['bravo', 'Bravo ◆'],
   // Recovery (owner, 2026-10-04): the universe replay showed the 200-day
   // rule throwing away two-thirds of the +30% rallies (post-crash
@@ -159,6 +163,7 @@ export function replaySignals(bars, model, suite, window = DEFAULT_WINDOW) {
       confluence: buy.map((s, i) => rising[i] && s.score >= MIN_SCORE && (i === 0 || buy[i - 1].score < MIN_SCORE)),
       etb: etbFired.map((fired, i) => fired && rising[i] && (i === 0 || !etbFired[i - 1])),
       zone: zone.map((z, i) => z && !zone[i - 1]),
+      zoneConfirmed: zone.map((z, i) => z && suite.bravo.regime[i] === 1 && !(zone[i - 1] && suite.bravo.regime[i - 1] === 1)),
       bravo: suite.bravo.bullOn.map((x, i) => !!x && rising[i]),
       recovery: buy.map((s, i) => !rising[i] && model.s50[i] != null && model.closes[i] > model.s50[i]
         && s.score >= MIN_SCORE && (i === 0 || buy[i - 1].score < MIN_SCORE)),
