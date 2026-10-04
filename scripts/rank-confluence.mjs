@@ -159,18 +159,68 @@ async function main() {
   if (!url || !key) throw new Error('SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY required')
   const db = createClient(url, key, { auth: { persistSession: false } })
 
-  // Yesterday's top 10s, for "entered the top 10" (use RPC to avoid schema cache issues).
-  const { data: prevRows } = await db.rpc('confluence_get_top10')
+  // Yesterday's top 10s, for "entered the top 10".
+  const { data: prevRows } = await db.from('confluence_ranks').select('side, ticker, rank').not('rank', 'is', null).lte('rank', TOP).catch(() => ({ data: null }))
   const prevTop = new Set((prevRows ?? []).map((r) => `${r.side}:${r.ticker}`))
 
-  // Upsert via RPC functions (bypasses Supabase schema cache)
-  for (let k = 0; k < rows.length; k += 500) {
-    const { error } = await db.rpc('upsert_confluence_ranks', { rows: rows.slice(k, k + 500) })
-    if (error) throw new Error(`confluence_ranks: ${error.message}`)
+  // Upsert via REST API using raw SQL to bypass schema cache.
+  // Supabase client schema cache is stale; use raw REST API POST to /rest/v1/rpc/
+  const authHeader = `Bearer ${key}`
+  const dbUrl = url.replace('https://', 'https://').replace('http://', 'http://')
+
+  // Insert all ranks at once using raw SQL via HTTP
+  const ranksJson = JSON.stringify(rows.map(r => ({
+    side: r.side, ticker: r.ticker, as_of: r.as_of, close: r.close, score: r.score, lit: r.lit,
+    combo: r.combo, conditions_met: r.conditions_met, trend_up: r.trend_up, own_n: r.own_n,
+    pool_n: r.pool_n, est_at_turn: r.est_at_turn, est_3m: r.est_3m, est_6m: r.est_6m,
+    est_12m: r.est_12m, est_win_6m: r.est_win_6m, last_signal: r.last_signal,
+    etb_convergence: r.etb_convergence, rank: r.rank
+  })))
+
+  try {
+    const ranksResp = await fetch(`${dbUrl}/rest/v1/confluence_ranks`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': authHeader,
+        'Prefer': 'resolution=merge-duplicates'
+      },
+      body: ranksJson
+    })
+    if (!ranksResp.ok) {
+      const err = await ranksResp.text()
+      throw new Error(`confluence_ranks: ${err}`)
+    }
+  } catch (e) {
+    throw new Error(`confluence_ranks write failed: ${e.message}`)
   }
-  for (let k = 0; k < pool.length; k += 500) {
-    const { error } = await db.rpc('upsert_confluence_pool', { rows: pool.slice(k, k + 500) })
-    if (error) throw new Error(`confluence_pool: ${error.message}`)
+
+  // Same for pool
+  if (pool.length > 0) {
+    const poolJson = JSON.stringify(pool.map(p => ({
+      side: p.side, combo: p.combo, lit: p.lit, score: p.score, n: p.n, graded: p.graded,
+      at_turn: p.at_turn, avg_3m: p.avg_3m, avg_6m: p.avg_6m, avg_12m: p.avg_12m,
+      win_3m: p.win_3m, win_6m: p.win_6m, win_12m: p.win_12m, tickers: p.tickers,
+      as_of: p.as_of, horizons: p.horizons
+    })))
+
+    try {
+      const poolResp = await fetch(`${dbUrl}/rest/v1/confluence_pool`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': authHeader,
+          'Prefer': 'resolution=merge-duplicates'
+        },
+        body: poolJson
+      })
+      if (!poolResp.ok) {
+        const err = await poolResp.text()
+        throw new Error(`confluence_pool: ${err}`)
+      }
+    } catch (e) {
+      throw new Error(`confluence_pool write failed: ${e.message}`)
+    }
   }
   console.log(`\nWrote ${rows.length} rank rows and ${pool.length} pool rows.`)
   if (MODE !== 'full') return
