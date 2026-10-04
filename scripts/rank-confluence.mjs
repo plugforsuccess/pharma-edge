@@ -175,7 +175,7 @@ async function main() {
   for (let i = 0; i < rows.length; i += batchSize) {
     const batch = rows.slice(i, i + batchSize)
     try {
-      await db.from('confluence_ranks').upsert(batch, { onConflict: 'side,ticker' })
+      await db.from('confluence_ranks').upsert(batch, { onConflict: 'side,ticker,as_of' })
     } catch (e) {
       throw new Error(`confluence_ranks batch ${Math.floor(i / batchSize) + 1} failed: ${e.message}`)
     }
