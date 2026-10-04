@@ -33,6 +33,11 @@ export const ENTRY_RULES = [
   ['confluence', 'Confluence'],
   ['zone', 'Buy zone'],
   ['bravo', 'Bravo ◆'],
+  // Recovery (owner, 2026-10-04): the universe replay showed the 200-day
+  // rule throwing away two-thirds of the +30% rallies (post-crash
+  // recoveries — NOW Jun 2026, NVDA 2022). Same 2+ signals, but while the
+  // 200-day is still falling and the close is back above the 50-day.
+  ['recovery', 'Recovery'],
 ]
 export const EXIT_RULES = [
   ['targets', 'Targets'],
@@ -124,6 +129,8 @@ export function trailingVol(closes, n = OPTION_MODEL.volBars) {
 //   confluence  the buy score reaching MIN_SCORE (from below), 200-day rising
 //   zone        the buy zone turning YES
 //   bravo       a Bravo bull diamond, 200-day rising
+//   recovery    the buy score reaching MIN_SCORE, 200-day falling, close
+//               above the 50-day (the rally the trend rule refuses)
 //   sell        the sell score at MIN_SCORE or more (one signal alone isn't
 //               a setup, on either side)
 export function replaySignals(bars, model, suite, window = DEFAULT_WINDOW) {
@@ -148,6 +155,8 @@ export function replaySignals(bars, model, suite, window = DEFAULT_WINDOW) {
       confluence: buy.map((s, i) => rising[i] && s.score >= MIN_SCORE && (i === 0 || buy[i - 1].score < MIN_SCORE)),
       zone: zone.map((z, i) => z && !zone[i - 1]),
       bravo: suite.bravo.bullOn.map((x, i) => !!x && rising[i]),
+      recovery: buy.map((s, i) => !rising[i] && model.s50[i] != null && model.closes[i] > model.s50[i]
+        && s.score >= MIN_SCORE && (i === 0 || buy[i - 1].score < MIN_SCORE)),
     },
     sell: sellS.map((s) => s.score >= MIN_SCORE),
   }

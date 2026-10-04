@@ -65,8 +65,8 @@ export default function ConfluenceLeaders({ mine = [] }) {
         </div>
         <p className="mt-2 text-xs text-muted">
           {side === 'buy'
-            ? 'Lows where 2+ buy signals agree, the 200-day is rising and the setup has paid before. Ranked by its 6-month record.'
-            : 'Extended highs where 2+ sell signals agree and the stock usually fell after. Ranked by its 3-month record.'}
+            ? 'Lows where 2+ buy signals agree and the 200-day is rising. Most signals first.'
+            : 'Extended highs where 2+ sell signals agree. Most signals first.'}
         </p>
       </div>
       {list === null ? (

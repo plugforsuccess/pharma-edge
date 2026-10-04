@@ -9,15 +9,13 @@
 //   pool    every ticker's setups pooled per side and combination
 //           → confluence_pool (the universe-wide record of each combination)
 //   ranks   today's score per side, blended estimate for today's
-//           combination (own record shrunk toward the pool), and the rank —
-//           only setups whose history shows an edge:
-//             buy   score ≥ 2, the 200-day rising, blended 6M avg > 0;
-//                   best 6M first
-//             sell  score ≥ 2, blended 3M avg < 0 (the stock fell after,
-//                   on average — exits are a shorter call); most negative
-//                   3M first
-//           ties: higher score, more buy-zone conditions (buy), fresher
-//           signal → confluence_ranks
+//           combination (own record shrunk toward the pool), and the rank:
+//             buy   score ≥ 2, the 200-day rising
+//             sell  score ≥ 2
+//           most signals first, then more buy-zone conditions (buy), then
+//           the fresher signal, then the blended history as a tiebreaker
+//           (the walk-forward test showed history adds no edge) →
+//           confluence_ranks
 //   alerts  (mode full) users with entry alerts on: a Tracking / holding
 //           ticker entering the buy top 10, a holding entering the sell top
 //           10 → an alerts row (the bell) + one email per user via Resend
@@ -81,15 +79,17 @@ export function rankAll(results, pools) {
         last_signal: r[side].lastSignal, rank: null,
       }
       rows.push(row)
-      const eligible = row.score >= MIN_SCORE && (side === 'buy'
-        ? row.trend_up && row.est_6m != null && row.est_6m > 0
-        : row.est_3m != null && row.est_3m < 0)
+      // Eligible: 2+ signals (buy: with the 200-day rising). The setup's
+      // history is NOT a gate — the universe replay's walk-forward test
+      // (2026-10-03) found "history says yes" trades did no better than
+      // "history says no" — so it only breaks ties.
+      const eligible = row.score >= MIN_SCORE && (side === 'buy' ? row.trend_up : true)
       if (eligible) cands.push(row)
     }
-    cands.sort((a, b) => (side === 'buy' ? b.est_6m - a.est_6m : a.est_3m - b.est_3m)
-      || b.score - a.score
+    cands.sort((a, b) => b.score - a.score
       || (side === 'buy' ? (b.conditions_met ?? 0) - (a.conditions_met ?? 0) : 0)
-      || String(b.last_signal ?? '').localeCompare(String(a.last_signal ?? '')))
+      || String(b.last_signal ?? '').localeCompare(String(a.last_signal ?? ''))
+      || (side === 'buy' ? (b.est_6m ?? 0) - (a.est_6m ?? 0) : (a.est_3m ?? 0) - (b.est_3m ?? 0)))
     cands.forEach((row, k) => { row.rank = k + 1 })
   }
   return rows
