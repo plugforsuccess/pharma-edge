@@ -1313,7 +1313,18 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   targets exit — so history no longer gates or sorts the ranking).
   Both tables are shared market data (authenticated SELECT, service-role
   write). Charts opens with **Confluence leaders** (Buy · lows / Sell ·
-  highs, Top 10 / Yours = Tracking + holdings; rows open the entry chart);
+  highs, Top 10 / Yours = Tracking + holdings; rows open the entry chart).
+  **Every row carries a verdict** (owner, 2026-10-04: "it's not telling me
+  how to enter"): buy **ENTER** (buy zone YES + 2+ signals + 200-day
+  rising — the only combination the rules call an entry; ENTER rows rank
+  first), **WAIT** (names each missing buy-zone condition, e.g. "IV Rank
+  74, needs < 35"), **WATCH** (200-day falling, unranked); sell
+  **EXTENDED** / **TURNING**. ENTER rows show the call the replay would
+  price (0.75Δ, ~730 DTE, Black-Scholes on 60-day vol — an estimate, not
+  a quote), its cost per contract and % of `profiles.account_size`, and
+  the structure stop (last confirmed swing low under the close).
+  Computed nightly in `scripts/lib/verdict.mjs` → `confluence_ranks.verdict
+  / blockers / trade / stop_price / stop_date`;
   the entry card falls back to the pool's record ("across 564 tickers:
   312×") when the ticker has < 5 cases. **Alerts** (full mode, users with
   entry alerts on): a Tracking / holding ticker entering the buy top 10
