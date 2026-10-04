@@ -174,26 +174,14 @@ async function main() {
   const batchSize = 1000
   for (let i = 0; i < rows.length; i += batchSize) {
     const batch = rows.slice(i, i + batchSize)
-    try {
-      const { data, error, status } = await db.from('confluence_ranks').upsert(batch, { onConflict: 'side,ticker,as_of' })
-      console.log(`confluence_ranks batch ${Math.floor(i / batchSize) + 1}: status=${status}, rows=${data?.length ?? '?'}, error=${error?.message ?? 'none'}`)
-      if (error) throw error
-    } catch (e) {
-      throw new Error(`confluence_ranks batch ${Math.floor(i / batchSize) + 1} failed: ${e.message}`)
-    }
+    await db.from('confluence_ranks').upsert(batch, { onConflict: 'side,ticker,as_of' })
   }
 
   // Same for pool
   if (pool.length > 0) {
     for (let i = 0; i < pool.length; i += batchSize) {
       const batch = pool.slice(i, i + batchSize)
-      try {
-        const { data, error, status } = await db.from('confluence_pool').upsert(batch, { onConflict: 'side,combo' })
-        console.log(`confluence_pool batch ${Math.floor(i / batchSize) + 1}: status=${status}, rows=${data?.length ?? '?'}, error=${error?.message ?? 'none'}`)
-        if (error) throw error
-      } catch (e) {
-        throw new Error(`confluence_pool batch ${Math.floor(i / batchSize) + 1} failed: ${e.message}`)
-      }
+      await db.from('confluence_pool').upsert(batch, { onConflict: 'side,combo' })
     }
   }
   console.log(`\nWrote ${rows.length} rank rows and ${pool.length} pool rows.`)
