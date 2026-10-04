@@ -14,8 +14,10 @@
 // trade  the call the replay would price at this close: ~730 DTE, 0.75
 //        delta, Black-Scholes on trailing 60-day vol — an estimate, not a
 //        quote (src/utils/replay.js OPTION_MODEL).
-// stop   the last confirmed swing low under the close ("the setup breaks
-//        below"); the lowest low of the last 40 bars when there is none.
+// stop   the last confirmed swing low under the close ("exit if it closes
+//        below"), never further away than the lowest low of the last 40
+//        bars (owner, 2026-10-04: a stock that has run far shouldn't read a
+//        30% stop as the plan); that 40-bar low when there is no swing low.
 
 import { entryGaps } from '../../src/utils/indicators.js'
 import { swingPoints, MIN_SCORE } from '../../src/utils/confluence.js'
@@ -85,12 +87,12 @@ export function tradeSpec(bars, opt = OPTION_MODEL) {
 export function structureStop(bars, swing = 10, fallback = 40) {
   const n = bars.length
   const close = bars[n - 1].c
+  let recent = null
+  for (let i = Math.max(0, n - fallback); i < n; i++) if (!recent || bars[i].l < recent.price) recent = { price: bars[i].l, date: bars[i].t }
   const { lows } = swingPoints(bars, swing)
   for (let j = lows.length - 1; j >= 0; j--) {
     const i = lows[j]
-    if (bars[i].l < close) return { price: bars[i].l, date: bars[i].t }
+    if (bars[i].l < close) return bars[i].l >= recent.price ? { price: bars[i].l, date: bars[i].t } : recent
   }
-  let best = null
-  for (let i = Math.max(0, n - fallback); i < n; i++) if (!best || bars[i].l < best.price) best = { price: bars[i].l, date: bars[i].t }
-  return best
+  return recent
 }
