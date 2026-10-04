@@ -142,9 +142,10 @@ export default function Layout() {
         className="lg:hidden pointer-events-none fixed inset-y-0 left-1/2 -translate-x-[calc(50%+14rem)] w-px bg-gradient-to-b from-transparent via-white/5 to-transparent max-w-md"
       />
 
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0" style={{ WebkitTransform: 'translate3d(0, 0, 0)' }}>
         <main
           className="flex-1 overflow-y-auto pt-safe pb-[calc(5.5rem+env(safe-area-inset-bottom))] lg:pb-6"
+          style={{ WebkitTransform: 'translate3d(0, 0, 0)' }}
         >
           <Suspense fallback={<PageLoader />}>
             <Outlet />
@@ -160,11 +161,14 @@ export default function Layout() {
           transform on a fixed, blurred bar makes iOS Safari let it drift
           while scrolling. Solid, so page text never shows through the
           labels. The bar spans the screen; the tabs stay in the 448px
-          column. */}
+          column. iOS fix: -webkit-transform: translate3d(0,0,0) forces
+          GPU rendering and prevents drift during momentum scroll. */}
       <nav
         className="lg:hidden fixed inset-x-0 bottom-0 z-50 bg-bg border-t border-border/80"
         style={{
           paddingBottom: 'calc(0.6rem + env(safe-area-inset-bottom))',
+          WebkitTransform: 'translate3d(0, 0, 0)',
+          WebkitBackfaceVisibility: 'hidden',
         }}
         aria-label="Primary"
       >
