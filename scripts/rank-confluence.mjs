@@ -59,7 +59,7 @@ export function analyze(ticker, bars) {
     trendUp: model.status.slope200 != null && model.status.slope200 > 0,
     conditionsMet: ['band', 'rising', 'trend', 'rsi', 'iv'].filter((k) => c[k]).length,
     etbConvergence: etbToday,
-    cond: c, blockers: blockers(model), trade: tradeSpec(bars), stop: structureStop(bars), momentum: momentum(suite),
+    cond: c, blockers: blockers(model), trade: tradeSpec(bars), stop: structureStop(bars, { sma200: model.status.sma200, bandPct: model.params.bandPct }), momentum: momentum(suite),
     buy: { today: conf.buy.today, setups: conf.buy.setups, lastSignal: lastSignal(conf.buy.flags) },
     sell: { today: conf.sell.today, setups: conf.sell.setups, lastSignal: lastSignal(conf.sell.flags) },
   }

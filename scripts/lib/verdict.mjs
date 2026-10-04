@@ -14,10 +14,13 @@
 // trade  the call the replay would price at this close: ~730 DTE, 0.75
 //        delta, Black-Scholes on trailing 60-day vol — an estimate, not a
 //        quote (src/utils/replay.js OPTION_MODEL).
-// stop   the last confirmed swing low under the close ("exit if it closes
-//        below"), never further away than the lowest low of the last 40
-//        bars (owner, 2026-10-04: a stock that has run far shouldn't read a
-//        30% stop as the plan); that 40-bar low when there is no swing low.
+// stop   "exit if it closes below": the last confirmed swing low under the
+//        close, capped at the lowest low of the last 40 bars (owner,
+//        2026-10-04: a stock that has run far shouldn't read a 30% stop as
+//        the plan) — but never tighter than the buy zone's own floor, 5%
+//        under the 200-day (owner, 2026-10-04: on a dip buy the 40-bar low
+//        is the dip itself, a 1% noise stop on a two-year call; if price
+//        closes under the band the setup that justified the entry is gone).
 
 import { entryGaps } from '../../src/utils/indicators.js'
 import { swingPoints, MIN_SCORE } from '../../src/utils/confluence.js'
@@ -84,15 +87,18 @@ export function tradeSpec(bars, opt = OPTION_MODEL) {
   }
 }
 
-export function structureStop(bars, swing = 10, fallback = 40) {
+export function structureStop(bars, { sma200 = null, bandPct = 5, swing = 10, fallback = 40 } = {}) {
   const n = bars.length
   const close = bars[n - 1].c
   let recent = null
   for (let i = Math.max(0, n - fallback); i < n; i++) if (!recent || bars[i].l < recent.price) recent = { price: bars[i].l, date: bars[i].t }
+  let stop = recent
   const { lows } = swingPoints(bars, swing)
   for (let j = lows.length - 1; j >= 0; j--) {
     const i = lows[j]
-    if (bars[i].l < close) return bars[i].l >= recent.price ? { price: bars[i].l, date: bars[i].t } : recent
+    if (bars[i].l < close) { stop = bars[i].l >= recent.price ? { price: bars[i].l, date: bars[i].t } : recent; break }
   }
-  return recent
+  const floor = sma200 > 0 ? sma200 * (1 - bandPct / 100) : null
+  if (floor != null && floor < close && floor < stop.price) stop = { price: floor, date: null, basis: 'band' }
+  return stop
 }
