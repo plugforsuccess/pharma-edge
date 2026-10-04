@@ -169,9 +169,8 @@ async function main() {
   }
   const prevTop = new Set((prevRows ?? []).map((r) => `${r.side}:${r.ticker}`))
 
-  // Upsert via REST API using raw SQL to bypass schema cache.
-  // Supabase client schema cache is stale; use raw REST API POST to /rest/v1/rpc/
-  const authHeader = `Bearer ${key}`
+  // Upsert via REST API to bypass schema cache.
+  // Supabase client schema cache is stale; use raw REST API POST to /rest/v1/
   const dbUrl = url.replace('https://', 'https://').replace('http://', 'http://')
 
   // Insert all ranks at once using raw SQL via HTTP
@@ -188,7 +187,7 @@ async function main() {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': authHeader,
+        'apikey': key,
         'Prefer': 'resolution=merge-duplicates'
       },
       body: ranksJson
