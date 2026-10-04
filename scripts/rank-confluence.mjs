@@ -49,12 +49,15 @@ export function analyze(ticker, bars) {
   const suite = suiteModel(bars)
   const conf = confluenceModel({ bars, model, suite, horizons: HORIZONS })
   const lastIdx = bars.length - 1
-  const lastSignal = (flags) => { for (let i = lastIdx; i >= Math.max(0, lastIdx - 10); i--) if (Object.values(flags).some((f) => f[i])) return bars[i].t; return null }
+  const lastSignal = (flags) => { for (let i = lastIdx; i >= Math.max(0, lastIdx - 10); i--) if (Object.values(flags).filter((f) => f && Array.isArray(f)).some((f) => f[i])) return bars[i].t; return null }
   const c = model.status.cond
+  // E+T+B convergence already computed in confluenceFlags; get today's value
+  const etbToday = conf.buy.flags.etb?.[lastIdx]?.fired ?? false
   return {
     ticker, asOf: bars[lastIdx].t, close: bars[lastIdx].c,
     trendUp: model.status.slope200 != null && model.status.slope200 > 0,
     conditionsMet: ['band', 'rising', 'trend', 'rsi', 'iv'].filter((k) => c[k]).length,
+    etbConvergence: etbToday,
     buy: { today: conf.buy.today, setups: conf.buy.setups, lastSignal: lastSignal(conf.buy.flags) },
     sell: { today: conf.sell.today, setups: conf.sell.setups, lastSignal: lastSignal(conf.sell.flags) },
   }
@@ -63,6 +66,9 @@ export function analyze(ticker, bars) {
 const h = (est, label) => est?.horizons.find((x) => x.label === label)?.avg ?? null
 
 // Ranks from analyzed tickers + the pools. Pure (tested by dry runs).
+// Tier 1 (buy side): E+T+B convergence (Echo + Tango + Bravo within 10 bars)
+// Tier 2 (buy side): Other 3+ signal combos
+// Within each tier, sorted by: score, conditions_met, last_signal, est_6m
 export function rankAll(results, pools) {
   const rows = []
   for (const side of SIDES) {
@@ -76,7 +82,7 @@ export function rankAll(results, pools) {
         own_n: est?.ownN ?? 0, pool_n: est?.poolN ?? 0, est_at_turn: est?.atTurn ?? null,
         est_3m: h(est, '3M'), est_6m: h(est, '6M'), est_12m: h(est, '12M'),
         est_win_6m: est?.horizons.find((x) => x.label === '6M')?.winRate ?? null,
-        last_signal: r[side].lastSignal, rank: null,
+        last_signal: r[side].lastSignal, etb_convergence: side === 'buy' ? r.etbConvergence : false, rank: null,
       }
       rows.push(row)
       // Eligible: 2+ signals (buy: with the 200-day rising). The setup's
@@ -86,10 +92,18 @@ export function rankAll(results, pools) {
       const eligible = row.score >= MIN_SCORE && (side === 'buy' ? row.trend_up : true)
       if (eligible) cands.push(row)
     }
-    cands.sort((a, b) => b.score - a.score
-      || (side === 'buy' ? (b.conditions_met ?? 0) - (a.conditions_met ?? 0) : 0)
-      || String(b.last_signal ?? '').localeCompare(String(a.last_signal ?? ''))
-      || (side === 'buy' ? (b.est_6m ?? 0) - (a.est_6m ?? 0) : (a.est_3m ?? 0) - (b.est_3m ?? 0)))
+    // Tier 1: E+T+B convergence (buy side only), then Tier 2: other 3+ signals
+    cands.sort((a, b) => {
+      // Tier by E+T+B convergence (buy side) — tier 1 first
+      if (side === 'buy') {
+        if (b.etb_convergence !== a.etb_convergence) return (b.etb_convergence ? 1 : 0) - (a.etb_convergence ? 1 : 0)
+      }
+      // Within tier: score, conditions_met, last_signal, est_6m
+      return b.score - a.score
+        || (side === 'buy' ? (b.conditions_met ?? 0) - (a.conditions_met ?? 0) : 0)
+        || String(b.last_signal ?? '').localeCompare(String(a.last_signal ?? ''))
+        || (side === 'buy' ? (b.est_6m ?? 0) - (a.est_6m ?? 0) : (a.est_3m ?? 0) - (b.est_3m ?? 0))
+    })
     cands.forEach((row, k) => { row.rank = k + 1 })
   }
   return rows

@@ -94,8 +94,8 @@ export function confluenceSeries(flags, n, window = DEFAULT_WINDOW, keys = COMPO
 // highs (sell) and forward returns. horizons = [[label, bars], …].
 // gradeWindow: how close the turn must be to count (defaults to window;
 // the window comparison holds it fixed so a wider window can't win just by
-// being wider).
-export function confluenceSetups({ series, closes, swings, window = DEFAULT_WINDOW, gradeWindow = window, horizons, minScore = MIN_SCORE, side = 'buy' }) {
+// being wider). etbFlags: optional etb convergence array to track E+T+B pattern.
+export function confluenceSetups({ series, closes, swings, window = DEFAULT_WINDOW, gradeWindow = window, horizons, minScore = MIN_SCORE, side = 'buy', etbFlags = null }) {
   const turns = side === 'sell' ? swings.highs : swings.lows
   const setups = []
   let clusterEnd = -Infinity
@@ -108,10 +108,12 @@ export function confluenceSetups({ series, closes, swings, window = DEFAULT_WIND
     if (seen.has(s.key)) continue
     seen.add(s.key)
     const graded = i + gradeWindow <= swings.confirmedTo
+    const etb = etbFlags?.[i]
     setups.push({
       i, key: s.key, lit: s.lit, score: s.score, price: closes[i],
       atTurn: graded ? turns.some((L) => Math.abs(L - i) <= gradeWindow) : null,
       returns: horizons.map(([, h]) => (i + h < closes.length ? closes[i + h] / closes[i] - 1 : null)),
+      etb: etb ? { fired: etb.fired, spread: etb.spread } : null,
     })
   }
   return setups
@@ -135,6 +137,28 @@ export function setupStats(list, horizons, side = 'buy') {
       }
     }),
   }
+}
+
+// Echo + Tango + Bravo convergence (ideal pattern): all three fired within
+// the last `window` bars, regardless of order (staggered). Returns { fired, spread }
+// where spread is the bar distance between earliest and latest signal.
+export function etbConvergence(flags, window = 10) {
+  const { bravo, echo, tango } = flags
+  const n = bravo.length
+  const out = new Array(n)
+  const lastSeen = { bravo: -Infinity, echo: -Infinity, tango: -Infinity }
+  for (let i = 0; i < n; i++) {
+    if (bravo[i]) lastSeen.bravo = i
+    if (echo[i]) lastSeen.echo = i
+    if (tango[i]) lastSeen.tango = i
+    const times = [lastSeen.bravo, lastSeen.echo, lastSeen.tango]
+    const maxTime = Math.max(...times)
+    const minTime = Math.min(...times)
+    const allWithinWindow = maxTime - minTime < window && maxTime >= i - window + 1
+    const spread = allWithinWindow ? maxTime - minTime : null
+    out[i] = { fired: allWithinWindow, spread }
+  }
+  return out
 }
 
 // Combinations seen in history, most frequent first (ties: higher score).
@@ -181,9 +205,14 @@ export function confluenceFlags(model, suite) {
   const m = model.macd
   const down = m.line.map((v, i) => i > 0 && v != null && m.signal[i] != null && m.line[i - 1] != null && m.signal[i - 1] != null
     && m.line[i - 1] >= m.signal[i - 1] && v < m.signal[i])
+  const buyFlags = { zone: model.cond.map((c) => !!c?.all), bravo: suite.bravo.bullOn, echo: suite.echo.bull, tango: suite.tango.bull, macd: up }
+  const sellFlags = { ext: extendedFlags(model.rsi, model.dist), bravo: suite.bravo.bearOn, echo: suite.echo.bear, tango: suite.tango.bear, macd: down }
+  // Track E+T+B convergence as a metadata field (not a voting signal)
+  const buyEtb = etbConvergence(buyFlags, 10)
+  const sellEtb = etbConvergence(sellFlags, 10)
   return {
-    buy: { zone: model.cond.map((c) => !!c?.all), bravo: suite.bravo.bullOn, echo: suite.echo.bull, tango: suite.tango.bull, macd: up },
-    sell: { ext: extendedFlags(model.rsi, model.dist), bravo: suite.bravo.bearOn, echo: suite.echo.bear, tango: suite.tango.bear, macd: down },
+    buy: { ...buyFlags, etb: buyEtb },
+    sell: { ...sellFlags, etb: sellEtb },
   }
 }
 
@@ -191,7 +220,8 @@ export function confluenceFlags(model, suite) {
 function sideModel({ side, flags, closes, swings, horizons, window }) {
   const keys = COMPONENTS[side].map(([k]) => k)
   const series = confluenceSeries(flags, closes.length, window, keys)
-  const setups = confluenceSetups({ series, closes, swings, window, horizons, side })
+  const etbFlags = flags.etb
+  const setups = confluenceSetups({ series, closes, swings, window, horizons, side, etbFlags })
   return {
     side, flags, series, setups,
     today: todaySetup({ series, setups, horizons, side }),

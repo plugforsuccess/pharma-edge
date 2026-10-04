@@ -17,7 +17,7 @@
 // ≥ minGain rise) are found after the fact and checked against the entries
 // the replay took live.
 
-import { COMPONENTS, DEFAULT_WINDOW, MIN_SCORE, confluenceFlags, confluenceSeries, swingPoints } from './confluence.js'
+import { COMPONENTS, DEFAULT_WINDOW, MIN_SCORE, confluenceFlags, confluenceSeries, swingPoints, etbConvergence } from './confluence.js'
 import { EXIT_PLAYBOOK } from './afterTax.js'
 
 export const OPTION_MODEL = Object.freeze({
@@ -31,6 +31,7 @@ export const OPTION_MODEL = Object.freeze({
 
 export const ENTRY_RULES = [
   ['confluence', 'Confluence'],
+  ['etb', 'E+T+B (1–2 week convergence)'],
   ['zone', 'Buy zone'],
   ['bravo', 'Bravo ◆'],
   // Recovery (owner, 2026-10-04): the universe replay showed the 200-day
@@ -142,6 +143,9 @@ export function replaySignals(bars, model, suite, window = DEFAULT_WINDOW) {
   const falling = model.slope200.map((s) => s != null && s < 0)
   const zone = model.cond.map((c) => !!c?.all)
   const sellOn = sellS.map((s, i) => s.score >= MIN_SCORE && (i === 0 || sellS[i - 1].score < MIN_SCORE))
+  // E+T+B convergence: Echo + Tango + Bravo all fired within 10 trading days (1–2 weeks)
+  const etbBuy = etbConvergence(flags.buy, 10)
+  const etbFired = etbBuy.map((e) => e.fired && e.spread != null && e.spread < 10)
   return {
     buyScore: buy.map((s) => s.score),
     buyKey: buy.map((s) => s.key),
@@ -153,6 +157,7 @@ export function replaySignals(bars, model, suite, window = DEFAULT_WINDOW) {
     buyOn: buy.map((s) => s.score >= MIN_SCORE),
     entry: {
       confluence: buy.map((s, i) => rising[i] && s.score >= MIN_SCORE && (i === 0 || buy[i - 1].score < MIN_SCORE)),
+      etb: etbFired.map((fired, i) => fired && rising[i] && (i === 0 || !etbFired[i - 1])),
       zone: zone.map((z, i) => z && !zone[i - 1]),
       bravo: suite.bravo.bullOn.map((x, i) => !!x && rising[i]),
       recovery: buy.map((s, i) => !rising[i] && model.s50[i] != null && model.closes[i] > model.s50[i]
