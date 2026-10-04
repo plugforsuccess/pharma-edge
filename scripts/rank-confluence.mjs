@@ -172,35 +172,23 @@ async function main() {
   // Upsert with batching to avoid timeout on large writes.
   // Use client library with service-role key to bypass RLS, avoid schema cache via direct table upsert.
   const batchSize = 1000
-
-  console.log(`Upserting ${rows.length} rank rows in batches of ${batchSize}...`)
   for (let i = 0; i < rows.length; i += batchSize) {
     const batch = rows.slice(i, i + batchSize)
-    const batchNum = Math.floor(i / batchSize) + 1
-    const { error, status } = await db.from('confluence_ranks').upsert(batch, { onConflict: 'side,ticker' })
-    if (error) {
-      console.error(`Batch ${batchNum} error (status ${status}):`, error)
-      throw new Error(`confluence_ranks batch ${batchNum}: ${error.message || JSON.stringify(error)}`)
+    try {
+      await db.from('confluence_ranks').upsert(batch, { onConflict: 'side,ticker' })
+    } catch (e) {
+      throw new Error(`confluence_ranks batch ${Math.floor(i / batchSize) + 1} failed: ${e.message}`)
     }
-    console.log(`  Batch ${batchNum}/${Math.ceil(rows.length / batchSize)} done`)
   }
 
-  // Same for pool (already has updated_at from poolRows)
+  // Same for pool
   if (pool.length > 0) {
-    console.log(`Upserting ${pool.length} pool rows in batches of ${batchSize}...`)
     for (let i = 0; i < pool.length; i += batchSize) {
       const batch = pool.slice(i, i + batchSize)
-      const batchNum = Math.floor(i / batchSize) + 1
       try {
-        const { data, error, status } = await db.from('confluence_pool').upsert(batch, { onConflict: 'side,combo' })
-        if (error) {
-          console.error(`Pool batch ${batchNum} error (status ${status}):`, error)
-          throw new Error(`confluence_pool batch ${batchNum}: ${error.message || JSON.stringify(error)}`)
-        }
-        console.log(`  Pool batch ${batchNum}/${Math.ceil(pool.length / batchSize)} done`)
+        await db.from('confluence_pool').upsert(batch, { onConflict: 'side,combo' })
       } catch (e) {
-        console.error(`Pool batch ${batchNum} exception:`, e.message)
-        throw e
+        throw new Error(`confluence_pool batch ${Math.floor(i / batchSize) + 1} failed: ${e.message}`)
       }
     }
   }
