@@ -160,7 +160,13 @@ async function main() {
   const db = createClient(url, key, { auth: { persistSession: false } })
 
   // Yesterday's top 10s, for "entered the top 10".
-  const { data: prevRows } = await db.from('confluence_ranks').select('side, ticker, rank').not('rank', 'is', null).lte('rank', TOP).catch(() => ({ data: null }))
+  let prevRows = []
+  try {
+    const result = await db.from('confluence_ranks').select('side, ticker, rank').not('rank', 'is', null).lte('rank', TOP)
+    prevRows = result.data ?? []
+  } catch (e) {
+    // Table may not exist yet or be inaccessible
+  }
   const prevTop = new Set((prevRows ?? []).map((r) => `${r.side}:${r.ticker}`))
 
   // Upsert via REST API using raw SQL to bypass schema cache.
