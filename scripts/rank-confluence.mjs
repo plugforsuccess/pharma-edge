@@ -162,69 +162,26 @@ async function main() {
   // Yesterday's top 10s, for "entered the top 10".
   let prevRows = []
   try {
-    const result = await db.from('confluence_ranks').select('side, ticker, rank').not('rank', 'is', null).lte('rank', TOP)
-    prevRows = result.data ?? []
+    const { data } = await db.from('confluence_ranks').select('side, ticker, rank').not('rank', 'is', null).lte('rank', TOP)
+    prevRows = data ?? []
   } catch (e) {
-    // Table may not exist yet or be inaccessible
+    // Table may not exist yet or be inaccessible; continue without alert check
   }
   const prevTop = new Set((prevRows ?? []).map((r) => `${r.side}:${r.ticker}`))
 
-  // Upsert via REST API to bypass schema cache.
-  // Supabase client schema cache is stale; use raw REST API POST to /rest/v1/
-  const dbUrl = url.replace('https://', 'https://').replace('http://', 'http://')
-
-  // Insert all ranks at once using raw SQL via HTTP
-  const ranksJson = JSON.stringify(rows.map(r => ({
-    side: r.side, ticker: r.ticker, as_of: r.as_of, close: r.close, score: r.score, lit: r.lit,
-    combo: r.combo, conditions_met: r.conditions_met, trend_up: r.trend_up, own_n: r.own_n,
-    pool_n: r.pool_n, est_at_turn: r.est_at_turn, est_3m: r.est_3m, est_6m: r.est_6m,
-    est_12m: r.est_12m, est_win_6m: r.est_win_6m, last_signal: r.last_signal,
-    etb_convergence: r.etb_convergence, rank: r.rank
-  })))
-
-  try {
-    const ranksResp = await fetch(`${dbUrl}/rest/v1/confluence_ranks`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': key,
-        'Prefer': 'resolution=merge-duplicates'
-      },
-      body: ranksJson
-    })
-    if (!ranksResp.ok) {
-      const err = await ranksResp.text()
-      throw new Error(`confluence_ranks: ${err}`)
-    }
-  } catch (e) {
-    throw new Error(`confluence_ranks write failed: ${e.message}`)
+  // Upsert with batching to avoid timeout on large writes.
+  // Use client library with service-role key to bypass RLS, avoid schema cache via direct table upsert.
+  const batchSize = 1000
+  for (let i = 0; i < rows.length; i += batchSize) {
+    const batch = rows.slice(i, i + batchSize)
+    await db.from('confluence_ranks').upsert(batch, { onConflict: 'side,ticker,as_of' })
   }
 
   // Same for pool
   if (pool.length > 0) {
-    const poolJson = JSON.stringify(pool.map(p => ({
-      side: p.side, combo: p.combo, lit: p.lit, score: p.score, n: p.n, graded: p.graded,
-      at_turn: p.at_turn, avg_3m: p.avg_3m, avg_6m: p.avg_6m, avg_12m: p.avg_12m,
-      win_3m: p.win_3m, win_6m: p.win_6m, win_12m: p.win_12m, tickers: p.tickers,
-      as_of: p.as_of, horizons: p.horizons
-    })))
-
-    try {
-      const poolResp = await fetch(`${dbUrl}/rest/v1/confluence_pool`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': authHeader,
-          'Prefer': 'resolution=merge-duplicates'
-        },
-        body: poolJson
-      })
-      if (!poolResp.ok) {
-        const err = await poolResp.text()
-        throw new Error(`confluence_pool: ${err}`)
-      }
-    } catch (e) {
-      throw new Error(`confluence_pool write failed: ${e.message}`)
+    for (let i = 0; i < pool.length; i += batchSize) {
+      const batch = pool.slice(i, i + batchSize)
+      await db.from('confluence_pool').upsert(batch, { onConflict: 'side,combo' })
     }
   }
   console.log(`\nWrote ${rows.length} rank rows and ${pool.length} pool rows.`)
