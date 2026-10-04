@@ -1393,7 +1393,15 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   fold, the trade-off list). **It never changes the app's rules** —
   adopting a found rule is the owner's call, after it holds up out of
   sample. No tuning to one chart (the NOW rally): a rule tuned to one
-  chart fits that chart and fails forward.
+  chart fits that chart and fails forward. **First run (2026-10-04,
+  545 tickers, 4,588 candidates, 9 min):** best rule = 3+ buy signals
+  within 3 days with MACD among them, 200-day rising → 60-delta call,
+  sell 70% at 3x, 15% at 5x, trail 40%. Out of sample +38% avg / 46%
+  win / 31% lost half / catch 11% on 441 trades vs today's rule +18% /
+  48% / 26% / catch 20% on 948. Both folds picked the same exit but
+  different entries (`stable: false`); the lift is in the average (fat
+  right tail), not the median (−10% vs −5%) or the win rate — not
+  adopted.
 - **Signal suite on the entry chart** (owner, 2026-10-03: "for better
   entries and sell signals"). A JS port of the TradingView suite in
   `plugforsuccess/wiley-indicator-suite` (Bravo trend, Echo momentum,
