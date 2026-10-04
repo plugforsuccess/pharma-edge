@@ -20,7 +20,7 @@ begin
       last_signal, etb_convergence, rank, updated_at
     )
     values (
-      x->>'side', x->>'ticker', (x->>'as_of')::timestamp with time zone,
+      x->>'side', x->>'ticker', (x->>'as_of')::date,
       (x->>'close')::numeric, (x->>'score')::numeric,
       array(select jsonb_array_elements_text(x->'lit')),
       x->>'combo', (x->>'conditions_met')::int, (x->>'trend_up')::boolean,
@@ -28,7 +28,7 @@ begin
       (x->>'est_at_turn')::numeric, (x->>'est_3m')::numeric,
       (x->>'est_6m')::numeric, (x->>'est_12m')::numeric,
       (x->>'est_win_6m')::numeric,
-      (x->>'last_signal')::timestamp with time zone,
+      (x->>'last_signal')::date,
       (x->>'etb_convergence')::boolean, (x->>'rank')::int,
       now()
     )
