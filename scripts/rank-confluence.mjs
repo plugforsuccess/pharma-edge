@@ -160,16 +160,32 @@ async function main() {
   const db = createClient(url, key, { auth: { persistSession: false } })
 
   // Yesterday's top 10s, for "entered the top 10".
-  const { data: prevRows } = await db.from('confluence_ranks').select('side, ticker, rank').not('rank', 'is', null).lte('rank', TOP)
+  let prevRows = []
+  try {
+    const { data } = await db.from('confluence_ranks').select('side, ticker, rank').not('rank', 'is', null).lte('rank', TOP)
+    prevRows = data ?? []
+  } catch (e) {
+    // Table may not exist yet or be inaccessible; continue without alert check
+  }
   const prevTop = new Set((prevRows ?? []).map((r) => `${r.side}:${r.ticker}`))
 
-  for (let k = 0; k < rows.length; k += 500) {
-    const { error } = await db.from('confluence_ranks').upsert(rows.slice(k, k + 500).map((r) => ({ ...r, updated_at: new Date().toISOString() })), { onConflict: 'side,ticker' })
-    if (error) throw new Error(`confluence_ranks: ${error.message}`)
+  // Upsert via RPC functions (bypass schema cache entirely).
+  // bulk_upsert_confluence_ranks() takes JSONB array and performs raw SQL INSERT...ON CONFLICT
+  try {
+    const { error } = await db.rpc('bulk_upsert_confluence_ranks', { data: rows })
+    if (error) throw new Error(`confluence_ranks RPC failed: ${error.message}`)
+  } catch (e) {
+    throw new Error(`confluence_ranks write failed: ${e.message}`)
   }
-  for (let k = 0; k < pool.length; k += 500) {
-    const { error } = await db.from('confluence_pool').upsert(pool.slice(k, k + 500), { onConflict: 'side,combo' })
-    if (error) throw new Error(`confluence_pool: ${error.message}`)
+
+  // Same for pool
+  if (pool.length > 0) {
+    try {
+      const { error } = await db.rpc('bulk_upsert_confluence_pool', { data: pool })
+      if (error) throw new Error(`confluence_pool RPC failed: ${error.message}`)
+    } catch (e) {
+      throw new Error(`confluence_pool write failed: ${e.message}`)
+    }
   }
   console.log(`\nWrote ${rows.length} rank rows and ${pool.length} pool rows.`)
   if (MODE !== 'full') return
