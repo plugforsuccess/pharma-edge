@@ -23,12 +23,15 @@ const EXITS = [
 
 export default function SignalRecord() {
   const [row, setRow] = useState(undefined)
+  const [opt, setOpt] = useState(undefined)
   const [entry, setEntry] = useState('confluence')
   const [allMissed, setAllMissed] = useState(false)
   useEffect(() => {
     let cancelled = false
     supabase.from('replay_runs').select('run_at, as_of, tickers, summary').order('run_at', { ascending: false }).limit(1)
       .then(({ data, error }) => { if (!cancelled) setRow(error ? null : data?.[0] ?? null) })
+    supabase.from('optimizer_runs').select('run_at, as_of, tickers, summary').order('run_at', { ascending: false }).limit(1)
+      .then(({ data, error }) => { if (!cancelled) setOpt(error ? null : data?.[0]?.summary ?? null) })
     return () => { cancelled = true }
   }, [])
   const s = row?.summary
@@ -56,6 +59,8 @@ export default function SignalRecord() {
         <section className="bg-card border border-border rounded-2xl p-5 text-sm text-subtle">No replay yet. It runs every Saturday.</section>
       ) : (
         <>
+          {opt && <OptimizerCard o={opt} />}
+
           <div className="flex gap-1 p-1 rounded-xl bg-card border border-border mb-4" role="tablist" aria-label="Buy on">
             {ENTRIES.filter(([k]) => s.runs[`${k}:targets`]).map(([k, label]) => (
               <button key={k} type="button" role="tab" aria-selected={entry === k} onClick={() => setEntry(k)}
@@ -198,6 +203,94 @@ export default function SignalRecord() {
         </>
       )}
     </div>
+  )
+}
+
+// The rule optimizer's latest run (optimizer_runs): the best rule found by
+// searching entries × exits over the universe, judged out of sample. The
+// app's live rules don't change here — this is the report.
+function OptimizerCard({ o }) {
+  const [showFrontier, setShowFrontier] = useState(false)
+  const b = o.baseline
+  const f = o.final
+  const lift = f.validated?.avg != null && b.validated?.avg != null ? f.validated.avg - b.validated.avg : null
+  return (
+    <Card title="Best rule found">
+      <div className="text-xs text-muted -mt-1 mb-3">
+        {o.grid.entries} entries × {o.grid.exits} exits searched over {o.tickers} tickers. Chosen on earlier years, judged on later ones it never saw.
+      </div>
+      <div className="rounded-xl bg-bg-elev px-4 py-3">
+        <div className="text-sm text-fg">{f.words}</div>
+        <div className="mt-3 grid grid-cols-3 gap-3">
+          <div>
+            <div className={clsx('text-2xl font-semibold tracking-tight font-mono-tab leading-none', tone(f.validated?.avg))}>{pctS(f.validated?.avg)}</div>
+            <div className="mt-1 text-[11px] text-muted">avg, out of sample</div>
+          </div>
+          <div>
+            <div className="text-2xl font-semibold tracking-tight font-mono-tab leading-none text-fg">{share(f.validated?.win)}</div>
+            <div className="mt-1 text-[11px] text-muted">win · {f.validated?.n ?? 0} trades</div>
+          </div>
+          <div>
+            <div className="text-2xl font-semibold tracking-tight font-mono-tab leading-none text-fg">{share(f.catch)}</div>
+            <div className="mt-1 text-[11px] text-muted">big moves caught</div>
+          </div>
+        </div>
+        <div className="mt-3 text-xs text-subtle font-mono-tab">
+          On everything: {share(f.all?.win)} win · {pctS(f.all?.avg)} avg · {share(f.all?.bigLoss)} lost ½+ · {f.all?.n} trades
+        </div>
+      </div>
+
+      <div className="mt-4 flex items-baseline gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="text-sm text-fg">Today&apos;s rule</div>
+          <div className="text-[11px] text-muted truncate">{b.words}</div>
+        </div>
+        <div className="text-right shrink-0">
+          <div className={clsx('text-base font-semibold font-mono-tab', tone(b.validated?.avg))}>{pctS(b.validated?.avg)}</div>
+          <div className="text-[11px] text-muted">{share(b.validated?.win)} win · {share(b.catch)} caught</div>
+        </div>
+      </div>
+      {lift != null && (
+        <div className={clsx('mt-2 text-xs', lift > 0.02 ? 'text-green-400' : lift < -0.02 ? 'text-rose-300' : 'text-subtle')}>
+          {lift > 0.02 ? `The found rule did ${pctS(lift).replace('+', '')} better out of sample.` : lift < -0.02 ? `The found rule did ${pctS(-lift)} worse out of sample — today's rule stands.` : 'No real difference out of sample — today\'s rule stands.'}
+          {!o.stable && ' Different folds picked different rules, so treat this as a direction, not a setting.'}
+        </div>
+      )}
+
+      <div className="mt-4 text-[11px] uppercase tracking-wider text-muted">Fold by fold</div>
+      <ul className="mt-1 space-y-2">
+        {o.folds.map((fd) => (
+          <li key={fd.fold} className="text-xs">
+            <div className="text-fg">Trained to {fd.train_end.slice(0, 4)}, tested {fd.test_end === '9999-12-31' ? `${fd.train_end.slice(0, 4)} on` : fd.train_end.slice(0, 4)}</div>
+            {fd.chosen ? (
+              <div className="text-muted font-mono-tab">chosen rule {pctS(fd.chosen.test.avg)} avg · {share(fd.chosen.test.win)} win · {fd.chosen.test.n} trades — today&apos;s rule {pctS(fd.baseline.test.avg)}</div>
+            ) : <div className="text-muted">Too few trades to choose</div>}
+          </li>
+        ))}
+      </ul>
+
+      {o.frontier?.length > 0 && (
+        <>
+          <button type="button" onClick={() => setShowFrontier(!showFrontier)} className="mt-4 min-h-[36px] text-xs font-semibold text-subtle hover:text-fg">
+            {showFrontier ? 'Hide the trade-off' : 'Catch more vs. win more'}
+          </button>
+          {showFrontier && (
+            <ul className="mt-1 divide-y divide-hairline">
+              {o.frontier.map((p) => (
+                <li key={p.words} className="py-2 flex items-center gap-3 text-xs">
+                  <span className="w-12 shrink-0 font-mono-tab text-confluence">{share(p.catch)}</span>
+                  <span className="flex-1 min-w-0 text-subtle truncate">{p.words}</span>
+                  <span className={clsx('shrink-0 font-mono-tab', tone(p.avg))}>{pctS(p.avg)}</span>
+                  <span className="w-10 shrink-0 text-right font-mono-tab text-muted">{share(p.win)}</span>
+                </li>
+              ))}
+              <li className="pt-2 text-[11px] text-muted">Caught · rule · avg · win. Every row is the best you can do at that catch rate.</li>
+            </ul>
+          )}
+        </>
+      )}
+      <div className="mt-3 text-[11px] text-muted">Nothing here changes the app&apos;s rules by itself.</div>
+    </Card>
   )
 }
 

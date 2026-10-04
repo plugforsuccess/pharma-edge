@@ -1,0 +1,48 @@
+# Rule optimizer (owner, 2026-10-04): searches the LEAPS entry × exit rules
+# over the whole universe with walk-forward folds and writes one
+# optimizer_runs row (the Signal record page's Optimizer card). Weekly on
+# Sundays, by hand, or on a feature-branch push that touches it.
+# See scripts/optimize-entries.mjs and src/utils/optimizer.js.
+
+name: Rule optimizer
+
+on:
+  schedule:
+    - cron: '23 15 * * 0'   # Sundays 15:23 UTC
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'write = save to optimizer_runs · dry-run = print only'
+        type: choice
+        options: [write, dry-run]
+        default: write
+  push:
+    branches-ignore: [main]
+    paths:
+      - scripts/optimize-entries.mjs
+      - src/utils/optimizer.js
+      - .github/workflows/optimize-entries.yml
+
+concurrency:
+  group: optimize-entries
+  cancel-in-progress: true
+
+jobs:
+  optimize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: node scripts/check-optimizer.mjs
+      - name: Optimize
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SPOTLIGHT: NOW,PLTR,NVDA
+          NODE_OPTIONS: --max-old-space-size=6144
+        run: node scripts/optimize-entries.mjs --mode "${{ inputs.mode || 'write' }}"
