@@ -159,19 +159,17 @@ async function main() {
   if (!url || !key) throw new Error('SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY required')
   const db = createClient(url, key, { auth: { persistSession: false } })
 
-  // Force schema refresh to pick up newly created tables
-  await db.from('confluence_ranks').select('*').limit(1).catch(() => {})
-
-  // Yesterday's top 10s, for "entered the top 10".
-  const { data: prevRows } = await db.from('confluence_ranks').select('side, ticker, rank').not('rank', 'is', null).lte('rank', TOP)
+  // Yesterday's top 10s, for "entered the top 10" (use RPC to avoid schema cache issues).
+  const { data: prevRows } = await db.rpc('confluence_get_top10')
   const prevTop = new Set((prevRows ?? []).map((r) => `${r.side}:${r.ticker}`))
 
+  // Upsert via RPC functions (bypasses Supabase schema cache)
   for (let k = 0; k < rows.length; k += 500) {
-    const { error } = await db.from('confluence_ranks').upsert(rows.slice(k, k + 500).map((r) => ({ ...r, updated_at: new Date().toISOString() })), { onConflict: 'side,ticker' })
+    const { error } = await db.rpc('upsert_confluence_ranks', { rows: rows.slice(k, k + 500) })
     if (error) throw new Error(`confluence_ranks: ${error.message}`)
   }
   for (let k = 0; k < pool.length; k += 500) {
-    const { error } = await db.from('confluence_pool').upsert(pool.slice(k, k + 500), { onConflict: 'side,combo' })
+    const { error } = await db.rpc('upsert_confluence_pool', { rows: pool.slice(k, k + 500) })
     if (error) throw new Error(`confluence_pool: ${error.message}`)
   }
   console.log(`\nWrote ${rows.length} rank rows and ${pool.length} pool rows.`)
