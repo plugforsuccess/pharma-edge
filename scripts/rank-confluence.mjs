@@ -169,19 +169,22 @@ async function main() {
   }
   const prevTop = new Set((prevRows ?? []).map((r) => `${r.side}:${r.ticker}`))
 
-  // Upsert with batching to avoid timeout on large writes.
-  // Use client library with service-role key to bypass RLS, avoid schema cache via direct table upsert.
+  // onConflict must name the table's primary key (side, ticker) — PostgREST
+  // rejects any other column set and the client reports it only via `error`.
   const batchSize = 1000
+  const now = new Date().toISOString()
   for (let i = 0; i < rows.length; i += batchSize) {
-    const batch = rows.slice(i, i + batchSize)
-    await db.from('confluence_ranks').upsert(batch, { onConflict: 'side,ticker,as_of' })
+    const batch = rows.slice(i, i + batchSize).map((r) => ({ ...r, updated_at: now }))
+    const { error } = await db.from('confluence_ranks').upsert(batch, { onConflict: 'side,ticker' })
+    if (error) throw new Error(`confluence_ranks batch ${i / batchSize + 1}: ${error.message}`)
   }
 
   // Same for pool
   if (pool.length > 0) {
     for (let i = 0; i < pool.length; i += batchSize) {
       const batch = pool.slice(i, i + batchSize)
-      await db.from('confluence_pool').upsert(batch, { onConflict: 'side,combo' })
+      const { error } = await db.from('confluence_pool').upsert(batch, { onConflict: 'side,combo' })
+      if (error) throw new Error(`confluence_pool batch ${i / batchSize + 1}: ${error.message}`)
     }
   }
   console.log(`\nWrote ${rows.length} rank rows and ${pool.length} pool rows.`)
