@@ -25,7 +25,7 @@ export default function ConfluenceLeaders({ mine = [] }) {
     let cancelled = false
     setRows(null)
     let q = supabase.from('confluence_ranks')
-      .select('ticker, side, as_of, close, score, lit, rank, est_3m, est_6m, est_at_turn, est_win_6m, own_n, pool_n, conditions_met')
+      .select('ticker, side, as_of, close, score, lit, rank, est_3m, est_6m, est_at_turn, est_win_6m, own_n, pool_n, conditions_met, etb_convergence')
       .eq('side', side)
     q = scope === 'all'
       ? q.not('rank', 'is', null).order('rank').limit(10)
@@ -65,7 +65,7 @@ export default function ConfluenceLeaders({ mine = [] }) {
         </div>
         <p className="mt-2 text-xs text-muted">
           {side === 'buy'
-            ? 'Lows where 2+ buy signals agree and the 200-day is rising. Most signals first.'
+            ? 'Lows where 2+ buy signals agree and the 200-day is rising. Echo, Tango and Bravo converging within 10 days ranks first, then most signals.'
             : 'Extended highs where 2+ sell signals agree. Most signals first.'}
         </p>
       </div>
@@ -86,6 +86,9 @@ export default function ConfluenceLeaders({ mine = [] }) {
                   <span className="flex items-baseline gap-2">
                     <span className="text-sm font-semibold text-fg">{r.ticker}</span>
                     <span className={clsx('text-xs font-mono-tab', r.score >= 3 ? (side === 'buy' ? 'text-confluence' : 'text-suite-bear') : 'text-subtle')}>{r.score}/5</span>
+                    {side === 'buy' && r.etb_convergence && (
+                      <span className="shrink-0 px-1.5 rounded border border-confluence/40 text-confluence text-[11px] font-semibold tracking-wide" title="Echo, Tango and Bravo bull signals within 10 trading days">E+T+B</span>
+                    )}
                     <span className="text-xs text-muted truncate">{r.lit.map((k) => LABEL[side][k]).join(' · ')}</span>
                   </span>
                   <span className="block mt-0.5 text-xs text-muted font-mono-tab">
