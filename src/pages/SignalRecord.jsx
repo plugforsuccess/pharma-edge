@@ -252,7 +252,7 @@ function OptimizerCard({ o }) {
       </div>
       {lift != null && (
         <div className={clsx('mt-2 text-xs', lift > 0.02 ? 'text-green-400' : lift < -0.02 ? 'text-rose-300' : 'text-subtle')}>
-          {lift > 0.02 ? `The found rule did ${pctS(lift).replace('+', '')} better out of sample.` : lift < -0.02 ? `The found rule did ${pctS(-lift)} worse out of sample — today's rule stands.` : 'No real difference out of sample — today\'s rule stands.'}
+          {lift > 0.02 ? `The found rule did ${Math.round(lift * 100)} points better out of sample.` : lift < -0.02 ? `The found rule did ${Math.round(-lift * 100)} points worse out of sample — today's rule stands.` : 'No real difference out of sample — today\'s rule stands.'}
           {!o.stable && ' Different folds picked different rules, so treat this as a direction, not a setting.'}
         </div>
       )}
@@ -261,7 +261,7 @@ function OptimizerCard({ o }) {
       <ul className="mt-1 space-y-2">
         {o.folds.map((fd) => (
           <li key={fd.fold} className="text-xs">
-            <div className="text-fg">Trained to {fd.train_end.slice(0, 4)}, tested {fd.test_end === '9999-12-31' ? `${fd.train_end.slice(0, 4)} on` : fd.train_end.slice(0, 4)}</div>
+            <div className="text-fg">Trained through {Number(fd.train_end.slice(0, 4)) - 1}, tested {fd.test_end === '9999-12-31' ? `${fd.train_end.slice(0, 4)} on` : fd.train_end.slice(0, 4)}</div>
             {fd.chosen ? (
               <div className="text-muted font-mono-tab">chosen rule {pctS(fd.chosen.test.avg)} avg · {share(fd.chosen.test.win)} win · {fd.chosen.test.n} trades — today&apos;s rule {pctS(fd.baseline.test.avg)}</div>
             ) : <div className="text-muted">Too few trades to choose</div>}
