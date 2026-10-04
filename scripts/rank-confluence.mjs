@@ -32,6 +32,7 @@ import { entryModel, HORIZONS } from '../src/utils/indicators.js'
 import { suiteModel } from '../src/utils/signalSuite.js'
 import { confluenceModel, poolStats, blendedEstimate, MIN_SCORE, SIDES } from '../src/utils/confluence.js'
 import { dailyBars, mapLimit, sources } from './lib/marketData.mjs'
+import { blockers, buyVerdict, sellVerdict, tradeSpec, structureStop } from './lib/verdict.mjs'
 
 const args = process.argv.slice(2)
 const MODE = (args[args.indexOf('--mode') + 1] && args.includes('--mode')) ? args[args.indexOf('--mode') + 1] : 'dry-run'
@@ -58,6 +59,7 @@ export function analyze(ticker, bars) {
     trendUp: model.status.slope200 != null && model.status.slope200 > 0,
     conditionsMet: ['band', 'rising', 'trend', 'rsi', 'iv'].filter((k) => c[k]).length,
     etbConvergence: etbToday,
+    cond: c, blockers: blockers(model), trade: tradeSpec(bars), stop: structureStop(bars),
     buy: { today: conf.buy.today, setups: conf.buy.setups, lastSignal: lastSignal(conf.buy.flags) },
     sell: { today: conf.sell.today, setups: conf.sell.setups, lastSignal: lastSignal(conf.sell.flags) },
   }
@@ -66,8 +68,9 @@ export function analyze(ticker, bars) {
 const h = (est, label) => est?.horizons.find((x) => x.label === label)?.avg ?? null
 
 // Ranks from analyzed tickers + the pools. Pure (tested by dry runs).
-// Tier 1 (buy side): E+T+B convergence (Echo + Tango + Bravo within 10 bars)
-// Tier 2 (buy side): Other 3+ signal combos
+// Buy side: rows meeting the entry rule (verdict enter) first, then
+// Tier 1: E+T+B convergence (Echo + Tango + Bravo within 10 bars)
+// Tier 2: other combos
 // Within each tier, sorted by: score, conditions_met, last_signal, est_6m
 export function rankAll(results, pools) {
   const rows = []
@@ -83,6 +86,9 @@ export function rankAll(results, pools) {
         est_3m: h(est, '3M'), est_6m: h(est, '6M'), est_12m: h(est, '12M'),
         est_win_6m: est?.horizons.find((x) => x.label === '6M')?.winRate ?? null,
         last_signal: r[side].lastSignal, etb_convergence: side === 'buy' ? r.etbConvergence : false, rank: null,
+        verdict: side === 'buy' ? buyVerdict({ score: now?.score ?? 0, trendUp: r.trendUp, cond: r.cond }) : sellVerdict({ score: now?.score ?? 0, lit: now?.lit ?? [] }),
+        blockers: side === 'buy' ? r.blockers : null, trade: side === 'buy' ? r.trade : null,
+        stop_price: r.stop?.price ?? null, stop_date: r.stop?.date ?? null,
       }
       rows.push(row)
       // Eligible: 2+ signals (buy: with the 200-day rising). The setup's
@@ -94,6 +100,8 @@ export function rankAll(results, pools) {
     }
     // Tier 1: E+T+B convergence (buy side only), then Tier 2: other 3+ signals
     cands.sort((a, b) => {
+      // Rows that meet the entry rule (buy zone YES) come first.
+      if (side === 'buy' && (a.verdict === 'enter') !== (b.verdict === 'enter')) return a.verdict === 'enter' ? -1 : 1
       // Tier by E+T+B convergence (buy side) — tier 1 first
       if (side === 'buy') {
         if (b.etb_convergence !== a.etb_convergence) return (b.etb_convergence ? 1 : 0) - (a.etb_convergence ? 1 : 0)
