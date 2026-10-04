@@ -159,6 +159,9 @@ async function main() {
   if (!url || !key) throw new Error('SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY required')
   const db = createClient(url, key, { auth: { persistSession: false } })
 
+  // Force schema refresh to pick up newly created tables
+  await db.from('confluence_ranks').select('*').limit(1).catch(() => {})
+
   // Yesterday's top 10s, for "entered the top 10".
   const { data: prevRows } = await db.from('confluence_ranks').select('side, ticker, rank').not('rank', 'is', null).lte('rank', TOP)
   const prevTop = new Set((prevRows ?? []).map((r) => `${r.side}:${r.ticker}`))
