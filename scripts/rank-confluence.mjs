@@ -169,44 +169,27 @@ async function main() {
   }
   const prevTop = new Set((prevRows ?? []).map((r) => `${r.side}:${r.ticker}`))
 
-  // Upsert via RPC functions using REST API (bypass schema cache entirely).
-  // Call RPC functions directly via /rest/v1/rpc/ to avoid schema introspection.
-  const restUrl = url.replace(/\/$/, '')
-
-  try {
-    const ranksResp = await fetch(`${restUrl}/rest/v1/rpc/bulk_upsert_confluence_ranks`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': key
-      },
-      body: JSON.stringify({ data: rows })
-    })
-    if (!ranksResp.ok) {
-      const err = await ranksResp.text()
-      throw new Error(`confluence_ranks: ${err}`)
+  // Upsert with batching to avoid timeout on large writes.
+  // Use client library with service-role key to bypass RLS, avoid schema cache via direct table upsert.
+  const batchSize = 1000
+  for (let i = 0; i < rows.length; i += batchSize) {
+    const batch = rows.slice(i, i + batchSize)
+    try {
+      await db.from('confluence_ranks').upsert(batch, { onConflict: 'side,ticker' })
+    } catch (e) {
+      throw new Error(`confluence_ranks batch ${Math.floor(i / batchSize) + 1} failed: ${e.message}`)
     }
-  } catch (e) {
-    throw new Error(`confluence_ranks write failed: ${e.message}`)
   }
 
   // Same for pool
   if (pool.length > 0) {
-    try {
-      const poolResp = await fetch(`${restUrl}/rest/v1/rpc/bulk_upsert_confluence_pool`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': key
-        },
-        body: JSON.stringify({ data: pool })
-      })
-      if (!poolResp.ok) {
-        const err = await poolResp.text()
-        throw new Error(`confluence_pool: ${err}`)
+    for (let i = 0; i < pool.length; i += batchSize) {
+      const batch = pool.slice(i, i + batchSize)
+      try {
+        await db.from('confluence_pool').upsert(batch, { onConflict: 'side,combo' })
+      } catch (e) {
+        throw new Error(`confluence_pool batch ${Math.floor(i / batchSize) + 1} failed: ${e.message}`)
       }
-    } catch (e) {
-      throw new Error(`confluence_pool write failed: ${e.message}`)
     }
   }
   console.log(`\nWrote ${rows.length} rank rows and ${pool.length} pool rows.`)
