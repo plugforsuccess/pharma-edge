@@ -3,28 +3,60 @@ import { Link } from 'react-router-dom'
 import clsx from 'clsx'
 import { ChevronRight } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { COMPONENTS } from '../utils/confluence'
 
 // Charts → Confluence leaders (owner, 2026-10-03; verdicts 2026-10-04: "it's
-// not telling me how to enter"): the universe ranked nightly by
-// scripts/rank-confluence.mjs. Every row carries a verdict — buy: ENTER (the
-// buy zone is YES with 2+ signals and the 200-day rising) / WAIT (what's
-// missing) / WATCH; sell: EXTENDED / TURNING — and an ENTER row shows the
-// call the replay would price plus the structure stop. "Yours" = Tracking +
-// holdings, ranked or not. Rows open the entry chart.
-const LABEL = { buy: Object.fromEntries(COMPONENTS.buy), sell: Object.fromEntries(COMPONENTS.sell) }
+// not telling me how to enter"; plain words 2026-10-04: "a novice user may
+// find this confusing"): the universe ranked nightly by
+// scripts/rank-confluence.mjs. Each row answers three questions in plain
+// English — what to do, what it costs, when you're wrong — and one muted
+// track-record line. Buy: BUY SETUP (early / confirmed) · NOT YET (what's
+// missing, in words) · NOT IN AN UPTREND. Sell: STRETCHED · LOSING STEAM.
+// Indicator names, per-share prices and the blended-history mechanics stay
+// on the entry chart, which every row opens.
 const VERDICT = {
-  enter: ['ENTER', 'border-green-400/50 text-green-400'],
-  wait: ['WAIT', 'border-amber-400/50 text-amber-400'],
-  watch: ['WATCH', 'border-border text-subtle'],
-  extended: ['EXTENDED', 'border-suite-bear/50 text-suite-bear'],
-  turning: ['TURNING', 'border-border text-subtle'],
+  enter: ['BUY SETUP', 'border-green-400/50 text-green-400'],
+  wait: ['NOT YET', 'border-amber-400/50 text-amber-400'],
+  watch: ['NOT IN AN UPTREND', 'border-border text-subtle'],
+  extended: ['STRETCHED', 'border-suite-bear/50 text-suite-bear'],
+  turning: ['LOSING STEAM', 'border-border text-subtle'],
 }
-const pct = (x) => (x == null ? '—' : `${x >= 0 ? '+' : '−'}${Math.abs(x * 100).toFixed(1)}%`)
+// What a missing buy-zone condition means, in words (the nightly row keeps
+// the indicator version for the entry chart).
+const PLAIN = {
+  iv: 'options are too expensive right now',
+  rsi: "hasn't pulled back enough",
+  trend: 'short-term trend still down',
+  rising: 'long-term trend is falling',
+}
+const plainBlocker = (b) => (b.k === 'band' ? (/^Fall/.test(b.need ?? '') ? 'too far above its trend line' : 'too far below its trend line') : PLAIN[b.k] ?? b.label)
 const money = (x, d = 2) => `$${Number(x).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d })}`
-const k = (x) => (x >= 1000 ? `$${(x / 1000).toFixed(1)}k` : money(x, 0))
+// "about $1,200" — nearest $100 from $1,000, nearest $10 below.
+const about = (x) => `about ${money(x >= 1000 ? Math.round(x / 100) * 100 : Math.round(x / 10) * 10, 0)}`
+const pct0 = (x) => `${Math.round(Math.abs(x) * 100)}%`
 const day = (t) => (t ? new Date(`${t}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }) : '')
 const monthYear = (t) => (t ? new Date(`${t}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' }) : '')
+const THIN_POOL = 30
+const FEW_OWN = 5
+
+function TrackRecord({ r, side }) {
+  const avg = side === 'buy' ? r.est_6m : r.est_3m
+  const win = side === 'buy' ? r.est_win_6m : r.est_win_3m
+  if (avg == null || !r.pool_n) return null
+  const months = side === 'buy' ? '6 months' : '3 months'
+  const cases = `${r.pool_n.toLocaleString('en-US')} past cases, ${r.own_n < FEW_OWN ? 'only ' : ''}${r.own_n} on ${r.ticker}`
+  if (r.pool_n < THIN_POOL) {
+    return <span className="block mt-1 text-[11px] text-muted"><span className="font-semibold">Thin record:</span> too few past cases to trust · {cases}</span>
+  }
+  const dir = side === 'buy' ? 'higher' : 'lower'
+  const toneAvg = side === 'buy' ? (avg >= 0 ? 'text-green-400' : 'text-rose-300') : (avg <= 0 ? 'text-green-400' : 'text-rose-300')
+  return (
+    <span className="block mt-1 text-[11px] text-muted">
+      <span className="font-semibold">Track record:</span> when these signals lined up before, the stock was {dir} {months} later
+      {win != null && <> <span className="text-subtle font-mono-tab">{pct0(win)}</span> of the time</>}, averaging <span className={clsx('font-mono-tab', toneAvg)}>{avg >= 0 ? '+' : '−'}{pct0(avg)}</span>
+      {' · '}{cases}{r.verdict === 'enter' && ' · stock return, not the option’s'}
+    </span>
+  )
+}
 
 export default function ConfluenceLeaders({ mine = [] }) {
   const [side, setSide] = useState('buy')
@@ -47,7 +79,7 @@ export default function ConfluenceLeaders({ mine = [] }) {
     let cancelled = false
     setRows(null)
     let q = supabase.from('confluence_ranks')
-      .select('ticker, side, as_of, close, score, lit, rank, est_3m, est_6m, own_n, pool_n, verdict, blockers, trade, stop_price, momentum')
+      .select('ticker, side, as_of, close, score, rank, est_3m, est_6m, est_win_3m, est_win_6m, own_n, pool_n, verdict, blockers, trade, stop_price, momentum')
       .eq('side', side)
     q = scope === 'all'
       ? q.not('rank', 'is', null).order('rank').limit(10)
@@ -60,7 +92,6 @@ export default function ConfluenceLeaders({ mine = [] }) {
   // Yours: ranked first, then by score.
   const list = useMemo(() => (scope === 'all' ? rows : rows && [...rows].sort((a, b) => (a.rank ?? 1e9) - (b.rank ?? 1e9) || b.score - a.score)), [rows, scope])
   const asOf = rows?.[0]?.as_of
-  const horizon = side === 'buy' ? 'est_6m' : 'est_3m'
   const noEntry = side === 'buy' && scope === 'all' && list?.length > 0 && !list.some((r) => r.verdict === 'enter')
 
   return (
@@ -88,8 +119,8 @@ export default function ConfluenceLeaders({ mine = [] }) {
         </div>
         <p className="mt-2 text-xs text-muted">
           {side === 'buy'
-            ? 'ENTER = the buy zone is YES with 2+ signals and the 200-day rising. WAIT rows name what is still missing.'
-            : '2+ sell signals at a high. For shares and spreads; a LEAPS follows its exit plan.'}
+            ? 'BUY SETUP means the app’s entry rule is met today. NOT YET rows say what is still missing.'
+            : 'Stocks showing 2+ sell signals near a high. For shares and spreads; a LEAPS follows its exit plan.'}
         </p>
       </div>
       {list === null ? (
@@ -101,51 +132,51 @@ export default function ConfluenceLeaders({ mine = [] }) {
         </div>
       ) : (
         <>
-          {noEntry && <p className="px-5 pb-3 text-xs text-amber-400">Nothing meets the entry rule today. These are the closest setups and what each still needs.</p>}
+          {noEntry && <p className="px-5 pb-3 text-xs text-amber-400">No stock meets the entry rule today. These are the closest, and what each still needs.</p>}
           <ul className="border-t border-hairline divide-y divide-hairline">
             {list.map((r) => {
               const v = VERDICT[r.verdict]
               const trade = r.verdict === 'enter' ? r.trade : null
               const perContract = trade ? trade.cost * 100 : null
+              const blockers = (r.blockers ?? []).map(plainBlocker)
               return (
                 <li key={r.ticker}>
                   <Link to={`/charts/entry/${encodeURIComponent(r.ticker)}`} className="px-5 py-3 flex items-center gap-3 hover:bg-card-hover/40 transition">
                     <span className={clsx('shrink-0 w-7 text-center text-xs font-semibold font-mono-tab', r.rank ? 'text-fg' : 'text-muted')}>{r.rank ? `#${r.rank}` : '—'}</span>
                     <span className="flex-1 min-w-0">
-                      <span className="flex items-center gap-2">
+                      <span className="flex items-center gap-2 flex-wrap">
                         <span className="text-sm font-semibold text-fg">{r.ticker}</span>
-                        {v && <span className={clsx('px-1.5 rounded border text-[11px] font-semibold tracking-wide', v[1])}>{v[0]}{r.verdict === 'enter' && (r.momentum === 'up' ? ' · confirmed' : r.momentum === 'down' ? ' · early' : '')}</span>}
                         <span className="text-xs text-muted font-mono-tab">{money(r.close)}</span>
-                      </span>
-                      <span className="block mt-0.5 text-xs text-subtle">
-                        {r.score} of 5 {side === 'sell' ? 'sell ' : ''}signals
-                        {side === 'buy' && r.verdict === 'wait' && r.blockers?.length > 0 && <> · <span className="text-amber-400">{r.blockers.map((b) => b.label).join(' · ')}</span></>}
-                        {side === 'buy' && r.verdict === 'watch' && <> · <span className="text-subtle">200-day falling</span></>}
-                        {side === 'sell' && r.lit?.length > 0 && <> · {r.lit.map((key) => LABEL.sell[key]).join(' · ')}</>}
-                        {r.score === 0 && ' today'}
+                        {v && <span className={clsx('px-1.5 rounded border text-[11px] font-semibold tracking-wide', v[1])}>{v[0]}{r.verdict === 'enter' && (r.momentum === 'up' ? ' · CONFIRMED' : r.momentum === 'down' ? ' · EARLY' : '')}</span>}
                       </span>
                       {trade && (
-                        <span className="block mt-0.5 text-xs text-fg font-mono-tab">
-                          Call · {money(trade.strike, 0)} strike · {monthYear(trade.expiry)} · ~{money(trade.cost)}/sh · {k(perContract)} a contract
-                          {accountSize && <> · {(perContract / accountSize * 100).toFixed(1)}% of account</>}
+                        <span className="block mt-1 text-sm text-fg">
+                          Buy the {monthYear(trade.expiry)} {money(trade.strike, 0)} call — {about(perContract)} per contract
+                          {accountSize && <span className="text-subtle"> · {(perContract / accountSize * 100).toFixed(1)}% of your account</span>}
                         </span>
                       )}
                       {r.verdict === 'enter' && r.momentum && (
                         <span className={clsx('block mt-0.5 text-xs', r.momentum === 'up' ? 'text-green-400' : 'text-amber-400')}>
-                          {r.momentum === 'up' ? 'Momentum has turned up.' : 'Momentum still down — the rule enters now; a cautious entry waits for it to turn up.'}
+                          {r.momentum === 'up' ? 'The pullback has turned up — a confirmed entry.' : 'Still falling — the rule buys now; a cautious entry waits for it to turn up.'}
                         </span>
                       )}
-                      {side === 'buy' && r.verdict && r.stop_price != null && (
-                        <span className="block mt-0.5 text-xs text-subtle font-mono-tab">Setup breaks below {money(r.stop_price)}</span>
+                      {r.verdict === 'wait' && blockers.length > 0 && (
+                        <span className="block mt-1 text-sm text-amber-400">
+                          {blockers.length === 1 ? 'Waiting on one thing: ' : 'Waiting on: '}{blockers.join(' · ')}
+                        </span>
+                      )}
+                      {r.verdict === 'watch' && <span className="block mt-1 text-sm text-subtle">Signals, but the long-term trend is falling — the rule doesn’t buy here.</span>}
+                      {side === 'buy' && r.verdict === 'enter' && r.stop_price != null && (
+                        <span className="block mt-0.5 text-xs text-subtle">Exit if it closes below <span className="font-mono-tab text-fg">{money(r.stop_price)}</span></span>
                       )}
                       {side === 'sell' && r.verdict && (
-                        <span className="block mt-0.5 text-xs text-subtle">Shares and spreads: a sell signal · LEAPS: your exit plan decides</span>
-                      )}
-                      {r[horizon] != null && (
-                        <span className="block mt-0.5 text-[11px] text-muted font-mono-tab">
-                          After this setup: {side === 'buy' ? '6M' : '3M'} <span className={r[horizon] < 0 ? 'text-rose-300' : 'text-green-400'}>{pct(r[horizon])}</span> avg · {r.own_n}× here, {r.pool_n}× universe
+                        <span className="block mt-1 text-sm text-subtle">
+                          {r.verdict === 'extended' ? 'Stretched after a run — ' : 'Momentum fading — '}
+                          sell signal for shares and spreads · a LEAPS follows its exit plan
                         </span>
                       )}
+                      <span className="block mt-0.5 text-[11px] text-muted">{r.score} of 5 signals{r.verdict ? '' : ' today'}</span>
+                      <TrackRecord r={r} side={side} />
                     </span>
                     <ChevronRight size={15} className="shrink-0 text-muted" aria-hidden />
                   </Link>
@@ -160,7 +191,7 @@ export default function ConfluenceLeaders({ mine = [] }) {
         <ChevronRight size={14} aria-hidden />
       </Link>
       <p className="px-5 pb-3 text-[11px] text-muted">
-        Option prices are model estimates (0.75 delta, ~2 years out), not quotes. Past stock returns, not advice. Rankings change after every close.
+        Option prices are estimates, not quotes. Past results are the stock’s, not advice. Rankings change after every close.
       </p>
     </section>
   )

@@ -1334,8 +1334,25 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   The cautious entry is a replay rule, `zoneConfirmed` (zone YES and Bravo
   regime bull) — measured against the plain zone on Signal record, never
   assumed better (the Hardening confirmation test cost more than it saved).
+  **Plain words** (owner, 2026-10-04: "a novice user may find this
+  confusing"): the row answers three questions — what to do, what it
+  costs, when you're wrong — and nothing else above the fold. Badges read
+  **BUY SETUP · EARLY / CONFIRMED**, **NOT YET**, **NOT IN AN UPTREND**;
+  sell **STRETCHED** / **LOSING STEAM**. A BUY SETUP row: "Buy the Oct
+  2028 $76 call — about $1,200 per contract · 1.6% of your account" (one
+  rounded figure; no per-share price or delta on the row) and "Exit if it
+  closes below $78.15". NOT YET rows: "Waiting on one thing: options are
+  too expensive right now" (`PLAIN` in `ConfluenceLeaders.jsx` maps each
+  blocker key to words; indicator names stay on the entry chart). The
+  history line is one **Track record** sentence with the win rate first —
+  "when these signals lined up before, the stock was higher 6 months
+  later 64% of the time, averaging +11% · 768 past cases, only 2 on L ·
+  stock return, not the option's" — "only" under 5 own cases, "Thin
+  record: too few past cases to trust" under 30 pool cases. The stop is
+  capped at the 40-bar low so a stock that has run far never reads a 30%
+  stop as the plan. No account-size warning (owner: not that).
   Computed nightly in `scripts/lib/verdict.mjs` → `confluence_ranks.verdict
-  / blockers / trade / stop_price / stop_date / momentum`;
+  / blockers / trade / stop_price / stop_date / momentum / est_win_3m`;
   the entry card falls back to the pool's record ("across 564 tickers:
   312×") when the ticker has < 5 cases. **Alerts** (full mode, users with
   entry alerts on): a Tracking / holding ticker entering the buy top 10

@@ -85,6 +85,7 @@ export function rankAll(results, pools) {
         own_n: est?.ownN ?? 0, pool_n: est?.poolN ?? 0, est_at_turn: est?.atTurn ?? null,
         est_3m: h(est, '3M'), est_6m: h(est, '6M'), est_12m: h(est, '12M'),
         est_win_6m: est?.horizons.find((x) => x.label === '6M')?.winRate ?? null,
+        est_win_3m: est?.horizons.find((x) => x.label === '3M')?.winRate ?? null,
         last_signal: r[side].lastSignal, etb_convergence: side === 'buy' ? r.etbConvergence : false, rank: null,
         verdict: side === 'buy' ? buyVerdict({ score: now?.score ?? 0, trendUp: r.trendUp, cond: r.cond }) : sellVerdict({ score: now?.score ?? 0, lit: now?.lit ?? [] }),
         blockers: side === 'buy' ? r.blockers : null, trade: side === 'buy' ? r.trade : null,
