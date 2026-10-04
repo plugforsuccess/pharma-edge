@@ -169,11 +169,23 @@ async function main() {
   }
   const prevTop = new Set((prevRows ?? []).map((r) => `${r.side}:${r.ticker}`))
 
-  // Upsert via RPC functions (bypass schema cache entirely).
-  // bulk_upsert_confluence_ranks() takes JSONB array and performs raw SQL INSERT...ON CONFLICT
+  // Upsert via RPC functions using REST API (bypass schema cache entirely).
+  // Call RPC functions directly via /rest/v1/rpc/ to avoid schema introspection.
+  const restUrl = url.replace(/\/$/, '')
+
   try {
-    const { error } = await db.rpc('bulk_upsert_confluence_ranks', { data: rows })
-    if (error) throw new Error(`confluence_ranks RPC failed: ${error.message}`)
+    const ranksResp = await fetch(`${restUrl}/rest/v1/rpc/bulk_upsert_confluence_ranks`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': key
+      },
+      body: JSON.stringify({ data: rows })
+    })
+    if (!ranksResp.ok) {
+      const err = await ranksResp.text()
+      throw new Error(`confluence_ranks: ${err}`)
+    }
   } catch (e) {
     throw new Error(`confluence_ranks write failed: ${e.message}`)
   }
@@ -181,8 +193,18 @@ async function main() {
   // Same for pool
   if (pool.length > 0) {
     try {
-      const { error } = await db.rpc('bulk_upsert_confluence_pool', { data: pool })
-      if (error) throw new Error(`confluence_pool RPC failed: ${error.message}`)
+      const poolResp = await fetch(`${restUrl}/rest/v1/rpc/bulk_upsert_confluence_pool`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': key
+        },
+        body: JSON.stringify({ data: pool })
+      })
+      if (!poolResp.ok) {
+        const err = await poolResp.text()
+        throw new Error(`confluence_pool: ${err}`)
+      }
     } catch (e) {
       throw new Error(`confluence_pool write failed: ${e.message}`)
     }
