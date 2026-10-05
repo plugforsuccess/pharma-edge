@@ -33,7 +33,7 @@ import { suiteModel } from '../src/utils/signalSuite.js'
 import { confluenceModel, poolStats, blendedEstimate, baselineStats, MIN_SCORE, SIDES } from '../src/utils/confluence.js'
 import { alignCloses } from '../src/utils/signalSuite.js'
 import { dailyBars, mapLimit, sources } from './lib/marketData.mjs'
-import { blockers, buyVerdict, sellVerdict, tradeSpec, structureStop, momentum } from './lib/verdict.mjs'
+import { blockers, buyVerdict, sellVerdict, tradeSpec, structureStop, momentum, ownRecord } from './lib/verdict.mjs'
 
 const args = process.argv.slice(2)
 const MODE = (args[args.indexOf('--mode') + 1] && args.includes('--mode')) ? args[args.indexOf('--mode') + 1] : 'dry-run'
@@ -62,7 +62,7 @@ export function analyze(ticker, bars, spy = null) {
     conditionsMet: ['band', 'rising', 'trend', 'rsi', 'iv'].filter((k) => c[k]).length,
     etbConvergence: etbToday,
     cond: c, blockers: blockers(model), trade: tradeSpec(bars), stop: structureStop(bars, { sma200: model.status.sma200, bandPct: model.params.bandPct }), momentum: momentum(suite),
-    closes: bars.map((b) => b.c), market,
+    closes: bars.map((b) => b.c), market, ownRecord: ownRecord(bars, model, suite),
     buy: { today: conf.buy.today, setups: conf.buy.setups, lastSignal: lastSignal(conf.buy.flags) },
     sell: { today: conf.sell.today, setups: conf.sell.setups, lastSignal: lastSignal(conf.sell.flags) },
   }
@@ -97,6 +97,7 @@ export function rankAll(results, pools) {
         verdict: side === 'buy' ? buyVerdict({ score: now?.score ?? 0, trendUp: r.trendUp, cond: r.cond }) : sellVerdict({ score: now?.score ?? 0, lit: now?.lit ?? [] }),
         blockers: side === 'buy' ? r.blockers : null, trade: side === 'buy' ? r.trade : null,
         stop_price: r.stop?.price ?? null, stop_date: r.stop?.date ?? null, momentum: r.momentum,
+        own_record: side === 'buy' ? r.ownRecord : null,
       }
       rows.push(row)
       // Eligible: 2+ signals (buy: with the 200-day rising). The setup's

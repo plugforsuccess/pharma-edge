@@ -96,6 +96,42 @@ function TrackRecord({ r, side, baseline }) {
   )
 }
 
+// What the app's own rule did on this very stock — ahead of the pattern's
+// record across all stocks, and flagged when the two disagree.
+function OwnRecord({ r }) {
+  const o = r.own_record
+  if (!o) return null
+  const z = o.zone
+  const num = (x, cls = 'text-fg') => <span className={clsx('font-mono-tab', cls)}>{x}</span>
+  const signed = (x) => `${x >= 0 ? '+' : '−'}${pct0(x)}`
+  const tone = (x) => (x >= 0 ? 'text-green-400' : 'text-rose-300')
+  const times = (k) => (k === 1 ? 'once' : k === 2 ? 'twice' : `${k} times`)
+  const monthOf = (t) => new Date(`${t}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' })
+  const poolWin = r.est_win_6m
+  // The pattern looks fine but this stock's own trades lost: say so.
+  const disagree = z.closed >= 1 && z.avg != null && z.avg < 0 && poolWin != null && poolWin >= 0.55
+  const rallies = o.moves?.n ? <> It caught {num(`${o.moves.caught} of ${o.moves.n}`)} of {r.ticker}’s big rallies{o.moves.why?.['already holding'] ? <> ({o.moves.why['already holding']} missed while holding an earlier, losing entry)</> : null}.</> : null
+  if (z.n === 0) {
+    return (
+      <p className="mt-2 text-[11px] leading-4 text-muted">
+        <span className="text-subtle font-semibold">On {r.ticker} itself:</span> this is the first time the rule has fired in 5 years
+        {o.confluence.closed > 0 && <>; the broader 2-signal version fired {times(o.confluence.n)}, {o.confluence.wins} of {o.confluence.closed} made money (avg {num(signed(o.confluence.avg), tone(o.confluence.avg))} on the call)</>}.
+        {rallies}
+      </p>
+    )
+  }
+  return (
+    <p className={clsx('mt-2 text-[11px] leading-4', disagree ? 'text-amber-400' : 'text-muted')}>
+      <span className={clsx('font-semibold', disagree ? 'text-amber-400' : 'text-subtle')}>On {r.ticker} itself:</span> this rule has fired {num(times(z.n), disagree ? 'text-amber-400' : 'text-subtle')} in 5 years
+      {z.closed > 0 && <> — {num(`${z.wins} of ${z.closed}`, disagree ? 'text-amber-400' : 'text-fg')} made money, averaging {num(signed(z.avg), tone(z.avg))} on the call</>}
+      {z.open && <>; the {monthOf(z.open.signal)} entry is still open at {num(signed(z.open.option), tone(z.open.option))}</>}.
+      {!z.open && o.confluence.open && <> A {monthOf(o.confluence.open.signal)} entry on similar signals is still open at {num(signed(o.confluence.open.option), tone(o.confluence.open.option))}.</>}
+      {rallies}
+      {disagree && <> <span className="font-semibold">{r.ticker}’s own history disagrees with the pattern’s record below.</span></>}
+    </p>
+  )
+}
+
 function Fact({ label, value, tone = 'text-fg' }) {
   return (
     <span className="min-w-0">
@@ -127,7 +163,7 @@ export default function ConfluenceLeaders({ mine = [] }) {
     let cancelled = false
     setRows(null)
     let q = supabase.from('confluence_ranks')
-      .select('ticker, side, as_of, close, score, rank, est_3m, est_6m, est_win_3m, est_win_6m, own_n, pool_n, verdict, blockers, trade, stop_price, momentum, est_med_3m, est_med_6m, est_badq_3m, est_badq_6m, est_beat_3m, est_beat_6m')
+      .select('ticker, side, as_of, close, score, rank, est_3m, est_6m, est_win_3m, est_win_6m, own_n, pool_n, verdict, blockers, trade, stop_price, momentum, own_record, est_med_3m, est_med_6m, est_badq_3m, est_badq_6m, est_beat_3m, est_beat_6m')
       .eq('side', side)
     q = scope === 'all'
       ? q.not('rank', 'is', null).order('rank').limit(10)
@@ -252,6 +288,7 @@ export default function ConfluenceLeaders({ mine = [] }) {
 
                     {/* Signals + record */}
                     <span className="mt-3 block"><SignalMeter score={r.score} side={side} /></span>
+                    {side === 'buy' && r.verdict === 'enter' && <OwnRecord r={r} />}
                     <TrackRecord r={r} side={side} baseline={baseline} />
                   </Link>
                 </li>

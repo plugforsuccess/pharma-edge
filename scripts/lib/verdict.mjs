@@ -24,7 +24,7 @@
 
 import { entryGaps } from '../../src/utils/indicators.js'
 import { swingPoints, MIN_SCORE } from '../../src/utils/confluence.js'
-import { OPTION_MODEL, strikeForDelta, bsCall, trailingVol } from '../../src/utils/replay.js'
+import { OPTION_MODEL, strikeForDelta, bsCall, trailingVol, replaySignals, replayTrades, tradeStats, bigMoves, gradeMoves, moveStats } from '../../src/utils/replay.js'
 
 const LABEL = {
   band: 'Not within 5% of the 200-day',
@@ -85,6 +85,38 @@ export function tradeSpec(bars, opt = OPTION_MODEL) {
     vol: Math.round(vol * 1000) / 1000,
     breakeven: Math.round((strike + cost) * 100) / 100,
   }
+}
+
+// This ticker's own replay of the app's rule (owner, 2026-10-05: the card
+// showed the pattern's record across all stocks while the rule on UNH
+// itself had lost 3 of 4): the buy zone → exit targets as the app plays
+// it, plus 2+ signals (confluence) as the broader version; the open trade,
+// the last trades, and the ticker's big rallies caught vs missed.
+export function ownRecord(bars, model, suite) {
+  const sig = replaySignals(bars, model, suite)
+  const vol = trailingVol(bars.map((b) => b.c), OPTION_MODEL.volBars)
+  const r2 = (x) => (x == null ? null : Math.round(x * 1000) / 1000)
+  const rule = (entryRule) => {
+    const trades = replayTrades(bars, sig, { entryRule, exitRule: 'targets', vol })
+    const st = tradeStats(trades)
+    const open = trades.find((t) => t.open)
+    return {
+      n: st.n, closed: st.closed, wins: trades.filter((t) => !t.open && t.optionReturn > 0).length,
+      avg: r2(st.avg), median: r2(st.median), big_loss: r2(st.bigLoss), avg_days: st.avgDays == null ? null : Math.round(st.avgDays),
+      open: open ? { signal: open.signalT, price: r2(open.stock), option: r2(open.optionReturn), stock: r2(open.stockReturn) } : null,
+      last: trades.slice(-3).map((t) => ({ signal: t.signalT, end: t.open ? null : t.endT, option: r2(t.optionReturn), stock: r2(t.stockReturn), open: !!t.open })),
+      trades,
+    }
+  }
+  const zone = rule('zone')
+  const confluence = rule('confluence')
+  const moves = bigMoves(bars)
+  const graded = gradeMoves(moves, zone.trades, sig, bars)
+  const ms = moveStats(graded)
+  const why = {}
+  for (const g of graded) if (!g.caught) why[g.why] = (why[g.why] ?? 0) + 1
+  delete zone.trades; delete confluence.trades
+  return { zone, confluence, moves: { n: ms.moves, caught: ms.caught, why } }
 }
 
 export function structureStop(bars, { sma200 = null, bandPct = 5, swing = 10, fallback = 40 } = {}) {

@@ -1372,6 +1372,16 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   close the row says so ("— only 0.6% away; this entry sits at the bottom
   edge of the buy zone") and, among BUY SETUP rows, more room to the stop
   ranks first (owner, 2026-10-05). No account-size warning (owner: not that).
+  **On this stock itself** (owner, 2026-10-05: "that information is not
+  clear whatsoever in the play card" — UNH's card showed the pattern's
+  record while the rule on UNH had lost 3 of 4 and sat in a −51% open
+  trade): BUY SETUP rows lead with the ticker's own replay of the rule
+  (`ownRecord` → `confluence_ranks.own_record`: buy zone → targets and the
+  2-signal version — fired N times, M of K made money, avg on the call, the
+  open entry, big rallies caught vs missed and how many were missed while
+  holding a losing entry). Amber, with "X's own history disagrees with the
+  pattern's record below", when the own trades lost while the pool's win
+  rate is ≥ 55%.
   Computed nightly in `scripts/lib/verdict.mjs` → `confluence_ranks.verdict
   / blockers / trade / stop_price / stop_date / momentum / est_win_3m`;
   the entry card falls back to the pool's record ("across 564 tickers:
