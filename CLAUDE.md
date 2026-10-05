@@ -1470,6 +1470,32 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   justifies buying delisted-inclusive data; it never changes a live rule
   by itself. Every variant tried goes in `docs/signal-engine/variants.md`.
   Don't edit the rule after results exist — append a dated section.
+  **Built 2026-10-05 (weeks 1–2 of the plan):** `src/utils/controls.js`
+  (`npm run controls:check`) — SPY-same-date paired control, random
+  entries per month (seeded, 200 reps), monthly DCA, cluster bootstrap by
+  signal month (one- and two-sample), periods, market buckets by SPY over
+  each trade's own hold, IV proxy `premium × (0.3·RV60 + 0.7·RV252)` with
+  `calibratePremium` (median IV/proxy over real-IV rows), slippage tiers by
+  60-day dollar volume (2/4/7%), trailing-12-month dividend yield from
+  Yahoo's chart `events=div` (`dividendsByTicker` in `marketData.mjs`),
+  and `verdict()` = the recorded rule. `replay.js` gained `oneTrade` /
+  `replayFromEntries` (pricing hooks `volAt` / `sticky` / `slipAt` /
+  `yieldAt`, `allowOverlap` for controls), Black-Scholes with a dividend
+  yield, and the **`setup`** entry rule (zone YES + 2 signals + rising =
+  BUY SETUP as shown; the test's primary rule). `scripts/lib/prereg.mjs`
+  runs it inside the universe job: premium grid 1.0–1.3 + calibrated,
+  rules setup / zone / confluence, SPY + DCA at every premium, random reps
+  at the calibrated premium for `setup`, results in
+  `replay_runs.summary.prereg`, one row per trade at the calibrated premium
+  in **`replay_trades`** (+ `replay_trades.csv` workflow artifact, 90 days).
+  Signal record shows it first (`PreregCard`: verdict, P1 / P2 / all,
+  completed-only toggle, premium sensitivity with 1.0 marked optimistic,
+  market buckets). **`iv-quotes.yml`** (weekdays 22:10 UTC,
+  `scripts/collect-iv-quotes.mjs`) writes the 30-day ATM IV to
+  `iv_history` (source `yahoo`) and the ~0.75Δ ~2-year call's bid / ask /
+  mid / IV / delta / OI to **`leaps_quotes`** for the whole universe.
+  Verdict is `inconclusive` until the premium calibrates (≥ 30 real-IV
+  samples) — read nothing into the numbers before then.
 - **Rule optimizer** (owner, 2026-10-04: "do everything mathematically
   possible to get the guarantee closest to 1.0" — advised: 1.0 is a
   statement about the future; what can be pushed is out-of-sample
@@ -1737,6 +1763,9 @@ Sunday     — optimize-entries.yml (15:23 UTC)
 
 Saturday   — replay-universe.yml (14:17 UTC)
              Day-by-day LEAPS replay of every ticker → replay_runs (/charts/record)
+
+6:10pm ET  — iv-quotes.yml (weekdays, 22:10 UTC)
+             30-day ATM IV → iv_history; ~0.75Δ ~2-year call bid/ask → leaps_quotes
 
 5:20pm ET  — entry-scan.yml (weekdays, 21:20 UTC)
              Entry alerts: LEAPS buy zone YES / weekly Hardening bull

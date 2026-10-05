@@ -33,6 +33,10 @@ export const ENTRY_RULES = [
   ['confluence', 'Confluence'],
   ['etb', 'E+T+B (1–2 week convergence)'],
   ['zone', 'Buy zone'],
+  // The rule as the app presents it (BUY SETUP): the zone turning YES with
+  // 2+ confluence signals and the 200-day rising. The pre-registered test
+  // (docs/signal-engine/preregistration.md) is about this rule.
+  ['setup', 'Buy setup (as shown)'],
   // Confirmed (owner, 2026-10-04: a buy zone YES beside a Bravo bear read as
   // a contradiction): the zone is YES *and* Bravo's regime is bull — the
   // cautious entry, to be measured against the plain zone, not assumed better.
@@ -93,12 +97,12 @@ export function normInv(p) {
   return (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q / (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1)
 }
 
-export function bsCall(S, K, T, vol, r = OPTION_MODEL.rate) {
+export function bsCall(S, K, T, vol, r = OPTION_MODEL.rate, q = 0) {
   if (!(S > 0 && K > 0)) return 0
   if (!(T > 0) || !(vol > 0)) return Math.max(0, S - K)
   const sd = vol * Math.sqrt(T)
-  const d1 = (Math.log(S / K) + (r + vol * vol / 2) * T) / sd
-  return S * normCdf(d1) - K * Math.exp(-r * T) * normCdf(d1 - sd)
+  const d1 = (Math.log(S / K) + (r - q + vol * vol / 2) * T) / sd
+  return S * Math.exp(-q * T) * normCdf(d1) - K * Math.exp(-r * T) * normCdf(d1 - sd)
 }
 
 // The strike whose call delta is `delta`.
@@ -109,9 +113,10 @@ export function bsPut(S, K, T, vol, r = OPTION_MODEL.rate) {
   return bsCall(S, K, T, vol, r) - S + K * Math.exp(-r * T)
 }
 
-export function strikeForDelta(S, T, vol, delta, r = OPTION_MODEL.rate) {
-  const d1 = normInv(delta)
-  return S * Math.exp(-(d1 * vol * Math.sqrt(T) - (r + vol * vol / 2) * T))
+export function strikeForDelta(S, T, vol, delta, r = OPTION_MODEL.rate, q = 0) {
+  // With a dividend yield the call delta is e^{-qT} N(d1); solve for d1.
+  const d1 = normInv(Math.min(0.999, delta * Math.exp(q * T)))
+  return S * Math.exp(-(d1 * vol * Math.sqrt(T) - (r - q + vol * vol / 2) * T))
 }
 
 // Trailing annualised volatility of log returns (null until n returns).
@@ -163,6 +168,7 @@ export function replaySignals(bars, model, suite, window = DEFAULT_WINDOW) {
       confluence: buy.map((s, i) => rising[i] && s.score >= MIN_SCORE && (i === 0 || buy[i - 1].score < MIN_SCORE)),
       etb: etbFired.map((fired, i) => fired && rising[i] && (i === 0 || !etbFired[i - 1])),
       zone: zone.map((z, i) => z && !zone[i - 1]),
+      setup: zone.map((z, i) => z && rising[i] && buy[i].score >= MIN_SCORE && !(zone[i - 1] && rising[i - 1] && buy[i - 1].score >= MIN_SCORE)),
       zoneConfirmed: zone.map((z, i) => z && suite.bravo.regime[i] === 1 && !(zone[i - 1] && suite.bravo.regime[i - 1] === 1)),
       bravo: suite.bravo.bullOn.map((x, i) => !!x && rising[i]),
       recovery: buy.map((s, i) => !rising[i] && model.s50[i] != null && model.closes[i] > model.s50[i]
@@ -182,76 +188,119 @@ export function replaySignals(bars, model, suite, window = DEFAULT_WINDOW) {
 // `signals` sells everything on it; `both` lets it close only what's left
 // after target 1 (the targets bank the gain, the signal guards the rest). No hard stop: the playbook cuts on the thesis, which a
 // replay can't see. A trade still open on the last bar is marked there.
-export function replayTrades(bars, sig, { entryRule = 'confluence', exitRule = 'targets', plan = EXIT_PLAYBOOK, opt = OPTION_MODEL, vol = null } = {}) {
+// Pricing hooks (the pre-registered test, docs/signal-engine/preregistration.md):
+//   volAt(i)    vol used to price the entry at signal bar i (default: the
+//               trailing realized vol); sticky = true holds that vol through
+//               the trade instead of re-marking from trailing realized vol
+//   slipAt(i)   slippage per fill for a trade signalled at bar i (default
+//               opt.slippage); applied on the entry and on every exit fill
+//   yieldAt(i)  continuous dividend yield at bar i (default 0)
+//   allowOverlap = true runs every entry as its own trade (controls:
+//               SPY-on-the-same-dates, monthly DCA); false = one position at
+//               a time, the app's rule
+export function oneTrade(bars, closes, sigma, i, { exitRule = 'targets', plan = EXIT_PLAYBOOK, opt = OPTION_MODEL, sell: sellSig = null, volAt = null, sticky = false, slipAt = null, yieldAt = null } = {}) {
+  const n = bars.length
+  const e = i + 1
+  if (e >= n) return null
+  const useTargets = exitRule === 'targets' || exitRule === 'both'
+  const useSignals = exitRule === 'signals' || exitRule === 'both'
+  const S0 = bars[e].o || bars[e].c
+  const vIn = volAt ? volAt(i) : sigma[i]
+  if (vIn == null) return null
+  const v0 = Math.max(opt.volFloor, vIn)
+  const q0 = yieldAt ? (yieldAt(i) ?? 0) : 0
+  const slip = slipAt ? slipAt(i) : opt.slippage
+  const T0 = opt.dte / 365
+  const K = strikeForDelta(S0, T0, v0, opt.delta, opt.rate, q0)
+  const cost = bsCall(S0, K, T0, v0, opt.rate, q0) * (1 + slip)
+  const expiry = dayMs(bars[e].t) + opt.dte * DAY_MS
+  let left = 1
+  let proceeds = 0
+  let stockOut = 0
+  let peak = 0
+  let maxHigh = bars[e].h
+  const hit = plan.targets.map(() => false)
+  const exits = []
+  const fills = []
+  const sell = (j, frac, value, reason) => {
+    const f = Math.min(frac, left)
+    if (f <= 1e-9) return
+    proceeds += f * value * (1 - slip)
+    stockOut += f * closes[j]
+    left -= f
+    exits.push({ i: j, t: bars[j].t, frac: f, value, mult: value / cost, reason })
+    fills.push(f * value * slip)
+  }
+  const markVol = (j) => (sticky ? v0 : Math.max(opt.volFloor, sigma[j] ?? v0))
+  const markQ = (j) => (yieldAt ? (yieldAt(j) ?? q0) : 0)
+  let j = e
+  for (; j < n && left > 1e-9; j++) {
+    maxHigh = Math.max(maxHigh, bars[j].h)
+    const daysLeft = (expiry - dayMs(bars[j].t)) / DAY_MS
+    const v = bsCall(closes[j], K, daysLeft / 365, markVol(j), opt.rate, markQ(j))
+    peak = Math.max(peak, v)
+    if (daysLeft < plan.rollDays) { sell(j, left, v, 'time'); break }
+    if (useTargets) {
+      plan.targets.forEach((t, k) => {
+        if (!hit[k] && v >= cost * (1 + t)) { hit[k] = true; sell(j, plan.fractions[k], v, `t${k + 1}`) }
+      })
+      if (hit.every(Boolean) && left > 1e-9 && v <= peak * (1 - plan.runnerTrailPct)) { sell(j, left, v, 'trail'); break }
+    }
+    if (useSignals && j > e && sellSig?.[j] && left > 1e-9 && (exitRule === 'signals' || hit[0])) { sell(j, left, v, 'signal'); break }
+  }
+  const last = Math.min(j, n - 1)
+  let open = false
+  if (left > 1e-9) {
+    // Still open on the last bar: mark it there (no slippage on a mark).
+    const daysLeft = (expiry - dayMs(bars[n - 1].t)) / DAY_MS
+    const v = bsCall(closes[n - 1], K, daysLeft / 365, markVol(n - 1), opt.rate, markQ(n - 1))
+    proceeds += left * v
+    stockOut += left * closes[n - 1]
+    open = true
+  }
+  const end = open ? n - 1 : exits[exits.length - 1].i
+  return {
+    signalI: i, signalT: bars[i].t, i: e, t: bars[e].t, stock: S0, strike: K, cost, vol: v0, slip, q: q0,
+    exits, open, endI: end, endT: bars[end].t,
+    optionReturn: proceeds / cost - 1,
+    stockReturn: stockOut / S0 - 1,
+    bestStock: maxHigh / S0 - 1,
+    days: Math.round((dayMs(bars[end].t) - dayMs(bars[e].t)) / DAY_MS),
+    lastI: last,
+  }
+}
+
+// Trades from a boolean entries array (entries[i] = a signal at bar i's
+// close; the trade buys at bar i+1's open). One position at a time unless
+// allowOverlap.
+export function replayFromEntries(bars, entries, { allowOverlap = false, vol = null, opt = OPTION_MODEL, ...rest } = {}) {
   const n = bars.length
   const closes = bars.map((b) => b.c)
   const sigma = vol ?? trailingVol(closes, opt.volBars)
-  const entries = sig.entry[entryRule]
-  const useTargets = exitRule === 'targets' || exitRule === 'both'
-  const useSignals = exitRule === 'signals' || exitRule === 'both'
   const trades = []
   let i = 0
   while (i < n - 1) {
-    if (!entries[i] || sigma[i] == null) { i++; continue }
-    const e = i + 1
-    const S0 = bars[e].o || bars[e].c
-    const v0 = Math.max(opt.volFloor, sigma[i])
-    const T0 = opt.dte / 365
-    const K = strikeForDelta(S0, T0, v0, opt.delta, opt.rate)
-    const cost = bsCall(S0, K, T0, v0, opt.rate) * (1 + opt.slippage)
-    const expiry = dayMs(bars[e].t) + opt.dte * DAY_MS
-    let left = 1
-    let proceeds = 0
-    let stockOut = 0
-    let peak = 0
-    let maxHigh = bars[e].h
-    const hit = plan.targets.map(() => false)
-    const exits = []
-    const sell = (j, frac, value, reason) => {
-      const f = Math.min(frac, left)
-      if (f <= 1e-9) return
-      proceeds += f * value * (1 - opt.slippage)
-      stockOut += f * closes[j]
-      left -= f
-      exits.push({ i: j, t: bars[j].t, frac: f, value, mult: value / cost, reason })
-    }
-    let j = e
-    for (; j < n && left > 1e-9; j++) {
-      maxHigh = Math.max(maxHigh, bars[j].h)
-      const daysLeft = (expiry - dayMs(bars[j].t)) / DAY_MS
-      const v = bsCall(closes[j], K, daysLeft / 365, Math.max(opt.volFloor, sigma[j] ?? v0), opt.rate)
-      peak = Math.max(peak, v)
-      if (daysLeft < plan.rollDays) { sell(j, left, v, 'time'); break }
-      if (useTargets) {
-        plan.targets.forEach((t, k) => {
-          if (!hit[k] && v >= cost * (1 + t)) { hit[k] = true; sell(j, plan.fractions[k], v, `t${k + 1}`) }
-        })
-        if (hit.every(Boolean) && left > 1e-9 && v <= peak * (1 - plan.runnerTrailPct)) { sell(j, left, v, 'trail'); break }
-      }
-      if (useSignals && j > e && sig.sell[j] && left > 1e-9 && (exitRule === 'signals' || hit[0])) { sell(j, left, v, 'signal'); break }
-    }
-    const last = Math.min(j, n - 1)
-    let open = false
-    if (left > 1e-9) {
-      // Still open on the last bar: mark it there (no slippage on a mark).
-      const daysLeft = (expiry - dayMs(bars[n - 1].t)) / DAY_MS
-      const v = bsCall(closes[n - 1], K, daysLeft / 365, Math.max(opt.volFloor, sigma[n - 1] ?? v0), opt.rate)
-      proceeds += left * v
-      stockOut += left * closes[n - 1]
-      open = true
-    }
-    const end = open ? n - 1 : exits[exits.length - 1].i
-    trades.push({
-      signalI: i, signalT: bars[i].t, i: e, t: bars[e].t, stock: S0, strike: K, cost, vol: v0,
-      exits, open, endI: end, endT: bars[end].t,
-      optionReturn: proceeds / cost - 1,
-      stockReturn: stockOut / S0 - 1,
-      bestStock: maxHigh / S0 - 1,
-      days: Math.round((dayMs(bars[end].t) - dayMs(bars[e].t)) / DAY_MS),
-      key: sig.buyKey?.[i] ?? null,
-    })
-    i = Math.max(last, e) + 1
+    if (!entries[i]) { i++; continue }
+    const tr = oneTrade(bars, closes, sigma, i, { opt, ...rest })
+    if (!tr) { i++; continue }
+    const { lastI, ...t } = tr
+    trades.push(t)
+    i = allowOverlap ? i + 1 : Math.max(lastI, i + 1) + 1
   }
+  return trades
+}
+
+// Trades, one at a time: a signal at bar i's close buys at bar i+1's open;
+// every later close is checked for exits in this order — time stop (expiry
+// within the playbook's rollDays), then targets (sell each target's
+// fraction once the call is worth 1 + target × cost), then the runner trail
+// (only once every target has hit, as in the app), then the sell signal:
+// `signals` sells everything on it; `both` lets it close only what's left
+// after target 1 (the targets bank the gain, the signal guards the rest). No hard stop: the playbook cuts on the thesis, which a
+// replay can't see. A trade still open on the last bar is marked there.
+export function replayTrades(bars, sig, { entryRule = 'confluence', exitRule = 'targets', plan = EXIT_PLAYBOOK, opt = OPTION_MODEL, vol = null, ...pricing } = {}) {
+  const trades = replayFromEntries(bars, sig.entry[entryRule], { exitRule, plan, opt, vol, sell: sig.sell, ...pricing })
+  for (const t of trades) t.key = sig.buyKey?.[t.signalI] ?? null
   return trades
 }
 

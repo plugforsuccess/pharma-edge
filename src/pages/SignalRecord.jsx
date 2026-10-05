@@ -14,7 +14,7 @@ const pctS = (x) => (x == null ? '—' : Math.abs(x) < 0.005 ? '0%' : `${x >= 0 
 const share = (x) => (x == null ? '—' : `${Math.round(x * 100)}%`)
 const day = (t) => (t ? new Date(`${t}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit', timeZone: 'UTC' }).replace(/, (\d\d)$/, ' ’$1') : '')
 const tone = (x) => (x == null ? 'text-muted' : x < 0 ? 'text-rose-300' : 'text-green-400')
-const ENTRIES = [['confluence', 'Confluence'], ['zone', 'Buy zone'], ['zoneConfirmed', 'Buy zone · momentum up'], ['bravo', 'Bravo ◆'], ['recovery', 'Recovery']]
+const ENTRIES = [['setup', 'Buy setup (as shown)'], ['confluence', 'Confluence'], ['zone', 'Buy zone'], ['zoneConfirmed', 'Buy zone · momentum up'], ['bravo', 'Bravo ◆'], ['recovery', 'Recovery']]
 const EXITS = [
   ['targets', 'Exit targets', '70% at 2x · 15% at 3x · trail the rest'],
   ['signals', 'Sell signals', 'All out on 2+ sell signals'],
@@ -59,6 +59,7 @@ export default function SignalRecord() {
         <section className="bg-card border border-border rounded-2xl p-5 text-sm text-subtle">No replay yet. It runs every Saturday.</section>
       ) : (
         <>
+          <PreregCard p={s.prereg} />
           {opt && <OptimizerCard o={opt} />}
 
           <div className="flex gap-1 p-1 rounded-xl bg-card border border-border mb-4" role="tablist" aria-label="Buy on">
@@ -203,6 +204,73 @@ export default function SignalRecord() {
         </>
       )}
     </div>
+  )
+}
+
+
+// The pre-registered test (docs/signal-engine/preregistration.md, recorded
+// 2026-10-05 before the code existed): the buy setup as shown vs the same
+// call on SPY bought the same day with the same exits, priced at the
+// calibrated implied-vol premium with slippage by liquidity, open trades at
+// their mark. Edge / no edge / inconclusive by the recorded rule.
+const VERDICT_TONE = { edge: 'border-green-400/50 text-green-400', 'no edge': 'border-rose-300/50 text-rose-300', inconclusive: 'border-amber-400/50 text-amber-400' }
+function PreregCard({ p }) {
+  const [completed, setCompleted] = useState(false)
+  if (!p) {
+    return (
+      <Card title="Pre-registered test">
+        <div className="px-5 pb-5 text-sm text-subtle">Not run yet — it joins the Saturday replay (needs SPY bars and the IV calibration).</div>
+      </Card>
+    )
+  }
+  const pm = p.premium.calibrated
+  const g = pm != null ? p.grid[String(pm)]?.[p.rule] : null
+  const per = g ? (completed ? g.completed : g.marked) : null
+  const ci = (r) => (r.lo == null ? '—' : `${pctS(r.lo)} to ${pctS(r.hi)}`)
+  return (
+    <Card title="Pre-registered test">
+      <div className="px-5 pb-4">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className={clsx('px-2 py-0.5 rounded-md border text-[11px] font-semibold tracking-wide uppercase', VERDICT_TONE[p.verdict.verdict] ?? 'border-border text-subtle')}>{p.verdict.verdict}</span>
+          <span className="text-xs text-subtle">{p.verdict.why}</span>
+        </div>
+        <p className="mt-2 text-xs text-muted">
+          Buy setup as shown vs the same call on SPY bought the same day, same exits.
+          {pm != null ? <> Priced at implied-vol premium <span className="font-mono-tab text-subtle">{pm.toFixed(2)}</span> (from {p.premium.samples.toLocaleString('en-US')} real-IV samples)</> : ' No calibrated premium yet (too little real IV history) — read nothing into the numbers below.'}, slippage by liquidity, every fill counted. {completed ? 'Completed trades only.' : 'Open trades at their mark.'}
+        </p>
+        <button type="button" onClick={() => setCompleted((v) => !v)} className="mt-2 min-h-[36px] text-xs text-violet-300 hover:text-violet-200">{completed ? 'Show every trade (open at its mark)' : 'Show completed trades only'}</button>
+      </div>
+      {per && (
+        <div className="border-t border-hairline">
+          {[['P1', '2022–23'], ['P2', '2024→'], ['all', 'All']].map(([k, label]) => {
+            const r = per[k]
+            if (!r) return null
+            return (
+              <div key={k} className="px-5 py-3 border-b border-hairline last:border-b-0">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-sm font-semibold text-fg">{label}</span>
+                  <span className="text-[11px] text-muted font-mono-tab">{r.n} trades · {r.months} months{!r.sampleFloor && ' · under the sample floor'}</span>
+                </div>
+                <div className="mt-1.5 grid grid-cols-3 gap-2 text-[11px]">
+                  <div><div className="text-muted uppercase tracking-[0.1em]">Strategy</div><div className={clsx('text-sm font-mono-tab', tone(r.strategy.mean))}>{pctS(r.strategy.mean)}</div><div className="text-muted">win {share(r.strategy.win)} · lost ½ {share(r.strategy.lostHalf)}</div></div>
+                  <div><div className="text-muted uppercase tracking-[0.1em]">SPY same day</div><div className={clsx('text-sm font-mono-tab', tone(r.spy.mean))}>{pctS(r.spy.mean)}</div><div className="text-muted">lost ½ {share(r.spy.lostHalf)}</div></div>
+                  <div><div className="text-muted uppercase tracking-[0.1em]">Difference</div><div className={clsx('text-sm font-mono-tab', tone(r.spy.diff))}>{pctS(r.spy.diff)}</div><div className="text-muted">95% CI {ci(r.spy)}</div></div>
+                </div>
+                <div className="mt-1.5 text-[11px] text-muted">
+                  Random entries, same months: {r.random.percentile == null ? 'not run for this rule' : <>strategy at the <span className="font-mono-tab text-subtle">{Math.round(r.random.percentile * 100)}th</span> percentile of {r.random.reps} replications</>}
+                  {' · '}vs monthly DCA: <span className={clsx('font-mono-tab', tone(r.dca.diff))}>{pctS(r.dca.diff)}</span> ({ci(r.dca)})
+                </div>
+              </div>
+            )
+          })}
+          <div className="px-5 py-3 border-t border-hairline text-[11px] text-muted">
+            <div>Difference vs SPY by premium (all trades): {p.premium.grid.map((x) => <span key={x} className="mr-2"><span className="font-mono-tab text-subtle">{Number(x).toFixed(2)}</span> {pctS(p.grid[String(x)]?.[p.rule]?.marked.all.spy.diff)}{Number(x) === 1 && ' (optimistic)'}</span>)}</div>
+            {g.buckets && <div className="mt-1">By the market over each trade's own hold — {Object.entries(g.buckets).map(([k, b]) => <span key={k} className="mr-2">SPY {k}: {b.n} trades, strategy {pctS(b.strategy)} vs SPY {pctS(b.spy)}</span>)}</div>}
+            <div className="mt-1">Rule recorded 2026-10-05 before the code existed. A positive result justifies buying delisted-inclusive data; it never changes a live rule by itself.</div>
+          </div>
+        </div>
+      )}
+    </Card>
   )
 }
 

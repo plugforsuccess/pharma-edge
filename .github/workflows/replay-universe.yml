@@ -1,4 +1,7 @@
 # Universe replay (owner, 2026-10-03): replays every ticker day by day with
+# no look-ahead; since 2026-10-05 it also runs the pre-registered test
+# (docs/signal-engine/preregistration.md: matched controls, IV proxy,
+# slippage tiers, trade export → replay_trades). Original description:
 # no look-ahead, trades a priced LEAPS call on each entry rule × exit rule,
 # grades big moves (catch rate, kept share, misses) and runs the walk-forward
 # test of the history filter. Writes one replay_runs row; the Charts →
@@ -24,7 +27,9 @@ on:
     paths:
       - scripts/replay-universe.mjs
       - scripts/lib/marketData.mjs
+      - scripts/lib/prereg.mjs
       - src/utils/replay.js
+      - src/utils/controls.js
       - .github/workflows/replay-universe.yml
 
 concurrency:
@@ -43,9 +48,20 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: node scripts/check-replay.mjs
+      - run: node scripts/check-controls.mjs
       - name: Replay
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SPOTLIGHT: ${{ inputs.spotlight || 'NOW,PLTR,NVDA' }}
+          REPLAY_TRADES_OUT: replay_trades.csv
         run: node scripts/replay-universe.mjs --mode "${{ inputs.mode || 'write' }}"
+      # The trade-level file (one row per strategy trade at the calibrated
+      # premium) — the pre-registered test's later steps run off it.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: replay-trades
+          path: replay_trades.csv
+          if-no-files-found: ignore
+          retention-days: 90
