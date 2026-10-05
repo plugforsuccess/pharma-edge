@@ -23,6 +23,7 @@
     "replay:check": "node scripts/check-replay.mjs",
     "controls:check": "node scripts/check-controls.mjs",
     "plan:check": "node scripts/check-plan.mjs",
+    "momentum:check": "node scripts/check-momentum.mjs",
     "replay:dry": "node scripts/replay-universe.mjs --mode dry-run",
     "optimizer:check": "node scripts/check-optimizer.mjs",
     "optimize:dry": "node scripts/optimize-entries.mjs --mode dry-run"

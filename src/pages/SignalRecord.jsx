@@ -214,8 +214,17 @@ export default function SignalRecord() {
 // calibrated implied-vol premium with slippage by liquidity, open trades at
 // their mark. Edge / no edge / inconclusive by the recorded rule.
 const VERDICT_TONE = { edge: 'border-green-400/50 text-green-400', 'no edge': 'border-rose-300/50 text-rose-300', inconclusive: 'border-amber-400/50 text-amber-400' }
+const PREREG_LABELS = { setup: 'Buy setup', zone: 'Buy zone', confluence: 'Confluence', triple: 'Triple ◆', momentum: 'Momentum 12-1' }
+const PREREG_TEXT = {
+  setup: 'Buy setup as shown (buy zone YES + 2 signals, 200-day rising)',
+  zone: 'Buy zone turning YES',
+  confluence: '2+ buy signals, 200-day rising',
+  triple: 'Bravo + Echo + Tango all turning up within 2 days',
+  momentum: 'Cross-sectional momentum: top decile of 12-month return (skipping the latest month) among names above their 200-day, at each month end',
+}
 function PreregCard({ p }) {
   const [completed, setCompleted] = useState(false)
+  const [rule, setRule] = useState(null)
   if (!p) {
     return (
       <Card title="Pre-registered test">
@@ -224,7 +233,9 @@ function PreregCard({ p }) {
     )
   }
   const pm = p.premium.calibrated
-  const g = pm != null ? p.grid[String(pm)]?.[p.rule] : null
+  const shownRule = rule ?? p.rule
+  const rules = Object.keys(p.grid[String(pm ?? p.premium.grid?.[0])] ?? {})
+  const g = pm != null ? p.grid[String(pm)]?.[shownRule] : null
   const per = g ? (completed ? g.completed : g.marked) : null
   const ci = (r) => (r.lo == null ? '—' : `${pctS(r.lo)} to ${pctS(r.hi)}`)
   return (
@@ -234,8 +245,19 @@ function PreregCard({ p }) {
           <span className={clsx('px-2 py-0.5 rounded-md border text-[11px] font-semibold tracking-wide uppercase', VERDICT_TONE[p.verdict.verdict] ?? 'border-border text-subtle')}>{p.verdict.verdict}</span>
           <span className="text-xs text-subtle">{p.verdict.why}</span>
         </div>
+        {rules.length > 1 && (
+          <div className="mt-2 flex flex-wrap gap-1.5" role="tablist" aria-label="Rule">
+            {rules.map((k) => (
+              <button key={k} type="button" role="tab" aria-selected={shownRule === k} onClick={() => setRule(k)}
+                className={clsx('min-h-[32px] px-2.5 rounded-lg border text-[11px] font-semibold transition',
+                  shownRule === k ? 'border-violet-400/50 bg-violet-400/10 text-violet-300' : 'border-border text-muted hover:text-subtle')}>
+                {PREREG_LABELS[k] ?? k}{k === p.rule ? ' · primary' : ''}
+              </button>
+            ))}
+          </div>
+        )}
         <p className="mt-2 text-xs text-muted">
-          Buy setup as shown vs the same call on SPY bought the same day, same exits.
+          {PREREG_TEXT[shownRule] ?? shownRule} vs the same call on SPY bought the same day, same exits.
           {pm != null ? <> Priced at implied-vol premium <span className="font-mono-tab text-subtle">{pm.toFixed(2)}</span> (from {p.premium.samples.toLocaleString('en-US')} real-IV samples)</> : ' No calibrated premium yet (too little real IV history) — read nothing into the numbers below.'}, slippage by liquidity, every fill counted. {completed ? 'Completed trades only.' : 'Open trades at their mark.'}
         </p>
         <button type="button" onClick={() => setCompleted((v) => !v)} className="mt-2 min-h-[36px] text-xs text-violet-300 hover:text-violet-200">{completed ? 'Show every trade (open at its mark)' : 'Show completed trades only'}</button>
@@ -264,9 +286,9 @@ function PreregCard({ p }) {
             )
           })}
           <div className="px-5 py-3 border-t border-hairline text-[11px] text-muted">
-            <div>Difference vs SPY by premium (all trades): {p.premium.grid.map((x) => <span key={x} className="mr-2"><span className="font-mono-tab text-subtle">{Number(x).toFixed(2)}</span> {pctS(p.grid[String(x)]?.[p.rule]?.marked.all.spy.diff)}{Number(x) === 1 && ' (optimistic)'}</span>)}</div>
+            <div>Difference vs SPY by premium (all trades): {p.premium.grid.map((x) => <span key={x} className="mr-2"><span className="font-mono-tab text-subtle">{Number(x).toFixed(2)}</span> {pctS(p.grid[String(x)]?.[shownRule]?.marked.all.spy.diff)}{Number(x) === 1 && ' (optimistic)'}</span>)}</div>
             {g.buckets && <div className="mt-1">By the market over each trade's own hold — {Object.entries(g.buckets).map(([k, b]) => <span key={k} className="mr-2">SPY {k}: {b.n} trades, strategy {pctS(b.strategy)} vs SPY {pctS(b.spy)}</span>)}</div>}
-            <div className="mt-1">Rule recorded 2026-10-05 before the code existed. A positive result justifies buying delisted-inclusive data; it never changes a live rule by itself.</div>
+            <div className="mt-1">{shownRule === p.rule ? 'Rule recorded 2026-10-05 before the code existed.' : 'A secondary rule under the same test; the verdict above is the primary rule\'s.'} A positive result justifies buying delisted-inclusive data; it never changes a live rule by itself.</div>
           </div>
         </div>
       )}

@@ -11,10 +11,15 @@
 //      and the verdict — read at the calibrated premium
 //   4. one export row per trade at the calibrated premium (replay_trades)
 
-import { replayTrades, trailingVol } from '../../src/utils/replay.js'
+import { replayTrades, replayFromEntries, trailingVol } from '../../src/utils/replay.js'
 import { PERIODS, PREMIUM_GRID, RANDOM_REPS, pricingFor, controlsForTicker, periodResult, bucketResults, verdict, periodOf, calibratePremium } from '../../src/utils/controls.js'
 
-export const PREREG_RULES = ['setup', 'zone', 'confluence', 'triple']
+// momentum (2026-10-05, after the Triple result): cross-sectional 12-1
+// momentum, top decile above the 200-day, rebalanced at month ends — a
+// universe-level rule whose entries the job computes (src/utils/momentum.js)
+// and hands in as `extraEntries`. The random control runs for it too.
+export const PREREG_RULES = ['setup', 'zone', 'confluence', 'triple', 'momentum']
+export const RANDOM_RULES = new Set(['setup', 'momentum'])
 const FWD = [['3m', 63], ['6m', 126], ['12m', 252]]
 export const PRIMARY_RULE = 'setup'
 const r4 = (x) => (x == null || !Number.isFinite(x) ? null : Math.round(x * 1e4) / 1e4)
@@ -82,7 +87,7 @@ export function calibrate(results, ivRows) {
   return { ...calibratePremium(samples), tickers: new Set(ivRows.map((x) => x.ticker)).size }
 }
 
-export function runPrereg({ results, spyBars, ivByTicker = new Map(), dividendsByTicker = new Map(), premium, premiumN = 0, reps = RANDOM_REPS, log = () => {} }) {
+export function runPrereg({ results, spyBars, ivByTicker = new Map(), dividendsByTicker = new Map(), premium, premiumN = 0, reps = RANDOM_REPS, extraEntries = new Map(), extraSummary = {}, log = () => {} }) {
   const premiums = [...new Set([...PREMIUM_GRID, premium].filter((x) => x != null))].sort((a, b) => a - b)
   const grid = {}
   const rows = []
@@ -96,9 +101,17 @@ export function runPrereg({ results, spyBars, ivByTicker = new Map(), dividendsB
     for (const r of results) {
       const pricing = pricingFor(r.bars, { premium: pm, dividends: dividendsByTicker.get(r.ticker) ?? {}, realIv: ivByTicker.get(r.ticker) ?? null })
       for (const rule of PREREG_RULES) {
-        const trades = replayTrades(r.bars, r.sig, { entryRule: rule, exitRule: 'targets', ...pricing })
+        let trades
+        if (extraEntries.has(rule)) {
+          const entries = extraEntries.get(rule).get(r.ticker)
+          if (!entries) continue
+          trades = replayFromEntries(r.bars, entries, { exitRule: 'targets', sell: r.sig.sell, ...pricing })
+          for (const t of trades) t.key = null
+        } else {
+          trades = replayTrades(r.bars, r.sig, { entryRule: rule, exitRule: 'targets', ...pricing })
+        }
         if (!trades.length) continue
-        const c = controlsForTicker({ bars: r.bars, spyBars, trades, pricing, spyPricing, reps: atCal && rule === PRIMARY_RULE ? reps : 0, seed: hash(r.ticker) })
+        const c = controlsForTicker({ bars: r.bars, spyBars, trades, pricing, spyPricing, reps: atCal && RANDOM_RULES.has(rule) ? reps : 0, seed: hash(r.ticker) })
         const acc = perRule[rule]
         for (const t of c.paired) acc.paired.push({ ...t, ticker: r.ticker })
         if (c.random.length) { // replication k across tickers = concat of each ticker's k-th replication
@@ -134,7 +147,7 @@ export function runPrereg({ results, spyBars, ivByTicker = new Map(), dividendsB
   return {
     summary: {
       recorded: '2026-10-05', rule: PRIMARY_RULE, premium: { calibrated: premium, samples: premiumN, grid: premiums },
-      reps, verdict: v, grid,
+      reps, verdict: v, grid, ...extraSummary,
     },
     rows,
   }

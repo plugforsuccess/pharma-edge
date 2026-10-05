@@ -1532,6 +1532,24 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   mid / IV / delta / OI to **`leaps_quotes`** for the whole universe.
   Verdict is `inconclusive` until the premium calibrates (≥ 30 real-IV
   samples) — read nothing into the numbers before then.
+- **Cross-sectional momentum, a secondary pre-registered rule** (owner,
+  2026-10-05, "Word", after the Triple result — every chart-pattern entry
+  tested had landed on the random control; slow momentum is the one entry
+  family with out-of-sample support). `src/utils/momentum.js`
+  (`npm run momentum:check`): at each completed month end, score every
+  ticker with a year of history by its 12-1 return (the 12 months ending
+  one month earlier), eligible = close above its 200-day, the top decile of
+  the eligible names (≥ 30 scored) are the entries (`crossSectionalEntries`,
+  `MOMENTUM`). A universe-level rule: the universe job computes the entries
+  across all tickers and hands them to `runPrereg` as `extraEntries`
+  (`PREREG_RULES` now ends in `momentum`; `RANDOM_RULES` = setup + momentum
+  get the 200 random replications). Same pricing, exits, controls, periods
+  and export (`replay_trades.rule = 'momentum'`); `summary.prereg.momentum`
+  keeps the per-month names / picks. Signal record's pre-registered card
+  has a rule switch (primary stays the buy setup; the verdict is the
+  primary's). It changes no live rule; the recorded consequence is in
+  `docs/signal-engine/preregistration.md` ("Added 2026-10-05"). Not on the
+  entry chart (a single ticker can't rank itself).
 - **Rule optimizer** (owner, 2026-10-04: "do everything mathematically
   possible to get the guarantee closest to 1.0" — advised: 1.0 is a
   statement about the future; what can be pushed is out-of-sample
