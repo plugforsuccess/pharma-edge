@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
 import clsx from 'clsx'
 import { supabase } from '../lib/supabase'
@@ -83,6 +84,16 @@ function holdingLevels(r, decision) {
   return { lines, calc }
 }
 
+
+// Full screen renders through a portal on <body>. The page scrolls inside
+// <main class="overflow-y-auto">; on iOS a position: fixed layer inside a
+// scrolled overflow container has its touches read as scrolls of that
+// container and its hit-testing offset (owner, 2026-10-05: no pan, no
+// pinch, the close unreachable). Outside <main> it behaves.
+function Portalled({ when, children }) {
+  return when ? createPortal(children, document.body) : children
+}
+
 export default function Charts() {
   const { user } = useAuth()
   const { federal, profile, positions, plan, ready, results } = useHoldings()
@@ -102,10 +113,14 @@ export default function Charts() {
   useEffect(() => {
     if (!full) return undefined
     const onKey = (e) => { if (e.key === 'Escape') setFull(false) }
+    // The page scrolls inside <main>, not the body: lock that too.
+    const scroller = document.querySelector('main')
     const prev = document.body.style.overflow
+    const prevMain = scroller?.style.overflow ?? ''
     document.body.style.overflow = 'hidden'
+    if (scroller) scroller.style.overflow = 'hidden'
     window.addEventListener('keydown', onKey)
-    return () => { document.body.style.overflow = prev; window.removeEventListener('keydown', onKey) }
+    return () => { document.body.style.overflow = prev; if (scroller) scroller.style.overflow = prevMain; window.removeEventListener('keydown', onKey) }
   }, [full])
   const today = todayYmd()
 
@@ -323,6 +338,7 @@ export default function Charts() {
       ) : (
         <>
           {current && (
+            <Portalled when={full}>
             <section ref={chartRef} className={clsx('bg-card scroll-mt-4',
               full ? 'fixed inset-0 z-[70] flex flex-col overflow-y-auto overscroll-contain pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]'
                 : 'border border-border rounded-2xl mb-5 overflow-hidden')}
@@ -489,6 +505,7 @@ export default function Charts() {
                 )}
               </div>
             </section>
+            </Portalled>
           )}
 
           {ideaItems.length > 0 && (
