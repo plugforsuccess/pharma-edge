@@ -30,7 +30,8 @@
 import { CHART_TICKERS } from '../src/lib/chartTickers.js'
 import { entryModel, HORIZONS } from '../src/utils/indicators.js'
 import { suiteModel } from '../src/utils/signalSuite.js'
-import { confluenceModel, poolStats, blendedEstimate, MIN_SCORE, SIDES } from '../src/utils/confluence.js'
+import { confluenceModel, poolStats, blendedEstimate, baselineStats, MIN_SCORE, SIDES } from '../src/utils/confluence.js'
+import { alignCloses } from '../src/utils/signalSuite.js'
 import { dailyBars, mapLimit, sources } from './lib/marketData.mjs'
 import { blockers, buyVerdict, sellVerdict, tradeSpec, structureStop, momentum } from './lib/verdict.mjs'
 
@@ -44,11 +45,12 @@ const universe = (process.env.TICKERS ? process.env.TICKERS.split(',') : CHART_T
   .map((s) => s.trim().toUpperCase()).filter((s) => /^[A-Z][A-Z0-9.-]{0,11}$/.test(s))
 
 // One ticker → everything the ranking needs (null when too little history).
-export function analyze(ticker, bars) {
+export function analyze(ticker, bars, spy = null) {
   if (!bars || bars.length < 300) return null
   const model = entryModel(bars)
   const suite = suiteModel(bars)
-  const conf = confluenceModel({ bars, model, suite, horizons: HORIZONS })
+  const market = spy ? alignCloses(bars, spy) : null
+  const conf = confluenceModel({ bars, model, suite, horizons: HORIZONS, market })
   const lastIdx = bars.length - 1
   const lastSignal = (flags) => { for (let i = lastIdx; i >= Math.max(0, lastIdx - 10); i--) if (Object.values(flags).filter((f) => f && Array.isArray(f)).some((f) => f[i])) return bars[i].t; return null }
   const c = model.status.cond
@@ -60,12 +62,14 @@ export function analyze(ticker, bars) {
     conditionsMet: ['band', 'rising', 'trend', 'rsi', 'iv'].filter((k) => c[k]).length,
     etbConvergence: etbToday,
     cond: c, blockers: blockers(model), trade: tradeSpec(bars), stop: structureStop(bars, { sma200: model.status.sma200, bandPct: model.params.bandPct }), momentum: momentum(suite),
+    closes: bars.map((b) => b.c), market,
     buy: { today: conf.buy.today, setups: conf.buy.setups, lastSignal: lastSignal(conf.buy.flags) },
     sell: { today: conf.sell.today, setups: conf.sell.setups, lastSignal: lastSignal(conf.sell.flags) },
   }
 }
 
 const h = (est, label) => est?.horizons.find((x) => x.label === label)?.avg ?? null
+const hz = (est, label, k) => est?.horizons.find((x) => x.label === label)?.[k] ?? null
 
 // Ranks from analyzed tickers + the pools. Pure (tested by dry runs).
 // Buy side: rows meeting the entry rule (verdict enter) first, then
@@ -86,6 +90,9 @@ export function rankAll(results, pools) {
         est_3m: h(est, '3M'), est_6m: h(est, '6M'), est_12m: h(est, '12M'),
         est_win_6m: est?.horizons.find((x) => x.label === '6M')?.winRate ?? null,
         est_win_3m: est?.horizons.find((x) => x.label === '3M')?.winRate ?? null,
+        est_med_3m: hz(est, '3M', 'median'), est_med_6m: hz(est, '6M', 'median'),
+        est_badq_3m: hz(est, '3M', 'badq'), est_badq_6m: hz(est, '6M', 'badq'),
+        est_beat_3m: hz(est, '3M', 'beat'), est_beat_6m: hz(est, '6M', 'beat'),
         last_signal: r[side].lastSignal, etb_convergence: side === 'buy' ? r.etbConvergence : false, rank: null,
         verdict: side === 'buy' ? buyVerdict({ score: now?.score ?? 0, trendUp: r.trendUp, cond: r.cond }) : sellVerdict({ score: now?.score ?? 0, lit: now?.lit ?? [] }),
         blockers: side === 'buy' ? r.blockers : null, trade: side === 'buy' ? r.trade : null,
@@ -125,18 +132,26 @@ export function rankAll(results, pools) {
   return rows
 }
 
-export function poolRows(pools, results, asOf) {
+// Baseline row per side: combo '__any_day__' — every ticker, every day.
+export const ANY_DAY = '__any_day__'
+
+export function poolRows(pools, results, asOf, baselines = null) {
   const out = []
-  for (const side of SIDES) {
-    for (const p of Object.values(pools[side])) {
-      const hz = (label) => p.horizons.find((x) => x.label === label)
-      out.push({
-        side, combo: p.key, lit: p.lit, score: p.score, n: p.n, graded: p.graded, at_turn: p.atTurn,
-        avg_3m: hz('3M')?.avg ?? null, avg_6m: hz('6M')?.avg ?? null, avg_12m: hz('12M')?.avg ?? null,
-        win_3m: hz('3M')?.winRate ?? null, win_6m: hz('6M')?.winRate ?? null, win_12m: hz('12M')?.winRate ?? null,
-        tickers: results.length, as_of: asOf, updated_at: new Date().toISOString(),
-      })
+  const row = (side, p, combo, lit, score) => {
+    const hz = (label) => p.horizons.find((x) => x.label === label)
+    return {
+      side, combo, lit, score, n: p.n, graded: p.graded ?? 0, at_turn: p.atTurn ?? null,
+      avg_3m: hz('3M')?.avg ?? null, avg_6m: hz('6M')?.avg ?? null, avg_12m: hz('12M')?.avg ?? null,
+      win_3m: hz('3M')?.winRate ?? null, win_6m: hz('6M')?.winRate ?? null, win_12m: hz('12M')?.winRate ?? null,
+      med_3m: hz('3M')?.median ?? null, med_6m: hz('6M')?.median ?? null, med_12m: hz('12M')?.median ?? null,
+      badq_3m: hz('3M')?.badq ?? null, badq_6m: hz('6M')?.badq ?? null, badq_12m: hz('12M')?.badq ?? null,
+      beat_3m: hz('3M')?.beat ?? null, beat_6m: hz('6M')?.beat ?? null, beat_12m: hz('12M')?.beat ?? null,
+      tickers: results.length, as_of: asOf, updated_at: new Date().toISOString(),
     }
+  }
+  for (const side of SIDES) {
+    for (const p of Object.values(pools[side])) out.push(row(side, p, p.key, p.lit, p.score))
+    if (baselines?.[side]) out.push(row(side, baselines[side], ANY_DAY, [], 0))
   }
   return out
 }
@@ -147,8 +162,11 @@ async function main() {
   const t0 = Date.now()
   const failed = []
   let done = 0
+  // The S&P 500 once, for "beat the market" (null → the record has no beat rate).
+  let spy = null
+  try { spy = await dailyBars('SPY') } catch (e) { console.log(`SPY unavailable (${e.message}) — no market comparison this run.`) }
   const results = (await mapLimit(universe, CONCURRENCY, async (ticker) => {
-    try { return analyze(ticker, await dailyBars(ticker)) } catch (e) { failed.push(`${ticker}: ${e.message}`); return null } finally {
+    try { return analyze(ticker, await dailyBars(ticker), spy) } catch (e) { failed.push(`${ticker}: ${e.message}`); return null } finally {
       done++
       if (done % 50 === 0) console.log(`  ${done}/${universe.length} · ${failed.length} failed · ${((Date.now() - t0) / 1000).toFixed(0)}s`)
       // Yahoo blocking this runner: stop instead of retrying for hours.
@@ -158,8 +176,10 @@ async function main() {
   if (!results.length) throw new Error(`no tickers analyzed (${failed.slice(0, 5).join('; ')})`)
   const asOf = results.map((r) => r.asOf).sort().pop()
   const pools = Object.fromEntries(SIDES.map((side) => [side, poolStats(results.map((r) => r[side].setups), HORIZONS, side)]))
+  const baselines = Object.fromEntries(SIDES.map((side) => [side, baselineStats(results.map((r) => ({ closes: r.closes, market: r.market })), HORIZONS, side)]))
   const rows = rankAll(results, pools)
-  const pool = poolRows(pools, results, asOf)
+  const pool = poolRows(pools, results, asOf, baselines)
+  for (const side of SIDES) { const b = baselines[side].horizons; console.log(`Baseline ${side}: any day, 3M win ${(b[0].winRate * 100).toFixed(0)}% median ${(b[0].median * 100).toFixed(1)}% · 6M win ${(b[1].winRate * 100).toFixed(0)}% median ${(b[1].median * 100).toFixed(1)}% beat ${b[1].beat == null ? '—' : (b[1].beat * 100).toFixed(0) + '%'}`) }
   console.log(`Analyzed ${results.length}/${universe.length} tickers in ${((Date.now() - t0) / 1000).toFixed(0)}s; ${failed.length} failed; as of ${asOf}; bars from Yahoo ${sources.yahoo}, edge ${sources.edge}.`)
   if (failed.length) console.log('Failed (first 10):', failed.slice(0, 10).join(' | '))
   for (const side of SIDES) {

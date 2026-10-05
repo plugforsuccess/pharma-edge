@@ -1350,7 +1350,20 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   These are share-price moves; this call would move about 5× as much, up
   or down." (leverage at entry = delta × share price / premium, from the
   row's own trade; owner, 2026-10-05: "stock return, not the option's"
-  wasn't precise) — "only" under 5 own cases, "Thin
+  wasn't precise). **Context** (owner, 2026-10-05: "is the universe average
+  helpful? median? vs its sector?" — JBL's any-day 6M record was 80% up /
+  +23%, so a bare 66% / +11% read as an edge when it wasn't): the pool
+  carries per horizon the median (`med_*`, "the typical result"), the bad
+  quarter (`badq_*`: 25th percentile for buys, 75th for sells — "one case
+  in four lost more than 6%") and the share that beat the S&P 500 over the
+  same window (`beat_*`, from SPY closes aligned per ticker; `market` in
+  `confluenceModel`), plus one **baseline row per side**, `combo =
+  '__any_day__'` (every ticker, every day — `baselineStats`). The row's
+  sentence compares against it: "higher 66% of the time — about the same
+  as any random day (61%)" (better / worse beyond ±8 points). Rank rows
+  copy the pool's `est_med_* / est_badq_* / est_beat_*` unblended (a
+  median of 2 own cases says nothing). Market, not sector: it removes the
+  bull-market inflation without a sector table. — "only" under 5 own cases, "Thin
   record: too few past cases to trust" under 30 pool cases. The stop is
   capped at the 40-bar low so a stock that has run far never reads a 30%
   stop as the plan, and never tighter than the buy zone's floor (5% under

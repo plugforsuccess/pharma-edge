@@ -1,7 +1,7 @@
 // Checks for src/utils/confluence.js (npm run confluence:check).
 import {
   swingPoints, confluenceSeries, confluenceSetups, setupStats, comboTable, todaySetup, compareWindows, MIN_MATCHES,
-  extendedFlags, poolStats, blend, blendedEstimate, SHRINK_K,
+  extendedFlags, poolStats, blend, blendedEstimate, SHRINK_K, quantile, horizonNumbers, baselineStats,
 } from '../src/utils/confluence.js'
 
 let passed = 0
@@ -93,6 +93,22 @@ eq('pooled across tickers', [pool['bravo+echo'].n, pool['bravo+echo'].atTurn], [
 const est = blendedEstimate({ today: { now: { key: 'bravo+echo', lit: ['bravo', 'echo'], score: 2 } }, setups: [], pool, horizons: H })
 eq('no own history → the pool', [est.ownN, est.poolN, est.atTurn], [0, 2, 0.5])
 eq('no setup today → no estimate', blendedEstimate({ today: { now: { key: 'bravo', lit: ['bravo'], score: 1 } }, setups: [], pool, horizons: H }), null)
+
+// Record context: median, bad quarter, beat the market, and the baseline.
+eq('quantile nearest-rank', [quantile([3, 1, 2, 4], 0.5), quantile([3, 1, 2, 4], 0.25), quantile([], 0.5)], [2, 1, null])
+const ctx = horizonNumbers([
+  { returns: [0.10], excess: [0.05] }, { returns: [0.30], excess: [-0.01] }, { returns: [-0.20], excess: [-0.3] }, { returns: [0.02], excess: [0.01] },
+], [['3M', 63]])[0]
+eq('median = typical result', ctx.median, 0.02)
+eq('bad quarter for buys = 25th percentile', ctx.badq, -0.2)
+eq('beat the market = share with excess > 0', ctx.beat, 0.5)
+eq('sell side: bad quarter is the 75th percentile, beat = excess < 0', (() => { const x = horizonNumbers([
+  { returns: [0.10], excess: [0.05] }, { returns: [0.30], excess: [-0.01] }, { returns: [-0.20], excess: [-0.3] }, { returns: [0.02], excess: [0.01] },
+], [['3M', 63]], 'sell')[0]; return [x.badq, x.beat] })(), [0.1, 0.5])
+eq('no excess → beat is null', horizonNumbers([{ returns: [0.1], excess: null }], [['3M', 63]])[0].beat, null)
+const base = baselineStats([{ closes: [100, 110, 121, 133.1], market: [100, 100, 100, 100] }], [['1', 1]])
+eq('baseline counts every day with a full horizon', [base.n, base.horizons[0].n, base.horizons[0].winRate, base.horizons[0].beat], [4, 3, 1, 1])
+eq('baseline median', base.horizons[0].median, 0.1, 1e-9)
 
 console.log(`confluence checks: ${passed} passed, ${failures.length} failed`)
 if (failures.length) {

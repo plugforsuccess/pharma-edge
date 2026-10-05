@@ -51,31 +51,47 @@ function SignalMeter({ score, side }) {
   )
 }
 
-// Plain sentences: how often the pattern appeared, what the stock did
-// after, and that the call moves more than the stock.
-function TrackRecord({ r, side }) {
-  const avg = side === 'buy' ? r.est_6m : r.est_3m
-  const win = side === 'buy' ? r.est_win_6m : r.est_win_3m
+// Plain sentences, each number with its context: how often the pattern
+// appeared, how often it worked against how often any random day worked,
+// the typical result, the bad quarter, beat the market, and that the call
+// moves more than the stock.
+function TrackRecord({ r, side, baseline }) {
+  const H = side === 'buy' ? '6m' : '3m'
+  const avg = r[`est_${H}`]
+  const win = r[`est_win_${H}`]
+  const med = r[`est_med_${H}`]
+  const badq = r[`est_badq_${H}`]
+  const beat = r[`est_beat_${H}`]
   if (avg == null || !r.pool_n) return null
   const t = r.verdict === 'enter' ? r.trade : null
   const levRaw = t && t.cost > 0 && r.close > 0 ? (t.delta * r.close) / t.cost : null
   const lev = levRaw ? (levRaw < 3 ? levRaw.toFixed(1) : String(Math.round(levRaw))) : null
   const times = (k) => (k === 1 ? 'once' : k === 2 ? 'twice' : `${k.toLocaleString('en-US')} times`)
   const own = r.own_n === 0 ? `never on ${r.ticker}` : `${times(r.own_n)} on ${r.ticker}`
-  const appeared = <>This signal pattern has appeared <span className="text-subtle font-mono-tab">{times(r.pool_n)}</span> across all stocks ({own}).</>
-  if (r.pool_n < THIN_POOL) {
-    return <p className="mt-2 text-[11px] leading-4 text-muted">{appeared} Too few to judge.</p>
-  }
+  const num = (x, cls = 'text-fg') => <span className={clsx('font-mono-tab', cls)}>{x}</span>
+  const seen = <>Seen {num(times(r.pool_n), 'text-subtle')} across all stocks ({own}).</>
+  if (r.pool_n < THIN_POOL) return <p className="mt-2 text-[11px] leading-4 text-muted">{seen} Too few to judge.</p>
   const months = side === 'buy' ? 'Six' : 'Three'
   const dir = side === 'buy' ? 'higher' : 'lower'
-  const good = side === 'buy' ? avg >= 0 : avg <= 0
+  const baseWin = baseline?.[`win_${H}`]
+  const vs = baseWin == null || win == null ? null
+    : win - baseWin > 0.08 ? 'better than' : win - baseWin < -0.08 ? 'worse than' : 'about the same as'
+  const good = (x) => (side === 'buy' ? x >= 0 : x <= 0)
+  const signed = (x) => `${x >= 0 ? '+' : '−'}${pct0(x)}`
+  // The bad quarter reads as a loss for buys, a rise for sells.
+  const badText = badq == null ? null
+    : side === 'buy'
+      ? (badq < 0 ? <>one case in four lost more than {num(pct0(badq), 'text-rose-300')}</> : <>even the worst quarter of cases gained {num(pct0(badq), 'text-green-400')} or more</>)
+      : (badq > 0 ? <>one case in four rose more than {num(pct0(badq), 'text-rose-300')}</> : <>even the worst quarter of cases fell {num(pct0(badq), 'text-green-400')} or more</>)
   return (
     <p className="mt-2 text-[11px] leading-4 text-muted">
-      {appeared}{' '}
-      {months} months later the stock was {dir}
-      {win != null && <> <span className="text-fg font-mono-tab">{pct0(win)}</span> of the time</>},
-      {' '}{avg >= 0 ? 'up' : 'down'} <span className={clsx('font-mono-tab', good ? 'text-green-400' : 'text-rose-300')}>{pct0(avg)}</span> on average.
-      {lev && <> That is the stock — a call like this moves about <span className="text-subtle font-mono-tab">{lev}×</span> as much.</>}
+      {seen}{' '}
+      {months} months later the stock was {dir} {num(pct0(win))} of the time
+      {vs && <> — {vs} any random day ({num(pct0(baseWin), 'text-subtle')})</>}.
+      {med != null && <> The typical result was {num(signed(med), good(med) ? 'text-green-400' : 'text-rose-300')}</>}
+      {med != null && badText && <>; {badText}</>}{med != null && '.'}
+      {beat != null && <> It {side === 'buy' ? 'beat' : 'fell behind'} the S&P 500 {num(pct0(beat))} of the time.</>}
+      {lev && <> A call like this moves about {num(`${lev}×`, 'text-subtle')} the stock.</>}
     </p>
   )
 }
@@ -94,6 +110,7 @@ export default function ConfluenceLeaders({ mine = [] }) {
   const [scope, setScope] = useState('all')
   const [rows, setRows] = useState(null)
   const [accountSize, setAccountSize] = useState(null)
+  const [baseline, setBaseline] = useState(null)
   const mineKey = mine.join(',')
 
   useEffect(() => {
@@ -110,12 +127,15 @@ export default function ConfluenceLeaders({ mine = [] }) {
     let cancelled = false
     setRows(null)
     let q = supabase.from('confluence_ranks')
-      .select('ticker, side, as_of, close, score, rank, est_3m, est_6m, est_win_3m, est_win_6m, own_n, pool_n, verdict, blockers, trade, stop_price, momentum')
+      .select('ticker, side, as_of, close, score, rank, est_3m, est_6m, est_win_3m, est_win_6m, own_n, pool_n, verdict, blockers, trade, stop_price, momentum, est_med_3m, est_med_6m, est_badq_3m, est_badq_6m, est_beat_3m, est_beat_6m')
       .eq('side', side)
     q = scope === 'all'
       ? q.not('rank', 'is', null).order('rank').limit(10)
       : q.in('ticker', mine.length ? mine : ['—']).order('score', { ascending: false }).limit(40)
     q.then(({ data, error }) => { if (!cancelled) setRows(error ? [] : data ?? []) })
+    // The baseline the record is read against: every ticker, every day.
+    supabase.from('confluence_pool').select('win_3m, win_6m, med_3m, med_6m').eq('side', side).eq('combo', '__any_day__').maybeSingle()
+      .then(({ data }) => { if (!cancelled) setBaseline(data ?? null) })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [side, scope, mineKey])
@@ -232,7 +252,7 @@ export default function ConfluenceLeaders({ mine = [] }) {
 
                     {/* Signals + record */}
                     <span className="mt-3 block"><SignalMeter score={r.score} side={side} /></span>
-                    <TrackRecord r={r} side={side} />
+                    <TrackRecord r={r} side={side} baseline={baseline} />
                   </Link>
                 </li>
               )

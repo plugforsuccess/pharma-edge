@@ -95,7 +95,7 @@ export function confluenceSeries(flags, n, window = DEFAULT_WINDOW, keys = COMPO
 // gradeWindow: how close the turn must be to count (defaults to window;
 // the window comparison holds it fixed so a wider window can't win just by
 // being wider). etbFlags: optional etb convergence array to track E+T+B pattern.
-export function confluenceSetups({ series, closes, swings, window = DEFAULT_WINDOW, gradeWindow = window, horizons, minScore = MIN_SCORE, side = 'buy', etbFlags = null }) {
+export function confluenceSetups({ series, closes, swings, window = DEFAULT_WINDOW, gradeWindow = window, horizons, minScore = MIN_SCORE, side = 'buy', etbFlags = null, market = null }) {
   const turns = side === 'sell' ? swings.highs : swings.lows
   const setups = []
   let clusterEnd = -Infinity
@@ -113,30 +113,68 @@ export function confluenceSetups({ series, closes, swings, window = DEFAULT_WIND
       i, key: s.key, lit: s.lit, score: s.score, price: closes[i],
       atTurn: graded ? turns.some((L) => Math.abs(L - i) <= gradeWindow) : null,
       returns: horizons.map(([, h]) => (i + h < closes.length ? closes[i + h] / closes[i] - 1 : null)),
+      // Return minus the market's (aligned closes) over the same window.
+      excess: market ? horizons.map(([, h]) => (i + h < closes.length && market[i] > 0 && market[i + h] > 0
+        ? (closes[i + h] / closes[i]) - (market[i + h] / market[i]) : null)) : null,
       etb: etb ? { fired: etb.fired, spread: etb.spread } : null,
     })
   }
   return setups
 }
 
-// Count, share at a turn (low / high), and average / win rate per horizon
-// (a sell wins when the stock fell).
+// q-th quantile of a list (sorted copy; nearest-rank).
+export function quantile(values, q) {
+  if (!values.length) return null
+  const s = [...values].sort((a, b) => a - b)
+  return s[Math.min(s.length - 1, Math.max(0, Math.ceil(q * s.length) - 1))]
+}
+
+// Per-horizon numbers for a list of setups: average, win rate (a sell wins
+// when the stock fell), median ("typical"), the bad quarter (25th
+// percentile for buys, 75th for sells — the outcome one case in four was
+// worse than) and the share that beat the market (excess > 0 for buys,
+// < 0 for sells; null when the setups carry no market excess).
+export function horizonNumbers(list, horizons, side = 'buy') {
+  const win = side === 'sell' ? (r) => r < 0 : (r) => r > 0
+  return horizons.map(([label], h) => {
+    const done = list.map((x) => x.returns[h]).filter((r) => r != null)
+    const ex = list.map((x) => x.excess?.[h]).filter((r) => r != null)
+    return {
+      label, n: done.length,
+      avg: done.length ? done.reduce((a, r) => a + r, 0) / done.length : null,
+      winRate: done.length ? done.filter(win).length / done.length : null,
+      median: quantile(done, 0.5),
+      badq: quantile(done, side === 'sell' ? 0.75 : 0.25),
+      beat: ex.length ? ex.filter(win).length / ex.length : null,
+    }
+  })
+}
+
+// Count, share at a turn (low / high), and the per-horizon numbers.
 export function setupStats(list, horizons, side = 'buy') {
   const graded = list.filter((x) => x.atTurn != null)
-  const win = side === 'sell' ? (r) => r < 0 : (r) => r > 0
   return {
     n: list.length,
     atTurn: graded.length ? graded.filter((x) => x.atTurn).length / graded.length : null,
     graded: graded.length,
-    horizons: horizons.map(([label], h) => {
-      const done = list.map((x) => x.returns[h]).filter((r) => r != null)
-      return {
-        label, n: done.length,
-        avg: done.length ? done.reduce((a, r) => a + r, 0) / done.length : null,
-        winRate: done.length ? done.filter(win).length / done.length : null,
-      }
-    }),
+    horizons: horizonNumbers(list, horizons, side),
   }
+}
+
+// The baseline the record is read against: every ticker, every day with a
+// full horizon ahead, same numbers. `tickers` = [{ closes, market }].
+export function baselineStats(tickers, horizons, side = 'buy') {
+  const list = []
+  for (const { closes, market } of tickers) {
+    for (let i = 0; i < closes.length; i++) {
+      list.push({
+        returns: horizons.map(([, h]) => (i + h < closes.length ? closes[i + h] / closes[i] - 1 : null)),
+        excess: market ? horizons.map(([, h]) => (i + h < closes.length && market[i] > 0 && market[i + h] > 0
+          ? (closes[i + h] / closes[i]) - (market[i + h] / market[i]) : null)) : null,
+      })
+    }
+  }
+  return { n: list.length, tickers: tickers.length, horizons: horizonNumbers(list, horizons, side) }
 }
 
 // Echo + Tango + Bravo convergence (ideal pattern): all three fired within
@@ -217,11 +255,11 @@ export function confluenceFlags(model, suite) {
 }
 
 // One side's model.
-function sideModel({ side, flags, closes, swings, horizons, window }) {
+function sideModel({ side, flags, closes, swings, horizons, window, market = null }) {
   const keys = COMPONENTS[side].map(([k]) => k)
   const series = confluenceSeries(flags, closes.length, window, keys)
   const etbFlags = flags.etb
-  const setups = confluenceSetups({ series, closes, swings, window, horizons, side, etbFlags })
+  const setups = confluenceSetups({ series, closes, swings, window, horizons, side, etbFlags, market })
   return {
     side, flags, series, setups,
     today: todaySetup({ series, setups, horizons, side }),
@@ -231,14 +269,16 @@ function sideModel({ side, flags, closes, swings, horizons, window }) {
 }
 
 // The whole daily model: { window, swings, buy, sell }.
-export function confluenceModel({ bars, model, suite, horizons, window = DEFAULT_WINDOW }) {
+// `market`: the S&P 500's closes aligned to `bars` (optional) — setups then
+// carry their excess return, so the pool can say how often they beat it.
+export function confluenceModel({ bars, model, suite, horizons, window = DEFAULT_WINDOW, market = null }) {
   const closes = bars.map((b) => b.c)
   const swings = swingPoints(bars)
   const flags = confluenceFlags(model, suite)
   return {
     window, swings,
-    buy: sideModel({ side: 'buy', flags: flags.buy, closes, swings, horizons, window }),
-    sell: sideModel({ side: 'sell', flags: flags.sell, closes, swings, horizons, window }),
+    buy: sideModel({ side: 'buy', flags: flags.buy, closes, swings, horizons, window, market }),
+    sell: sideModel({ side: 'sell', flags: flags.sell, closes, swings, horizons, window, market }),
   }
 }
 
@@ -286,6 +326,11 @@ export function blendedEstimate({ today, setups, pool, horizons, side = 'buy' })
       label,
       avg: blend(own.horizons[h].avg, own.horizons[h].n, p?.horizons[h]?.avg ?? null),
       winRate: blend(own.horizons[h].winRate, own.horizons[h].n, p?.horizons[h]?.winRate ?? null),
+      // Distribution numbers come from the pool alone (a median of 2 cases
+      // says nothing): the typical result, the bad quarter, beat the market.
+      median: p?.horizons[h]?.median ?? null,
+      badq: p?.horizons[h]?.badq ?? null,
+      beat: p?.horizons[h]?.beat ?? null,
     })),
   }
 }
