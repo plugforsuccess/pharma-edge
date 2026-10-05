@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import clsx from 'clsx'
 import { ArrowDown, ArrowLeft, ArrowUp, Check, ChevronRight, Info, Maximize2, Plus, RotateCcw, Search, X } from 'lucide-react'
@@ -375,23 +376,35 @@ function ToggleGroup({ label, items, isOn, onToggle }) {
 }
 
 // One pane full screen. Esc or X closes; the page doesn't scroll behind it.
+// A pane alone, full screen. Rendered through a portal on <body>: the
+// page scrolls inside <main class="overflow-y-auto">, and on iOS a
+// position: fixed layer inside a scrolled overflow container gets its
+// touches read as scrolls of that container and its hit-testing offset
+// (owner, 2026-10-05: "can't pan or pinch, can't close"). The portal takes
+// it out of <main>; touch-action: none hands every touch to the chart; the
+// real scroller is locked while it is open.
 function FullPane({ title, onClose, children }) {
   const body = useRef(null)
   const close = useRef(onClose)
   close.current = onClose
   const [h, setH] = useState(null)
   useEffect(() => {
-    const prev = document.body.style.overflow
+    const scroller = document.querySelector('main')
+    const prevBody = document.body.style.overflow
+    const prevMain = scroller?.style.overflow ?? ''
     document.body.style.overflow = 'hidden'
+    if (scroller) scroller.style.overflow = 'hidden'
     const key = (e) => { if (e.key === 'Escape') close.current() }
     window.addEventListener('keydown', key)
-    const ro = new ResizeObserver(() => setH(body.current?.clientHeight ?? null))
+    const measure = () => setH(body.current?.clientHeight || null)
+    const ro = new ResizeObserver(measure)
     if (body.current) ro.observe(body.current)
-    return () => { document.body.style.overflow = prev; window.removeEventListener('keydown', key); ro.disconnect() }
+    measure()
+    return () => { document.body.style.overflow = prevBody; if (scroller) scroller.style.overflow = prevMain; window.removeEventListener('keydown', key); ro.disconnect() }
   }, [])
-  return (
-    <div className="fixed inset-0 z-[70] bg-bg flex flex-col" role="dialog" aria-modal="true" aria-label={title}
-      style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}>
+  return createPortal(
+    <div className="fixed inset-0 z-[70] bg-bg flex flex-col overscroll-contain" role="dialog" aria-modal="true" aria-label={title}
+      style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)', touchAction: 'none' }}>
       <div className="flex items-center gap-2 px-4 py-2 border-b border-hairline">
         <h2 className="flex-1 min-w-0 truncate text-sm font-semibold text-violet-300">{title}</h2>
         <button type="button" onClick={onClose} aria-label="Close"
@@ -400,7 +413,8 @@ function FullPane({ title, onClose, children }) {
         </button>
       </div>
       <div ref={body} className="flex-1 min-h-0">{h ? children(h) : null}</div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
