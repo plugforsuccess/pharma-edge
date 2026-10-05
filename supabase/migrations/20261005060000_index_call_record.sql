@@ -30,7 +30,11 @@ as $$
         'win', e.v->'marked'->'all'->'strategy'->'win',
         'lost_half', e.v->'marked'->'all'->'strategy'->'lostHalf',
         'spy', e.v->'marked'->'all'->'spy'->'mean',
-        'spy_lost_half', e.v->'marked'->'all'->'spy'->'lostHalf'))
+        'spy_lost_half', e.v->'marked'->'all'->'spy'->'lostHalf',
+        'dca', e.v->'marked'->'all'->'dca'->'mean',
+        'dca_n', e.v->'marked'->'all'->'dca'->'n',
+        'random', e.v->'marked'->'all'->'random'->'mean',
+        'random_pct', e.v->'marked'->'all'->'random'->'percentile'))
       from cal, jsonb_each(cal.summary->'prereg'->'grid'->cal.pm) as e(k, v)
     ),
     'index_rule', public.replay_event_stats('index', 'SPY')->'universe'

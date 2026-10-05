@@ -579,12 +579,15 @@ const VERDICT_TONE = {
 function indexRecordText(rec) {
   const pct = (v) => (v == null ? null : `${v >= 0 ? '+' : '−'}${Math.round(Math.abs(v) * 100)}%`)
   if (!rec?.rules) return 'The plain index call — the benchmark every stock signal is tested against.'
-  const own = rec.index_rule
+  const idx = rec.rules.index
   const setup = rec.rules.setup
   const mom = rec.rules.momentum
   const control = setup?.spy
   const parts = []
-  if (own?.n > 0 && own.option_avg != null) parts.push(`In the test, buying this call at each month end averaged ${pct(Number(own.option_avg))} per trade (${Math.round(Number(own.option_win) * 100)}% won, ${own.n} trades)`)
+  // The fairest index record is the monthly DCA control on SPY itself: the
+  // same call bought every month end, overlapping (one-at-a-time month-end
+  // entries give only a handful of trades, so timing luck dominates them).
+  if (idx?.dca != null && Number(idx.dca_n) >= 30) parts.push(`In the test, this call bought every month end averaged ${pct(Number(idx.dca))} per trade over ${Number(idx.dca_n)} trades`)
   else if (control != null) parts.push(`In the test, this call bought on the same days as every stock signal averaged ${pct(Number(control))} per trade${setup.spy_lost_half != null && Number(setup.spy_lost_half) === 0 ? ', none losing half' : ''}`)
   if (!parts.length) return 'The plain index call — the benchmark every stock signal is tested against.'
   const vs = [setup?.strategy != null ? `${pct(Number(setup.strategy))} for the buy setup` : null, mom?.strategy != null ? `${pct(Number(mom.strategy))} for momentum` : null].filter(Boolean)

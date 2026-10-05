@@ -1560,7 +1560,10 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   SPY row carries one sentence from the test via the
   `index_call_record()` SQL function (per-rule strategy / SPY-control means
   at the calibrated premium from the latest `replay_runs`, plus the index
-  rule's own stats once it has run; `indexRecordText` in `Charts.jsx`;
+  rule's own stats once it has run; `indexRecordText` in `Charts.jsx` leads
+  with the **SPY monthly-DCA control** — the same call bought every month
+  end, overlapping, 116 trades — because the one-at-a-time `index` rule
+  yields only ~8 trades in five years and timing luck dominates it;
   "past results, not a forecast"). **Pre-registered rule `index`**: the
   SPY call at each completed month end (`monthEndIndexes`), SPY handed to
   `runPrereg` as an `extraResult` (it isn't in the universe) with entries
