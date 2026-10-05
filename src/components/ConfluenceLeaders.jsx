@@ -36,6 +36,8 @@ const pct0 = (x) => `${Math.round(Math.abs(x) * 100)}%`
 const day = (t) => (t ? new Date(`${t}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }) : '')
 const monthYear = (t) => (t ? new Date(`${t}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' }) : '')
 const THIN_POOL = 30
+// Under this much room to the stop the row says the entry is at the edge of the zone.
+const EDGE_ROOM = 0.03
 const FEW_OWN = 5
 
 function TrackRecord({ r, side }) {
@@ -173,9 +175,16 @@ export default function ConfluenceLeaders({ mine = [] }) {
                         </span>
                       )}
                       {r.verdict === 'watch' && <span className="block mt-1 text-sm text-subtle">Signals, but the long-term trend is falling — the rule doesn’t buy here.</span>}
-                      {side === 'buy' && r.verdict === 'enter' && r.stop_price != null && (
-                        <span className="block mt-0.5 text-xs text-subtle">Exit if it closes below <span className="font-mono-tab text-fg">{money(r.stop_price)}</span></span>
-                      )}
+                      {side === 'buy' && r.verdict === 'enter' && r.stop_price != null && (() => {
+                        const room = 1 - r.stop_price / r.close
+                        const edge = room < EDGE_ROOM
+                        return (
+                          <span className={clsx('block mt-0.5 text-xs', edge ? 'text-amber-400' : 'text-subtle')}>
+                            Exit if it closes below <span className="font-mono-tab text-fg">{money(r.stop_price)}</span>
+                            {edge && <> — only {(room * 100).toFixed(1)}% away; this entry sits at the bottom edge of the buy zone</>}
+                          </span>
+                        )
+                      })()}
                       {side === 'sell' && r.verdict && (
                         <span className="block mt-1 text-sm text-subtle">
                           {r.verdict === 'extended' ? 'Stretched after a run — ' : 'Momentum fading — '}

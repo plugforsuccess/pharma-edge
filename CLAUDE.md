@@ -1355,7 +1355,10 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   capped at the 40-bar low so a stock that has run far never reads a 30%
   stop as the plan, and never tighter than the buy zone's floor (5% under
   the 200-day — on a dip buy the 40-bar low is the dip itself; under the
-  band the setup is gone). No account-size warning (owner: not that).
+  band the setup is gone). When the stop is within 3% of the
+  close the row says so ("— only 0.6% away; this entry sits at the bottom
+  edge of the buy zone") and, among BUY SETUP rows, more room to the stop
+  ranks first (owner, 2026-10-05). No account-size warning (owner: not that).
   Computed nightly in `scripts/lib/verdict.mjs` → `confluence_ranks.verdict
   / blockers / trade / stop_price / stop_date / momentum / est_win_3m`;
   the entry card falls back to the pool's record ("across 564 tickers:
