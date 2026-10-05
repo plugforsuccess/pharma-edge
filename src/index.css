@@ -127,7 +127,7 @@
      blue = bull, pink = bear diamonds (owner, 2026-10-03). Signals only —
      gains / losses stay green / red. */
   --color-suite-bull: #4d8dff;
-  --color-suite-bear: #ff5fa2;
+  --color-suite-bear: #f2545b;
   /* Confluence score + swing lows on the entry chart (canvas needs hex). */
   --color-confluence: #a78bfa;
 

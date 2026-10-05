@@ -21,6 +21,9 @@ const p = EXIT_PLAYBOOK
 const RULE_TEXT = {
   confluence: '2+ buy signals, 200-day rising',
   zone: 'Buy zone turns YES',
+  setup: 'Buy zone YES + 2 signals, 200-day rising (the BUY SETUP row)',
+  triple: 'Bravo + Echo + Tango all bull within 2 days (a test, not a live rule)',
+  zoneConfirmed: 'Buy zone YES while Bravo\'s regime is bull',
   bravo: 'Bravo bull ◆, 200-day rising',
   recovery: '2+ buy signals, 200-day falling, close above the 50-day',
   targets: `${share(p.fractions[0])} at ${1 + p.targets[0]}x · ${share(p.fractions[1])} at ${1 + p.targets[1]}x · trail the rest ${share(p.runnerTrailPct)}`,

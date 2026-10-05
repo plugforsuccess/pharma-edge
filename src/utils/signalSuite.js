@@ -140,6 +140,11 @@ export function suiteModel(bars, { spy = [], vix = [], params = SUITE_PARAMS } =
   const upperBand = basis.map((b, i) => (b != null && bandAtr[i] != null ? b + bandAtr[i] * p.bandMult : null))
   const lowerBand = basis.map((b, i) => (b != null && bandAtr[i] != null ? b - bandAtr[i] * p.bandMult : null))
   const fast = ema(hl2, p.fastLength)
+  // Reclaim zone (owner, 2026-10-05): Bravo's basis ± half an ATR(200) — a
+  // quarter of the band each side; the strip the regime flips in. Price
+  // above it = reclaimed, below = lost, inside = contested.
+  const zoneHigh = basis.map((b, i) => (b != null && bandAtr[i] != null ? b + bandAtr[i] * 0.5 : null))
+  const zoneLow = basis.map((b, i) => (b != null && bandAtr[i] != null ? b - bandAtr[i] * 0.5 : null))
   const slope = fast.map((f, i) => (f != null && fast[i - p.slopeLookback] != null ? f - fast[i - p.slopeLookback] : null))
   const ok = (i) => basis[i] != null && fast[i] != null && slope[i] != null && i > 0
   const bravoBullRaw = bars.map((_, i) => ok(i) && close[i] > basis[i] && fast[i] > basis[i] && slope[i] > 0 && close[i] > close[i - 1])
@@ -212,7 +217,7 @@ export function suiteModel(bars, { spy = [], vix = [], params = SUITE_PARAMS } =
 
   return {
     params: p,
-    bravo: { basis, upperBand, lowerBand, fast, bull: bravoBull, bear: bravoBear, bullOn: bravoBullOn, bearOn: bravoBearOn, regime },
+    bravo: { basis, upperBand, lowerBand, zoneLow, zoneHigh, fast, bull: bravoBull, bear: bravoBear, bullOn: bravoBullOn, bearOn: bravoBearOn, regime },
     echo: { line: echo, ...echoRails, bull: echoBull, bear: echoBear },
     tango: { line: tango, ...tangoRails, bull: tangoBull, bear: tangoBear },
     signals,
@@ -221,6 +226,37 @@ export function suiteModel(bars, { spy = [], vix = [], params = SUITE_PARAMS } =
     bears: signals.filter((s) => s.side === 'bear'),
     exits,
   }
+}
+
+// Triple event (owner, 2026-10-05): Bravo, Echo and Tango all turn bullish
+// (or all bearish) within `within` bars — Bravo = its trend condition
+// turning on (the B diamond), Echo / Tango = their line crossing zero (the
+// pillar turning positive / negative; their rail-cross signals are rarer and
+// cooldown-gated, so "all three within 2 bars" almost never met on them).
+// Fires once, on the bar the third one arrives; a second firing inside
+// `within` bars is folded into the first. Same math on daily or weekly
+// bars. Without a `line` (synthetic suites) the pillar's bull / bear flags
+// are used as the turns.
+export function tripleEvents(suite, within = 2) {
+  const n = suite.bravo.bullOn.length
+  const zeroCross = (line, up) => line.map((v, i) => i > 0 && v != null && line[i - 1] != null && (up ? line[i - 1] <= 0 && v > 0 : line[i - 1] >= 0 && v < 0))
+  const turns = (o, up) => (o.line ? zeroCross(o.line, up) : up ? o.bull : o.bear)
+  const lastTrue = (arr) => { const out = new Array(n).fill(-1); let L = -1; for (let i = 0; i < n; i++) { if (arr[i]) L = i; out[i] = L } return out }
+  const side = (a, b, c) => {
+    const la = lastTrue(a), lb = lastTrue(b), lc = lastTrue(c)
+    const out = new Array(n).fill(false)
+    let last = -Infinity
+    for (let i = 0; i < n; i++) {
+      if (!(a[i] || b[i] || c[i])) continue
+      const oldest = Math.min(la[i], lb[i], lc[i])
+      if (oldest < 0 || i - oldest > within) continue
+      if (i - last <= within) continue
+      out[i] = true
+      last = i
+    }
+    return out
+  }
+  return { bull: side(suite.bravo.bullOn, turns(suite.echo, true), turns(suite.tango, true)), bear: side(suite.bravo.bearOn, turns(suite.echo, false), turns(suite.tango, false)), within }
 }
 
 // Forward stock returns after each event (63 / 126 / 252 trading days).
@@ -328,6 +364,7 @@ export function suiteOnDays(dailyBars, periodBars, suite, tf) {
       basis: step(suite.bravo.basis), upperBand: step(suite.bravo.upperBand), lowerBand: step(suite.bravo.lowerBand),
       fast: step(suite.bravo.fast), bull: flags(suite.bravo.bull), bear: flags(suite.bravo.bear),
       bullOn: flags(suite.bravo.bullOn), bearOn: flags(suite.bravo.bearOn), regime: step(suite.bravo.regime).map((x) => x ?? 0),
+      zoneLow: step(suite.bravo.zoneLow), zoneHigh: step(suite.bravo.zoneHigh),
     },
     echo: osc(suite.echo),
     tango: osc(suite.tango),

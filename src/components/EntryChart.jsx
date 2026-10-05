@@ -2,6 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { FEATURES } from '../lib/features'
 import { Maximize2 } from 'lucide-react'
 import { DiamondMarkers, LANE_PX } from './chartDiamonds'
+import { VerticalBands, ZoneFill } from './chartBands'
+import { tripleEvents } from '../utils/signalSuite'
 import {
   createChart, createSeriesMarkers, BaselineSeries, CandlestickSeries, HistogramSeries, LineSeries,
   ColorType, CrosshairMode, LineStyle, LineType,
@@ -56,7 +58,12 @@ export const SUB_PANES = [
 ]
 // The Bravo band is gone (owner, 2026-10-03: not needed — the diamonds
 // carry the signal and the suite card shows the trend).
+// Triple ◆ (owner, 2026-10-05): Bravo + Echo + Tango all bull (or all bear)
+// within 2 bars — one labelled diamond on price ("3") and a vertical band
+// through every pane. Reclaim zone: Bravo's basis ± ½ ATR shaded on price.
 export const LAYERS = [
+  ['triple', 'Triple ◆'],
+  ['zone', 'Reclaim zone'],
   ['bravoSignals', 'Bravo ◆'],
   ['exits', 'Exits'],
   ['swings', 'Swing lows'],
@@ -79,6 +86,15 @@ export function paneTitle(k, tf = '1d') {
   if (k === 'dist' && tf === '1wk') return '% vs 200-week'
   if (k === 'dist' && tf === '1mo') return '% vs 200-month'
   return PANE_TITLES[k]
+}
+
+// "Zone 412.10–418.40 · above · reclaim 418.40": where price sits vs the
+// reclaim zone and the level a weekly close has to clear.
+function zoneLegend(bar, lo, hi) {
+  const c = bar?.c
+  const where = c == null ? '' : c > hi ? 'above' : c < lo ? 'below' : 'inside'
+  return { label: 'Zone', value: `${fmt(lo)}–${fmt(hi)} · ${where}${c != null && c <= hi ? ` · reclaim ${fmt(hi)}` : ''}`,
+    cls: where === 'above' ? 'text-suite-bull' : where === 'below' ? 'text-suite-bear' : 'text-subtle', swatch: 'bg-suite-bull/60' }
 }
 
 const fmt = (v, d = 2) => (v == null || !Number.isFinite(v) ? '—' : v.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }))
@@ -152,6 +168,10 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
     const line = (arr, i0 = 0) => arr.map((v, i) => (v == null ? { time: time[i] } : { time: time[i], value: v })).slice(i0)
     const quiet = { lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false }
     const paneOf = (k) => shown.indexOf(k)
+    // The first series in each pane carries that pane's event bands.
+    const firstSeries = []
+    const bands = []   // Triple event columns, drawn through every pane
+    const addS = (type, opts, pi) => { const sr = chart.addSeries(type, opts, pi); if (!firstSeries[pi]) firstSeries[pi] = sr; return sr }
     // Create every pane up front, in order: the library appends a pane when
     // a series asks for an index past the last one, so adding a lower pane's
     // series first would land it in the wrong slot.
@@ -160,35 +180,43 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
     // Price pane ---------------------------------------------------------
     if (showPrice) {
     // Buy-zone shading: full-height columns on signal days, its own scale.
-    const zone = chart.addSeries(HistogramSeries, { ...quiet, priceScaleId: 'zone', base: 0 }, 0)
+    const zone = addS(HistogramSeries, { ...quiet, priceScaleId: 'zone', base: 0 }, 0)
     chart.priceScale('zone', 0).applyOptions({ visible: false, scaleMargins: { top: 0, bottom: 0 } })
     zone.setData(bars.map((b, i) => (daily && model.cond[i]?.all
       ? { time: b.t, value: 1, color: alpha(t.up, 0.13) }
       : { time: b.t })))
 
-    const candles = chart.addSeries(CandlestickSeries, {
+    const candles = addS(CandlestickSeries, {
       upColor: t.up, downColor: t.down, wickUpColor: t.up, wickDownColor: t.down, borderVisible: false,
       priceLineColor: t.subtle, priceLineStyle: LineStyle.Dotted,
     }, 0)
     candles.setData(bars.map((b) => ({ time: b.t, open: b.o, high: b.h, low: b.l, close: b.c })))
     chart.priceScale('right', 0).applyOptions({ scaleMargins: { top: 0.06, bottom: 0.08 } })
 
+    // Reclaim zone: Bravo's basis ± ½ ATR, filled between its edges (blue
+    // while the trend regime is bull, red while bear, grey otherwise).
+    if (on('zone') && suite.bravo.zoneLow) {
+      const zf = new ZoneFill({ fill: alpha(t.suiteBull, 0.12), edge: alpha(t.suiteBull, 0.5) })
+      candles.attachPrimitive(zf)
+      zf.setPoints(bars.map((b, i) => ({ time: b.t, lo: suite.bravo.zoneLow[i], hi: suite.bravo.zoneHigh[i] })))
+    }
+
     if (daily) {
-      const wema = chart.addSeries(LineSeries, { ...quiet, color: alpha(t.fg, 0.7), lineWidth: 1, lineStyle: LineStyle.Dashed }, 0)
+      const wema = addS(LineSeries, { ...quiet, color: alpha(t.fg, 0.7), lineWidth: 1, lineStyle: LineStyle.Dashed }, 0)
       wema.setData(line(model.wema))
     }
-    const s50 = chart.addSeries(LineSeries, { ...quiet, color: t.gold, lineWidth: 1.5 }, 0)
+    const s50 = addS(LineSeries, { ...quiet, color: t.gold, lineWidth: 1.5 }, 0)
     s50.setData(line(model.s50))
-    const s200 = chart.addSeries(LineSeries, { ...quiet, color: t.up, lineWidth: 3 }, 0)
+    const s200 = addS(LineSeries, { ...quiet, color: t.up, lineWidth: 3 }, 0)
     s200.setData(model.s200.map((v, i) => (v == null ? { time: time[i] }
       : { time: time[i], value: v, color: model.slope200[i] == null ? t.subtle : model.slope200[i] > 0 ? t.up : t.down })))
 
     if (on('bravo')) {
       const band = { ...quiet, color: alpha(t.subtle, 0.45), lineWidth: 1, lineType: LineType.WithSteps }
-      chart.addSeries(LineSeries, band, 0).setData(line(suite.bravo.upperBand))
-      chart.addSeries(LineSeries, band, 0).setData(line(suite.bravo.lowerBand))
-      chart.addSeries(LineSeries, { ...quiet, color: alpha(t.subtle, 0.6), lineWidth: 1, lineStyle: LineStyle.Dotted, lineType: LineType.WithSteps }, 0).setData(line(suite.bravo.basis))
-      chart.addSeries(LineSeries, { ...quiet, color: t.goldHi, lineWidth: 1.5, lineType: LineType.WithSteps }, 0).setData(line(suite.bravo.fast))
+      addS(LineSeries, band, 0).setData(line(suite.bravo.upperBand))
+      addS(LineSeries, band, 0).setData(line(suite.bravo.lowerBand))
+      addS(LineSeries, { ...quiet, color: alpha(t.subtle, 0.6), lineWidth: 1, lineStyle: LineStyle.Dotted, lineType: LineType.WithSteps }, 0).setData(line(suite.bravo.basis))
+      addS(LineSeries, { ...quiet, color: t.goldHi, lineWidth: 1.5, lineType: LineType.WithSteps }, 0).setData(line(suite.bravo.fast))
     }
 
     const signalSet = new Set(daily ? model.signals : [])
@@ -203,8 +231,8 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
       }
     }
     // Bravo signals: solid diamonds with a B — blue under the candle when its
-    // bull trend turns on, pink above when the bear one does. Exits: hollow
-    // pink diamonds above the candle with the reason inside (E / T / B),
+    // bull trend turns on, red above when the bear one does. Exits: hollow
+    // red diamonds above the candle with the reason inside (E / T / B),
     // stacked over a Bravo bear diamond on the same day.
     const priceDiamonds = []
     const bravoBearDays = new Set()
@@ -217,6 +245,17 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
         if (x.i < 0) continue
         priceDiamonds.push({ time: time[x.i], price: bars[x.i].h, offset: bravoBearDays.has(x.i) ? -36 : -15, color: t.suiteBear, label: x.why.join(''), hollow: true })
       }
+    }
+    // Triple ◆: a bigger diamond with a 3 inside — under the candle (bull),
+    // above it (bear), past any Bravo diamond on the same bar.
+    const triple = on('triple') ? tripleEvents(suite, 2) : null
+    if (triple) {
+      triple.bull.forEach((f, i) => { if (!f) return
+        priceDiamonds.push({ time: time[i], price: bars[i].l, offset: suite.bravo.bullOn[i] ? 38 : 16, color: t.suiteBull, label: '3' })
+        bands.push({ time: time[i], color: alpha(t.suiteBull, 0.14) }) })
+      triple.bear.forEach((f, i) => { if (!f) return
+        priceDiamonds.push({ time: time[i], price: bars[i].h, offset: bravoBearDays.has(i) ? -38 : -16, color: t.suiteBear, label: '3' })
+        bands.push({ time: time[i], color: alpha(t.suiteBear, 0.14) }) })
     }
     if (priceDiamonds.length) {
       const pd = new DiamondMarkers({ outline: t.bg, size: 7 })
@@ -252,13 +291,13 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
       const pi = paneOf('dist')
       // The ±band: a flat line at +band filled down to a baseline at −band.
       if (daily) {
-        chart.addSeries(BaselineSeries, {
+        addS(BaselineSeries, {
           ...quiet, baseValue: { type: 'price', price: -p.bandPct }, lineWidth: 1, lineStyle: LineStyle.Dotted,
           topLineColor: alpha(t.up, 0.35), topFillColor1: alpha(t.up, 0.08), topFillColor2: alpha(t.up, 0.08),
           bottomLineColor: 'transparent', bottomFillColor1: 'transparent', bottomFillColor2: 'transparent',
         }, pi).setData(bars.map((b) => ({ time: b.t, value: p.bandPct })))
       }
-      const d = chart.addSeries(BaselineSeries, {
+      const d = addS(BaselineSeries, {
         ...quiet, lastValueVisible: true, baseValue: { type: 'price', price: 0 }, lineWidth: 1.5,
         topLineColor: t.up, topFillColor1: alpha(t.up, 0.22), topFillColor2: alpha(t.up, 0.02),
         bottomLineColor: t.down, bottomFillColor1: alpha(t.down, 0.02), bottomFillColor2: alpha(t.down, 0.22),
@@ -267,7 +306,7 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
       d.setData(line(model.dist))
     }
     if (paneOf('rsi') >= 0) {
-      const r = chart.addSeries(LineSeries, {
+      const r = addS(LineSeries, {
         ...quiet, lastValueVisible: true, color: t.fg, lineWidth: 1.5, autoscaleInfoProvider: fixed(0, 100),
         priceFormat: { type: 'custom', formatter: pct100 },
       }, paneOf('rsi'))
@@ -278,14 +317,14 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
     }
     if (paneOf('macd') >= 0) {
       const pi = paneOf('macd')
-      chart.addSeries(HistogramSeries, { ...quiet, base: 0 }, pi)
+      addS(HistogramSeries, { ...quiet, base: 0 }, pi)
         .setData(model.macd.hist.map((v, i) => (v == null ? { time: time[i] }
           : { time: time[i], value: v, color: alpha(v >= 0 ? t.up : t.down, (model.macd.hist[i - 1] != null && Math.abs(v) < Math.abs(model.macd.hist[i - 1])) ? 0.35 : 0.7) })))
-      chart.addSeries(LineSeries, { ...quiet, lastValueVisible: true, color: t.gold, lineWidth: 1.5 }, pi).setData(line(model.macd.line))
-      chart.addSeries(LineSeries, { ...quiet, color: t.subtle, lineWidth: 1 }, pi).setData(line(model.macd.signal))
+      addS(LineSeries, { ...quiet, lastValueVisible: true, color: t.gold, lineWidth: 1.5 }, pi).setData(line(model.macd.line))
+      addS(LineSeries, { ...quiet, color: t.subtle, lineWidth: 1 }, pi).setData(line(model.macd.signal))
     }
     if (paneOf('ivr') >= 0) {
-      const s = chart.addSeries(LineSeries, {
+      const s = addS(LineSeries, {
         ...quiet, lastValueVisible: true, color: t.gold, lineWidth: 1.5, autoscaleInfoProvider: fixed(0, 100),
         priceFormat: { type: 'custom', formatter: pct100 },
       }, paneOf('ivr'))
@@ -295,8 +334,8 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
     if (paneOf('ivhv') >= 0) {
       const pi = paneOf('ivhv')
       const pf = { type: 'custom', formatter: (v) => `${(v * 100).toFixed(0)}%` }
-      chart.addSeries(LineSeries, { ...quiet, lastValueVisible: true, color: t.subtle, lineWidth: 1.5, priceFormat: pf }, pi).setData(line(model.hv))
-      chart.addSeries(LineSeries, {
+      addS(LineSeries, { ...quiet, lastValueVisible: true, color: t.subtle, lineWidth: 1.5, priceFormat: pf }, pi).setData(line(model.hv))
+      addS(LineSeries, {
         ...quiet, lastValueVisible: true, color: t.gold, lineWidth: 1.5, priceFormat: pf,
         pointMarkersVisible: model.iv.filter((x) => x != null).length < 60, pointMarkersRadius: 2,
       }, pi).setData(line(model.iv))
@@ -308,16 +347,16 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
       if (!suite || paneOf(k) < 0) return
       const pi = paneOf(k)
       const rail = { ...quiet, color: alpha(t.subtle, 0.55), lineWidth: 1, lineType: LineType.WithSteps, lineStyle: LineStyle.Dashed }
-      chart.addSeries(LineSeries, rail, pi).setData(line(o.upper))
-      chart.addSeries(LineSeries, rail, pi).setData(line(o.lower))
-      const ln = chart.addSeries(BaselineSeries, {
+      addS(LineSeries, rail, pi).setData(line(o.upper))
+      addS(LineSeries, rail, pi).setData(line(o.lower))
+      const ln = addS(BaselineSeries, {
         ...quiet, lastValueVisible: true, baseValue: { type: 'price', price: 0 }, lineWidth: 1.5, lineType: LineType.WithSteps,
         topLineColor: t.suiteBull, topFillColor1: alpha(t.suiteBull, 0.6), topFillColor2: alpha(t.suiteBull, 0.12),
         bottomLineColor: t.suiteBear, bottomFillColor1: alpha(t.suiteBear, 0.12), bottomFillColor2: alpha(t.suiteBear, 0.55),
         priceFormat: { type: 'custom', formatter: (v) => v.toFixed(0) },
       }, pi)
       ln.setData(line(o.line))
-      // The pillar's signals in a lane along the pane's bottom: blue diamonds (bull), pink (bear).
+      // The pillar's signals in a lane along the pane's bottom: blue diamonds (bull), red (bear).
       const pts = []
       o.bull.forEach((f, i) => { if (f) pts.push({ time: time[i], color: t.suiteBull }) })
       o.bear.forEach((f, i) => { if (f) pts.push({ time: time[i], color: t.suiteBear }) })
@@ -336,15 +375,20 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
       const buyTone = (sc) => (sc >= 4 ? t.up : sc === 3 ? t.violet : sc === 2 ? alpha(t.violet, 0.5) : alpha(t.subtle, 0.35))
       const sellTone = (sc) => (sc >= 4 ? t.down : sc === 3 ? t.suiteBear : sc === 2 ? alpha(t.suiteBear, 0.5) : alpha(t.subtle, 0.35))
       const fmt5 = { type: 'custom', formatter: (x) => (Math.abs(x) > 5.2 ? '' : Math.abs(x).toFixed(0)) }
-      const hb = chart.addSeries(HistogramSeries, { ...quiet, lastValueVisible: true, base: 0, autoscaleInfoProvider: fixed(-5, 5), priceFormat: fmt5 }, pi)
+      const hb = addS(HistogramSeries, { ...quiet, lastValueVisible: true, base: 0, autoscaleInfoProvider: fixed(-5, 5), priceFormat: fmt5 }, pi)
       hb.setData(conf.buy.series.map((c, i) => (c.score ? { time: time[i], value: c.score, color: buyTone(c.score) } : { time: time[i], value: 0 })))
-      const hs = chart.addSeries(HistogramSeries, { ...quiet, lastValueVisible: true, base: 0, autoscaleInfoProvider: fixed(-5, 5), priceFormat: fmt5 }, pi)
+      const hs = addS(HistogramSeries, { ...quiet, lastValueVisible: true, base: 0, autoscaleInfoProvider: fixed(-5, 5), priceFormat: fmt5 }, pi)
       hs.setData(conf.sell.series.map((c, i) => (c.score ? { time: time[i], value: -c.score, color: sellTone(c.score) } : { time: time[i], value: 0 })))
       hb.createPriceLine({ price: 3, color: alpha(t.violet, 0.6), lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: false })
       hb.createPriceLine({ price: -3, color: alpha(t.suiteBear, 0.6), lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: false })
     }
 
     // Indicator panes: little padding, so 0–100 scales stay 0–100 when tall.
+
+    // Triple bands through every pane (the price pane too).
+    if (showPrice && bands.length) {
+      firstSeries.forEach((sr) => { if (!sr) return; const vb = new VerticalBands(); sr.attachPrimitive(vb); vb.setBands(bands) })
+    }
 
     // Pane heights: price first, the rest equal.
     const all = chart.panes()
@@ -464,6 +508,7 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
       { label: `200${iv.unit}`, value: fmt(v(model?.s200)), cls: slope == null ? 'text-subtle' : slope > 0 ? 'text-green-400' : 'text-rose-300', swatch: slope > 0 ? 'bg-green-400' : 'bg-red-400', thick: true },
       { label: `50${iv.unit}`, value: fmt(v(model?.s50)), cls: 'text-amber-300', swatch: 'bg-amber-400' },
       ...(daily ? [{ label: 'W50', value: fmt(v(model?.wema)), cls: 'text-subtle', swatch: 'bg-fg/70', dashed: true }] : []),
+      ...(layers.includes('zone') && v(suite?.bravo?.zoneHigh) != null ? [zoneLegend(v(bars), v(suite.bravo.zoneLow), v(suite.bravo.zoneHigh))] : []),
     ],
     dist: [{ label: '', value: pct(v(model?.dist)), cls: v(model?.dist) < 0 ? 'text-rose-300' : 'text-green-400' },
       ...(daily ? [{ label: `±${model?.params.bandPct}% band`, value: '', cls: 'text-muted' }] : [])],

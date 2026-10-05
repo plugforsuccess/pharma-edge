@@ -1406,6 +1406,42 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   **Resend — a placeholder**: skipped (logged) until the `RESEND_API_KEY`
   Actions secret and a verified `RESEND_FROM` (Actions variable, default
   `Cash Moves <alerts@cashmoves.io>`) exist. No push from this job yet.
+- **Triple ◆, reclaim zone, plan card, context badge, event stats** (owner,
+  2026-10-05; nothing here changes a live rule until it passes the
+  walk-forward ablation). **Triple event** = Bravo, Echo and Tango all
+  turning bullish (or all bearish) within 2 bars — Bravo = `bullOn` (the B
+  diamond), Echo / Tango = their line crossing zero (their rail-cross
+  signals are cooldown-gated and so rare that "all three within 2 bars"
+  never met on them); `tripleEvents(suite, within)` in `signalSuite.js`,
+  once per cluster, on the bar the third arrives. Drawn as a bigger diamond
+  with a **3** inside (blue bull under the candle, red bear above) plus a
+  **vertical band through every pane** (`VerticalBands` in
+  `components/chartBands.js`, attached to the first series of each pane);
+  computed on daily and weekly bars, both statuses under the ticker in the
+  header (`TripleChips`; weekly bars are now always fetched —
+  `weeklyData` — and the Signal suite reuses them on Weekly). **Visual
+  grammar** (owner): blue = bull, red = bear (`--color-suite-bear` is now
+  red, `#f2545b`, not pink), every shape labelled (B, 3, E / T / B). **Reclaim
+  zone** = Bravo's basis ± ½ ATR(200) (`bravo.zoneLow` / `zoneHigh`, also
+  on the day-mapped suite), shaded on price (`ZoneFill`) with a live header
+  label "Zone 133.87–137.87 · above · reclaim 137.87". Layers `triple` and
+  `zone` default on (`cm:entry-layers:v3`). **Plan card** (auto, under the
+  Signal suite; `reclaimPlan` in `src/utils/plan.js`, `npm run plan:check`):
+  trigger = weekly close above the weekly zone high, invalidation = weekly
+  close below its low, targets = the next weekly upper band and the prior
+  daily swing highs above price (two, ≥ 3% apart), % to each and reward :
+  risk against the invalidation; when price is > 15% above the zone it says
+  the plan applies on a pullback. **Context badge** in the status card
+  (`trendQuality`, `TREND_GATE`): "Trend pullback" when the drawdown from
+  the 252-bar high ≤ 25% and the 200-day has risen ≥ 60 bars, else
+  "Recovery setup — higher risk". **Event stats** (`EventStatsCard`): the
+  `replay_event_stats(rule, ticker)` SQL function reads `replay_trades`
+  (latest run with rows for the rule) — count, stock up 6M later, call
+  trade won, median 3 / 6 / 12M stock return vs the random-entry control
+  (`fwd_*` / `rand_*` columns, filled per trade by the universe job) for
+  the ticker and the universe. `triple` is a replay entry rule (`ENTRY_RULES`,
+  "a test, not a live rule"), in `PREREG_RULES`, and listed on Signal
+  record and the Replay card; its rows appear after the next universe run.
 - **Replay + Signal record** (owner, 2026-10-03: NOW +84% — "how can the
   app suggest this trade and signal the exit?"; advised: it can't be
   guaranteed without look-ahead, so measure it honestly). `src/utils/replay.js`
@@ -1551,17 +1587,17 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   margin is the header height (46px price, 30px others) over the pane
   height, recomputed on resize; 0–100 scales blank tick labels past 100.
   **Pillar signals are diamonds in the suite's colors** (owner,
-  2026-10-03): blue = bull, pink = bear (`--color-suite-bull` /
+  2026-10-03): blue = bull, red = bear (`--color-suite-bull` /
   `--color-suite-bear` tokens, signals only — gains / losses stay green /
   red), styled after TradingView's (owner's reference): a soft fill, a
   bright outline in the same hue and a thin background-color ring. Echo /
   Tango diamonds sit in a **signal lane** along the bottom of their pane
   (a faint strip; the line keeps a bottom margin above it), and their
-  areas are blue above zero / pink below. On the price chart (owner,
+  areas are blue above zero / red below. On the price chart (owner,
   2026-10-03): **Bravo diamonds** (layer "Bravo ◆", on by default) — solid,
   "B" inside, blue under the candle where Bravo's bull condition turns on,
-  pink above where the bear one does, at most one per 5-bar cooldown
-  (`bravo.bullOn` / `bearOn`); **exits** are hollow pink diamonds above
+  red above where the bear one does, at most one per 5-bar cooldown
+  (`bravo.bullOn` / `bearOn`); **exits** are hollow red diamonds above
   the candle with the reason inside (E / T / B), stacked over a Bravo
   bear diamond on the same day. Letters go inside the diamond. Drawn by
   `components/chartDiamonds.js` (a series primitive — the library has no

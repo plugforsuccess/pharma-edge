@@ -14,14 +14,37 @@
 import { replayTrades, trailingVol } from '../../src/utils/replay.js'
 import { PERIODS, PREMIUM_GRID, RANDOM_REPS, pricingFor, controlsForTicker, periodResult, bucketResults, verdict, periodOf, calibratePremium } from '../../src/utils/controls.js'
 
-export const PREREG_RULES = ['setup', 'zone', 'confluence']
+export const PREREG_RULES = ['setup', 'zone', 'confluence', 'triple']
+const FWD = [['3m', 63], ['6m', 126], ['12m', 252]]
 export const PRIMARY_RULE = 'setup'
 const r4 = (x) => (x == null || !Number.isFinite(x) ? null : Math.round(x * 1e4) / 1e4)
 
-// Per-trade features for the export (all known at the signal bar).
+// Forward stock returns per horizon and, per calendar month, the mean
+// forward return over every bar of that month (the random-entry baseline
+// for a signal in that month). Cached on the ticker.
+function forward(r) {
+  if (r._fwd) return r._fwd
+  const c = r.bars.map((b) => b.c)
+  const n = c.length
+  const fwd = {}
+  const monthMean = {}
+  for (const [k, h] of FWD) {
+    fwd[k] = c.map((x, i) => (i + h < n && x > 0 ? c[i + h] / x - 1 : null))
+    const acc = new Map()
+    fwd[k].forEach((v, i) => { if (v == null) return; const m = r.bars[i].t.slice(0, 7); const a = acc.get(m) ?? { s: 0, n: 0 }; a.s += v; a.n++; acc.set(m, a) })
+    monthMean[k] = Object.fromEntries([...acc].map(([m, a]) => [m, a.s / a.n]))
+  }
+  r._fwd = { fwd, monthMean }
+  return r._fwd
+}
+
+// Per-trade features for the export (all known at the signal bar, except
+// the forward returns, which are the outcome).
 export function features(r, t) {
   const i = t.signalI
   const bars = r.bars
+  const f = forward(r)
+  const month = bars[i].t.slice(0, 7)
   let hi = 0
   for (let k = Math.max(0, i - 251); k <= i; k++) hi = Math.max(hi, bars[k].h)
   let up = 0
@@ -33,6 +56,8 @@ export function features(r, t) {
     score: r.sig.buyScore?.[i] ?? null,
     lit: key ? key.split('+') : [],
     iv_rank_source: r.model.ivSource === 'iv' ? 'iv' : 'hv_standin',
+    fwd_3m: r4(f.fwd['3m'][i]), fwd_6m: r4(f.fwd['6m'][i]), fwd_12m: r4(f.fwd['12m'][i]),
+    rand_3m: r4(f.monthMean['3m'][month] ?? null), rand_6m: r4(f.monthMean['6m'][month] ?? null), rand_12m: r4(f.monthMean['12m'][month] ?? null),
   }
 }
 
