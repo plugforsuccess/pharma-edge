@@ -226,3 +226,14 @@ option-gain targets join the grid — exit when the call's mark reaches
 variants in all). The two-ticker offline run already showed the leverage
 these imply: a +10% stock move returned ~+17% on the call after slippage,
 +15% ~+27%, +20% ~+40%. Reading rule unchanged.
+
+**Amendment, same day, after the first grid was read** (owner: "we don't
+want to hold for more than 2–18 months"): the hold caps become **2, 6, 12
+and 18 months** (42 / 126 / 252 / 378 trading days; the 18-month cap
+coincides with the playbook's time stop on a 2-year call), replacing 3 and
+6 months — 56 variants. The first grid's reading stands as recorded: hit
+rates were high (59–79% on the buy setup, 68–74% on momentum in 2023–25
+at a +25% call target) but misses cost more than hits earned, an 8% stock
+stop made every variant worse, and 2022 lost a third per trade on every
+version — a bull-market plan that needs a regime gate, tested next. This
+amendment widens the window; it does not change the reading rule.

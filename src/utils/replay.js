@@ -74,7 +74,10 @@ export const EXIT_RULES = [
 export const SWING = Object.freeze({ target: 'pivot', pct: 0.15, maxHold: 126, stopPct: null, maxPivot: 0.40, minPivot: 0.02 })
 export const SWING_GRID = Object.freeze({
   targets: [['pct', 0.10], ['pct', 0.15], ['pct', 0.20], ['pivot', 0.15], ['opt', 0.25], ['opt', 0.50], ['opt', 0.75]],
-  holds: [63, 126], stops: [null, 0.08],
+  // Hold caps = the owner's window (2026-10-05: "we don't want to hold for
+  // more than 2–18 months"): 2, 6, 12 and 18 months in trading days. The
+  // 18-month cap coincides with the playbook's time stop on a 2-year call.
+  holds: [42, 126, 252, 378], stops: [null, 0.08],
 })
 export const SWING_PIVOT_BARS = 10
 
