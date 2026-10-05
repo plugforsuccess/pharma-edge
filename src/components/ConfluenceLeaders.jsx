@@ -48,12 +48,19 @@ function TrackRecord({ r, side }) {
     return <span className="block mt-1 text-[11px] text-muted"><span className="font-semibold">Thin record:</span> too few past cases to trust · {cases}</span>
   }
   const dir = side === 'buy' ? 'higher' : 'lower'
+  // The call's leverage at entry: delta × share price / premium (a 0.75Δ
+  // call costing 15% of the share price moves ~5× the stock's %). Changes
+  // as the stock moves — a sizing hint, not a forecast.
+  const t = r.verdict === 'enter' ? r.trade : null
+  const levRaw = t && t.cost > 0 && r.close > 0 ? (t.delta * r.close) / t.cost : null
+  const lev = levRaw ? (levRaw < 3 ? levRaw.toFixed(1) : String(Math.round(levRaw))) : null
   const toneAvg = side === 'buy' ? (avg >= 0 ? 'text-green-400' : 'text-rose-300') : (avg <= 0 ? 'text-green-400' : 'text-rose-300')
   return (
     <span className="block mt-1 text-[11px] text-muted">
       <span className="font-semibold">Track record:</span> when these signals lined up before, the stock was {dir} {months} later
       {win != null && <> <span className="text-subtle font-mono-tab">{pct0(win)}</span> of the time</>}, averaging <span className={clsx('font-mono-tab', toneAvg)}>{avg >= 0 ? '+' : '−'}{pct0(avg)}</span>
-      {' · '}{cases}{r.verdict === 'enter' && ' · stock return, not the option’s'}
+      {' · '}{cases}
+      {lev && <>. These are share-price moves; this call would move about <span className="text-subtle font-mono-tab">{lev}×</span> as much, up or down.</>}
     </span>
   )
 }

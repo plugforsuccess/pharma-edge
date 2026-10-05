@@ -1346,8 +1346,11 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   blocker key to words; indicator names stay on the entry chart). The
   history line is one **Track record** sentence with the win rate first —
   "when these signals lined up before, the stock was higher 6 months
-  later 64% of the time, averaging +11% · 768 past cases, only 2 on L ·
-  stock return, not the option's" — "only" under 5 own cases, "Thin
+  later 64% of the time, averaging +11% · 768 past cases, only 2 on L.
+  These are share-price moves; this call would move about 5× as much, up
+  or down." (leverage at entry = delta × share price / premium, from the
+  row's own trade; owner, 2026-10-05: "stock return, not the option's"
+  wasn't precise) — "only" under 5 own cases, "Thin
   record: too few past cases to trust" under 30 pool cases. The stop is
   capped at the 40-bar low so a stock that has run far never reads a 30%
   stop as the plan, and never tighter than the buy zone's floor (5% under
