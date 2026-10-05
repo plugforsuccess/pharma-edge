@@ -266,6 +266,8 @@ eq('put at expiry = intrinsic', bsPut(80, 100, 0, 0.2), 20)
   eq('a miss exits at the hold cap', [capped.hit, capped.exits[0].reason, capped.endI - capped.i], [false, 'cap', 63])
   const stopped = oneTrade(sb.map((b, i) => (i > 100 ? { ...b, c: 90, o: 90, h: 90.5, l: 89.5 } : b)), sb.map((b, i) => (i > 100 ? 90 : b.c)), sigma, 99, { exitRule: 'swing', swing: { ...SWING, target: 'pct', pct: 0.5, stopPct: 0.08 }, highs })
   eq('the stock stop variant exits on a close below it', stopped.exits[0].reason, 'stop')
+  const optT = oneTrade(sb, closes, sigma, 299, { exitRule: 'swing', swing: { ...SWING, target: 'opt', pct: 0.25, maxHold: 126 }, highs })
+  eq('an option-gain target exits when the mark reaches cost × 1.25', [optT.hit, optT.exits[0].reason, optT.exits[0].mult >= 1.25], [true, 'target', true])
 }
 
 console.log(`replay checks: ${passed} passed, ${failures.length} failed`)

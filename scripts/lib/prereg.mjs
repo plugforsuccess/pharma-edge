@@ -104,7 +104,7 @@ const SWING_RANDOM_REPS = 50
 export function swingVariants() {
   const out = []
   for (const [target, pct] of SWING_GRID.targets) for (const maxHold of SWING_GRID.holds) for (const stopPct of SWING_GRID.stops) {
-    out.push({ key: `${target}${target === 'pct' ? Math.round(pct * 100) : ''}:${maxHold}:${stopPct == null ? 'none' : Math.round(stopPct * 100)}`, swing: { ...SWING, target, pct, maxHold, stopPct } })
+    out.push({ key: `${target}${target === 'pivot' ? '' : Math.round(pct * 100)}:${maxHold}:${stopPct == null ? 'none' : Math.round(stopPct * 100)}`, swing: { ...SWING, target, pct, maxHold, stopPct } })
   }
   return out
 }

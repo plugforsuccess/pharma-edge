@@ -218,3 +218,11 @@ so the exit is what this test changes. The entries are unchanged.
 - **Known weaknesses:** no stop means a miss rides to the cap; the pivot
   target depends on a swing high existing above entry; five bullish years
   inflate every hit rate, which is what the random control is for.
+
+**Amendment, same day, before the grid was read** (owner: "if options are
+using leverage these targets may be met on 10–15% increases"): three
+option-gain targets join the grid — exit when the call's mark reaches
+**+25%, +50% or +75% of cost** — with the same hold caps and stops (28
+variants in all). The two-ticker offline run already showed the leverage
+these imply: a +10% stock move returned ~+17% on the call after slippage,
++15% ~+27%, +20% ~+40%. Reading rule unchanged.

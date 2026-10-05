@@ -67,10 +67,15 @@ export const EXIT_RULES = [
 ]
 // target: 'pivot' = nearest confirmed swing high above entry (≥ SWING_BARS
 // bars after it, so known at entry), falling back to +pct when none sits
-// within maxPivot; or 'pct' = entry × (1 + pct). stopPct: stock stop, null
-// = none. maxHold in trading days.
+// within maxPivot; 'pct' = entry × (1 + pct) on the stock; 'opt' = the
+// option's mark reaching cost × (1 + pct) (owner, 2026-10-05: with the
+// call's leverage a +25–50% option target is met on a 10–15% stock move).
+// stopPct: stock stop, null = none. maxHold in trading days.
 export const SWING = Object.freeze({ target: 'pivot', pct: 0.15, maxHold: 126, stopPct: null, maxPivot: 0.40, minPivot: 0.02 })
-export const SWING_GRID = Object.freeze({ targets: [['pct', 0.10], ['pct', 0.15], ['pct', 0.20], ['pivot', 0.15]], holds: [63, 126], stops: [null, 0.08] })
+export const SWING_GRID = Object.freeze({
+  targets: [['pct', 0.10], ['pct', 0.15], ['pct', 0.20], ['pivot', 0.15], ['opt', 0.25], ['opt', 0.50], ['opt', 0.75]],
+  holds: [63, 126], stops: [null, 0.08],
+})
 export const SWING_PIVOT_BARS = 10
 
 // The swing target for a trade entered at bar e at price S0: the nearest
@@ -78,6 +83,7 @@ export const SWING_PIVOT_BARS = 10
 // from swingPoints(bars, SWING_PIVOT_BARS).
 export function swingTargetAt(bars, e, S0, highs, swing = SWING) {
   const pctTarget = S0 * (1 + swing.pct)
+  if (swing.target === 'opt') return { target: null, optMult: 1 + swing.pct, kind: 'opt' }
   if (swing.target !== 'pivot' || !highs) return { target: pctTarget, kind: 'pct' }
   let best = null
   for (const h of highs) {
@@ -278,7 +284,7 @@ export function oneTrade(bars, closes, sigma, i, { exitRule = 'targets', plan = 
     peak = Math.max(peak, v)
     if (daysLeft < plan.rollDays) { sell(j, left, v, 'time'); break }
     if (useSwing) {
-      if (closes[j] >= sw.target) { sell(j, left, v, 'target'); break }
+      if (sw.kind === 'opt' ? v >= cost * sw.optMult : closes[j] >= sw.target) { sell(j, left, v, 'target'); break }
       if (swing.stopPct != null && closes[j] <= S0 * (1 - swing.stopPct)) { sell(j, left, v, 'stop'); break }
       if (j - e >= swing.maxHold) { sell(j, left, v, 'cap'); break }
       continue
@@ -305,7 +311,7 @@ export function oneTrade(bars, closes, sigma, i, { exitRule = 'targets', plan = 
   return {
     signalI: i, signalT: bars[i].t, i: e, t: bars[e].t, stock: S0, strike: K, cost, vol: v0, slip, q: q0,
     exits, open, endI: end, endT: bars[end].t,
-    ...(sw ? { target: sw.target, targetKind: sw.kind, hit: exits.some((x) => x.reason === 'target') } : {}),
+    ...(sw ? { target: sw.kind === 'opt' ? cost * sw.optMult : sw.target, targetKind: sw.kind, hit: exits.some((x) => x.reason === 'target') } : {}),
     optionReturn: proceeds / cost - 1,
     stockReturn: stockOut / S0 - 1,
     bestStock: maxHigh / S0 - 1,

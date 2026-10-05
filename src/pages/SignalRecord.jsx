@@ -220,7 +220,7 @@ function SwingCard({ sw }) {
   const [view, setView] = useState('all')
   if (!sw) return null
   const r = sw.rules?.[rule]
-  const variantLabel = (v) => `${v.target === 'pivot' ? 'Prior pivot high' : `+${Math.round(v.pct * 100)}% stock`} · ${v.maxHold}d cap${v.stopPct != null ? ` · ${Math.round(v.stopPct * 100)}% stop` : ''}`
+  const variantLabel = (v) => `${v.target === 'pivot' ? 'Prior pivot high' : v.target === 'opt' ? `+${Math.round(v.pct * 100)}% on the call` : `+${Math.round(v.pct * 100)}% stock`} · ${v.maxHold}d cap${v.stopPct != null ? ` · ${Math.round(v.stopPct * 100)}% stop` : ''}`
   const years = Object.keys(r?.variants?.[sw.defaultKey]?.byYear ?? {}).sort()
   const recentYears = years.slice(-2)
   const pick = (vs) => {
