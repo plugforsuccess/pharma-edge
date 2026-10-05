@@ -1550,6 +1550,24 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   primary's). It changes no live rule; the recorded consequence is in
   `docs/signal-engine/preregistration.md` ("Added 2026-10-05"). Not on the
   entry chart (a single ticker can't rank itself).
+- **The index call, displayed and tested** (owner, 2026-10-05: "Index
+  calls win? Are these calls displayed anywhere?" — the first momentum run
+  showed every single-name rule behind the SPY call bought on the same
+  dates: +77% vs +38% momentum / +19% buy setup per trade). **Charts** now
+  leads LEAPS ideas with the SPY and QQQ calls (`suggest-leaps` returns
+  `index: [...]` — same contract rules as the sector picks, not ranked,
+  not momentum-gated; rows verdict "Index", `from: 'Index call'`), and the
+  SPY row carries one sentence from the test via the
+  `index_call_record()` SQL function (per-rule strategy / SPY-control means
+  at the calibrated premium from the latest `replay_runs`, plus the index
+  rule's own stats once it has run; `indexRecordText` in `Charts.jsx`;
+  "past results, not a forecast"). **Pre-registered rule `index`**: the
+  SPY call at each completed month end (`monthEndIndexes`), SPY handed to
+  `runPrereg` as an `extraResult` (it isn't in the universe) with entries
+  in `extraEntries`; its SPY-same-day control is itself — read the random
+  and DCA lines and compare against the single-name rules on the Signal
+  record card. Recorded in `docs/signal-engine/preregistration.md` ("Added
+  2026-10-05 … the index call as a rule"). Changes no live rule.
 - **Rule optimizer** (owner, 2026-10-04: "do everything mathematically
   possible to get the guarantee closest to 1.0" — advised: 1.0 is a
   statement about the future; what can be pushed is out-of-sample

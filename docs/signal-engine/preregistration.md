@@ -148,3 +148,32 @@ joins the test as a **secondary rule**, measured by the identical machinery:
   the *control* as much as the rule), a ~560-name universe rather than the
   whole market, five years of history (two bull periods), and no
   transaction-cost model beyond the slippage tiers.
+
+## Added 2026-10-05 (after the momentum result): the index call as a rule
+
+The first momentum run showed every single-name rule, momentum included,
+well behind the SPY call bought on the same dates (+77% per trade vs +38%
+momentum and +19% buy setup, all trades, calibrated premium). That column
+is a control, not a rule, so the index call joins the test as a rule of
+its own, recorded before it runs:
+
+- **Rule:** buy the SPY 0.75Δ ~2-year call at each completed month end;
+  same exit playbook; one open trade at a time (a month end while a trade
+  is open is skipped).
+- **Controls:** random entries on SPY (same count per month) and monthly
+  DCA on SPY. The SPY-same-day paired control is the rule itself and reads
+  zero by construction.
+- **Reading:** the comparison that matters is this rule against the
+  single-name rules on the same card, period by period, and its P1 (2022–
+  23, a down year then a recovery) against P2. It does not change the
+  primary rule or the verdict. If it keeps beating the single-name rules
+  in both periods, the product consequence already follows from the "no
+  edge" clause: the index / sector call plus the exit playbook is the
+  claim, and single-name timing is context.
+- **Displayed from today:** Charts shows the SPY and QQQ calls picked by
+  the same contract rules above the sector ideas, with one sentence from
+  this test. That is disclosure of what was measured, not a new rule.
+- **Known weaknesses:** one bull market with one drawdown; a long-dated
+  index call's result is mostly the index's drift times leverage, so a
+  bear period would reverse the sign; survivorship does not apply to SPY
+  but does flatter the single-name rules it is compared with.

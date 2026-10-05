@@ -18,8 +18,13 @@ import { PERIODS, PREMIUM_GRID, RANDOM_REPS, pricingFor, controlsForTicker, peri
 // momentum, top decile above the 200-day, rebalanced at month ends — a
 // universe-level rule whose entries the job computes (src/utils/momentum.js)
 // and hands in as `extraEntries`. The random control runs for it too.
-export const PREREG_RULES = ['setup', 'zone', 'confluence', 'triple', 'momentum']
-export const RANDOM_RULES = new Set(['setup', 'momentum'])
+// index (2026-10-05, after the momentum result): the SPY call bought at
+// each completed month end — the benchmark as a rule of its own. SPY is
+// handed in as an `extraResult` (it isn't in the universe) and only runs
+// the rules named in `extraEntries` for it. Its SPY-same-day control is
+// itself; the random and DCA controls are the comparison.
+export const PREREG_RULES = ['setup', 'zone', 'confluence', 'triple', 'momentum', 'index']
+export const RANDOM_RULES = new Set(['setup', 'momentum', 'index'])
 const FWD = [['3m', 63], ['6m', 126], ['12m', 252]]
 export const PRIMARY_RULE = 'setup'
 const r4 = (x) => (x == null || !Number.isFinite(x) ? null : Math.round(x * 1e4) / 1e4)
@@ -87,7 +92,7 @@ export function calibrate(results, ivRows) {
   return { ...calibratePremium(samples), tickers: new Set(ivRows.map((x) => x.ticker)).size }
 }
 
-export function runPrereg({ results, spyBars, ivByTicker = new Map(), dividendsByTicker = new Map(), premium, premiumN = 0, reps = RANDOM_REPS, extraEntries = new Map(), extraSummary = {}, log = () => {} }) {
+export function runPrereg({ results, spyBars, ivByTicker = new Map(), dividendsByTicker = new Map(), premium, premiumN = 0, reps = RANDOM_REPS, extraEntries = new Map(), extraResults = [], extraSummary = {}, log = () => {} }) {
   const premiums = [...new Set([...PREMIUM_GRID, premium].filter((x) => x != null))].sort((a, b) => a - b)
   const grid = {}
   const rows = []
@@ -98,16 +103,19 @@ export function runPrereg({ results, spyBars, ivByTicker = new Map(), dividendsB
     const spyPricing = pricingFor(spyBars, { premium: pm, dividends: spyDiv, realIv: spyIv })
     const perRule = Object.fromEntries(PREREG_RULES.map((k) => [k, { paired: [], random: [], dca: [] }]))
     let n = 0
-    for (const r of results) {
+    const all = [...results, ...extraResults.map((r) => ({ ...r, _extraOnly: true }))]
+    for (const r of all) {
       const pricing = pricingFor(r.bars, { premium: pm, dividends: dividendsByTicker.get(r.ticker) ?? {}, realIv: ivByTicker.get(r.ticker) ?? null })
       for (const rule of PREREG_RULES) {
         let trades
+        if (r._extraOnly && !extraEntries.has(rule)) continue
         if (extraEntries.has(rule)) {
           const entries = extraEntries.get(rule).get(r.ticker)
           if (!entries) continue
           trades = replayFromEntries(r.bars, entries, { exitRule: 'targets', sell: r.sig.sell, ...pricing })
           for (const t of trades) t.key = null
         } else {
+          if (!r.sig.entry?.[rule]) continue // a universe-level rule whose entries weren't handed in
           trades = replayTrades(r.bars, r.sig, { entryRule: rule, exitRule: 'targets', ...pricing })
         }
         if (!trades.length) continue
@@ -132,7 +140,7 @@ export function runPrereg({ results, spyBars, ivByTicker = new Map(), dividendsB
           }
         }
       }
-      if (++n % 100 === 0) log(`  premium ${pm}: ${n}/${results.length}`)
+      if (++n % 100 === 0) log(`  premium ${pm}: ${n}/${all.length}`)
     }
     grid[String(pm)] = {}
     for (const rule of PREREG_RULES) {

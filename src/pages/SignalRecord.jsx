@@ -214,13 +214,14 @@ export default function SignalRecord() {
 // calibrated implied-vol premium with slippage by liquidity, open trades at
 // their mark. Edge / no edge / inconclusive by the recorded rule.
 const VERDICT_TONE = { edge: 'border-green-400/50 text-green-400', 'no edge': 'border-rose-300/50 text-rose-300', inconclusive: 'border-amber-400/50 text-amber-400' }
-const PREREG_LABELS = { setup: 'Buy setup', zone: 'Buy zone', confluence: 'Confluence', triple: 'Triple ◆', momentum: 'Momentum 12-1' }
+const PREREG_LABELS = { setup: 'Buy setup', zone: 'Buy zone', confluence: 'Confluence', triple: 'Triple ◆', momentum: 'Momentum 12-1', index: 'Index call' }
 const PREREG_TEXT = {
   setup: 'Buy setup as shown (buy zone YES + 2 signals, 200-day rising)',
   zone: 'Buy zone turning YES',
   confluence: '2+ buy signals, 200-day rising',
   triple: 'Bravo + Echo + Tango all turning up within 2 days',
   momentum: 'Cross-sectional momentum: top decile of 12-month return (skipping the latest month) among names above their 200-day, at each month end',
+  index: 'The SPY call bought at each month end — the benchmark as a rule (its "SPY same day" column is itself; read the random and DCA lines)',
 }
 function PreregCard({ p }) {
   const [completed, setCompleted] = useState(false)

@@ -99,6 +99,8 @@ export default function Charts() {
   const { federal, profile, positions, plan, ready, results } = useHoldings()
   const [botRows, setBotRows] = useState(null)
   const [ideas, setIdeas] = useState(undefined)
+  // The index call's record from the pre-registered test (index_call_record()).
+  const [indexRecord, setIndexRecord] = useState(null)
   const [selected, setSelected] = useState(null)
   const [range, setRange] = useState('6mo')
   const [bars, setBars] = useState({})
@@ -133,6 +135,7 @@ export default function Charts() {
       .then(({ data, error }) => { if (live) setBotRows(error ? [] : data ?? []) })
     supabase.functions.invoke('suggest-leaps', { body: {} })
       .then(({ data, error }) => { if (live) setIdeas(!error && data?.success ? data : null) })
+    supabase.rpc('index_call_record').then(({ data, error }) => { if (live && !error) setIndexRecord(data ?? null) })
     return () => { live = false }
   }, [user])
 
@@ -149,6 +152,24 @@ export default function Charts() {
         out.push({ id: `h:${d.pos.id}`, posId: d.pos.id, shares: d.pos.instrument_type === 'stock', group: 'holdings', ticker: d.pos.ticker, crypto: d.pos.instrument_type === 'crypto',
           title: d.title, body: d.body, verdict: d.verdict, tone: d.tone, lines, from: 'Your plan' })
       }
+    }
+    // The index call first (owner, 2026-10-05: in the test, the SPY call
+    // bought on the same days as every stock signal beat every single-name
+    // rule — the benchmark, made visible). SPY carries the record sentence.
+    for (const p of ideas?.index ?? []) {
+      const c = p.contract
+      const rec = p.ticker === 'SPY' ? indexRecordText(indexRecord) : 'The same plain index call on the Nasdaq-100; the test measured SPY.'
+      if (!c) {
+        out.push({ id: `x:${p.ticker}`, group: 'ideas', ticker: p.ticker, title: `${p.ticker}: no call fits right now`,
+          body: `${rec} ${p.reason[0].toUpperCase()}${p.reason.slice(1)}.`, verdict: 'Index', tone: 'neutral', lines: [], from: 'Index call' })
+        continue
+      }
+      out.push({ id: `x:${p.ticker}`, group: 'ideas', ticker: p.ticker,
+        title: `Buy ${p.ticker} ${shortDate(c.expiration)} $${c.strike} call`,
+        body: `${rec} Delta ${c.delta.toFixed(2)} · about ${money(c.mid * 100)} per contract (mid) · ${c.dte} days to expiry.`,
+        verdict: 'Index', tone: 'green', from: 'Index call',
+        lines: [{ v: c.strike, label: 'Strike', gold: true }, { v: c.strike + c.mid, label: 'Break-even' }],
+        expiration: c.expiration })
     }
     // LEAPS buy ideas: the top-ranked sector ETFs and their calls.
     const total = ideas?.ranked?.length ?? 0
@@ -184,7 +205,7 @@ export default function Charts() {
     }
     // Ideas first: the default chart is the top-ranked buy.
     return [...out.filter((x) => x.group === 'ideas'), ...out.filter((x) => x.group === 'holdings')]
-  }, [ready, results, plan, today, botRows, ideas])
+  }, [ready, results, plan, today, botRows, ideas, indexRecord])
 
   // Holdings are "ready" only once the tax rates load (a moment after
   // positions); wait for that so the first pick doesn't jump.
@@ -549,6 +570,25 @@ const VERDICT_TONE = {
   green: 'text-green-300 border-green-400/40 bg-green-400/10',
   amber: 'text-amber-300 border-amber-400/40 bg-amber-400/10',
   neutral: 'text-subtle border-border bg-bg-elev',
+}
+
+// One sentence from the pre-registered test: the SPY call bought on the
+// same days as every stock signal, against the single-name rules (same
+// exits, open trades at their mark). Once the `index` rule has run (SPY
+// at month ends), its own numbers lead.
+function indexRecordText(rec) {
+  const pct = (v) => (v == null ? null : `${v >= 0 ? '+' : '−'}${Math.round(Math.abs(v) * 100)}%`)
+  if (!rec?.rules) return 'The plain index call — the benchmark every stock signal is tested against.'
+  const own = rec.index_rule
+  const setup = rec.rules.setup
+  const mom = rec.rules.momentum
+  const control = setup?.spy
+  const parts = []
+  if (own?.n > 0 && own.option_avg != null) parts.push(`In the test, buying this call at each month end averaged ${pct(Number(own.option_avg))} per trade (${Math.round(Number(own.option_win) * 100)}% won, ${own.n} trades)`)
+  else if (control != null) parts.push(`In the test, this call bought on the same days as every stock signal averaged ${pct(Number(control))} per trade${setup.spy_lost_half != null && Number(setup.spy_lost_half) === 0 ? ', none losing half' : ''}`)
+  if (!parts.length) return 'The plain index call — the benchmark every stock signal is tested against.'
+  const vs = [setup?.strategy != null ? `${pct(Number(setup.strategy))} for the buy setup` : null, mom?.strategy != null ? `${pct(Number(mom.strategy))} for momentum` : null].filter(Boolean)
+  return `${parts[0]}${vs.length ? ` — against ${vs.join(' and ')}` : ''}. Same exits, 2022–2026, a bull market; past results, not a forecast.`
 }
 
 // "PLTR hit 100% gain" → "hit 100% gain" (the ticker is already shown).

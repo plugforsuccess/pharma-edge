@@ -1,6 +1,12 @@
 // suggest-leaps — LEAPS buy ideas on the core sleeve, for /charts.
 //
-// POST {} → { success, as_of, benchmark, picks: [Pick], ranked: [Score] }
+// POST {} → { success, as_of, benchmark, picks: [Pick], ranked: [Score], index: [IndexPick] }
+//
+// index (owner, 2026-10-05: "index calls win" — in the pre-registered test
+// the SPY call bought on the same days as every single-name signal beat
+// every single-name rule): the plain index call on SPY and QQQ, picked by
+// the same contract rules, shown on Charts above the sector ideas. Not
+// ranked, not gated on momentum — it is the benchmark made visible.
 //
 // Mirrors the LDP engine's core sleeve (ldp/scoring.py, ldp/contracts.py,
 // thresholds from ldp/config.py — keep in sync):
@@ -28,6 +34,7 @@ import { yahooBars, yahooOptions, callDelta } from '../_shared/yahoo.ts'
 
 const SECTORS = ['XLK', 'XLF', 'XLV', 'XLE', 'XLI', 'XLY', 'XLP', 'XLU', 'XLB', 'XLRE', 'XLC']
 const BENCHMARK = 'SPY'
+const INDEX = ['SPY', 'QQQ']
 // ldp/config.py CoreConfig + ContractConfig
 const CORE = { topN: 3, weights: { ret_3m: 0.2, ret_6m: 0.3, ret_12m: 0.3, rel_strength: 0.2 } as Record<string, number>, requireAbove200dma: true }
 const CONTRACT = { minDte: 540, targetDte: 730, deltaMin: 0.70, deltaMax: 0.80, maxVolRank: 70, maxSpreadPct: 0.10, minOpenInterest: 100 }
@@ -126,7 +133,7 @@ serve(async (req) => {
   if (cache && Date.now() - cache.at < CACHE_MS) return json(cache.body)
 
   try {
-    const tickers = [BENCHMARK, ...SECTORS]
+    const tickers = [...new Set([BENCHMARK, ...INDEX, ...SECTORS])]
     const closes = Object.fromEntries(await Promise.all(tickers.map(async (t) => [t, await dailyCloses(t)] as const)))
     const bench12 = ret(closes[BENCHMARK], 252)
 
@@ -170,9 +177,28 @@ serve(async (req) => {
       }
     }))
 
+    const index = await Promise.all(INDEX.map(async (t) => {
+      const c = closes[t]
+      const spot = c[c.length - 1]
+      const sma200 = c.length >= 200 ? c.slice(-200).reduce((s, x) => s + x, 0) / 200 : null
+      const vol = volRank(c)
+      const base = { ticker: t, spot, ret_3m: ret(c, 63), ret_6m: ret(c, 126), ret_12m: ret(c, 252), above_200dma: sma200 != null && spot > sma200, vol_rank: vol }
+      try {
+        const sel = pickContract(await longCalls(t, spot), vol)
+        const reason = sel.contract ? null
+          : vol == null ? 'not enough price history to measure volatility'
+          : vol > CONTRACT.maxVolRank ? `volatility rank ${Math.round(vol)} > ${CONTRACT.maxVolRank} — options are expensive`
+          : sel.checked === 0 ? 'no options listed 540+ days out'
+          : `none of ${sel.checked} long-dated calls cleared the contract rules`
+        return { ...base, contract: sel.contract, checked: sel.checked, passed: sel.passed, reason }
+      } catch (e) {
+        return { ...base, contract: null, checked: 0, passed: 0, reason: `couldn't load the option chain (${(e as Error).message})` }
+      }
+    }))
+
     const body = {
       success: true, as_of: new Date().toISOString(), benchmark: BENCHMARK, vol_rank_source: 'hv20_1y', source: 'yahoo',
-      rules: { ...CONTRACT, topN: CORE.topN, weights: CORE.weights }, picks, ranked,
+      rules: { ...CONTRACT, topN: CORE.topN, weights: CORE.weights }, picks, ranked, index,
     }
     cache = { at: Date.now(), body }
     return json(body)
