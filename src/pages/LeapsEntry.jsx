@@ -13,6 +13,7 @@ import NumberInput from '../components/NumberInput'
 import { FEATURES } from '../lib/features'
 import ReplayCard from '../components/ReplayCard'
 import { confluenceModel, COMPONENTS, MIN_MATCHES } from '../utils/confluence'
+import { trendQuality, tripleStatus, reclaimPlan } from '../utils/plan'
 
 // /charts/entry/:ticker — the LEAPS entry chart. Price with 200 / 50 SMA and
 // the weekly 50 EMA, five indicator panes, the combined buy-zone signal
@@ -24,9 +25,9 @@ import { confluenceModel, COMPONENTS, MIN_MATCHES } from '../utils/confluence'
 const PARAMS_KEY = 'cm:entry-params'
 // v3: the Confluence pane was added (on by default).
 const PANES_KEY = 'cm:entry-panes:v3'
-// v2: saved choices from before the Bravo ◆ layer existed left it off.
-const LAYERS_KEY = 'cm:entry-layers:v2'
-const DEFAULT_LAYERS = ['bravoSignals', 'exits', 'swings']
+// v3: Triple ◆ + the reclaim zone were added (on by default).
+const LAYERS_KEY = 'cm:entry-layers:v3'
+const DEFAULT_LAYERS = ['triple', 'zone', 'bravoSignals', 'exits', 'swings']
 // The signal suite runs on daily (default — matches TradingView on a daily
 // chart), weekly or monthly bars. A Hardening bull this many trading days
 // from a buy-zone signal (either side) confirms it (Hardening is hidden:
@@ -154,17 +155,31 @@ export default function LeapsEntry() {
   // its events placed on the daily candles their period closes on.
   const [suiteTf, setSuiteTf] = useState(() => { const v = loadJson(SUITE_TF_KEY); return SUITE_TIMEFRAMES[v] ? v : '1d' })
   const [suiteData, setSuiteData] = useState(null)
+  // Weekly bars are always fetched (owner, 2026-10-05): the header's weekly
+  // Triple status and the plan card's weekly zone need them; the Signal suite
+  // reuses them when it is on Weekly.
+  const [weeklyData, setWeeklyData] = useState(null)
+  useEffect(() => {
+    let cancelled = false
+    setWeeklyData(null)
+    supabase.functions.invoke('leaps-entry', { body: { ticker, suite: '1wk' } }).then(({ data: d, error }) => {
+      if (cancelled) return
+      setWeeklyData(error || !d?.success ? { tf: '1wk', error: true } : { tf: '1wk', ...d })
+    })
+    return () => { cancelled = true }
+  }, [ticker])
   useEffect(() => {
     let cancelled = false
     setSuiteData(null)
     // Daily runs on the chart's own bars — nothing more to fetch.
     if (suiteTf === '1d') return undefined
+    if (suiteTf === '1wk') { if (weeklyData) setSuiteData(weeklyData); return undefined }
     supabase.functions.invoke('leaps-entry', { body: { ticker, suite: suiteTf } }).then(({ data: d, error }) => {
       if (cancelled) return
       setSuiteData(error || !d?.success ? { tf: suiteTf, error: true } : { tf: suiteTf, ...d })
     })
     return () => { cancelled = true }
-  }, [ticker, suiteTf])
+  }, [ticker, suiteTf, weeklyData])
   const pickSuiteTf = (tf) => { setSuiteTf(tf); saveJson(SUITE_TF_KEY, tf) }
   const suitePack = useMemo(() => {
     if (!bars?.length) return null
@@ -189,6 +204,30 @@ export default function LeapsEntry() {
   // the suite runs on the daily bars here whatever the suite timeframe.
   const dailySuite = useMemo(() => (bars?.length ? (suiteTf === '1d' && suitePack ? suitePack.raw : suiteModel(bars)) : null), [bars, suiteTf, suitePack])
   const conf = useMemo(() => (model && dailySuite ? confluenceModel({ bars, model, suite: dailySuite, horizons: HORIZONS }) : null), [bars, model, dailySuite])
+  // Triple events on daily and weekly bars, the trend-quality badge and the
+  // reclaim plan (owner, 2026-10-05). All read-only: nothing trades on them.
+  const weekly = useMemo(() => {
+    if (!weeklyData?.bars?.length) return null
+    const periods = normalizePeriods(weeklyData.bars, '1wk')
+    const onPeriods = (list) => {
+      const byKey = new Map(normalizePeriods(list ?? [], '1wk').map((x) => [x.k, x.c]))
+      return periods.map((pb) => ({ t: pb.t, c: byKey.get(pb.k) })).filter((x) => x.c != null)
+    }
+    const raw = suiteModel(periods, { spy: onPeriods(weeklyData.spy), vix: onPeriods(weeklyData.vix) })
+    return { periods, raw, triple: tripleStatus(periods, raw) }
+  }, [weeklyData])
+  const dailyTriple = useMemo(() => (bars?.length && dailySuite ? tripleStatus(bars, dailySuite) : null), [bars, dailySuite])
+  const trend = useMemo(() => (bars?.length && model ? trendQuality(bars, model) : null), [bars, model])
+  const plan = useMemo(() => {
+    if (!bars?.length || !weekly) return null
+    const w = weekly.periods.length - 1
+    const pivots = (conf?.swings?.highs ?? []).map((i) => bars[i].h)
+    return reclaimPlan({
+      close: bars[bars.length - 1].c,
+      weekly: { close: weekly.periods[w].c, zoneLow: weekly.raw.bravo.zoneLow[w], zoneHigh: weekly.raw.bravo.zoneHigh[w], upperBand: weekly.raw.bravo.upperBand[w] },
+      pivots,
+    })
+  }, [bars, weekly, conf])
   // The universe-wide record of each combination (confluence_pool, nightly):
   // shown when this ticker has few cases of today's setup.
   const [pool, setPool] = useState(null)
@@ -245,6 +284,7 @@ export default function LeapsEntry() {
         <div className="flex-1 min-w-0">
           <div className="text-[11px] uppercase tracking-[0.14em] text-muted font-semibold">LEAPS entry</div>
           <h1 className="text-lg font-semibold leading-tight">{ticker}</h1>
+          {bars?.length > 0 && <TripleChips daily={dailyTriple} weekly={weekly?.triple ?? (weeklyData?.error ? false : null)} />}
         </div>
         <button type="button" onClick={() => setSearchOpen(true)} aria-label="Search tickers"
           className="min-h-[44px] px-3 inline-flex items-center gap-2 rounded-xl bg-card border border-border text-sm text-subtle hover:text-fg transition">
@@ -265,9 +305,11 @@ export default function LeapsEntry() {
       ) : (
         <div className="md:grid md:grid-cols-[1fr_280px] md:gap-x-5 md:items-start">
           <div className="min-w-0 md:order-1">
-            <StatusPanel s={s} model={model} params={params} suite={suite} dailySuite={dailySuite} confirmDays={confirmDays} tfLabel={SUITE_TIMEFRAMES[suiteTf].label.toLowerCase()} conf={conf} pool={pool} />
+            <StatusPanel s={s} model={model} params={params} suite={suite} dailySuite={dailySuite} confirmDays={confirmDays} tfLabel={SUITE_TIMEFRAMES[suiteTf].label.toLowerCase()} conf={conf} pool={pool} trend={trend} />
             {<SuitePanel pack={suitePack} failed={suiteData?.error && suiteData.tf === suiteTf} tf={suiteTf} onTf={pickSuiteTf} holdings={holdings} onJump={jumpPeriod} onOpenPane={setExpanded}
               buyZone={!!s?.cond?.all} />}
+            <PlanCard plan={plan} loading={weeklyData === null} failed={!!weeklyData?.error} trend={trend} />
+            <EventStatsCard ticker={ticker} daily={dailyTriple} onJumpDay={jumpDay} />
           </div>
 
           {/* Chart */}
@@ -306,6 +348,9 @@ export default function LeapsEntry() {
                 {!periodMode && <Key glyph={<span className="inline-block w-3 h-2.5 rounded-sm bg-green-400/15 align-middle" />}>Buy zone</Key>}
                 {layers.includes('hardening') && <Key className="text-amber-300" glyph="▲">Hardening bull</Key>}
                 {layers.includes('hardening') && <Key className="text-rose-300" glyph="▼">Hardening bear</Key>}
+                {layers.includes('triple') && <Key className="text-suite-bull" glyph="◆">Triple bull (3)</Key>}
+                {layers.includes('triple') && <Key className="text-suite-bear" glyph="◆">Triple bear (3) · band through every pane</Key>}
+                {layers.includes('zone') && <Key glyph={<span className="inline-block w-3 h-2.5 rounded-sm bg-suite-bull/20 border border-suite-bull/50 align-middle" />}>Reclaim zone (Bravo basis ± ½ ATR)</Key>}
                 {layers.includes('bravoSignals') && <Key className="text-suite-bull" glyph="◆">Bravo bull</Key>}
                 {layers.includes('bravoSignals') && <Key className="text-suite-bear" glyph="◆">Bravo bear</Key>}
                 {layers.includes('exits') && <Key className="text-suite-bear" glyph="◇">Exit (E Echo · T Tango · B Bravo)</Key>}
@@ -428,7 +473,7 @@ function Key({ glyph, className, children }) {
   )
 }
 
-function StatusPanel({ s, model, params, suite, dailySuite, confirmDays, tfLabel, conf, pool }) {
+function StatusPanel({ s, model, params, suite, dailySuite, confirmDays, tfLabel, conf, pool, trend = null }) {
   // Momentum beside the verdict (owner, 2026-10-04): a YES next to a Bravo
   // bear is an early entry (the dip is still in progress), not a contradiction.
   const momentumUp = dailySuite?.bravo?.regime?.[dailySuite.bravo.regime.length - 1] === 1
@@ -484,6 +529,13 @@ function StatusPanel({ s, model, params, suite, dailySuite, confirmDays, tfLabel
       <div className="relative px-5 pt-5 pb-4 flex items-center gap-4">
         <div className="flex-1 min-w-0">
           <div className="text-[11px] uppercase tracking-[0.14em] text-muted font-semibold">Buy zone · {day(s.t)}</div>
+          {trend && (
+            <span className={clsx('mt-1.5 inline-flex items-center gap-1.5 text-[11px] font-semibold px-2 py-0.5 rounded-md border',
+              trend.pass ? 'text-green-400 border-green-400/40 bg-green-400/10' : 'text-amber-300 border-amber-400/40 bg-amber-400/10')}
+              title={trend.why}>
+              {trend.label}
+            </span>
+          )}
           <div className={clsx('mt-1 text-3xl font-bold tracking-tight', yes ? 'text-green-400' : 'text-fg')}>
             {yes ? 'YES' : 'NO'}
           </div>
@@ -561,6 +613,166 @@ function StatusPanel({ s, model, params, suite, dailySuite, confirmDays, tfLabel
           </li>
         )}
       </ul>
+    </section>
+  )
+}
+
+// Triple ◆ status on daily and weekly bars, under the ticker (owner,
+// 2026-10-05): "Daily · Triple bull 3d ago" / "Weekly · none".
+function TripleChips({ daily, weekly }) {
+  const chip = (label, st, unit) => {
+    if (st === null) return <span key={label} className="text-[11px] text-muted">{label} · loading…</span>
+    if (st === false) return <span key={label} className="text-[11px] text-muted">{label} · no weekly bars</span>
+    const last = [st.lastBull && { ...st.lastBull, side: 'bull' }, st.lastBear && { ...st.lastBear, side: 'bear' }].filter(Boolean).sort((a, b) => a.barsAgo - b.barsAgo)[0]
+    if (!last) return <span key={label} className="text-[11px] text-muted">{label} · no Triple yet</span>
+    const ago = last.barsAgo === 0 ? `this ${unit}` : last.barsAgo === 1 ? `last ${unit}` : `${last.barsAgo} ${unit}s ago`
+    const fresh = last.barsAgo <= (unit === 'day' ? 10 : 4)
+    return (
+      <span key={label} className={clsx('inline-flex items-center gap-1 text-[11px] font-semibold', last.side === 'bull' ? 'text-suite-bull' : 'text-suite-bear', !fresh && 'opacity-70')}>
+        <span aria-hidden>◆</span>{label} · Triple {last.side} {ago}
+      </span>
+    )
+  }
+  return (
+    <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 font-mono-tab">
+      {chip('Daily', daily, 'day')}
+      {chip('Weekly', weekly, 'week')}
+    </div>
+  )
+}
+
+// The reclaim plan (owner, 2026-10-05), computed from the weekly reclaim
+// zone (Bravo basis ± ½ ATR): trigger = a weekly close above the zone high,
+// invalidation = a weekly close below the zone low, targets = the next
+// upper band and the prior swing highs above price, with % to each and
+// reward : risk. Auto-generated, read-only — not a rule the app trades on.
+function PlanCard({ plan, loading, failed, trend }) {
+  if (loading) return <section className="bg-card border border-border rounded-2xl mb-4 h-40 animate-pulse" aria-busy="true" />
+  if (failed || !plan) {
+    return (
+      <section className="bg-card border border-border rounded-2xl mb-4 px-5 py-4">
+        <h2 className="text-sm font-semibold">Plan</h2>
+        <p className="text-xs text-subtle mt-1">{failed ? 'Weekly bars aren\'t available for this ticker, so there is no zone to plan around.' : 'Not enough weekly history to draw the reclaim zone yet.'}</p>
+      </section>
+    )
+  }
+  const pos = plan.position
+  const far = pos === 'above' && plan.risk != null && plan.risk > 0.15
+  const posText = pos === 'above'
+    ? (far ? `Price is ${Math.round(plan.risk * 100)}% above the reclaim zone — this plan applies on a pullback into it.` : 'Price is above the reclaim zone.')
+    : pos === 'below' ? 'Price is below the reclaim zone — the trigger is the reclaim.' : 'Price is inside the reclaim zone.'
+  const row = (label, value, sub, tone = 'text-fg') => (
+    <li key={label} className="px-5 py-2.5 flex items-center gap-3 min-h-[48px]">
+      <span className="flex-1 min-w-0">
+        <span className="block text-sm text-fg leading-snug">{label}</span>
+        {sub && <span className="block text-[11px] text-muted mt-0.5 leading-snug">{sub}</span>}
+      </span>
+      <span className={clsx('text-right shrink-0 text-sm font-mono-tab', tone)}>{value}</span>
+    </li>
+  )
+  return (
+    <section className="bg-card border border-border rounded-2xl mb-4 overflow-hidden">
+      <div className="px-5 pt-5 pb-3">
+        <div className="flex items-center gap-2">
+          <h2 className="flex-1 text-sm font-semibold">Plan <span className="text-muted font-normal">· weekly reclaim zone</span></h2>
+          {trend && <span className={clsx('text-[11px] font-semibold', trend.pass ? 'text-green-400' : 'text-amber-300')}>{trend.pass ? 'Trend pullback' : 'Higher risk'}</span>}
+        </div>
+        <p className="text-xs text-subtle mt-1">{posText} Zone <span className="font-mono-tab text-fg">{money(plan.invalidation.level)}–{money(plan.trigger.level)}</span>.</p>
+      </div>
+      <ul className="border-t border-hairline divide-y divide-hairline">
+        {row('Trigger · weekly close above', plan.trigger.met ? money(plan.trigger.level) : `${money(plan.trigger.level)} · ${signed(plan.trigger.pct * 100)}`,
+          plan.trigger.met ? `Met — ${Math.abs(Math.round(plan.trigger.pct * 100))}% below price.` : 'Not met yet.', plan.trigger.met ? 'text-green-400' : 'text-fg')}
+        {row('Invalidation · weekly close below', money(plan.invalidation.level),
+          plan.invalidation.hit ? 'Hit — last weekly close is below the zone.' : plan.risk != null ? `${(plan.risk * 100).toFixed(1)}% below price — the risk every target is measured against.` : 'Price is already below the zone.', plan.invalidation.hit ? 'text-rose-300' : 'text-fg')}
+        {plan.targets.length === 0 && row('Targets', '—', 'No upper band or prior pivot above price.')}
+        {plan.targets.map((t) => row(`Target · ${t.label}`, `${money(t.level)} · ${signed(t.pct * 100)}`,
+          t.rr != null ? `Reward : risk ${t.rr.toFixed(1)} : 1` : 'No risk to measure against (price below the zone).', 'text-green-400'))}
+      </ul>
+      <p className="px-5 py-3 border-t border-hairline text-[11px] text-muted leading-snug">Generated from the chart, not a recommendation. The Triple event and this plan are under test and don't change any live rule.</p>
+    </section>
+  )
+}
+
+// Past Triple events on this ticker and across the universe, from
+// replay_trades (the latest universe run with rule = 'triple'): count, hit
+// rate, median 3 / 6 / 12-month stock return vs the random-entry control.
+function EventStatsCard({ ticker, daily, onJumpDay }) {
+  const [stats, setStats] = useState(null)
+  useEffect(() => {
+    let cancelled = false
+    setStats(null)
+    supabase.rpc('replay_event_stats', { p_rule: 'triple', p_ticker: ticker }).then(({ data, error }) => {
+      if (cancelled) return
+      setStats(error ? { error: true } : data ?? { error: true })
+    })
+    return () => { cancelled = true }
+  }, [ticker])
+  const localBulls = daily?.bull ?? []
+  const pctOf = (v) => (v == null ? '—' : signed(Number(v) * 100, 0))
+  const rate = (v) => (v == null ? '—' : `${Math.round(Number(v) * 100)}%`)
+  const block = (title, g, note) => {
+    if (!g || !Number(g.n)) return (
+      <div className="px-5 py-3">
+        <div className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold">{title}</div>
+        <div className="text-xs text-subtle mt-1">No Triple trades in the latest universe run.</div>
+      </div>
+    )
+    const rows = [['3M', g.med_3m, g.rand_3m], ['6M', g.med_6m, g.rand_6m], ['12M', g.med_12m, g.rand_12m]]
+    return (
+      <div className="px-5 py-3">
+        <div className="flex items-baseline gap-2">
+          <div className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold">{title}</div>
+          {note && <div className="text-[11px] text-muted">{note}</div>}
+        </div>
+        <div className="mt-1.5 grid grid-cols-3 gap-2 text-center">
+          <div><div className="text-base font-semibold font-mono-tab">{Number(g.n).toLocaleString('en-US')}</div><div className="text-[11px] text-muted">events</div></div>
+          <div><div className={clsx('text-base font-semibold font-mono-tab', Number(g.stock_hit_6m) >= 0.55 ? 'text-green-400' : 'text-fg')}>{rate(g.stock_hit_6m)}</div><div className="text-[11px] text-muted">stock up 6M later</div></div>
+          <div><div className={clsx('text-base font-semibold font-mono-tab', Number(g.option_win) >= 0.5 ? 'text-green-400' : 'text-fg')}>{rate(g.option_win)}</div><div className="text-[11px] text-muted">call trade won</div></div>
+        </div>
+        <table className="mt-2 w-full text-[11px] font-mono-tab">
+          <thead><tr className="text-muted"><th className="text-left font-normal py-0.5">Median stock return</th><th className="text-right font-normal">Triple</th><th className="text-right font-normal">Random entry</th><th className="text-right font-normal">Edge</th></tr></thead>
+          <tbody>
+            {rows.map(([h, a, b]) => {
+              const edge = a != null && b != null ? Number(a) - Number(b) : null
+              return (
+                <tr key={h}>
+                  <td className="py-0.5 text-subtle">{h}</td>
+                  <td className="text-right text-fg">{pctOf(a)}</td>
+                  <td className="text-right text-subtle">{pctOf(b)}</td>
+                  <td className={clsx('text-right', edge == null ? 'text-muted' : edge > 0.02 ? 'text-green-400' : edge < -0.02 ? 'text-rose-300' : 'text-subtle')}>{edge == null ? '—' : signed(edge * 100, 0)}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+        {Number(g.graded) < Number(g.n) && <div className="text-[11px] text-muted mt-1">{Number(g.n) - Number(g.graded)} too recent to grade at 6 months.</div>}
+      </div>
+    )
+  }
+  return (
+    <section className="bg-card border border-border rounded-2xl mb-4 overflow-hidden">
+      <div className="px-5 pt-5 pb-3">
+        <h2 className="text-sm font-semibold">Triple ◆ record</h2>
+        <p className="text-xs text-subtle mt-1">
+          {localBulls.length ? <>{localBulls.length} bull Triple{localBulls.length === 1 ? '' : 's'} on this chart</> : 'No bull Triple on this chart'}
+          {localBulls.length > 0 && onJumpDay && (
+            <> · <button type="button" className="text-violet-300 hover:text-violet-200" onClick={() => onJumpDay(localBulls[localBulls.length - 1].i)}>latest on chart</button></>
+          )}
+        </p>
+      </div>
+      {stats === null ? (
+        <div className="px-5 pb-5 h-24 animate-pulse" aria-busy="true" />
+      ) : stats.error ? (
+        <p className="px-5 pb-5 text-xs text-subtle">Couldn't load the universe record.</p>
+      ) : (
+        <div className="border-t border-hairline divide-y divide-hairline">
+          {block(`${ticker} · Triple → call, exit playbook`, stats.ticker)}
+          {block('Universe', stats.universe, stats.universe?.tickers ? `${Number(stats.universe.tickers).toLocaleString('en-US')} tickers` : null)}
+          <p className="px-5 py-3 text-[11px] text-muted leading-snug">
+            {stats.run_at ? `Latest universe run ${day(String(stats.run_at).slice(0, 10))}. ` : ''}Stock returns from the signal; random entry = the same number of entries per month at random dates. A test under the pre-registered plan; it changes no live rule.
+          </p>
+        </div>
+      )}
     </section>
   )
 }

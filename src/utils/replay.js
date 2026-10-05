@@ -18,6 +18,7 @@
 // the replay took live.
 
 import { COMPONENTS, DEFAULT_WINDOW, MIN_SCORE, confluenceFlags, confluenceSeries, swingPoints, etbConvergence } from './confluence.js'
+import { tripleEvents } from './signalSuite.js'
 import { EXIT_PLAYBOOK } from './afterTax.js'
 
 export const OPTION_MODEL = Object.freeze({
@@ -37,6 +38,11 @@ export const ENTRY_RULES = [
   // 2+ confluence signals and the 200-day rising. The pre-registered test
   // (docs/signal-engine/preregistration.md) is about this rule.
   ['setup', 'Buy setup (as shown)'],
+  // Triple (owner, 2026-10-05): Bravo + Echo + Tango all bullish within 2
+  // bars, no trend gate — logged on Signal record to be measured; its
+  // context (drawdown, days the 200-day has risen) rides in replay_trades
+  // for the ablation. Not a live rule.
+  ['triple', 'Triple ◆'],
   // Confirmed (owner, 2026-10-04: a buy zone YES beside a Bravo bear read as
   // a contradiction): the zone is YES *and* Bravo's regime is bull — the
   // cautious entry, to be measured against the plain zone, not assumed better.
@@ -170,6 +176,7 @@ export function replaySignals(bars, model, suite, window = DEFAULT_WINDOW) {
       zone: zone.map((z, i) => z && !zone[i - 1]),
       setup: zone.map((z, i) => z && rising[i] && buy[i].score >= MIN_SCORE && !(zone[i - 1] && rising[i - 1] && buy[i - 1].score >= MIN_SCORE)),
       zoneConfirmed: zone.map((z, i) => z && suite.bravo.regime[i] === 1 && !(zone[i - 1] && suite.bravo.regime[i - 1] === 1)),
+      triple: tripleEvents(suite, 2).bull,
       bravo: suite.bravo.bullOn.map((x, i) => !!x && rising[i]),
       recovery: buy.map((s, i) => !rising[i] && model.s50[i] != null && model.closes[i] > model.s50[i]
         && s.score >= MIN_SCORE && (i === 0 || buy[i - 1].score < MIN_SCORE)),
