@@ -480,8 +480,8 @@ function StatusPanel({ s, model, params, suite, dailySuite, confirmDays, tfLabel
           {yes && dailySuite && (
             <div className={clsx('text-xs mt-1.5', momentumUp ? 'text-green-400' : 'text-amber-400')}>
               {momentumUp
-                ? 'Momentum is up — a confirmed entry.'
-                : 'Momentum is down (price below its short-term trend line). The rule enters now; a cautious entry waits for it to turn up.'}
+                ? 'Momentum is rising — a confirmed entry.'
+                : 'Momentum is falling (price below its short-term trend line). The rule enters now; a cautious entry waits for it to rise.'}
             </div>
           )}
           {!yes && s.sma200 && (
