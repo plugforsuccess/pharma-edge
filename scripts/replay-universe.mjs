@@ -34,7 +34,8 @@ import { suiteModel } from '../src/utils/signalSuite.js'
 import { confluenceModel, blend, SHRINK_K } from '../src/utils/confluence.js'
 import { replayModel, tradeStats, moveStats, dropStats, ENTRY_RULES, EXIT_RULES, BEAR_RULES, OPTION_MODEL, PUT_MODEL, MOVE, DROP } from '../src/utils/replay.js'
 import { EXIT_PLAYBOOK } from '../src/utils/afterTax.js'
-import { dailyBars, mapLimit, sources } from './lib/marketData.mjs'
+import { dailyBars, mapLimit, sources, dividendsByTicker } from './lib/marketData.mjs'
+import { runPrereg, calibrate, PRIMARY_RULE } from './lib/prereg.mjs'
 
 const args = process.argv.slice(2)
 const MODE = args.includes('--mode') ? args[args.indexOf('--mode') + 1] : 'dry-run'
@@ -64,7 +65,8 @@ function analyze(ticker, bars) {
   const setups = conf.buy.setups
     .filter((s) => s.returns[H6] != null && s.i + H6_BARS < bars.length)
     .map((s) => ({ key: s.key, r: s.returns[H6], done: bars[s.i + H6_BARS].t }))
-  return { ticker, asOf: bars[bars.length - 1].t, rp, setups }
+  // bars / model / sig stay for the pre-registered test (controls + export).
+  return { ticker, asOf: bars[bars.length - 1].t, rp, setups, bars, model, sig: rp.sig }
 }
 
 // Out-of-sample history estimate for each confluence trade: only setups
@@ -108,6 +110,35 @@ async function main() {
   })).filter(Boolean)
   if (!results.length) throw new Error(`no tickers analyzed (${failed.slice(0, 5).join('; ')})`)
   const asOf = results.map((r) => r.asOf).sort().pop()
+
+  // ── Pre-registered test: SPY, real IV history, premium, controls ──
+  let spyBars = null
+  try { spyBars = await dailyBars('SPY') } catch (e) { console.log(`SPY unavailable (${e.message}) — the pre-registered test is skipped this run.`) }
+  let ivRows = []
+  if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    try {
+      const { createClient } = await import('@supabase/supabase-js')
+      const db0 = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } })
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await db0.from('iv_history').select('ticker, sample_date, iv_30d, source').not('source', 'ilike', '%backfill%').gt('iv_30d', 0.02).lt('iv_30d', 3).range(from, from + 999)
+        if (error) throw error
+        ivRows.push(...(data ?? []))
+        if (!data || data.length < 1000) break
+      }
+    } catch (e) { console.log(`iv_history unavailable (${e.message}) — premium can't be calibrated this run.`) }
+  }
+  const ivByTicker = new Map()
+  for (const row of ivRows) { if (!ivByTicker.has(row.ticker)) ivByTicker.set(row.ticker, {}); ivByTicker.get(row.ticker)[String(row.sample_date)] = Number(row.iv_30d) }
+  const cal = calibrate(results, ivRows)
+  console.log(`IV premium: ${cal.premium == null ? 'not calibrated' : cal.premium.toFixed(3)} from ${cal.n} real-IV samples on ${cal.tickers} tickers.`)
+  let prereg = null
+  let tradeRows = []
+  if (spyBars) {
+    const t1 = Date.now()
+    const pr = runPrereg({ results, spyBars, ivByTicker, dividendsByTicker, premium: cal.premium, premiumN: cal.n, log: (m) => console.log(m) })
+    prereg = { ...pr.summary, seconds: Math.round((Date.now() - t1) / 1000) }
+    tradeRows = pr.rows
+  }
 
   const runs = {}
   for (const [entryRule, entryLabel] of ENTRY_RULES) {
@@ -174,6 +205,7 @@ async function main() {
     sources: { ...sources }, seconds: Math.round((Date.now() - t0) / 1000),
     option_model: OPTION_MODEL, plan: { targets: EXIT_PLAYBOOK.targets, fractions: EXIT_PLAYBOOK.fractions, runnerTrailPct: EXIT_PLAYBOOK.runnerTrailPct, rollDays: EXIT_PLAYBOOK.rollDays },
     move_rule: MOVE, drop_rule: DROP, put_model: PUT_MODEL, runs, moves, missed, walk_forward: walk, by_year: years, puts, spotlight,
+    prereg,
   }
 
   const pct = (x) => (x == null ? '—' : `${x >= 0 ? '+' : ''}${(x * 100).toFixed(1)}%`)
@@ -192,14 +224,33 @@ async function main() {
     for (const tr of s.runs['confluence:targets'].trades) console.log(`  ${tr.entry} → ${tr.end}${tr.open ? ' (open)' : ''}  option ${pct(tr.option)}  stock ${pct(tr.stockRet)}  ${tr.exits.map((x) => `${x.reason}@${x.mult.toFixed(2)}x`).join(' ')}`)
     for (const m of s.moves) console.log(`  move ${m.low} → ${m.peak} ${pct(m.gain)}: ${m.caught ? `caught, kept ${pct(m.kept)}` : m.held ? 'held' : `missed (${m.why})`}`)
   }
+  if (prereg) {
+    const g = prereg.grid[String(prereg.premium.calibrated ?? prereg.premium.grid[0])]?.[PRIMARY_RULE]
+    console.log(`\nPre-registered test (${PRIMARY_RULE} → targets, premium ${prereg.premium.calibrated ?? 'uncalibrated'}): ${prereg.verdict.verdict.toUpperCase()} — ${prereg.verdict.why}`)
+    if (g) for (const k of ['all', 'P1', 'P2']) { const p = g.marked[k]; console.log(`  ${k.padEnd(3)} n ${p.n} months ${p.months} · strategy ${pct(p.strategy.mean)} · SPY ${pct(p.spy.mean)} · diff ${pct(p.spy.diff)} [${pct(p.spy.lo)}, ${pct(p.spy.hi)}] · random pctl ${p.random.percentile == null ? '—' : Math.round(p.random.percentile * 100)} · DCA diff ${pct(p.dca.diff)} · lost½ ${pct(p.strategy.lostHalf)} vs ${pct(p.spy.lostHalf)}`) }
+    console.log('  by premium (all, diff vs SPY):', prereg.premium.grid.map((pm) => `${pm}: ${pct(prereg.grid[String(pm)]?.[PRIMARY_RULE]?.marked.all.spy.diff)}`).join(' · '))
+  }
   if (process.env.REPLAY_OUT) { const { writeFileSync } = await import('node:fs'); writeFileSync(process.env.REPLAY_OUT, JSON.stringify(summary)) }
+  if (process.env.REPLAY_TRADES_OUT && tradeRows.length) {
+    const { writeFileSync } = await import('node:fs')
+    const cols = Object.keys(tradeRows[0])
+    const esc = (v) => (v == null ? '' : Array.isArray(v) ? `"${v.join('+')}"` : typeof v === 'string' && /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : String(v))
+    writeFileSync(process.env.REPLAY_TRADES_OUT, [cols.join(','), ...tradeRows.map((r) => cols.map((c) => esc(r[c])).join(','))].join('\n'))
+    console.log(`Wrote ${tradeRows.length} trade rows to ${process.env.REPLAY_TRADES_OUT}.`)
+  }
   if (MODE === 'dry-run') return
 
   const { createClient } = await import('@supabase/supabase-js')
   const db = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } })
-  const { error } = await db.from('replay_runs').insert({ as_of: asOf, tickers: results.length, summary })
+  const { data: run, error } = await db.from('replay_runs').insert({ as_of: asOf, tickers: results.length, summary }).select('id').single()
   if (error) throw new Error(`replay_runs insert: ${error.message}`)
   console.log('\nWrote replay_runs.')
+  for (let i = 0; i < tradeRows.length; i += 500) {
+    const batch = tradeRows.slice(i, i + 500).map((r) => ({ ...r, run_id: run.id }))
+    const { error: e2 } = await db.from('replay_trades').insert(batch)
+    if (e2) throw new Error(`replay_trades insert (batch ${i / 500 + 1}): ${e2.message}`)
+  }
+  if (tradeRows.length) console.log(`Wrote ${tradeRows.length} replay_trades rows.`)
 }
 
 main().catch((e) => { console.error(e); process.exit(1) })

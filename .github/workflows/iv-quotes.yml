@@ -1,0 +1,43 @@
+# Nightly IV + LEAPS quotes (pre-registered test, 2026-10-05): the 30-day
+# ATM implied vol → iv_history and the ~0.75-delta ~2-year call's bid / ask /
+# mid → leaps_quotes, for every ticker in the universe, from Yahoo's option
+# chains. Calibrates the replay's IV-proxy premium and slippage tiers on the
+# app's own quotes over time. See scripts/collect-iv-quotes.mjs.
+
+name: IV + LEAPS quotes
+
+on:
+  schedule:
+    - cron: '10 22 * * 1-5'   # 22:10 UTC weekdays — after the close, after the ranking
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'write = save · dry-run = print only'
+        type: choice
+        options: [write, dry-run]
+        default: write
+      tickers:
+        description: 'Subset, comma-separated (blank = whole universe)'
+        default: ''
+
+concurrency:
+  group: iv-quotes
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Collect
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          TICKERS: ${{ inputs.tickers }}
+        run: node scripts/collect-iv-quotes.mjs --mode "${{ inputs.mode || 'write' }}"

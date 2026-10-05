@@ -21,6 +21,7 @@
     "confluence:check": "node scripts/check-confluence.mjs",
     "rank:dry": "node scripts/rank-confluence.mjs --mode dry-run",
     "replay:check": "node scripts/check-replay.mjs",
+    "controls:check": "node scripts/check-controls.mjs",
     "replay:dry": "node scripts/replay-universe.mjs --mode dry-run",
     "optimizer:check": "node scripts/check-optimizer.mjs",
     "optimize:dry": "node scripts/optimize-entries.mjs --mode dry-run"

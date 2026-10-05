@@ -34,6 +34,17 @@ async function getAuth(force = false) {
   return pending
 }
 
+// Dividends (ex-date → amount) from the chart's events, per ticker, for
+// the dividend yield in the replay's Black-Scholes (pre-registered test).
+export const dividendsByTicker = new Map()
+
+function parseDividends(body) {
+  const ev = body?.chart?.result?.[0]?.events?.dividends ?? {}
+  const out = {}
+  for (const d of Object.values(ev)) if (d?.date && d.amount > 0) out[etDay(d.date * 1000)] = (out[etDay(d.date * 1000)] ?? 0) + Number(d.amount)
+  return out
+}
+
 function parseChart(body) {
   const r = body?.chart?.result?.[0]
   const ts = r?.timestamp ?? []
@@ -58,14 +69,15 @@ async function fromYahoo(ticker, range, attempts = 3) {
     for (const host of HOSTS) {
       const crumb = a ? `&crumb=${encodeURIComponent(a.crumb)}` : ''
       try {
-        const resp = await fetch(`https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=1d&includePrePost=false${crumb}`, {
+        const resp = await fetch(`https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=1d&includePrePost=false&events=div${crumb}`, {
           headers: { 'User-Agent': UA, Accept: 'application/json', ...(a ? { Cookie: a.cookie } : {}) },
           signal: AbortSignal.timeout(10000),
         })
         if (resp.status === 404) return { bars: null, error: 'not found' }
         if (!resp.ok) { last = String(resp.status); continue }
-        const bars = parseChart(await resp.json())
-        if (bars.length) return { bars }
+        const body = await resp.json()
+        const bars = parseChart(body)
+        if (bars.length) { dividendsByTicker.set(ticker, parseDividends(body)); return { bars } }
         last = 'empty'
       } catch (e) { last = e.message }
     }
@@ -129,4 +141,29 @@ export async function mapLimit(items, limit, fn, pauseMs = 100) {
     }
   }))
   return out
+}
+
+// Any Yahoo JSON endpoint with the session (cookie + crumb), for the
+// nightly quotes collector (scripts/collect-iv-quotes.mjs). Path like
+// '/v7/finance/options/AAPL?date=…'.
+export async function yahooJson(path, attempts = 3) {
+  let last = 'no response'
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const a = await getAuth(attempt > 0)
+    for (const host of HOSTS) {
+      const sep = path.includes('?') ? '&' : '?'
+      const crumb = a ? `${sep}crumb=${encodeURIComponent(a.crumb)}` : ''
+      try {
+        const resp = await fetch(`https://${host}${path}${crumb}`, {
+          headers: { 'User-Agent': UA, Accept: 'application/json', ...(a ? { Cookie: a.cookie } : {}) },
+          signal: AbortSignal.timeout(15000),
+        })
+        if (resp.status === 404) return { body: null, error: 'not found' }
+        if (!resp.ok) { last = String(resp.status); continue }
+        return { body: await resp.json() }
+      } catch (e) { last = e.message }
+    }
+    if (attempt < attempts - 1) await sleep(1500 * 2 ** attempt)
+  }
+  return { body: null, error: last }
 }
