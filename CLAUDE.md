@@ -1550,6 +1550,49 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   primary's). It changes no live rule; the recorded consequence is in
   `docs/signal-engine/preregistration.md` ("Added 2026-10-05"). Not on the
   entry chart (a single ticker can't rank itself).
+- **The index call, displayed and tested** (owner, 2026-10-05: "Index
+  calls win? Are these calls displayed anywhere?" — the first momentum run
+  showed every single-name rule behind the SPY call bought on the same
+  dates: +77% vs +38% momentum / +19% buy setup per trade). **Charts** now
+  leads LEAPS ideas with the SPY and QQQ calls (`suggest-leaps` returns
+  `index: [...]` — same contract rules as the sector picks, not ranked,
+  not momentum-gated; rows verdict "Index", `from: 'Index call'`), and the
+  SPY row carries one sentence from the test via the
+  `index_call_record()` SQL function (per-rule strategy / SPY-control means
+  at the calibrated premium from the latest `replay_runs`, plus the index
+  rule's own stats once it has run; `indexRecordText` in `Charts.jsx` leads
+  with the **SPY monthly-DCA control** — the same call bought every month
+  end, overlapping, 116 trades — because the one-at-a-time `index` rule
+  yields only ~8 trades in five years and timing luck dominates it;
+  "past results, not a forecast"). **Pre-registered rule `index`**: the
+  SPY call at each completed month end (`monthEndIndexes`), SPY handed to
+  `runPrereg` as an `extraResult` (it isn't in the universe) with entries
+  in `extraEntries`; its SPY-same-day control is itself — read the random
+  and DCA lines and compare against the single-name rules on the Signal
+  record card. Recorded in `docs/signal-engine/preregistration.md` ("Added
+  2026-10-05 … the index call as a rule"). Changes no live rule.
+- **The swing exit** (owner, 2026-10-05: "maybe the look back is too far.
+  We want the app to identify swing trades (LEAPS) and exit at pre-determined
+  high prices. It's not about buying vs a random day."). The export showed
+  the entries *find* swings — 80–90% of 2023–25 signal trades saw the stock
+  rise ≥ 10% inside the trade — while ~10% ever reached the playbook's +100%
+  option target after 500+ days; the exit was the mismatch. `exitRule:
+  'swing'` in `replay.js` (`SWING`, `swingTargetAt`, `SWING_PIVOT_BARS`): a
+  stock price target fixed at entry — the nearest **confirmed** swing high
+  above entry (≥ 10 bars after it, so known at entry; +15% when none sits
+  within 40%) or a % target — all out at the option's mark on the first
+  close at or above it, else at a hold cap (126 days default), a stock stop
+  as a variant; `tradeStats` adds `hitRate`, `medDaysHit`, `hitAvg`,
+  `missAvg`. It is an `EXIT_RULES` option (Replay card "Swing") and the
+  **pre-registered grid** (`SWING_GRID`: targets +10 / +15 / +20% / pivot ×
+  cap 2 / 6 / 12 / 18 months (42 / 126 / 252 / 378 trading days — the owner's hold window; the 18-month cap = the playbook time stop on a 2-year call) × stop none / 8% × gate none / SPY above its 200-day on the signal day (`spyRegime`; owner, 2026-10-05, after every version lost in 2022) = 112; `runSwingGrid` in `prereg.mjs`,
+  `SWING_RULES` setup / confluence / momentum / triple, at the calibrated
+  premium) → `summary.prereg.swing` with per-variant all / P1 / P2 / by
+  signal year and a 50-replication random control for the default variant;
+  Signal record's **Swing exit** card (rule and period switches, "Last 2
+  years"). Reading rule and weaknesses recorded in
+  `docs/signal-engine/preregistration.md` ("the swing exit"). The entries
+  and every live rule are unchanged.
 - **Rule optimizer** (owner, 2026-10-04: "do everything mathematically
   possible to get the guarantee closest to 1.0" — advised: 1.0 is a
   statement about the future; what can be pushed is out-of-sample

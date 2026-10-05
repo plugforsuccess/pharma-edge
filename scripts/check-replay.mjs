@@ -232,7 +232,7 @@ eq('put at expiry = intrinsic', bsPut(80, 100, 0, 0.2), 20)
 {
   const bars = market(1000, 11)
   const m = replayModel({ bars, model: entryModel(bars), suite: suiteModel(bars) })
-  eq('twenty-four entry × exit runs', Object.keys(m.runs).length, 24)
+  eq('thirty-two entry × exit runs', Object.keys(m.runs).length, 32)
   eq('two put runs', Object.keys(m.puts).length, 2)
   eq('put trades enter after their signal', Object.values(m.puts).every((r) => r.trades.every((t) => t.i === t.signalI + 1)), true)
   eq('every trade enters after its signal', Object.values(m.runs).every((r) => r.trades.every((t) => t.i === t.signalI + 1)), true)
@@ -245,6 +245,29 @@ eq('put at expiry = intrinsic', bsPut(80, 100, 0, 0.2), 20)
   const st = tradeStats([{ open: false, optionReturn: 1, stockReturn: 0.3, days: 300, bestStock: 0.5 }, { open: true, optionReturn: -0.5, stockReturn: -0.1, bestStock: 0.02 }])
   eq('open trade counts at its mark', [st.n, st.closed, st.open, st.winRate, st.avg, st.bigLoss], [2, 1, 1, 0.5, 0.25, 0.5])
   eq('days held still closed-only', st.avgDays, 300)
+}
+
+
+// ── Swing exit (owner, 2026-10-05): a stock price target fixed at entry ──
+{
+  const { swingTargetAt, oneTrade, trailingVol, SWING, SWING_PIVOT_BARS } = await import('../src/utils/replay.js')
+  const { swingPoints } = await import('../src/utils/confluence.js')
+  // 400 flat bars at 100 with a confirmed swing high of 112 at bar 150, then a rise to 115 from bar 300.
+  const sb = Array.from({ length: 400 }, (_, i) => { const c = i >= 300 ? 100 + (i - 299) * 0.5 : 100; return { t: `d${i}`, o: c, h: i === 150 ? 112 : c + 0.5, l: c - 0.5, c, v: 1 } })
+  const highs = swingPoints(sb, SWING_PIVOT_BARS).highs
+  eq('swing pivot target = nearest confirmed swing high above entry', swingTargetAt(sb, 200, 100, highs).target, 112)
+  eq('pivot before confirmation is not used', swingTargetAt(sb, 152, 100, highs).kind, 'pct')
+  eq('pct target when asked', swingTargetAt(sb, 200, 100, highs, { ...SWING, target: 'pct', pct: 0.1 }).target, 110, 1e-9)
+  const closes = sb.map((b) => b.c)
+  const sigma = trailingVol(closes, 60).map(() => 0.3)
+  const tr = oneTrade(sb, closes, sigma, 299, { exitRule: 'swing', swing: { ...SWING, maxHold: 126 }, highs })
+  eq('swing trade exits on the first close at/above the target', [tr.hit, tr.exits[0].reason, closes[tr.endI] >= 112], [true, 'target', true])
+  const capped = oneTrade(sb, closes, sigma, 100, { exitRule: 'swing', swing: { ...SWING, target: 'pct', pct: 0.5, maxHold: 63 }, highs })
+  eq('a miss exits at the hold cap', [capped.hit, capped.exits[0].reason, capped.endI - capped.i], [false, 'cap', 63])
+  const stopped = oneTrade(sb.map((b, i) => (i > 100 ? { ...b, c: 90, o: 90, h: 90.5, l: 89.5 } : b)), sb.map((b, i) => (i > 100 ? 90 : b.c)), sigma, 99, { exitRule: 'swing', swing: { ...SWING, target: 'pct', pct: 0.5, stopPct: 0.08 }, highs })
+  eq('the stock stop variant exits on a close below it', stopped.exits[0].reason, 'stop')
+  const optT = oneTrade(sb, closes, sigma, 299, { exitRule: 'swing', swing: { ...SWING, target: 'opt', pct: 0.25, maxHold: 126 }, highs })
+  eq('an option-gain target exits when the mark reaches cost × 1.25', [optT.hit, optT.exits[0].reason, optT.exits[0].mult >= 1.25], [true, 'target', true])
 }
 
 console.log(`replay checks: ${passed} passed, ${failures.length} failed`)

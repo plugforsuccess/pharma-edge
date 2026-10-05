@@ -60,6 +60,7 @@ export default function SignalRecord() {
       ) : (
         <>
           <PreregCard p={s.prereg} />
+          <SwingCard sw={s.prereg?.swing} />
           {opt && <OptimizerCard o={opt} />}
 
           <div className="flex gap-1 p-1 rounded-xl bg-card border border-border mb-4" role="tablist" aria-label="Buy on">
@@ -208,19 +209,100 @@ export default function SignalRecord() {
 }
 
 
+// The swing exit grid (owner, 2026-10-05: "identify swing trades, exit at
+// pre-determined high prices"): entry rule × {price target, hold cap, stop}
+// → hit rate, days to the target, option return, by period / year, with
+// the random-entry control beside the default variant.
+const SWING_RULE_LABEL = { setup: 'Buy setup', confluence: 'Confluence', momentum: 'Momentum 12-1', triple: 'Triple ◆' }
+const SWING_VIEWS = [['all', 'All'], ['P1', '2022–23'], ['P2', '2024→'], ['recent', 'Last 2 years']]
+const SWING_GATES = [[null, 'Every entry'], ['spy200', 'SPY above 200-day']]
+function SwingCard({ sw }) {
+  const [rule, setRule] = useState('setup')
+  const [view, setView] = useState('all')
+  const [gate, setGate] = useState(null)
+  if (!sw) return null
+  const r = sw.rules?.[rule]
+  const months = (d) => (d >= 42 && d % 21 === 0 ? `${d / 21} mo` : `${d}d`)
+  const variantLabel = (v) => `${v.target === 'pivot' ? 'Prior pivot high' : v.target === 'opt' ? `+${Math.round(v.pct * 100)}% on the call` : `+${Math.round(v.pct * 100)}% stock`} · ${months(v.maxHold)} cap${v.stopPct != null ? ` · ${Math.round(v.stopPct * 100)}% stop` : ''}`
+  const years = Object.keys(r?.variants?.[sw.defaultKey]?.byYear ?? {}).sort()
+  const recentYears = years.slice(-2)
+  const pick = (vs) => {
+    if (view === 'recent') {
+      const lists = recentYears.map((y) => vs.byYear[y]).filter(Boolean)
+      if (!lists.length) return null
+      const n = lists.reduce((s, x) => s + x.n, 0)
+      const w = (k) => (n ? lists.reduce((s, x) => s + (x[k] ?? 0) * x.n, 0) / n : null)
+      return { n, hitRate: w('hitRate'), medDaysHit: lists[0].medDaysHit, avg: w('avg'), lostHalf: w('lostHalf'), hitAvg: w('hitAvg'), missAvg: w('missAvg') }
+    }
+    return vs[view]
+  }
+  const hasGates = (sw.variants ?? []).some((v) => v.gate)
+  const rows = (sw.variants ?? []).filter((v) => !hasGates || (v.gate ?? null) === gate).map((v) => ({ v, s: r?.variants?.[v.key] ? pick(r.variants[v.key]) : null }))
+  const share = (x) => (x == null ? '—' : `${Math.round(x * 100)}%`)
+  return (
+    <Card title="Swing exit">
+      <div className="px-5 pb-3 text-xs text-muted">
+        Same entries, a different exit: a stock price fixed at entry, all out on the first close at or above it, else at the hold cap. The question is the hit rate and what hits and misses returned on the call — by period, because the look-back may be too long.
+      </div>
+      <div className="px-5 pb-3 flex flex-wrap gap-1.5">
+        {Object.keys(sw.rules ?? {}).map((k) => (
+          <button key={k} type="button" onClick={() => setRule(k)} className={clsx('min-h-[32px] px-2.5 rounded-lg border text-[11px] font-semibold', rule === k ? 'border-violet-400/50 bg-violet-400/10 text-violet-300' : 'border-border text-muted')}>{SWING_RULE_LABEL[k] ?? k}</button>
+        ))}
+        <span className="flex-1" />
+        {SWING_VIEWS.map(([k, label]) => (
+          <button key={k} type="button" onClick={() => setView(k)} className={clsx('min-h-[32px] px-2.5 rounded-lg border text-[11px] font-semibold', view === k ? 'border-amber-400/50 bg-amber-400/10 text-amber-300' : 'border-border text-muted')}>{label}</button>
+        ))}
+      </div>
+      {hasGates && (
+        <div className="px-5 pb-3 flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] text-muted mr-1">Regime gate</span>
+          {SWING_GATES.map(([k, label]) => (
+            <button key={String(k)} type="button" onClick={() => setGate(k)} className={clsx('min-h-[32px] px-2.5 rounded-lg border text-[11px] font-semibold', gate === k ? 'border-green-400/50 bg-green-400/10 text-green-400' : 'border-border text-muted')}>{label}</button>
+          ))}
+        </div>
+      )}
+      <div className="overflow-x-auto">
+        <table className="w-full text-[11px] font-mono-tab">
+          <thead><tr className="text-muted border-t border-hairline"><th className="text-left font-normal px-5 py-2">Exit</th><th className="text-right font-normal pr-3">Trades</th><th className="text-right font-normal pr-3">Hit</th><th className="text-right font-normal pr-3">Days</th><th className="text-right font-normal pr-3">Avg</th><th className="text-right font-normal pr-3">Hit avg</th><th className="text-right font-normal pr-3">Miss avg</th><th className="text-right font-normal pr-5">Lost ½</th></tr></thead>
+          <tbody>
+            {rows.map(({ v, s }) => (
+              <tr key={v.key} className={clsx('border-t border-hairline', v.key === sw.defaultKey && 'bg-violet-400/[0.06]')}>
+                <td className="px-5 py-1.5 text-fg whitespace-nowrap">{variantLabel(v)}{v.key === sw.defaultKey ? <span className="text-muted"> · default</span> : null}</td>
+                <td className="text-right pr-3 text-subtle">{s?.n ?? '—'}</td>
+                <td className={clsx('text-right pr-3', s?.hitRate >= 0.6 ? 'text-green-400' : 'text-fg')}>{share(s?.hitRate)}</td>
+                <td className="text-right pr-3 text-subtle">{s?.medDaysHit ?? '—'}</td>
+                <td className={clsx('text-right pr-3', tone(s?.avg))}>{pctS(s?.avg)}</td>
+                <td className="text-right pr-3 text-green-400">{pctS(s?.hitAvg)}</td>
+                <td className="text-right pr-3 text-rose-300">{pctS(s?.missAvg)}</td>
+                <td className="text-right pr-5 text-subtle">{share(s?.lostHalf)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {r?.random && (
+        <div className="px-5 py-3 border-t border-hairline text-[11px] text-muted">
+          Random entries in the same months, same default exit ({r.random.reps} replications): hit rate {share(r.random.hitRate)}, avg {pctS(r.random.avg)} — the rule's hit rate sits at the {r.random.hitPercentile == null ? '—' : `${Math.round(r.random.hitPercentile * 100)}th`} percentile. Shown beside, not in front: the owner's question is the hit rate and the expectancy.
+        </div>
+      )}
+    </Card>
+  )
+}
+
 // The pre-registered test (docs/signal-engine/preregistration.md, recorded
 // 2026-10-05 before the code existed): the buy setup as shown vs the same
 // call on SPY bought the same day with the same exits, priced at the
 // calibrated implied-vol premium with slippage by liquidity, open trades at
 // their mark. Edge / no edge / inconclusive by the recorded rule.
 const VERDICT_TONE = { edge: 'border-green-400/50 text-green-400', 'no edge': 'border-rose-300/50 text-rose-300', inconclusive: 'border-amber-400/50 text-amber-400' }
-const PREREG_LABELS = { setup: 'Buy setup', zone: 'Buy zone', confluence: 'Confluence', triple: 'Triple ◆', momentum: 'Momentum 12-1' }
+const PREREG_LABELS = { setup: 'Buy setup', zone: 'Buy zone', confluence: 'Confluence', triple: 'Triple ◆', momentum: 'Momentum 12-1', index: 'Index call' }
 const PREREG_TEXT = {
   setup: 'Buy setup as shown (buy zone YES + 2 signals, 200-day rising)',
   zone: 'Buy zone turning YES',
   confluence: '2+ buy signals, 200-day rising',
   triple: 'Bravo + Echo + Tango all turning up within 2 days',
   momentum: 'Cross-sectional momentum: top decile of 12-month return (skipping the latest month) among names above their 200-day, at each month end',
+  index: 'The SPY call bought at each month end — the benchmark as a rule (its "SPY same day" column is itself; read the random and DCA lines)',
 }
 function PreregCard({ p }) {
   const [completed, setCompleted] = useState(false)

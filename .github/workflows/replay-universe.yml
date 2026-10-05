@@ -55,6 +55,9 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SPOTLIGHT: ${{ inputs.spotlight || 'NOW,PLTR,NVDA' }}
           REPLAY_TRADES_OUT: replay_trades.csv
+          # The job holds every ticker's bars, model and replay runs in memory;
+          # the default heap (~2 GB) was not enough once the swing grid joined.
+          NODE_OPTIONS: --max-old-space-size=6144
         run: node scripts/replay-universe.mjs --mode "${{ inputs.mode || 'write' }}"
       # The trade-level file (one row per strategy trade at the calibrated
       # premium) — the pre-registered test's later steps run off it.

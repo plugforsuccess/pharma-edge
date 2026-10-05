@@ -28,6 +28,7 @@ const RULE_TEXT = {
   recovery: '2+ buy signals, 200-day falling, close above the 50-day',
   targets: `${share(p.fractions[0])} at ${1 + p.targets[0]}x · ${share(p.fractions[1])} at ${1 + p.targets[1]}x · trail the rest ${share(p.runnerTrailPct)}`,
   signals: 'All out on 2+ sell signals',
+  swing: 'All out when the stock closes at the nearest prior swing high (set at entry), else after 126 trading days',
   both: `${share(p.fractions[0])} at ${1 + p.targets[0]}x, then 2+ sell signals`,
 }
 const REASON = { t1: 'T1', t2: 'T2', trail: 'Trail', signal: 'Signal', time: 'Time stop' }

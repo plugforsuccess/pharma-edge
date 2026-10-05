@@ -148,3 +148,106 @@ joins the test as a **secondary rule**, measured by the identical machinery:
   the *control* as much as the rule), a ~560-name universe rather than the
   whole market, five years of history (two bull periods), and no
   transaction-cost model beyond the slippage tiers.
+
+## Added 2026-10-05 (after the momentum result): the index call as a rule
+
+The first momentum run showed every single-name rule, momentum included,
+well behind the SPY call bought on the same dates (+77% per trade vs +38%
+momentum and +19% buy setup, all trades, calibrated premium). That column
+is a control, not a rule, so the index call joins the test as a rule of
+its own, recorded before it runs:
+
+- **Rule:** buy the SPY 0.75Δ ~2-year call at each completed month end;
+  same exit playbook; one open trade at a time (a month end while a trade
+  is open is skipped).
+- **Controls:** random entries on SPY (same count per month) and monthly
+  DCA on SPY. The SPY-same-day paired control is the rule itself and reads
+  zero by construction.
+- **Reading:** the comparison that matters is this rule against the
+  single-name rules on the same card, period by period, and its P1 (2022–
+  23, a down year then a recovery) against P2. It does not change the
+  primary rule or the verdict. If it keeps beating the single-name rules
+  in both periods, the product consequence already follows from the "no
+  edge" clause: the index / sector call plus the exit playbook is the
+  claim, and single-name timing is context.
+- **Displayed from today:** Charts shows the SPY and QQQ calls picked by
+  the same contract rules above the sector ideas, with one sentence from
+  this test. That is disclosure of what was measured, not a new rule.
+- **Known weaknesses:** one bull market with one drawdown; a long-dated
+  index call's result is mostly the index's drift times leverage, so a
+  bear period would reverse the sign; survivorship does not apply to SPY
+  but does flatter the single-name rules it is compared with.
+
+## Added 2026-10-05 (owner: "swing trades, exit at pre-determined high prices"): the swing exit
+
+The owner's framing, recorded before the run: the goal is not to beat a
+random day. It is to **identify a swing in a stock, buy the LEAPS, and sell
+when the stock reaches a price set at entry.** The existing export already
+says the entries find swings — in 2023–2025, 80–90% of signal trades saw
+the stock rise ≥ 10% inside the trade and 55–80% saw ≥ 20% — while only
+~10% ever reached the exit playbook's first target (+100% on an 18-month
+option) because the trade waited 500+ days for it. The mismatch is the exit,
+so the exit is what this test changes. The entries are unchanged.
+
+- **Rule (`exitRule: 'swing'`):** at entry, fix a stock price target. Exit
+  the whole position at the option's marked value on the first close at or
+  above the target; otherwise at a time cap; a stock stop is a variant.
+  Instrument unchanged (0.75Δ, ~2-year call at the calibrated premium).
+- **Grid (16 variants, all reported, none chosen in advance):**
+  target ∈ { +10%, +15%, +20% above the entry price, **pivot** = the
+  nearest confirmed swing high above entry (a high with ≥ 10 bars after
+  it — known at entry; +15% when none sits within 40%) } ×
+  hold cap ∈ { 63, 126 trading days } × stop ∈ { none, stock −8% }.
+- **What is measured:** target hit rate; median days to the target; mean
+  and median option return with every trade counted (open at mark);
+  share lost ≥ 50%; expectancy = hit rate × mean hit return + miss rate ×
+  mean miss return. By period P1 / P2 and **by signal year**, since the
+  owner suspects the five-year look-back is too long: the last two years
+  are reported on their own.
+- **Controls, kept but secondary:** random entries in the same months
+  with the same swing exit, so a bull-market hit rate is not mistaken for
+  selection. The owner's question is the hit rate and the expectancy; the
+  control is reported beside them, not in front of them.
+- **Reading:** a variant is worth a live test when its hit rate is above
+  60% in both periods, its expectancy is positive in both, and the
+  neighbouring variants (±5% target, the other hold cap) agree within
+  ~10 points. The Signal record card shows the grid; the Replay card gets a
+  **Swing** sell option (pivot target, 126-day cap, no stop) so a single
+  chart can be read the same way. Nothing changes live until the owner
+  adopts a variant after that reading.
+- **Known weaknesses:** no stop means a miss rides to the cap; the pivot
+  target depends on a swing high existing above entry; five bullish years
+  inflate every hit rate, which is what the random control is for.
+
+**Amendment, same day, before the grid was read** (owner: "if options are
+using leverage these targets may be met on 10–15% increases"): three
+option-gain targets join the grid — exit when the call's mark reaches
+**+25%, +50% or +75% of cost** — with the same hold caps and stops (28
+variants in all). The two-ticker offline run already showed the leverage
+these imply: a +10% stock move returned ~+17% on the call after slippage,
++15% ~+27%, +20% ~+40%. Reading rule unchanged.
+
+**Amendment, same day, after the first grid was read** (owner: "we don't
+want to hold for more than 2–18 months"): the hold caps become **2, 6, 12
+and 18 months** (42 / 126 / 252 / 378 trading days; the 18-month cap
+coincides with the playbook's time stop on a 2-year call), replacing 3 and
+6 months — 56 variants. The first grid's reading stands as recorded: hit
+rates were high (59–79% on the buy setup, 68–74% on momentum in 2023–25
+at a +25% call target) but misses cost more than hits earned, an 8% stock
+stop made every variant worse, and 2022 lost a third per trade on every
+version — a bull-market plan that needs a regime gate, tested next. This
+amendment widens the window; it does not change the reading rule.
+
+**Amendment, same day, after the second grid was read** (owner: "Sure" to
+the regime gate): every swing variant also runs **gated** — entries count
+only when SPY closed above its 200-day average on the signal day (112
+variants). What was read before this change, so it can't be fitted after:
+with the owner's 2–18 month window, momentum entries selling the whole
+call at +50% / +75% with a 12-month cap and no stop hit 60% / 52% and
+averaged +17% / +24% per trade, positive in 2023, 2024, 2025 and 2026 and
+−21% to −23% in 2022; the buy setup carried none of this; two-month caps
+were ~zero; the pivot target hit 80% for +18%. **Reading the gate:** it is
+worth paper trading if it removes most of 2022's trades while keeping
+2023–25's average within ~5 points, *and* the gated hit rate and average
+hold in the last two years. A gate that merely trims trade count in every
+year is noise.

@@ -36,7 +36,7 @@ import { replayModel, tradeStats, moveStats, dropStats, ENTRY_RULES, EXIT_RULES,
 import { EXIT_PLAYBOOK } from '../src/utils/afterTax.js'
 import { dailyBars, mapLimit, sources, dividendsByTicker } from './lib/marketData.mjs'
 import { runPrereg, calibrate, PRIMARY_RULE } from './lib/prereg.mjs'
-import { crossSectionalEntries, MOMENTUM } from '../src/utils/momentum.js'
+import { crossSectionalEntries, monthEndIndexes, MOMENTUM } from '../src/utils/momentum.js'
 
 const args = process.argv.slice(2)
 const MODE = args.includes('--mode') ? args[args.indexOf('--mode') + 1] : 'dry-run'
@@ -111,6 +111,8 @@ async function main() {
   })).filter(Boolean)
   if (!results.length) throw new Error(`no tickers analyzed (${failed.slice(0, 5).join('; ')})`)
   const asOf = results.map((r) => r.asOf).sort().pop()
+  const mem = (label) => { const m = process.memoryUsage(); console.log(`[mem] ${label}: rss ${(m.rss / 1e9).toFixed(2)} GB, heap ${(m.heapUsed / 1e9).toFixed(2)} GB`) }
+  mem('after analyze')
 
   // ── Pre-registered test: SPY, real IV history, premium, controls ──
   let spyBars = null
@@ -141,11 +143,22 @@ async function main() {
     const mom = crossSectionalEntries(results.map((r) => ({ ticker: r.ticker, bars: r.bars, s200: r.model.s200 })))
     const scored = mom.months.filter((m) => m.picked > 0)
     console.log(`Momentum: ${scored.length} scored months, ${scored.reduce((s, m) => s + m.picked, 0)} picks (avg ${scored.length ? Math.round(scored.reduce((s, m) => s + m.names, 0) / scored.length) : 0} eligible names / month).`)
+    // The index rule: SPY's own call at each completed month end.
+    const spyResult = analyze('SPY', spyBars)
+    const indexEntries = new Map()
+    if (spyResult) {
+      const flags = new Array(spyBars.length).fill(false)
+      for (const i of monthEndIndexes(spyBars)) flags[i] = true
+      indexEntries.set('SPY', flags)
+      console.log(`Index: SPY at ${flags.filter(Boolean).length} month ends.`)
+    }
     const pr = runPrereg({ results, spyBars, ivByTicker, dividendsByTicker, premium: cal.premium, premiumN: cal.n, log: (m) => console.log(m),
-      extraEntries: new Map([['momentum', mom.entries]]),
+      extraEntries: new Map([['momentum', mom.entries], ['index', indexEntries]]),
+      extraResults: spyResult ? [spyResult] : [],
       extraSummary: { momentum: { params: MOMENTUM, months: mom.months } } })
     prereg = { ...pr.summary, seconds: Math.round((Date.now() - t1) / 1000) }
     tradeRows = pr.rows
+    mem('after prereg')
   }
 
   const runs = {}

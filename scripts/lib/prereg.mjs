@@ -11,15 +11,23 @@
 //      and the verdict — read at the calibrated premium
 //   4. one export row per trade at the calibrated premium (replay_trades)
 
-import { replayTrades, replayFromEntries, trailingVol } from '../../src/utils/replay.js'
+import { replayTrades, replayFromEntries, trailingVol, tradeStats, SWING, SWING_GRID, SWING_PIVOT_BARS } from '../../src/utils/replay.js'
+import { swingPoints } from '../../src/utils/confluence.js'
+import { randomEntries, mulberry32 } from '../../src/utils/controls.js'
+import { sma } from '../../src/utils/indicators.js'
 import { PERIODS, PREMIUM_GRID, RANDOM_REPS, pricingFor, controlsForTicker, periodResult, bucketResults, verdict, periodOf, calibratePremium } from '../../src/utils/controls.js'
 
 // momentum (2026-10-05, after the Triple result): cross-sectional 12-1
 // momentum, top decile above the 200-day, rebalanced at month ends — a
 // universe-level rule whose entries the job computes (src/utils/momentum.js)
 // and hands in as `extraEntries`. The random control runs for it too.
-export const PREREG_RULES = ['setup', 'zone', 'confluence', 'triple', 'momentum']
-export const RANDOM_RULES = new Set(['setup', 'momentum'])
+// index (2026-10-05, after the momentum result): the SPY call bought at
+// each completed month end — the benchmark as a rule of its own. SPY is
+// handed in as an `extraResult` (it isn't in the universe) and only runs
+// the rules named in `extraEntries` for it. Its SPY-same-day control is
+// itself; the random and DCA controls are the comparison.
+export const PREREG_RULES = ['setup', 'zone', 'confluence', 'triple', 'momentum', 'index']
+export const RANDOM_RULES = new Set(['setup', 'momentum', 'index'])
 const FWD = [['3m', 63], ['6m', 126], ['12m', 252]]
 export const PRIMARY_RULE = 'setup'
 const r4 = (x) => (x == null || !Number.isFinite(x) ? null : Math.round(x * 1e4) / 1e4)
@@ -87,7 +95,103 @@ export function calibrate(results, ivRows) {
   return { ...calibratePremium(samples), tickers: new Set(ivRows.map((x) => x.ticker)).size }
 }
 
-export function runPrereg({ results, spyBars, ivByTicker = new Map(), dividendsByTicker = new Map(), premium, premiumN = 0, reps = RANDOM_REPS, extraEntries = new Map(), extraSummary = {}, log = () => {} }) {
+// The swing exit grid (docs/signal-engine/preregistration.md, "the swing
+// exit", 2026-10-05): every entry rule × 16 exit variants at the calibrated
+// premium — hit rate, days to target, hit / miss returns, by period and by
+// signal year; a random-entry control (same months, same swing exit) for
+// the default variant only.
+export const SWING_RULES = ['setup', 'confluence', 'momentum', 'triple']
+const SWING_RANDOM_REPS = 50
+export function swingVariants() {
+  const out = []
+  for (const gate of SWING_GRID.gates ?? [null]) for (const [target, pct] of SWING_GRID.targets) for (const maxHold of SWING_GRID.holds) for (const stopPct of SWING_GRID.stops) {
+    out.push({ key: `${target}${target === 'pivot' ? '' : Math.round(pct * 100)}:${maxHold}:${stopPct == null ? 'none' : Math.round(stopPct * 100)}${gate ? `:${gate}` : ''}`, gate, swing: { ...SWING, target, pct, maxHold, stopPct } })
+  }
+  return out
+}
+// SPY above its 200-day on a given date (the latest SPY bar on or before it).
+export function spyRegime(spyBars) {
+  if (!spyBars?.length) return () => true
+  const closes = spyBars.map((b) => b.c)
+  const s200 = sma(closes, 200)
+  const dates = spyBars.map((b) => b.t)
+  const above = closes.map((c, i) => (s200[i] != null ? c > s200[i] : null))
+  return (t) => {
+    let lo = 0, hi = dates.length - 1, k = -1
+    while (lo <= hi) { const m = (lo + hi) >> 1; if (dates[m] <= t) { k = m; lo = m + 1 } else hi = m - 1 }
+    return k < 0 ? false : above[k] !== false
+  }
+}
+// Compact record per trade — the grid holds 28 variants × every trade of
+// every rule, so whole trade objects (with their exits) blew the runner's
+// memory on the first run. Only what the summary needs survives.
+const compact = (t) => ({ y: t.signalT.slice(0, 4), p: periodOf(t.signalT), hit: !!t.hit, d: t.days, r: t.optionReturn, open: !!t.open })
+function swingSummary(recs) {
+  const by = (list) => {
+    const rs = list.map((x) => x.r).filter((x) => x != null).sort((a, b) => a - b)
+    const mean = (xs) => (xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : null)
+    const hits = list.filter((x) => x.hit)
+    const days = hits.map((x) => x.d).sort((a, b) => a - b)
+    return {
+      n: list.length, open: list.filter((x) => x.open).length,
+      hitRate: list.length ? r4(hits.length / list.length) : null, medDaysHit: days.length ? days[Math.floor(days.length / 2)] : null,
+      avg: r4(mean(rs)), median: rs.length ? r4(rs[Math.floor(rs.length / 2)]) : null, lostHalf: rs.length ? r4(rs.filter((x) => x <= -0.5).length / rs.length) : null,
+      hitAvg: r4(mean(hits.map((x) => x.r).filter((x) => x != null))), missAvg: r4(mean(list.filter((x) => !x.hit).map((x) => x.r).filter((x) => x != null))),
+      avgDays: list.length ? Math.round(mean(list.filter((x) => !x.open).map((x) => x.d)) ?? 0) : null,
+    }
+  }
+  const years = {}
+  for (const x of recs) (years[x.y] ??= []).push(x)
+  return {
+    all: by(recs), P1: by(recs.filter((x) => x.p === 'P1')), P2: by(recs.filter((x) => x.p === 'P2')),
+    byYear: Object.fromEntries(Object.entries(years).sort().map(([y, l]) => [y, by(l)])),
+  }
+}
+export function runSwingGrid({ results, premium, spyBars = null, ivByTicker = new Map(), dividendsByTicker = new Map(), extraEntries = new Map(), log = () => {} }) {
+  const variants = swingVariants()
+  const regimeOn = spyRegime(spyBars)
+  const defaultKey = variants.find((v) => !v.gate && v.swing.target === SWING.target && v.swing.maxHold === SWING.maxHold && v.swing.stopPct === SWING.stopPct)?.key
+  const acc = Object.fromEntries(SWING_RULES.map((r) => [r, Object.fromEntries(variants.map((v) => [v.key, []]))]))
+  const randomAcc = Object.fromEntries(SWING_RULES.map((r) => [r, []]))
+  let n = 0
+  for (const r of results) {
+    const pricing = pricingFor(r.bars, { premium, dividends: dividendsByTicker.get(r.ticker) ?? {}, realIv: ivByTicker.get(r.ticker) ?? null })
+    const highs = swingPoints(r.bars, SWING_PIVOT_BARS).highs
+    for (const rule of SWING_RULES) {
+      const entries = extraEntries.has(rule) ? extraEntries.get(rule).get(r.ticker) : r.sig.entry?.[rule]
+      if (!entries || !entries.some(Boolean)) continue
+      const gated = entries.map((f, i) => f && regimeOn(r.bars[i].t))
+      for (const v of variants) {
+        const trades = replayFromEntries(r.bars, v.gate === 'spy200' ? gated : entries, { exitRule: 'swing', swing: v.swing, highs, sell: r.sig.sell, ...pricing })
+        for (const t of trades) acc[rule][v.key].push(compact(t))
+        if (v.key === defaultKey && trades.length) {
+          const rng = mulberry32(hash(r.ticker) ^ 0x5157)
+          const dates = trades.map((t) => t.signalT)
+          for (let k = 0; k < SWING_RANDOM_REPS; k++) {
+            const rt = replayFromEntries(r.bars, randomEntries(r.bars, dates, rng), { exitRule: 'swing', swing: v.swing, highs, ...pricing })
+            const a = (randomAcc[rule][k] ??= { n: 0, hits: 0, sum: 0 })
+            for (const t of rt) { a.n++; if (t.hit) a.hits++; a.sum += t.optionReturn }
+          }
+        }
+      }
+    }
+    if (++n % 100 === 0) log(`  swing grid: ${n}/${results.length}`)
+  }
+  const out = { grid: SWING_GRID, defaultKey, variants: variants.map((v) => ({ key: v.key, gate: v.gate, ...v.swing })), rules: {} }
+  for (const rule of SWING_RULES) {
+    const perVariant = Object.fromEntries(variants.map((v) => [v.key, swingSummary(acc[rule][v.key])]))
+    const reps = (randomAcc[rule] ?? []).filter((a) => a && a.n > 0)
+    const randomHit = reps.map((a) => a.hits / a.n)
+    const randomAvg = reps.map((a) => a.sum / a.n)
+    const mean = (xs) => (xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : null)
+    const own = perVariant[defaultKey]?.all
+    const pctile = (xs, v) => (xs.length && v != null ? xs.filter((x) => x <= v).length / xs.length : null)
+    out.rules[rule] = { variants: perVariant, random: { reps: reps.length, hitRate: r4(mean(randomHit)), avg: r4(mean(randomAvg)), hitPercentile: r4(pctile(randomHit, own?.hitRate)), avgPercentile: r4(pctile(randomAvg, own?.avg)) } }
+  }
+  return out
+}
+
+export function runPrereg({ results, spyBars, ivByTicker = new Map(), dividendsByTicker = new Map(), premium, premiumN = 0, reps = RANDOM_REPS, extraEntries = new Map(), extraResults = [], extraSummary = {}, log = () => {} }) {
   const premiums = [...new Set([...PREMIUM_GRID, premium].filter((x) => x != null))].sort((a, b) => a - b)
   const grid = {}
   const rows = []
@@ -98,16 +202,19 @@ export function runPrereg({ results, spyBars, ivByTicker = new Map(), dividendsB
     const spyPricing = pricingFor(spyBars, { premium: pm, dividends: spyDiv, realIv: spyIv })
     const perRule = Object.fromEntries(PREREG_RULES.map((k) => [k, { paired: [], random: [], dca: [] }]))
     let n = 0
-    for (const r of results) {
+    const all = [...results, ...extraResults.map((r) => ({ ...r, _extraOnly: true }))]
+    for (const r of all) {
       const pricing = pricingFor(r.bars, { premium: pm, dividends: dividendsByTicker.get(r.ticker) ?? {}, realIv: ivByTicker.get(r.ticker) ?? null })
       for (const rule of PREREG_RULES) {
         let trades
+        if (r._extraOnly && !extraEntries.has(rule)) continue
         if (extraEntries.has(rule)) {
           const entries = extraEntries.get(rule).get(r.ticker)
           if (!entries) continue
           trades = replayFromEntries(r.bars, entries, { exitRule: 'targets', sell: r.sig.sell, ...pricing })
           for (const t of trades) t.key = null
         } else {
+          if (!r.sig.entry?.[rule]) continue // a universe-level rule whose entries weren't handed in
           trades = replayTrades(r.bars, r.sig, { entryRule: rule, exitRule: 'targets', ...pricing })
         }
         if (!trades.length) continue
@@ -132,7 +239,7 @@ export function runPrereg({ results, spyBars, ivByTicker = new Map(), dividendsB
           }
         }
       }
-      if (++n % 100 === 0) log(`  premium ${pm}: ${n}/${results.length}`)
+      if (++n % 100 === 0) log(`  premium ${pm}: ${n}/${all.length}`)
     }
     grid[String(pm)] = {}
     for (const rule of PREREG_RULES) {
@@ -142,12 +249,15 @@ export function runPrereg({ results, spyBars, ivByTicker = new Map(), dividendsB
     }
     log(`premium ${pm} done`)
   }
+  // The swing exit grid, at the calibrated premium (or 1.0 without one).
+  log('swing grid…')
+  const swing = runSwingGrid({ results: [...results, ...extraResults], premium: premium ?? 1, spyBars, ivByTicker, dividendsByTicker, extraEntries, log })
   const cal = premium != null ? grid[String(premium)]?.[PRIMARY_RULE] : null
   const v = cal ? verdict({ P1: cal.marked.P1, P2: cal.marked.P2 }) : { verdict: 'inconclusive', why: 'no calibrated premium (too little real IV history)' }
   return {
     summary: {
       recorded: '2026-10-05', rule: PRIMARY_RULE, premium: { calibrated: premium, samples: premiumN, grid: premiums },
-      reps, verdict: v, grid, ...extraSummary,
+      reps, verdict: v, grid, swing, ...extraSummary,
     },
     rows,
   }

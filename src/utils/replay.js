@@ -58,7 +58,48 @@ export const EXIT_RULES = [
   ['targets', 'Targets'],
   ['signals', 'Signals'],
   ['both', 'Both'],
+  // Swing (owner, 2026-10-05: "identify swing trades, exit at pre-determined
+  // high prices"): a stock price target fixed at entry, all out on the first
+  // close at or above it, else at a hold cap (a stock stop is a variant).
+  // Default = the nearest confirmed pivot high, 126-day cap, no stop. The
+  // grid is measured in the pre-registered test (SWING_GRID).
+  ['swing', 'Swing (price target)'],
 ]
+// target: 'pivot' = nearest confirmed swing high above entry (≥ SWING_BARS
+// bars after it, so known at entry), falling back to +pct when none sits
+// within maxPivot; 'pct' = entry × (1 + pct) on the stock; 'opt' = the
+// option's mark reaching cost × (1 + pct) (owner, 2026-10-05: with the
+// call's leverage a +25–50% option target is met on a 10–15% stock move).
+// stopPct: stock stop, null = none. maxHold in trading days.
+export const SWING = Object.freeze({ target: 'pivot', pct: 0.15, maxHold: 126, stopPct: null, maxPivot: 0.40, minPivot: 0.02 })
+export const SWING_GRID = Object.freeze({
+  targets: [['pct', 0.10], ['pct', 0.15], ['pct', 0.20], ['pivot', 0.15], ['opt', 0.25], ['opt', 0.50], ['opt', 0.75]],
+  // Hold caps = the owner's window (2026-10-05: "we don't want to hold for
+  // more than 2–18 months"): 2, 6, 12 and 18 months in trading days. The
+  // 18-month cap coincides with the playbook's time stop on a 2-year call.
+  holds: [42, 126, 252, 378], stops: [null, 0.08],
+  // Regime gate (owner, 2026-10-05, after the first grids: every version
+  // lost in 2022): null = every entry; 'spy200' = only entries signalled
+  // while SPY closed above its 200-day average that day.
+  gates: [null, 'spy200'],
+})
+export const SWING_PIVOT_BARS = 10
+
+// The swing target for a trade entered at bar e at price S0: the nearest
+// confirmed swing high above entry, else the % target. `highs` = indexes
+// from swingPoints(bars, SWING_PIVOT_BARS).
+export function swingTargetAt(bars, e, S0, highs, swing = SWING) {
+  const pctTarget = S0 * (1 + swing.pct)
+  if (swing.target === 'opt') return { target: null, optMult: 1 + swing.pct, kind: 'opt' }
+  if (swing.target !== 'pivot' || !highs) return { target: pctTarget, kind: 'pct' }
+  let best = null
+  for (const h of highs) {
+    if (h + SWING_PIVOT_BARS > e - 1) break // not confirmed by the signal bar
+    const p = bars[h].h
+    if (p >= S0 * (1 + swing.minPivot) && p <= S0 * (1 + swing.maxPivot) && (best == null || p < best)) best = p
+  }
+  return best != null ? { target: best, kind: 'pivot' } : { target: pctTarget, kind: 'pct' }
+}
 export const MOVE = Object.freeze({ minGain: 0.3, horizon: 126, early: 10 })
 
 // Puts (owner, 2026-10-03: "have we considered puts?" — tested, not
@@ -205,12 +246,13 @@ export function replaySignals(bars, model, suite, window = DEFAULT_WINDOW) {
 //   allowOverlap = true runs every entry as its own trade (controls:
 //               SPY-on-the-same-dates, monthly DCA); false = one position at
 //               a time, the app's rule
-export function oneTrade(bars, closes, sigma, i, { exitRule = 'targets', plan = EXIT_PLAYBOOK, opt = OPTION_MODEL, sell: sellSig = null, volAt = null, sticky = false, slipAt = null, yieldAt = null } = {}) {
+export function oneTrade(bars, closes, sigma, i, { exitRule = 'targets', plan = EXIT_PLAYBOOK, opt = OPTION_MODEL, sell: sellSig = null, volAt = null, sticky = false, slipAt = null, yieldAt = null, swing = SWING, highs = null } = {}) {
   const n = bars.length
   const e = i + 1
   if (e >= n) return null
   const useTargets = exitRule === 'targets' || exitRule === 'both'
   const useSignals = exitRule === 'signals' || exitRule === 'both'
+  const useSwing = exitRule === 'swing'
   const S0 = bars[e].o || bars[e].c
   const vIn = volAt ? volAt(i) : sigma[i]
   if (vIn == null) return null
@@ -221,6 +263,7 @@ export function oneTrade(bars, closes, sigma, i, { exitRule = 'targets', plan = 
   const K = strikeForDelta(S0, T0, v0, opt.delta, opt.rate, q0)
   const cost = bsCall(S0, K, T0, v0, opt.rate, q0) * (1 + slip)
   const expiry = dayMs(bars[e].t) + opt.dte * DAY_MS
+  const sw = useSwing ? swingTargetAt(bars, e, S0, highs, swing) : null
   let left = 1
   let proceeds = 0
   let stockOut = 0
@@ -247,6 +290,12 @@ export function oneTrade(bars, closes, sigma, i, { exitRule = 'targets', plan = 
     const v = bsCall(closes[j], K, daysLeft / 365, markVol(j), opt.rate, markQ(j))
     peak = Math.max(peak, v)
     if (daysLeft < plan.rollDays) { sell(j, left, v, 'time'); break }
+    if (useSwing) {
+      if (sw.kind === 'opt' ? v >= cost * sw.optMult : closes[j] >= sw.target) { sell(j, left, v, 'target'); break }
+      if (swing.stopPct != null && closes[j] <= S0 * (1 - swing.stopPct)) { sell(j, left, v, 'stop'); break }
+      if (j - e >= swing.maxHold) { sell(j, left, v, 'cap'); break }
+      continue
+    }
     if (useTargets) {
       plan.targets.forEach((t, k) => {
         if (!hit[k] && v >= cost * (1 + t)) { hit[k] = true; sell(j, plan.fractions[k], v, `t${k + 1}`) }
@@ -269,6 +318,7 @@ export function oneTrade(bars, closes, sigma, i, { exitRule = 'targets', plan = 
   return {
     signalI: i, signalT: bars[i].t, i: e, t: bars[e].t, stock: S0, strike: K, cost, vol: v0, slip, q: q0,
     exits, open, endI: end, endT: bars[end].t,
+    ...(sw ? { target: sw.kind === 'opt' ? cost * sw.optMult : sw.target, targetKind: sw.kind, hit: exits.some((x) => x.reason === 'target') } : {}),
     optionReturn: proceeds / cost - 1,
     stockReturn: stockOut / S0 - 1,
     bestStock: maxHigh / S0 - 1,
@@ -306,7 +356,8 @@ export function replayFromEntries(bars, entries, { allowOverlap = false, vol = n
 // after target 1 (the targets bank the gain, the signal guards the rest). No hard stop: the playbook cuts on the thesis, which a
 // replay can't see. A trade still open on the last bar is marked there.
 export function replayTrades(bars, sig, { entryRule = 'confluence', exitRule = 'targets', plan = EXIT_PLAYBOOK, opt = OPTION_MODEL, vol = null, ...pricing } = {}) {
-  const trades = replayFromEntries(bars, sig.entry[entryRule], { exitRule, plan, opt, vol, sell: sig.sell, ...pricing })
+  const highs = exitRule === 'swing' && !pricing.highs ? swingPoints(bars, SWING_PIVOT_BARS).highs : pricing.highs
+  const trades = replayFromEntries(bars, sig.entry[entryRule], { exitRule, plan, opt, vol, sell: sig.sell, ...pricing, highs })
   for (const t of trades) t.key = sig.buyKey?.[t.signalI] ?? null
   return trades
 }
@@ -459,6 +510,12 @@ export function tradeStats(trades, { bear = false } = {}) {
     bigLoss: r.length ? r.filter((x) => x <= -0.5).length / r.length : null,
     avgStock: avg(marked.map((t) => t.stockReturn)),
     avgDays: avg(done.map((t) => t.days)),
+    // Swing exit: how often the price target was reached, how fast, and
+    // what hits / misses returned on the option.
+    hitRate: trades.length && trades.some((t) => t.target != null) ? trades.filter((t) => t.hit).length / trades.length : null,
+    medDaysHit: (() => { const d = trades.filter((t) => t.hit).map((t) => t.days).sort((a, b) => a - b); return d.length ? d[Math.floor(d.length / 2)] : null })(),
+    hitAvg: avg(trades.filter((t) => t.hit && t.optionReturn != null).map((t) => t.optionReturn)),
+    missAvg: avg(trades.filter((t) => t.target != null && !t.hit && t.optionReturn != null).map((t) => t.optionReturn)),
     // How much of the best stock move inside each trade the exit kept.
     capture: bear
       ? avg(done.filter((t) => t.bestStock < -0.05).map((t) => Math.max(-1, Math.min(1, t.stockReturn / t.bestStock))))
