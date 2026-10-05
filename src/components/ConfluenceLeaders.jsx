@@ -145,7 +145,7 @@ export default function ConfluenceLeaders({ mine = [] }) {
         </div>
         <p className="mt-2 text-xs text-muted">
           {side === 'buy'
-            ? 'BUY SETUP = the entry rule is met today. EARLY = the dip hasn’t turned up yet; the rule buys anyway, a cautious entry waits. NOT YET = what’s still missing.'
+            ? 'BUY SETUP = the entry rule is met today. EARLY = momentum is still down; the rule buys anyway, a cautious entry waits for it to turn up. NOT YET = what’s still missing.'
             : 'Stocks showing 2+ sell signals near a high. For shares and spreads; a LEAPS follows its exit plan.'}
         </p>
       </div>
@@ -216,7 +216,7 @@ export default function ConfluenceLeaders({ mine = [] }) {
                     {/* Two facts */}
                     {trade && (
                       <span className="mt-3 grid grid-cols-2 gap-3">
-                        <Fact label="Momentum" value={r.momentum === 'up' ? 'Turned up · confirmed' : 'Still falling · early'} tone={r.momentum === 'up' ? 'text-green-400' : 'text-amber-400'} />
+                        <Fact label="Momentum" value={r.momentum === 'up' ? 'Up · confirmed' : 'Down · early'} tone={r.momentum === 'up' ? 'text-green-400' : 'text-amber-400'} />
                         {r.stop_price != null && (
                           <Fact label="Exit below" tone={edge ? 'text-amber-400' : 'text-fg'}
                             value={<><span className="font-mono-tab">{money(r.stop_price)}</span>{room != null && <span className={clsx('text-xs', edge ? 'text-amber-400' : 'text-muted')}> · {(room * 100).toFixed(1)}% away</span>}</>} />
