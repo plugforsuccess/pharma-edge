@@ -1571,6 +1571,28 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   and DCA lines and compare against the single-name rules on the Signal
   record card. Recorded in `docs/signal-engine/preregistration.md` ("Added
   2026-10-05 … the index call as a rule"). Changes no live rule.
+- **The swing exit** (owner, 2026-10-05: "maybe the look back is too far.
+  We want the app to identify swing trades (LEAPS) and exit at pre-determined
+  high prices. It's not about buying vs a random day."). The export showed
+  the entries *find* swings — 80–90% of 2023–25 signal trades saw the stock
+  rise ≥ 10% inside the trade — while ~10% ever reached the playbook's +100%
+  option target after 500+ days; the exit was the mismatch. `exitRule:
+  'swing'` in `replay.js` (`SWING`, `swingTargetAt`, `SWING_PIVOT_BARS`): a
+  stock price target fixed at entry — the nearest **confirmed** swing high
+  above entry (≥ 10 bars after it, so known at entry; +15% when none sits
+  within 40%) or a % target — all out at the option's mark on the first
+  close at or above it, else at a hold cap (126 days default), a stock stop
+  as a variant; `tradeStats` adds `hitRate`, `medDaysHit`, `hitAvg`,
+  `missAvg`. It is an `EXIT_RULES` option (Replay card "Swing") and the
+  **pre-registered grid** (`SWING_GRID`: targets +10 / +15 / +20% / pivot ×
+  cap 63 / 126 × stop none / 8% = 16; `runSwingGrid` in `prereg.mjs`,
+  `SWING_RULES` setup / confluence / momentum / triple, at the calibrated
+  premium) → `summary.prereg.swing` with per-variant all / P1 / P2 / by
+  signal year and a 50-replication random control for the default variant;
+  Signal record's **Swing exit** card (rule and period switches, "Last 2
+  years"). Reading rule and weaknesses recorded in
+  `docs/signal-engine/preregistration.md` ("the swing exit"). The entries
+  and every live rule are unchanged.
 - **Rule optimizer** (owner, 2026-10-04: "do everything mathematically
   possible to get the guarantee closest to 1.0" — advised: 1.0 is a
   statement about the future; what can be pushed is out-of-sample

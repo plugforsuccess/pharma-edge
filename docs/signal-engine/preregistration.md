@@ -177,3 +177,44 @@ its own, recorded before it runs:
   index call's result is mostly the index's drift times leverage, so a
   bear period would reverse the sign; survivorship does not apply to SPY
   but does flatter the single-name rules it is compared with.
+
+## Added 2026-10-05 (owner: "swing trades, exit at pre-determined high prices"): the swing exit
+
+The owner's framing, recorded before the run: the goal is not to beat a
+random day. It is to **identify a swing in a stock, buy the LEAPS, and sell
+when the stock reaches a price set at entry.** The existing export already
+says the entries find swings — in 2023–2025, 80–90% of signal trades saw
+the stock rise ≥ 10% inside the trade and 55–80% saw ≥ 20% — while only
+~10% ever reached the exit playbook's first target (+100% on an 18-month
+option) because the trade waited 500+ days for it. The mismatch is the exit,
+so the exit is what this test changes. The entries are unchanged.
+
+- **Rule (`exitRule: 'swing'`):** at entry, fix a stock price target. Exit
+  the whole position at the option's marked value on the first close at or
+  above the target; otherwise at a time cap; a stock stop is a variant.
+  Instrument unchanged (0.75Δ, ~2-year call at the calibrated premium).
+- **Grid (16 variants, all reported, none chosen in advance):**
+  target ∈ { +10%, +15%, +20% above the entry price, **pivot** = the
+  nearest confirmed swing high above entry (a high with ≥ 10 bars after
+  it — known at entry; +15% when none sits within 40%) } ×
+  hold cap ∈ { 63, 126 trading days } × stop ∈ { none, stock −8% }.
+- **What is measured:** target hit rate; median days to the target; mean
+  and median option return with every trade counted (open at mark);
+  share lost ≥ 50%; expectancy = hit rate × mean hit return + miss rate ×
+  mean miss return. By period P1 / P2 and **by signal year**, since the
+  owner suspects the five-year look-back is too long: the last two years
+  are reported on their own.
+- **Controls, kept but secondary:** random entries in the same months
+  with the same swing exit, so a bull-market hit rate is not mistaken for
+  selection. The owner's question is the hit rate and the expectancy; the
+  control is reported beside them, not in front of them.
+- **Reading:** a variant is worth a live test when its hit rate is above
+  60% in both periods, its expectancy is positive in both, and the
+  neighbouring variants (±5% target, the other hold cap) agree within
+  ~10 points. The Signal record card shows the grid; the Replay card gets a
+  **Swing** sell option (pivot target, 126-day cap, no stop) so a single
+  chart can be read the same way. Nothing changes live until the owner
+  adopts a variant after that reading.
+- **Known weaknesses:** no stop means a miss rides to the cap; the pivot
+  target depends on a swing high existing above entry; five bullish years
+  inflate every hit rate, which is what the random control is for.

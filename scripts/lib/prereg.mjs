@@ -11,7 +11,9 @@
 //      and the verdict — read at the calibrated premium
 //   4. one export row per trade at the calibrated premium (replay_trades)
 
-import { replayTrades, replayFromEntries, trailingVol } from '../../src/utils/replay.js'
+import { replayTrades, replayFromEntries, trailingVol, tradeStats, SWING, SWING_GRID, SWING_PIVOT_BARS } from '../../src/utils/replay.js'
+import { swingPoints } from '../../src/utils/confluence.js'
+import { randomEntries, mulberry32 } from '../../src/utils/controls.js'
 import { PERIODS, PREMIUM_GRID, RANDOM_REPS, pricingFor, controlsForTicker, periodResult, bucketResults, verdict, periodOf, calibratePremium } from '../../src/utils/controls.js'
 
 // momentum (2026-10-05, after the Triple result): cross-sectional 12-1
@@ -92,6 +94,70 @@ export function calibrate(results, ivRows) {
   return { ...calibratePremium(samples), tickers: new Set(ivRows.map((x) => x.ticker)).size }
 }
 
+// The swing exit grid (docs/signal-engine/preregistration.md, "the swing
+// exit", 2026-10-05): every entry rule × 16 exit variants at the calibrated
+// premium — hit rate, days to target, hit / miss returns, by period and by
+// signal year; a random-entry control (same months, same swing exit) for
+// the default variant only.
+export const SWING_RULES = ['setup', 'confluence', 'momentum', 'triple']
+const SWING_RANDOM_REPS = 50
+export function swingVariants() {
+  const out = []
+  for (const [target, pct] of SWING_GRID.targets) for (const maxHold of SWING_GRID.holds) for (const stopPct of SWING_GRID.stops) {
+    out.push({ key: `${target}${target === 'pct' ? Math.round(pct * 100) : ''}:${maxHold}:${stopPct == null ? 'none' : Math.round(stopPct * 100)}`, swing: { ...SWING, target, pct, maxHold, stopPct } })
+  }
+  return out
+}
+function swingSummary(trades) {
+  const by = (list) => { const s = tradeStats(list); return { n: s.n, open: s.open, hitRate: r4(s.hitRate), medDaysHit: s.medDaysHit, avg: r4(s.avg), median: r4(s.median), lostHalf: r4(s.bigLoss), hitAvg: r4(s.hitAvg), missAvg: r4(s.missAvg), avgDays: s.avgDays == null ? null : Math.round(s.avgDays) } }
+  const years = {}
+  for (const t of trades) { const y = t.signalT.slice(0, 4); (years[y] ??= []).push(t) }
+  return {
+    all: by(trades), P1: by(trades.filter((t) => periodOf(t.signalT) === 'P1')), P2: by(trades.filter((t) => periodOf(t.signalT) === 'P2')),
+    byYear: Object.fromEntries(Object.entries(years).sort().map(([y, l]) => [y, by(l)])),
+  }
+}
+export function runSwingGrid({ results, premium, ivByTicker = new Map(), dividendsByTicker = new Map(), extraEntries = new Map(), log = () => {} }) {
+  const variants = swingVariants()
+  const defaultKey = variants.find((v) => v.swing.target === SWING.target && v.swing.maxHold === SWING.maxHold && v.swing.stopPct === SWING.stopPct)?.key
+  const acc = Object.fromEntries(SWING_RULES.map((r) => [r, Object.fromEntries(variants.map((v) => [v.key, []]))]))
+  const randomAcc = Object.fromEntries(SWING_RULES.map((r) => [r, []]))
+  let n = 0
+  for (const r of results) {
+    const pricing = pricingFor(r.bars, { premium, dividends: dividendsByTicker.get(r.ticker) ?? {}, realIv: ivByTicker.get(r.ticker) ?? null })
+    const highs = swingPoints(r.bars, SWING_PIVOT_BARS).highs
+    for (const rule of SWING_RULES) {
+      const entries = extraEntries.has(rule) ? extraEntries.get(rule).get(r.ticker) : r.sig.entry?.[rule]
+      if (!entries || !entries.some(Boolean)) continue
+      for (const v of variants) {
+        const trades = replayFromEntries(r.bars, entries, { exitRule: 'swing', swing: v.swing, highs, sell: r.sig.sell, ...pricing })
+        for (const t of trades) acc[rule][v.key].push({ ...t, ticker: r.ticker })
+        if (v.key === defaultKey && trades.length) {
+          const rng = mulberry32(hash(r.ticker) ^ 0x5157)
+          const dates = trades.map((t) => t.signalT)
+          for (let k = 0; k < SWING_RANDOM_REPS; k++) {
+            const rt = replayFromEntries(r.bars, randomEntries(r.bars, dates, rng), { exitRule: 'swing', swing: v.swing, highs, ...pricing })
+            ;(randomAcc[rule][k] ??= []).push(...rt)
+          }
+        }
+      }
+    }
+    if (++n % 100 === 0) log(`  swing grid: ${n}/${results.length}`)
+  }
+  const out = { grid: SWING_GRID, defaultKey, variants: variants.map((v) => ({ key: v.key, ...v.swing })), rules: {} }
+  for (const rule of SWING_RULES) {
+    const perVariant = Object.fromEntries(variants.map((v) => [v.key, swingSummary(acc[rule][v.key])]))
+    const reps = (randomAcc[rule] ?? []).filter(Boolean)
+    const randomHit = reps.map((l) => (l.length ? l.filter((t) => t.hit).length / l.length : null)).filter((x) => x != null)
+    const randomAvg = reps.map((l) => (l.length ? l.reduce((s, t) => s + t.optionReturn, 0) / l.length : null)).filter((x) => x != null)
+    const mean = (xs) => (xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : null)
+    const own = perVariant[defaultKey]?.all
+    const pctile = (xs, v) => (xs.length && v != null ? xs.filter((x) => x <= v).length / xs.length : null)
+    out.rules[rule] = { variants: perVariant, random: { reps: reps.length, hitRate: r4(mean(randomHit)), avg: r4(mean(randomAvg)), hitPercentile: r4(pctile(randomHit, own?.hitRate)), avgPercentile: r4(pctile(randomAvg, own?.avg)) } }
+  }
+  return out
+}
+
 export function runPrereg({ results, spyBars, ivByTicker = new Map(), dividendsByTicker = new Map(), premium, premiumN = 0, reps = RANDOM_REPS, extraEntries = new Map(), extraResults = [], extraSummary = {}, log = () => {} }) {
   const premiums = [...new Set([...PREMIUM_GRID, premium].filter((x) => x != null))].sort((a, b) => a - b)
   const grid = {}
@@ -150,12 +216,15 @@ export function runPrereg({ results, spyBars, ivByTicker = new Map(), dividendsB
     }
     log(`premium ${pm} done`)
   }
+  // The swing exit grid, at the calibrated premium (or 1.0 without one).
+  log('swing grid…')
+  const swing = runSwingGrid({ results: [...results, ...extraResults], premium: premium ?? 1, ivByTicker, dividendsByTicker, extraEntries, log })
   const cal = premium != null ? grid[String(premium)]?.[PRIMARY_RULE] : null
   const v = cal ? verdict({ P1: cal.marked.P1, P2: cal.marked.P2 }) : { verdict: 'inconclusive', why: 'no calibrated premium (too little real IV history)' }
   return {
     summary: {
       recorded: '2026-10-05', rule: PRIMARY_RULE, premium: { calibrated: premium, samples: premiumN, grid: premiums },
-      reps, verdict: v, grid, ...extraSummary,
+      reps, verdict: v, grid, swing, ...extraSummary,
     },
     rows,
   }

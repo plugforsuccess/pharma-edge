@@ -60,6 +60,7 @@ export default function SignalRecord() {
       ) : (
         <>
           <PreregCard p={s.prereg} />
+          <SwingCard sw={s.prereg?.swing} />
           {opt && <OptimizerCard o={opt} />}
 
           <div className="flex gap-1 p-1 rounded-xl bg-card border border-border mb-4" role="tablist" aria-label="Buy on">
@@ -207,6 +208,74 @@ export default function SignalRecord() {
   )
 }
 
+
+// The swing exit grid (owner, 2026-10-05: "identify swing trades, exit at
+// pre-determined high prices"): entry rule × {price target, hold cap, stop}
+// → hit rate, days to the target, option return, by period / year, with
+// the random-entry control beside the default variant.
+const SWING_RULE_LABEL = { setup: 'Buy setup', confluence: 'Confluence', momentum: 'Momentum 12-1', triple: 'Triple ◆' }
+const SWING_VIEWS = [['all', 'All'], ['P1', '2022–23'], ['P2', '2024→'], ['recent', 'Last 2 years']]
+function SwingCard({ sw }) {
+  const [rule, setRule] = useState('setup')
+  const [view, setView] = useState('all')
+  if (!sw) return null
+  const r = sw.rules?.[rule]
+  const variantLabel = (v) => `${v.target === 'pivot' ? 'Prior pivot high' : `+${Math.round(v.pct * 100)}% stock`} · ${v.maxHold}d cap${v.stopPct != null ? ` · ${Math.round(v.stopPct * 100)}% stop` : ''}`
+  const years = Object.keys(r?.variants?.[sw.defaultKey]?.byYear ?? {}).sort()
+  const recentYears = years.slice(-2)
+  const pick = (vs) => {
+    if (view === 'recent') {
+      const lists = recentYears.map((y) => vs.byYear[y]).filter(Boolean)
+      if (!lists.length) return null
+      const n = lists.reduce((s, x) => s + x.n, 0)
+      const w = (k) => (n ? lists.reduce((s, x) => s + (x[k] ?? 0) * x.n, 0) / n : null)
+      return { n, hitRate: w('hitRate'), medDaysHit: lists[0].medDaysHit, avg: w('avg'), lostHalf: w('lostHalf'), hitAvg: w('hitAvg'), missAvg: w('missAvg') }
+    }
+    return vs[view]
+  }
+  const rows = (sw.variants ?? []).map((v) => ({ v, s: r?.variants?.[v.key] ? pick(r.variants[v.key]) : null }))
+  const share = (x) => (x == null ? '—' : `${Math.round(x * 100)}%`)
+  return (
+    <Card title="Swing exit">
+      <div className="px-5 pb-3 text-xs text-muted">
+        Same entries, a different exit: a stock price fixed at entry, all out on the first close at or above it, else at the hold cap. The question is the hit rate and what hits and misses returned on the call — by period, because the look-back may be too long.
+      </div>
+      <div className="px-5 pb-3 flex flex-wrap gap-1.5">
+        {Object.keys(sw.rules ?? {}).map((k) => (
+          <button key={k} type="button" onClick={() => setRule(k)} className={clsx('min-h-[32px] px-2.5 rounded-lg border text-[11px] font-semibold', rule === k ? 'border-violet-400/50 bg-violet-400/10 text-violet-300' : 'border-border text-muted')}>{SWING_RULE_LABEL[k] ?? k}</button>
+        ))}
+        <span className="flex-1" />
+        {SWING_VIEWS.map(([k, label]) => (
+          <button key={k} type="button" onClick={() => setView(k)} className={clsx('min-h-[32px] px-2.5 rounded-lg border text-[11px] font-semibold', view === k ? 'border-amber-400/50 bg-amber-400/10 text-amber-300' : 'border-border text-muted')}>{label}</button>
+        ))}
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-[11px] font-mono-tab">
+          <thead><tr className="text-muted border-t border-hairline"><th className="text-left font-normal px-5 py-2">Exit</th><th className="text-right font-normal pr-3">Trades</th><th className="text-right font-normal pr-3">Hit</th><th className="text-right font-normal pr-3">Days</th><th className="text-right font-normal pr-3">Avg</th><th className="text-right font-normal pr-3">Hit avg</th><th className="text-right font-normal pr-3">Miss avg</th><th className="text-right font-normal pr-5">Lost ½</th></tr></thead>
+          <tbody>
+            {rows.map(({ v, s }) => (
+              <tr key={v.key} className={clsx('border-t border-hairline', v.key === sw.defaultKey && 'bg-violet-400/[0.06]')}>
+                <td className="px-5 py-1.5 text-fg whitespace-nowrap">{variantLabel(v)}{v.key === sw.defaultKey ? <span className="text-muted"> · default</span> : null}</td>
+                <td className="text-right pr-3 text-subtle">{s?.n ?? '—'}</td>
+                <td className={clsx('text-right pr-3', s?.hitRate >= 0.6 ? 'text-green-400' : 'text-fg')}>{share(s?.hitRate)}</td>
+                <td className="text-right pr-3 text-subtle">{s?.medDaysHit ?? '—'}</td>
+                <td className={clsx('text-right pr-3', tone(s?.avg))}>{pctS(s?.avg)}</td>
+                <td className="text-right pr-3 text-green-400">{pctS(s?.hitAvg)}</td>
+                <td className="text-right pr-3 text-rose-300">{pctS(s?.missAvg)}</td>
+                <td className="text-right pr-5 text-subtle">{share(s?.lostHalf)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {r?.random && (
+        <div className="px-5 py-3 border-t border-hairline text-[11px] text-muted">
+          Random entries in the same months, same default exit ({r.random.reps} replications): hit rate {share(r.random.hitRate)}, avg {pctS(r.random.avg)} — the rule's hit rate sits at the {r.random.hitPercentile == null ? '—' : `${Math.round(r.random.hitPercentile * 100)}th`} percentile. Shown beside, not in front: the owner's question is the hit rate and the expectancy.
+        </div>
+      )}
+    </Card>
+  )
+}
 
 // The pre-registered test (docs/signal-engine/preregistration.md, recorded
 // 2026-10-05 before the code existed): the buy setup as shown vs the same

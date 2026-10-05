@@ -18,3 +18,10 @@ One rule, no grid: the SPY 0.75Δ ~2-year call at each completed month end,
 exit playbook. Added after the first momentum run (momentum +38% / buy
 setup +19% vs the paired SPY control +77%). Result: pending the next
 universe run.
+
+## 2026-10-05 — swing exit grid (16 variants)
+
+Price target {+10%, +15%, +20%, nearest confirmed pivot high} × hold cap
+{63, 126 bars} × stop {none, stock −8%}, on the existing entry rules.
+Measured on hit rate and expectancy, by period and by signal year, with
+the random-entry control beside. Result: pending the next universe run.
