@@ -385,17 +385,23 @@ export function dropStats(graded) {
   }
 }
 
+// Every trade counts — an open one at its mark on the last bar (owner,
+// 2026-10-05: closed-only stats showed 2026 at a 100% win rate, because
+// winners close at target 1 within months while losers sit open until the
+// time stop ~18 months later; the open book was the losers). Days held and
+// capture still describe closed trades only.
 export function tradeStats(trades, { bear = false } = {}) {
   const done = trades.filter((t) => !t.open)
-  const r = done.map((t) => t.optionReturn).sort((a, b) => a - b)
+  const marked = trades.filter((t) => t.optionReturn != null)
+  const r = marked.map((t) => t.optionReturn).sort((a, b) => a - b)
   const avg = (xs) => (xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : null)
   return {
-    n: trades.length, closed: done.length,
+    n: trades.length, closed: done.length, open: trades.length - done.length,
     winRate: r.length ? r.filter((x) => x > 0).length / r.length : null,
     avg: avg(r),
     median: r.length ? (r.length % 2 ? r[(r.length - 1) / 2] : (r[r.length / 2 - 1] + r[r.length / 2]) / 2) : null,
     bigLoss: r.length ? r.filter((x) => x <= -0.5).length / r.length : null,
-    avgStock: avg(done.map((t) => t.stockReturn)),
+    avgStock: avg(marked.map((t) => t.stockReturn)),
     avgDays: avg(done.map((t) => t.days)),
     // How much of the best stock move inside each trade the exit kept.
     capture: bear

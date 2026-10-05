@@ -47,10 +47,29 @@ export function blockers(model) {
   return out
 }
 
-export function buyVerdict({ score, trendUp, cond }) {
+// NOT NOW (owner, 2026-10-05: UNH ranked #1 while the rule's own June
+// entry on UNH sat at −51%): the rule is met today but it is already
+// losing on this ticker. Not averaging into a loser; nothing to do with
+// the pattern's pooled history.
+export const HOLD_OPEN_LOSS = -0.3
+
+const pctS = (x) => `${x >= 0 ? '+' : '−'}${Math.round(Math.abs(x) * 100)}%`
+const monthOf = (t) => new Date(`${t}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' })
+
+export function holdReason(own, ticker) {
+  if (!own) return null
+  const z = own.zone, c = own.confluence
+  if (z?.open && z.open.option <= HOLD_OPEN_LOSS) return `the ${monthOf(z.open.signal)} entry on this rule is still ${pctS(z.open.option)}`
+  if (c?.open && c.open.option <= HOLD_OPEN_LOSS) return `a ${monthOf(c.open.signal)} entry on similar signals is still ${pctS(c.open.option)}`
+  if (z && z.n >= 1 && z.avg != null && z.avg < 0) return `this rule has lost on ${ticker} — ${z.wins} of ${z.n} up, ${pctS(z.avg)} on average`
+  return null
+}
+
+export function buyVerdict({ score, trendUp, cond, hold = null }) {
   if (score < MIN_SCORE) return null
   if (!trendUp) return 'watch'
-  return cond?.all ? 'enter' : 'wait'
+  if (!cond?.all) return 'wait'
+  return hold ? 'hold' : 'enter'
 }
 
 // Bravo's regime at the close: 'up' = close and fast EMA above the basis.
@@ -101,7 +120,7 @@ export function ownRecord(bars, model, suite) {
     const st = tradeStats(trades)
     const open = trades.find((t) => t.open)
     return {
-      n: st.n, closed: st.closed, wins: trades.filter((t) => !t.open && t.optionReturn > 0).length,
+      n: st.n, closed: st.closed, open_n: st.open, wins: trades.filter((t) => t.optionReturn > 0).length,
       avg: r2(st.avg), median: r2(st.median), big_loss: r2(st.bigLoss), avg_days: st.avgDays == null ? null : Math.round(st.avgDays),
       open: open ? { signal: open.signalT, price: r2(open.stock), option: r2(open.optionReturn), stock: r2(open.stockReturn) } : null,
       last: trades.slice(-3).map((t) => ({ signal: t.signalT, end: t.open ? null : t.endT, option: r2(t.optionReturn), stock: r2(t.stockReturn), open: !!t.open })),

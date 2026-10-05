@@ -33,7 +33,7 @@ import { suiteModel } from '../src/utils/signalSuite.js'
 import { confluenceModel, poolStats, blendedEstimate, baselineStats, MIN_SCORE, SIDES } from '../src/utils/confluence.js'
 import { alignCloses } from '../src/utils/signalSuite.js'
 import { dailyBars, mapLimit, sources } from './lib/marketData.mjs'
-import { blockers, buyVerdict, sellVerdict, tradeSpec, structureStop, momentum, ownRecord } from './lib/verdict.mjs'
+import { blockers, buyVerdict, sellVerdict, tradeSpec, structureStop, momentum, ownRecord, holdReason } from './lib/verdict.mjs'
 
 const args = process.argv.slice(2)
 const MODE = (args[args.indexOf('--mode') + 1] && args.includes('--mode')) ? args[args.indexOf('--mode') + 1] : 'dry-run'
@@ -83,6 +83,7 @@ export function rankAll(results, pools) {
     for (const r of results) {
       const est = blendedEstimate({ today: r[side].today, setups: r[side].setups, pool: pools[side], horizons: HORIZONS, side })
       const now = r[side].today.now
+      const hold = side === 'buy' ? holdReason(r.ownRecord, r.ticker) : null
       const row = {
         side, ticker: r.ticker, as_of: r.asOf, close: r.close, score: now?.score ?? 0, lit: now?.lit ?? [],
         combo: now?.key || null, conditions_met: side === 'buy' ? r.conditionsMet : null, trend_up: r.trendUp,
@@ -94,7 +95,8 @@ export function rankAll(results, pools) {
         est_badq_3m: hz(est, '3M', 'badq'), est_badq_6m: hz(est, '6M', 'badq'),
         est_beat_3m: hz(est, '3M', 'beat'), est_beat_6m: hz(est, '6M', 'beat'),
         last_signal: r[side].lastSignal, etb_convergence: side === 'buy' ? r.etbConvergence : false, rank: null,
-        verdict: side === 'buy' ? buyVerdict({ score: now?.score ?? 0, trendUp: r.trendUp, cond: r.cond }) : sellVerdict({ score: now?.score ?? 0, lit: now?.lit ?? [] }),
+        verdict: side === 'buy' ? buyVerdict({ score: now?.score ?? 0, trendUp: r.trendUp, cond: r.cond, hold }) : sellVerdict({ score: now?.score ?? 0, lit: now?.lit ?? [] }),
+        hold_reason: hold,
         blockers: side === 'buy' ? r.blockers : null, trade: side === 'buy' ? r.trade : null,
         stop_price: r.stop?.price ?? null, stop_date: r.stop?.date ?? null, momentum: r.momentum,
         own_record: side === 'buy' ? r.ownRecord : null,
@@ -109,14 +111,18 @@ export function rankAll(results, pools) {
     }
     // Tier 1: E+T+B convergence (buy side only), then Tier 2: other 3+ signals
     cands.sort((a, b) => {
-      // Rows that meet the entry rule (buy zone YES) come first.
-      if (side === 'buy' && (a.verdict === 'enter') !== (b.verdict === 'enter')) return a.verdict === 'enter' ? -1 : 1
-      // Among entries, room to the stop first (owner, 2026-10-05): a setup
-      // at the bottom edge of the buy zone, with the floor 1% away, is a
-      // different trade from one mid-band with 7% of room.
-      if (side === 'buy' && a.verdict === 'enter' && b.verdict === 'enter') {
-        const room = (r) => (r.stop_price != null && r.close > 0 ? 1 - r.stop_price / r.close : 0)
-        if (room(b) !== room(a)) return room(b) - room(a)
+      // Buy side (owner, 2026-10-05: quality, not room): BUY SETUP → NOT YET
+      // → NOT NOW; within setups more signals first, then momentum up before
+      // early, then the ticker's own record of the rule.
+      if (side === 'buy') {
+        const tier = (r) => (r.verdict === 'enter' ? 0 : r.verdict === 'wait' ? 1 : r.verdict === 'hold' ? 2 : 3)
+        if (tier(a) !== tier(b)) return tier(a) - tier(b)
+        if (a.verdict === 'enter' && b.verdict === 'enter') {
+          if (b.score !== a.score) return b.score - a.score
+          if ((a.momentum === 'up') !== (b.momentum === 'up')) return a.momentum === 'up' ? -1 : 1
+          const own = (r) => r.own_record?.zone?.avg ?? 0
+          if (own(b) !== own(a)) return own(b) - own(a)
+        }
       }
       // Tier by E+T+B convergence (buy side) — tier 1 first
       if (side === 'buy') {

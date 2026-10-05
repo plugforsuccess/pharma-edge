@@ -1382,6 +1382,20 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   holding a losing entry). Amber, with "X's own history disagrees with the
   pattern's record below", when the own trades lost while the pool's win
   rate is ≥ 55%.
+  **NOT NOW** (owner, 2026-10-05: UNH ranked #1 while the rule's own June
+  entry on UNH sat at −51% — "either adjust the signals or don't present
+  it"): the rule is met today but it is already losing on this ticker —
+  an open entry on the rule (or on the 2-signal version) below −30%
+  (`HOLD_OPEN_LOSS`), or the ticker's own record of the rule negative →
+  verdict `hold`, `hold_reason` on the row ("The rule is met, but the Jun
+  2026 entry on this rule is still −51%"), no trade line, ranked after
+  NOT YET. Not averaging into a loser; unrelated to the pattern's pooled
+  history. **Order** among BUY SETUP rows: more signals, then momentum up
+  before early, then the ticker's own record (room to the stop is shown,
+  no longer sorted on — it ranked post-crash setups first). **Replay stats
+  count every trade, open ones at their mark** (`tradeStats`; owner,
+  2026-10-05: closed-only stats showed 2026 at a 100% win rate because
+  winners close at target 1 while losers sit open until the time stop).
   Computed nightly in `scripts/lib/verdict.mjs` → `confluence_ranks.verdict
   / blockers / trade / stop_price / stop_date / momentum / est_win_3m`;
   the entry card falls back to the pool's record ("across 564 tickers:
@@ -1431,6 +1445,9 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   Replay card and a Puts card on Signal record. **Nothing suggests a put
   yet** — the LEAPS bot stays long only; bear trades would sit with the
   spread rules if the test holds up.
+  **Stats count open trades at their mark** (2026-10-05; before that,
+  closed-only — see NOT NOW above): `tradeStats` returns `open` beside
+  `closed`; win rate / average / median / lost-half include the open book.
   **Universe:** `scripts/replay-universe.mjs` in
   `.github/workflows/replay-universe.yml` (Saturdays, dispatch, branch
   pushes touching it) replays every ticker, pools trades per rule pair,

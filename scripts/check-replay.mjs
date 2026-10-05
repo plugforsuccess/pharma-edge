@@ -239,5 +239,13 @@ eq('put at expiry = intrinsic', bsPut(80, 100, 0, 0.2), 20)
   eq('trades never overlap', Object.values(m.runs).every((r) => r.trades.every((t, k, a) => k === 0 || t.signalI > a[k - 1].endI)), true)
 }
 
+// Open trades count at their mark (owner, 2026-10-05): closed-only stats
+// hid the open losers.
+{
+  const st = tradeStats([{ open: false, optionReturn: 1, stockReturn: 0.3, days: 300, bestStock: 0.5 }, { open: true, optionReturn: -0.5, stockReturn: -0.1, bestStock: 0.02 }])
+  eq('open trade counts at its mark', [st.n, st.closed, st.open, st.winRate, st.avg, st.bigLoss], [2, 1, 1, 0.5, 0.25, 0.5])
+  eq('days held still closed-only', st.avgDays, 300)
+}
+
 console.log(`replay checks: ${passed} passed, ${failures.length} failed`)
 if (failures.length) { for (const f of failures) console.log('  ✗', f); process.exit(1) }
