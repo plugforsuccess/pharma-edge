@@ -215,9 +215,11 @@ export default function SignalRecord() {
 // the random-entry control beside the default variant.
 const SWING_RULE_LABEL = { setup: 'Buy setup', confluence: 'Confluence', momentum: 'Momentum 12-1', triple: 'Triple ◆' }
 const SWING_VIEWS = [['all', 'All'], ['P1', '2022–23'], ['P2', '2024→'], ['recent', 'Last 2 years']]
+const SWING_GATES = [[null, 'Every entry'], ['spy200', 'SPY above 200-day']]
 function SwingCard({ sw }) {
   const [rule, setRule] = useState('setup')
   const [view, setView] = useState('all')
+  const [gate, setGate] = useState(null)
   if (!sw) return null
   const r = sw.rules?.[rule]
   const months = (d) => (d >= 42 && d % 21 === 0 ? `${d / 21} mo` : `${d}d`)
@@ -234,7 +236,8 @@ function SwingCard({ sw }) {
     }
     return vs[view]
   }
-  const rows = (sw.variants ?? []).map((v) => ({ v, s: r?.variants?.[v.key] ? pick(r.variants[v.key]) : null }))
+  const hasGates = (sw.variants ?? []).some((v) => v.gate)
+  const rows = (sw.variants ?? []).filter((v) => !hasGates || (v.gate ?? null) === gate).map((v) => ({ v, s: r?.variants?.[v.key] ? pick(r.variants[v.key]) : null }))
   const share = (x) => (x == null ? '—' : `${Math.round(x * 100)}%`)
   return (
     <Card title="Swing exit">
@@ -250,6 +253,14 @@ function SwingCard({ sw }) {
           <button key={k} type="button" onClick={() => setView(k)} className={clsx('min-h-[32px] px-2.5 rounded-lg border text-[11px] font-semibold', view === k ? 'border-amber-400/50 bg-amber-400/10 text-amber-300' : 'border-border text-muted')}>{label}</button>
         ))}
       </div>
+      {hasGates && (
+        <div className="px-5 pb-3 flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] text-muted mr-1">Regime gate</span>
+          {SWING_GATES.map(([k, label]) => (
+            <button key={String(k)} type="button" onClick={() => setGate(k)} className={clsx('min-h-[32px] px-2.5 rounded-lg border text-[11px] font-semibold', gate === k ? 'border-green-400/50 bg-green-400/10 text-green-400' : 'border-border text-muted')}>{label}</button>
+          ))}
+        </div>
+      )}
       <div className="overflow-x-auto">
         <table className="w-full text-[11px] font-mono-tab">
           <thead><tr className="text-muted border-t border-hairline"><th className="text-left font-normal px-5 py-2">Exit</th><th className="text-right font-normal pr-3">Trades</th><th className="text-right font-normal pr-3">Hit</th><th className="text-right font-normal pr-3">Days</th><th className="text-right font-normal pr-3">Avg</th><th className="text-right font-normal pr-3">Hit avg</th><th className="text-right font-normal pr-3">Miss avg</th><th className="text-right font-normal pr-5">Lost ½</th></tr></thead>

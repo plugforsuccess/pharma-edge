@@ -237,3 +237,17 @@ at a +25% call target) but misses cost more than hits earned, an 8% stock
 stop made every variant worse, and 2022 lost a third per trade on every
 version — a bull-market plan that needs a regime gate, tested next. This
 amendment widens the window; it does not change the reading rule.
+
+**Amendment, same day, after the second grid was read** (owner: "Sure" to
+the regime gate): every swing variant also runs **gated** — entries count
+only when SPY closed above its 200-day average on the signal day (112
+variants). What was read before this change, so it can't be fitted after:
+with the owner's 2–18 month window, momentum entries selling the whole
+call at +50% / +75% with a 12-month cap and no stop hit 60% / 52% and
+averaged +17% / +24% per trade, positive in 2023, 2024, 2025 and 2026 and
+−21% to −23% in 2022; the buy setup carried none of this; two-month caps
+were ~zero; the pivot target hit 80% for +18%. **Reading the gate:** it is
+worth paper trading if it removes most of 2022's trades while keeping
+2023–25's average within ~5 points, *and* the gated hit rate and average
+hold in the last two years. A gate that merely trims trade count in every
+year is noise.

@@ -14,6 +14,7 @@
 import { replayTrades, replayFromEntries, trailingVol, tradeStats, SWING, SWING_GRID, SWING_PIVOT_BARS } from '../../src/utils/replay.js'
 import { swingPoints } from '../../src/utils/confluence.js'
 import { randomEntries, mulberry32 } from '../../src/utils/controls.js'
+import { sma } from '../../src/utils/indicators.js'
 import { PERIODS, PREMIUM_GRID, RANDOM_REPS, pricingFor, controlsForTicker, periodResult, bucketResults, verdict, periodOf, calibratePremium } from '../../src/utils/controls.js'
 
 // momentum (2026-10-05, after the Triple result): cross-sectional 12-1
@@ -103,10 +104,23 @@ export const SWING_RULES = ['setup', 'confluence', 'momentum', 'triple']
 const SWING_RANDOM_REPS = 50
 export function swingVariants() {
   const out = []
-  for (const [target, pct] of SWING_GRID.targets) for (const maxHold of SWING_GRID.holds) for (const stopPct of SWING_GRID.stops) {
-    out.push({ key: `${target}${target === 'pivot' ? '' : Math.round(pct * 100)}:${maxHold}:${stopPct == null ? 'none' : Math.round(stopPct * 100)}`, swing: { ...SWING, target, pct, maxHold, stopPct } })
+  for (const gate of SWING_GRID.gates ?? [null]) for (const [target, pct] of SWING_GRID.targets) for (const maxHold of SWING_GRID.holds) for (const stopPct of SWING_GRID.stops) {
+    out.push({ key: `${target}${target === 'pivot' ? '' : Math.round(pct * 100)}:${maxHold}:${stopPct == null ? 'none' : Math.round(stopPct * 100)}${gate ? `:${gate}` : ''}`, gate, swing: { ...SWING, target, pct, maxHold, stopPct } })
   }
   return out
+}
+// SPY above its 200-day on a given date (the latest SPY bar on or before it).
+export function spyRegime(spyBars) {
+  if (!spyBars?.length) return () => true
+  const closes = spyBars.map((b) => b.c)
+  const s200 = sma(closes, 200)
+  const dates = spyBars.map((b) => b.t)
+  const above = closes.map((c, i) => (s200[i] != null ? c > s200[i] : null))
+  return (t) => {
+    let lo = 0, hi = dates.length - 1, k = -1
+    while (lo <= hi) { const m = (lo + hi) >> 1; if (dates[m] <= t) { k = m; lo = m + 1 } else hi = m - 1 }
+    return k < 0 ? false : above[k] !== false
+  }
 }
 // Compact record per trade — the grid holds 28 variants × every trade of
 // every rule, so whole trade objects (with their exits) blew the runner's
@@ -133,9 +147,10 @@ function swingSummary(recs) {
     byYear: Object.fromEntries(Object.entries(years).sort().map(([y, l]) => [y, by(l)])),
   }
 }
-export function runSwingGrid({ results, premium, ivByTicker = new Map(), dividendsByTicker = new Map(), extraEntries = new Map(), log = () => {} }) {
+export function runSwingGrid({ results, premium, spyBars = null, ivByTicker = new Map(), dividendsByTicker = new Map(), extraEntries = new Map(), log = () => {} }) {
   const variants = swingVariants()
-  const defaultKey = variants.find((v) => v.swing.target === SWING.target && v.swing.maxHold === SWING.maxHold && v.swing.stopPct === SWING.stopPct)?.key
+  const regimeOn = spyRegime(spyBars)
+  const defaultKey = variants.find((v) => !v.gate && v.swing.target === SWING.target && v.swing.maxHold === SWING.maxHold && v.swing.stopPct === SWING.stopPct)?.key
   const acc = Object.fromEntries(SWING_RULES.map((r) => [r, Object.fromEntries(variants.map((v) => [v.key, []]))]))
   const randomAcc = Object.fromEntries(SWING_RULES.map((r) => [r, []]))
   let n = 0
@@ -145,8 +160,9 @@ export function runSwingGrid({ results, premium, ivByTicker = new Map(), dividen
     for (const rule of SWING_RULES) {
       const entries = extraEntries.has(rule) ? extraEntries.get(rule).get(r.ticker) : r.sig.entry?.[rule]
       if (!entries || !entries.some(Boolean)) continue
+      const gated = entries.map((f, i) => f && regimeOn(r.bars[i].t))
       for (const v of variants) {
-        const trades = replayFromEntries(r.bars, entries, { exitRule: 'swing', swing: v.swing, highs, sell: r.sig.sell, ...pricing })
+        const trades = replayFromEntries(r.bars, v.gate === 'spy200' ? gated : entries, { exitRule: 'swing', swing: v.swing, highs, sell: r.sig.sell, ...pricing })
         for (const t of trades) acc[rule][v.key].push(compact(t))
         if (v.key === defaultKey && trades.length) {
           const rng = mulberry32(hash(r.ticker) ^ 0x5157)
@@ -161,7 +177,7 @@ export function runSwingGrid({ results, premium, ivByTicker = new Map(), dividen
     }
     if (++n % 100 === 0) log(`  swing grid: ${n}/${results.length}`)
   }
-  const out = { grid: SWING_GRID, defaultKey, variants: variants.map((v) => ({ key: v.key, ...v.swing })), rules: {} }
+  const out = { grid: SWING_GRID, defaultKey, variants: variants.map((v) => ({ key: v.key, gate: v.gate, ...v.swing })), rules: {} }
   for (const rule of SWING_RULES) {
     const perVariant = Object.fromEntries(variants.map((v) => [v.key, swingSummary(acc[rule][v.key])]))
     const reps = (randomAcc[rule] ?? []).filter((a) => a && a.n > 0)
@@ -235,7 +251,7 @@ export function runPrereg({ results, spyBars, ivByTicker = new Map(), dividendsB
   }
   // The swing exit grid, at the calibrated premium (or 1.0 without one).
   log('swing grid…')
-  const swing = runSwingGrid({ results: [...results, ...extraResults], premium: premium ?? 1, ivByTicker, dividendsByTicker, extraEntries, log })
+  const swing = runSwingGrid({ results: [...results, ...extraResults], premium: premium ?? 1, spyBars, ivByTicker, dividendsByTicker, extraEntries, log })
   const cal = premium != null ? grid[String(premium)]?.[PRIMARY_RULE] : null
   const v = cal ? verdict({ P1: cal.marked.P1, P2: cal.marked.P2 }) : { verdict: 'inconclusive', why: 'no calibrated premium (too little real IV history)' }
   return {

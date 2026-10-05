@@ -1585,7 +1585,7 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   as a variant; `tradeStats` adds `hitRate`, `medDaysHit`, `hitAvg`,
   `missAvg`. It is an `EXIT_RULES` option (Replay card "Swing") and the
   **pre-registered grid** (`SWING_GRID`: targets +10 / +15 / +20% / pivot ×
-  cap 2 / 6 / 12 / 18 months (42 / 126 / 252 / 378 trading days — the owner's hold window; the 18-month cap = the playbook time stop on a 2-year call) × stop none / 8% = 56; `runSwingGrid` in `prereg.mjs`,
+  cap 2 / 6 / 12 / 18 months (42 / 126 / 252 / 378 trading days — the owner's hold window; the 18-month cap = the playbook time stop on a 2-year call) × stop none / 8% × gate none / SPY above its 200-day on the signal day (`spyRegime`; owner, 2026-10-05, after every version lost in 2022) = 112; `runSwingGrid` in `prereg.mjs`,
   `SWING_RULES` setup / confluence / momentum / triple, at the calibrated
   premium) → `summary.prereg.swing` with per-variant all / P1 / P2 / by
   signal year and a 50-replication random control for the default variant;

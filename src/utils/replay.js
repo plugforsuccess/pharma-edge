@@ -78,6 +78,10 @@ export const SWING_GRID = Object.freeze({
   // more than 2–18 months"): 2, 6, 12 and 18 months in trading days. The
   // 18-month cap coincides with the playbook's time stop on a 2-year call.
   holds: [42, 126, 252, 378], stops: [null, 0.08],
+  // Regime gate (owner, 2026-10-05, after the first grids: every version
+  // lost in 2022): null = every entry; 'spy200' = only entries signalled
+  // while SPY closed above its 200-day average that day.
+  gates: [null, 'spy200'],
 })
 export const SWING_PIVOT_BARS = 10
 
