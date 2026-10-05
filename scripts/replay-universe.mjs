@@ -111,6 +111,8 @@ async function main() {
   })).filter(Boolean)
   if (!results.length) throw new Error(`no tickers analyzed (${failed.slice(0, 5).join('; ')})`)
   const asOf = results.map((r) => r.asOf).sort().pop()
+  const mem = (label) => { const m = process.memoryUsage(); console.log(`[mem] ${label}: rss ${(m.rss / 1e9).toFixed(2)} GB, heap ${(m.heapUsed / 1e9).toFixed(2)} GB`) }
+  mem('after analyze')
 
   // ── Pre-registered test: SPY, real IV history, premium, controls ──
   let spyBars = null
@@ -156,6 +158,7 @@ async function main() {
       extraSummary: { momentum: { params: MOMENTUM, months: mom.months } } })
     prereg = { ...pr.summary, seconds: Math.round((Date.now() - t1) / 1000) }
     tradeRows = pr.rows
+    mem('after prereg')
   }
 
   const runs = {}

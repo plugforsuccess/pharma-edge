@@ -108,12 +108,28 @@ export function swingVariants() {
   }
   return out
 }
-function swingSummary(trades) {
-  const by = (list) => { const s = tradeStats(list); return { n: s.n, open: s.open, hitRate: r4(s.hitRate), medDaysHit: s.medDaysHit, avg: r4(s.avg), median: r4(s.median), lostHalf: r4(s.bigLoss), hitAvg: r4(s.hitAvg), missAvg: r4(s.missAvg), avgDays: s.avgDays == null ? null : Math.round(s.avgDays) } }
+// Compact record per trade — the grid holds 28 variants × every trade of
+// every rule, so whole trade objects (with their exits) blew the runner's
+// memory on the first run. Only what the summary needs survives.
+const compact = (t) => ({ y: t.signalT.slice(0, 4), p: periodOf(t.signalT), hit: !!t.hit, d: t.days, r: t.optionReturn, open: !!t.open })
+function swingSummary(recs) {
+  const by = (list) => {
+    const rs = list.map((x) => x.r).filter((x) => x != null).sort((a, b) => a - b)
+    const mean = (xs) => (xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : null)
+    const hits = list.filter((x) => x.hit)
+    const days = hits.map((x) => x.d).sort((a, b) => a - b)
+    return {
+      n: list.length, open: list.filter((x) => x.open).length,
+      hitRate: list.length ? r4(hits.length / list.length) : null, medDaysHit: days.length ? days[Math.floor(days.length / 2)] : null,
+      avg: r4(mean(rs)), median: rs.length ? r4(rs[Math.floor(rs.length / 2)]) : null, lostHalf: rs.length ? r4(rs.filter((x) => x <= -0.5).length / rs.length) : null,
+      hitAvg: r4(mean(hits.map((x) => x.r).filter((x) => x != null))), missAvg: r4(mean(list.filter((x) => !x.hit).map((x) => x.r).filter((x) => x != null))),
+      avgDays: list.length ? Math.round(mean(list.filter((x) => !x.open).map((x) => x.d)) ?? 0) : null,
+    }
+  }
   const years = {}
-  for (const t of trades) { const y = t.signalT.slice(0, 4); (years[y] ??= []).push(t) }
+  for (const x of recs) (years[x.y] ??= []).push(x)
   return {
-    all: by(trades), P1: by(trades.filter((t) => periodOf(t.signalT) === 'P1')), P2: by(trades.filter((t) => periodOf(t.signalT) === 'P2')),
+    all: by(recs), P1: by(recs.filter((x) => x.p === 'P1')), P2: by(recs.filter((x) => x.p === 'P2')),
     byYear: Object.fromEntries(Object.entries(years).sort().map(([y, l]) => [y, by(l)])),
   }
 }
@@ -131,13 +147,14 @@ export function runSwingGrid({ results, premium, ivByTicker = new Map(), dividen
       if (!entries || !entries.some(Boolean)) continue
       for (const v of variants) {
         const trades = replayFromEntries(r.bars, entries, { exitRule: 'swing', swing: v.swing, highs, sell: r.sig.sell, ...pricing })
-        for (const t of trades) acc[rule][v.key].push({ ...t, ticker: r.ticker })
+        for (const t of trades) acc[rule][v.key].push(compact(t))
         if (v.key === defaultKey && trades.length) {
           const rng = mulberry32(hash(r.ticker) ^ 0x5157)
           const dates = trades.map((t) => t.signalT)
           for (let k = 0; k < SWING_RANDOM_REPS; k++) {
             const rt = replayFromEntries(r.bars, randomEntries(r.bars, dates, rng), { exitRule: 'swing', swing: v.swing, highs, ...pricing })
-            ;(randomAcc[rule][k] ??= []).push(...rt)
+            const a = (randomAcc[rule][k] ??= { n: 0, hits: 0, sum: 0 })
+            for (const t of rt) { a.n++; if (t.hit) a.hits++; a.sum += t.optionReturn }
           }
         }
       }
@@ -147,9 +164,9 @@ export function runSwingGrid({ results, premium, ivByTicker = new Map(), dividen
   const out = { grid: SWING_GRID, defaultKey, variants: variants.map((v) => ({ key: v.key, ...v.swing })), rules: {} }
   for (const rule of SWING_RULES) {
     const perVariant = Object.fromEntries(variants.map((v) => [v.key, swingSummary(acc[rule][v.key])]))
-    const reps = (randomAcc[rule] ?? []).filter(Boolean)
-    const randomHit = reps.map((l) => (l.length ? l.filter((t) => t.hit).length / l.length : null)).filter((x) => x != null)
-    const randomAvg = reps.map((l) => (l.length ? l.reduce((s, t) => s + t.optionReturn, 0) / l.length : null)).filter((x) => x != null)
+    const reps = (randomAcc[rule] ?? []).filter((a) => a && a.n > 0)
+    const randomHit = reps.map((a) => a.hits / a.n)
+    const randomAvg = reps.map((a) => a.sum / a.n)
     const mean = (xs) => (xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : null)
     const own = perVariant[defaultKey]?.all
     const pctile = (xs, v) => (xs.length && v != null ? xs.filter((x) => x <= v).length / xs.length : null)
