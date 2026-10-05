@@ -36,6 +36,7 @@ import { replayModel, tradeStats, moveStats, dropStats, ENTRY_RULES, EXIT_RULES,
 import { EXIT_PLAYBOOK } from '../src/utils/afterTax.js'
 import { dailyBars, mapLimit, sources, dividendsByTicker } from './lib/marketData.mjs'
 import { runPrereg, calibrate, PRIMARY_RULE } from './lib/prereg.mjs'
+import { crossSectionalEntries, MOMENTUM } from '../src/utils/momentum.js'
 
 const args = process.argv.slice(2)
 const MODE = args.includes('--mode') ? args[args.indexOf('--mode') + 1] : 'dry-run'
@@ -135,7 +136,14 @@ async function main() {
   let tradeRows = []
   if (spyBars) {
     const t1 = Date.now()
-    const pr = runPrereg({ results, spyBars, ivByTicker, dividendsByTicker, premium: cal.premium, premiumN: cal.n, log: (m) => console.log(m) })
+    // Cross-sectional momentum entries (12-1, top decile above the 200-day,
+    // month ends) — computed across the universe, then replayed per ticker.
+    const mom = crossSectionalEntries(results.map((r) => ({ ticker: r.ticker, bars: r.bars, s200: r.model.s200 })))
+    const scored = mom.months.filter((m) => m.picked > 0)
+    console.log(`Momentum: ${scored.length} scored months, ${scored.reduce((s, m) => s + m.picked, 0)} picks (avg ${scored.length ? Math.round(scored.reduce((s, m) => s + m.names, 0) / scored.length) : 0} eligible names / month).`)
+    const pr = runPrereg({ results, spyBars, ivByTicker, dividendsByTicker, premium: cal.premium, premiumN: cal.n, log: (m) => console.log(m),
+      extraEntries: new Map([['momentum', mom.entries]]),
+      extraSummary: { momentum: { params: MOMENTUM, months: mom.months } } })
     prereg = { ...pr.summary, seconds: Math.round((Date.now() - t1) / 1000) }
     tradeRows = pr.rows
   }

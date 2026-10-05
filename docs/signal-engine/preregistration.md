@@ -116,3 +116,35 @@ A nightly job stores, for every ticker in the universe, the ATM 30-day IV
 and the **bid / ask / mid of the ~0.75-delta, ~2-year call**, so the IV
 proxy and the slippage tiers calibrate on the app's own quotes within a few
 months instead of staying guesses.
+
+## Added 2026-10-05 (after the Triple result): cross-sectional momentum
+
+Recorded before the code ran. The owner asked whether the Bravo / Echo /
+Tango suite is "advanced enough"; the honest answer is that every
+chart-pattern entry tested so far (confluence, buy zone, Bravo, Hardening,
+Triple, recovery) has landed on the random-entry control, and that the one
+entry family with out-of-sample academic support is slow momentum. So it
+joins the test as a **secondary rule**, measured by the identical machinery:
+
+- **Rule:** at each completed month end, score every ticker in the
+  universe with ≥ 12 months of history by its return over the 12 months
+  ending one month earlier (12-1); eligible = close above its 200-day
+  average; the **top decile** of the eligible names (at least 30 scored
+  that month) are the entries. The replay buys the next open, same call
+  (0.75Δ, ~2 years), same exit playbook, one open trade per name.
+- **Controls:** SPY same-date paired, 200 random-entry replications (same
+  count per month), monthly DCA — all at the calibrated premium, slippage
+  tiers, dividends, open trades at their mark. Same periods, same sample
+  floor, same CI method.
+- **Reading:** it does not change the primary rule or the verdict, which
+  stay on the buy setup. If momentum clears its controls in both periods
+  under the bar above and the buy setup does not, the consequence is the
+  one already recorded for "no edge" on the chart signals, plus: the
+  Charts list may lead with the momentum ranking after the walk-forward
+  and the delisted-inclusive check — still never a live change from one
+  run.
+- **Known weaknesses, recorded now:** survivorship (the universe is
+  today's names — momentum losers that delisted are missing, which flatters
+  the *control* as much as the rule), a ~560-name universe rather than the
+  whole market, five years of history (two bull periods), and no
+  transaction-cost model beyond the slippage tiers.
