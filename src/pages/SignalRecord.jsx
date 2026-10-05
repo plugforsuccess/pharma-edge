@@ -212,7 +212,8 @@ export default function SignalRecord() {
 // The swing exit grid (owner, 2026-10-05: "identify swing trades, exit at
 // pre-determined high prices"): entry rule × {price target, hold cap, stop}
 // → hit rate, days to the target, option return, by period / year, with
-// the random-entry control beside the default variant.
+// the random-entry control beside the default variant and the leading
+// option-target variants (`randomByVariant`, a "Random" column).
 const SWING_RULE_LABEL = { setup: 'Buy setup', confluence: 'Confluence', momentum: 'Momentum 12-1', triple: 'Triple ◆' }
 const SWING_VIEWS = [['all', 'All'], ['P1', '2022–23'], ['P2', '2024→'], ['recent', 'Last 2 years']]
 const SWING_GATES = [[null, 'Every entry'], ['spy200', 'SPY above 200-day']]
@@ -239,6 +240,8 @@ function SwingCard({ sw }) {
   const hasGates = (sw.variants ?? []).some((v) => v.gate)
   const rows = (sw.variants ?? []).filter((v) => !hasGates || (v.gate ?? null) === gate).map((v) => ({ v, s: r?.variants?.[v.key] ? pick(r.variants[v.key]) : null }))
   const share = (x) => (x == null ? '—' : `${Math.round(x * 100)}%`)
+  const ctrl = (key) => (view === 'all' ? r?.randomByVariant?.[key] ?? (key === sw.defaultKey ? r?.random : null) : null)
+  const hasCtrl = rows.some(({ v }) => ctrl(v.key)?.reps)
   return (
     <Card title="Swing exit">
       <div className="px-5 pb-3 text-xs text-muted">
@@ -263,7 +266,7 @@ function SwingCard({ sw }) {
       )}
       <div className="overflow-x-auto">
         <table className="w-full text-[11px] font-mono-tab">
-          <thead><tr className="text-muted border-t border-hairline"><th className="text-left font-normal px-5 py-2">Exit</th><th className="text-right font-normal pr-3">Trades</th><th className="text-right font-normal pr-3">Hit</th><th className="text-right font-normal pr-3">Days</th><th className="text-right font-normal pr-3">Avg</th><th className="text-right font-normal pr-3">Hit avg</th><th className="text-right font-normal pr-3">Miss avg</th><th className="text-right font-normal pr-5">Lost ½</th></tr></thead>
+          <thead><tr className="text-muted border-t border-hairline"><th className="text-left font-normal px-5 py-2">Exit</th><th className="text-right font-normal pr-3">Trades</th><th className="text-right font-normal pr-3">Hit</th><th className="text-right font-normal pr-3">Days</th><th className="text-right font-normal pr-3">Avg</th><th className="text-right font-normal pr-3">Hit avg</th><th className="text-right font-normal pr-3">Miss avg</th><th className={clsx('text-right font-normal', hasCtrl ? 'pr-3' : 'pr-5')}>Lost ½</th>{hasCtrl && <th className="text-right font-normal pr-5">Random</th>}</tr></thead>
           <tbody>
             {rows.map(({ v, s }) => (
               <tr key={v.key} className={clsx('border-t border-hairline', v.key === sw.defaultKey && 'bg-violet-400/[0.06]')}>
@@ -274,7 +277,8 @@ function SwingCard({ sw }) {
                 <td className={clsx('text-right pr-3', tone(s?.avg))}>{pctS(s?.avg)}</td>
                 <td className="text-right pr-3 text-green-400">{pctS(s?.hitAvg)}</td>
                 <td className="text-right pr-3 text-rose-300">{pctS(s?.missAvg)}</td>
-                <td className="text-right pr-5 text-subtle">{share(s?.lostHalf)}</td>
+                <td className={clsx('text-right text-subtle', hasCtrl ? 'pr-3' : 'pr-5')}>{share(s?.lostHalf)}</td>
+                {hasCtrl && <td className="text-right pr-5 text-subtle whitespace-nowrap">{ctrl(v.key)?.reps ? <>{pctS(ctrl(v.key).avg)} <span className="text-muted">· {Math.round((ctrl(v.key).avgPercentile ?? 0) * 100)}th</span></> : '—'}</td>}
               </tr>
             ))}
           </tbody>
@@ -282,7 +286,7 @@ function SwingCard({ sw }) {
       </div>
       {r?.random && (
         <div className="px-5 py-3 border-t border-hairline text-[11px] text-muted">
-          Random entries in the same months, same default exit ({r.random.reps} replications): hit rate {share(r.random.hitRate)}, avg {pctS(r.random.avg)} — the rule's hit rate sits at the {r.random.hitPercentile == null ? '—' : `${Math.round(r.random.hitPercentile * 100)}th`} percentile. Shown beside, not in front: the owner's question is the hit rate and the expectancy.
+          Random entries in the same months, same default exit ({r.random.reps} replications): hit rate {share(r.random.hitRate)}, avg {pctS(r.random.avg)} — the rule's hit rate sits at the {r.random.hitPercentile == null ? '—' : `${Math.round(r.random.hitPercentile * 100)}th`} percentile.{hasCtrl ? ' The Random column (all periods only) gives the same control for the option-target variants: the random entries\u2019 average on that exit and where the rule\u2019s average sits among the replications — 50th means no better than a random day.' : ''} Shown beside, not in front: the owner's question is the hit rate and the expectancy.
         </div>
       )}
     </Card>

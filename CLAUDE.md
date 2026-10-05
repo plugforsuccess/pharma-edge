@@ -1588,7 +1588,9 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   cap 2 / 6 / 12 / 18 months (42 / 126 / 252 / 378 trading days — the owner's hold window; the 18-month cap = the playbook time stop on a 2-year call) × stop none / 8% × gate none / SPY above its 200-day on the signal day (`spyRegime`; owner, 2026-10-05, after every version lost in 2022) = 112; `runSwingGrid` in `prereg.mjs`,
   `SWING_RULES` setup / confluence / momentum / triple, at the calibrated
   premium) → `summary.prereg.swing` with per-variant all / P1 / P2 / by
-  signal year and a 50-replication random control for the default variant;
+  signal year and a 50-replication random control for the default variant
+  and the four leading option-target variants (`SWING_CONTROL_KEYS`,
+  `randomByVariant`; the card's Random column, all periods only);
   Signal record's **Swing exit** card (rule and period switches, "Last 2
   years"). Reading rule and weaknesses recorded in
   `docs/signal-engine/preregistration.md` ("the swing exit"). The entries

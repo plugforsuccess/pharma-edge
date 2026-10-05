@@ -251,3 +251,24 @@ worth paper trading if it removes most of 2022's trades while keeping
 2023–25's average within ~5 points, *and* the gated hit rate and average
 hold in the last two years. A gate that merely trims trade count in every
 year is noise.
+
+**Amendment 2026-10-05, after the third grid (112 variants) was read on
+main** (owner: "Add it"). The random-entry control ran for the default
+variant only (pivot target, 6-month cap), where every entry rule sat at or
+below the random entries (momentum at the 4th percentile, +3% vs +4%).
+The variants that led the grid — momentum entries, sell the whole call at
++50% / +75%, 12- or 18-month cap, no stop: +17% to +26% per trade, 2023–26
+positive, 2022 −17% to −23% — had no control, so their average cannot be
+split between the entry, the exit and the bull market. The control now
+also runs, with 50 replications per ticker and the same random dates per
+ticker across variants, for exactly those four ungated variants
+(`SWING_CONTROL_KEYS`: `opt50:252:none`, `opt50:378:none`,
+`opt75:252:none`, `opt75:378:none`), each against its own exit; gated
+variants get none (the gate was neutral for momentum). **Reading, fixed
+before the run:** a variant is a candidate for paper trading only if the
+rule's average sits at or above the 90th percentile of its random
+replications *and* beats the random average by ≥ 8 points per trade; at
+the 50th–90th percentile the exit is doing the work and any entry would
+do (then the question becomes the exit's own merit against the index
+call); below the 50th the entry is selecting worse-than-random dates.
+Nothing live changes on this result.
