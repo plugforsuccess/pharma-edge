@@ -103,6 +103,13 @@ export function rankAll(results, pools) {
     cands.sort((a, b) => {
       // Rows that meet the entry rule (buy zone YES) come first.
       if (side === 'buy' && (a.verdict === 'enter') !== (b.verdict === 'enter')) return a.verdict === 'enter' ? -1 : 1
+      // Among entries, room to the stop first (owner, 2026-10-05): a setup
+      // at the bottom edge of the buy zone, with the floor 1% away, is a
+      // different trade from one mid-band with 7% of room.
+      if (side === 'buy' && a.verdict === 'enter' && b.verdict === 'enter') {
+        const room = (r) => (r.stop_price != null && r.close > 0 ? 1 - r.stop_price / r.close : 0)
+        if (room(b) !== room(a)) return room(b) - room(a)
+      }
       // Tier by E+T+B convergence (buy side) — tier 1 first
       if (side === 'buy') {
         if (b.etb_convergence !== a.etb_convergence) return (b.etb_convergence ? 1 : 0) - (a.etb_convergence ? 1 : 0)
