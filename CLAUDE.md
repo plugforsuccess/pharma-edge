@@ -1459,6 +1459,17 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   latest. Both Actions jobs fetch bars through `scripts/lib/marketData.mjs`:
   Yahoo with the cookie + crumb session (runners get 429 without it), else
   the `leaps-entry` edge function with the service-role key.
+- **Pre-registered test plan** (2026-10-05, after an adversarial review
+  of the engine): `docs/signal-engine/preregistration.md` fixes, before
+  the code exists, what is measured (strategy minus matched controls —
+  SPY LEAPS same dates, 200 random-entry replications, monthly DCA — at
+  the calibrated implied-vol premium, open trades marked, date-clustered
+  bootstrap CIs, two periods P1 2022–23 / P2 2024→), what counts as
+  **edge / no edge / inconclusive**, and the consequences of each. The
+  verdict is not read until the IV proxy is in. A positive result
+  justifies buying delisted-inclusive data; it never changes a live rule
+  by itself. Every variant tried goes in `docs/signal-engine/variants.md`.
+  Don't edit the rule after results exist — append a dated section.
 - **Rule optimizer** (owner, 2026-10-04: "do everything mathematically
   possible to get the guarantee closest to 1.0" — advised: 1.0 is a
   statement about the future; what can be pushed is out-of-sample
