@@ -51,7 +51,8 @@ function SignalMeter({ score, side }) {
   )
 }
 
-// One line, led by the number that matters most (how often it worked).
+// Plain sentences: how often the pattern appeared, what the stock did
+// after, and that the call moves more than the stock.
 function TrackRecord({ r, side }) {
   const avg = side === 'buy' ? r.est_6m : r.est_3m
   const win = side === 'buy' ? r.est_win_6m : r.est_win_3m
@@ -59,18 +60,22 @@ function TrackRecord({ r, side }) {
   const t = r.verdict === 'enter' ? r.trade : null
   const levRaw = t && t.cost > 0 && r.close > 0 ? (t.delta * r.close) / t.cost : null
   const lev = levRaw ? (levRaw < 3 ? levRaw.toFixed(1) : String(Math.round(levRaw))) : null
-  const cases = `${r.pool_n.toLocaleString('en-US')} past cases${r.own_n < FEW_OWN ? `, only ${r.own_n}` : `, ${r.own_n}`} on ${r.ticker}`
+  const times = (k) => (k === 1 ? 'once' : k === 2 ? 'twice' : `${k.toLocaleString('en-US')} times`)
+  const own = r.own_n === 0 ? `never on ${r.ticker}` : `${times(r.own_n)} on ${r.ticker}`
+  const appeared = <>This signal pattern has appeared <span className="text-subtle font-mono-tab">{times(r.pool_n)}</span> across all stocks ({own}).</>
   if (r.pool_n < THIN_POOL) {
-    return <p className="mt-2 text-[11px] leading-4 text-muted"><span className="text-subtle font-semibold">Thin record</span> · too few past cases to trust · {cases}</p>
+    return <p className="mt-2 text-[11px] leading-4 text-muted">{appeared} Too few to judge.</p>
   }
+  const months = side === 'buy' ? 'Six' : 'Three'
+  const dir = side === 'buy' ? 'higher' : 'lower'
   const good = side === 'buy' ? avg >= 0 : avg <= 0
   return (
     <p className="mt-2 text-[11px] leading-4 text-muted">
-      <span className="text-subtle font-semibold">Track record</span>
-      {' · '}{win != null && <><span className="text-fg font-mono-tab">{pct0(win)}</span> {side === 'buy' ? 'higher' : 'lower'} {side === 'buy' ? '6' : '3'} months later · </>}
-      avg <span className={clsx('font-mono-tab', good ? 'text-green-400' : 'text-rose-300')}>{avg >= 0 ? '+' : '−'}{pct0(avg)}</span>
-      {' · '}{cases}
-      {lev && <> · share-price moves; this call moves ≈<span className="text-subtle font-mono-tab">{lev}×</span> that</>}
+      {appeared}{' '}
+      {months} months later the stock was {dir}
+      {win != null && <> <span className="text-fg font-mono-tab">{pct0(win)}</span> of the time</>},
+      {' '}{avg >= 0 ? 'up' : 'down'} <span className={clsx('font-mono-tab', good ? 'text-green-400' : 'text-rose-300')}>{pct0(avg)}</span> on average.
+      {lev && <> That is the stock — a call like this moves about <span className="text-subtle font-mono-tab">{lev}×</span> as much.</>}
     </p>
   )
 }
