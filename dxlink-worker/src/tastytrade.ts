@@ -16,8 +16,9 @@
 //   TASTYTRADE_CLIENT_SECRET
 //   TASTYTRADE_REFRESH_TOKEN
 
-const BASE =
-  Deno.env.get('TASTYTRADE_BASE_URL') || 'https://api.tastyworks.com'
+const rawBase = (Deno.env.get('TASTYTRADE_BASE_URL') ?? '').trim().replace(/\/+$/, '')
+// Accept a bare host in the secret ("api.tastyworks.com") as well as a URL.
+const BASE = rawBase ? (/^https?:\/\//i.test(rawBase) ? rawBase : `https://${rawBase}`) : 'https://api.tastyworks.com'
 const CLIENT_ID = Deno.env.get('TASTYTRADE_CLIENT_ID')
 const CLIENT_SECRET = Deno.env.get('TASTYTRADE_CLIENT_SECRET')
 let CURRENT_REFRESH_TOKEN = Deno.env.get('TASTYTRADE_REFRESH_TOKEN') ?? ''
