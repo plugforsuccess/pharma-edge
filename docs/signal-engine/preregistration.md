@@ -295,3 +295,38 @@ and Triple pick worse-than-random dates on every option-target exit.
 Consequence per the rule: no paper-trading candidate from this grid; the
 next question is the exit's own merit against the index call, not the
 entry.
+
+## Added 2026-10-06 (owner: "run it"): the magnitude test
+
+**Question.** Does any signal predict that a big move is coming, in either
+direction? The swing-grid control showed the entries don't pick better
+*directional* days than random. The owner's goal is 15–40% stock swings
+on long calls or puts; a signal that can't even say "something big is
+coming" is describing the past.
+
+**Measure** (`scripts/magnitude-test.mjs`, `.github/workflows/magnitude-test.yml`):
+for every signal day on every universe ticker, the biggest absolute move
+of the close within the next 60 trading days (`|move|`), its up and down
+halves, the share of signal days with `|move|` ≥ 15% / 25% / 40%, and the
+realized vol over the window. Signals: the replay's buy entries (setup,
+zone, confluence, triple, bravo, recovery), the sell side (sell score
+reaching 2, Bravo bear turning on), cross-sectional momentum month ends,
+and a **cheap-vol** entry (20-day historical vol's 252-day rank crossing
+below 25) as the first look at the vol-rank idea. Control: random days in
+the same months on the same ticker, same count, 50 seeded replications;
+plus every day of every ticker as the base rate. Periods P1 / P2 as
+before. No option pricing, no exits — the stock's path only.
+
+**Reading, fixed before the run.** A signal "predicts magnitude" when its
+mean `|move|` sits at or above the 90th percentile of its random
+replications *and* exceeds the random mean by ≥ 3 points (e.g. 18% vs
+15%), *and* its ≥ 15% share is also ≥ 90th percentile. Then a
+direction-agnostic structure (a straddle / strangle, or a call *and* a put
+sized by the signal) is worth a pre-registered test of its own. Below
+that, the signals carry no information about size either; the path is the
+vol-rank entry (if cheap-vol passes the same bar) or the index, and no
+chart signal is presented as predictive. Realized vol after a signal is
+reported for context only — vol clustering is expected and is not the
+claim being tested. Caveat: a sell-side signal firing after a crash will
+show a large past move, not a future one — only the forward window counts
+here.
