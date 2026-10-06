@@ -272,3 +272,26 @@ the 50th–90th percentile the exit is doing the work and any entry would
 do (then the question becomes the exit's own merit against the index
 call); below the 50th the entry is selecting worse-than-random dates.
 Nothing live changes on this result.
+
+**Result, 2026-10-06 (run 37388507234, 545 tickers, calibrated premium),
+read against the rule above.** Rule avg vs random avg per trade, and the
+rule's percentile among 50 replications (random entries in the same
+months, same exit, same random dates per ticker across variants):
+
+| Entry | +50% · 12 mo | +50% · 18 mo | +75% · 12 mo | +75% · 18 mo |
+|---|---|---|---|---|
+| Momentum | +17 vs +17 (26th) | +18 vs +19 (16th) | +24 vs +23 (72nd) | +26 vs +26 (58th) |
+| Buy setup | +6 vs +6 (86th) | +8 vs +8 (82nd) | +11 vs +9 (100th) | +13 vs +12 (100th) |
+| Confluence | +5 vs +8 (0th) | +7 vs +10 (0th) | +9 vs +11 (0th) | +12 vs +14 (0th) |
+| Triple | +6 vs +8 (2nd) | +7 vs +10 (0th) | +8 vs +11 (0th) | +10 vs +14 (0th) |
+
+Hit rates match the random entries' within 2 points everywhere. **No
+variant meets the candidate bar** (≥ 90th percentile *and* ≥ 8 points
+over random). Momentum sits in the 16th–72nd band: the exit is doing the
+work, and any entry in the same months would have done about as well.
+The buy setup clears the percentile on the +75% targets (100th) but by
+1–2 points, not 8 — its random dates' spread is just narrow. Confluence
+and Triple pick worse-than-random dates on every option-target exit.
+Consequence per the rule: no paper-trading candidate from this grid; the
+next question is the exit's own merit against the index call, not the
+entry.
