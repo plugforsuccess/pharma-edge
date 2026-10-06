@@ -1532,6 +1532,30 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   mid / IV / delta / OI to **`leaps_quotes`** for the whole universe.
   Verdict is `inconclusive` until the premium calibrates (≥ 30 real-IV
   samples) — read nothing into the numbers before then.
+- **Tastytrade market data for LEAPS** (owner, 2026-10-06: "use Tastytrade
+  for LEAPS data"). (1) **`market-metrics`** edge function (service-role
+  only; `.github/workflows/market-metrics.yml`, weekdays 22:30 UTC, after
+  iv-quotes) pulls Tastytrade `/market-metrics` for the chart universe +
+  SPY / QQQ / IWM / DIA / sector ETFs → **`market_metrics`** (IV index,
+  IV rank / percentile as 0–100, IV 5-day change, HV 30 / 60 / 90, IV−HV,
+  beta, liquidity rating, next earnings date + time, next dividend, market
+  cap, P/E; authenticated SELECT) and writes the IV index to `iv_history`
+  (source `tastytrade`, replacing the Yahoo scrape's row for the day).
+  `leaps-entry` returns `metrics`; the entry chart's status card shows a
+  Tastytrade row under the conditions (context, not a condition).
+  `suggest-leaps` uses the broker's IV rank as the vol rank when it is
+  < 7 days old (`vol_rank_source` per pick: `tastytrade_iv_rank` /
+  `hv20_1y`). (2) **LEAPS streaming:** suggest-leaps upserts its picked
+  contracts into **`leaps_watch`** (OCC key; sources `suggest` / `index`);
+  the dxlink-worker (`src/leaps.ts`) reads `leaps_watch` (last 14 days)
+  plus every open `leaps_positions` option holding, resolves each to its
+  dxFeed streamer symbol through the ticker's nested chain (constructed
+  `.TICKERyymmddC150` fallback) and subscribes Quote / Greeks / Summary /
+  Trade, refreshed every 30 min. Quotes land in `dxlink_quotes` with
+  underlying / expiration / strike / type; suggest-leaps attaches the
+  latest row as `contract.live` and Charts shows "bid / ask (live)" (≤ 20
+  min old, else the age). Redistribution of broker data to other users is
+  an open question for counsel — fine on the owner's own screen.
 - **Cross-sectional momentum, a secondary pre-registered rule** (owner,
   2026-10-05, "Word", after the Triple result — every chart-pattern entry
   tested had landed on the random control; slow momentum is the one entry

@@ -43,6 +43,7 @@ import {
   STRIKE_WINDOW_PCT,
   TRACKED_TICKERS,
 } from './tickers.ts'
+import { fetchLeapsContracts, resolveLeaps, LEAPS_REFRESH_MS } from './leaps.ts'
 
 interface OptionMeta {
   streamer: string
@@ -282,6 +283,31 @@ async function main() {
     await client.subscribe(allSpecs.slice(i, i + CHUNK))
   }
   console.log(`[main] sent ${allSpecs.length} subscription specs`)
+
+  // LEAPS contracts (leaps.ts): the app's picked and held long-dated
+  // calls, on top of the GEX plan. Subscribed the same way; refreshed
+  // every 30 minutes, adding anything new (stale ones age out).
+  const leapsSeen = new Set<string>()
+  const applyLeaps = async () => {
+    try {
+      if (Date.now() > session.expiresAt - 60_000) session = await login()
+      const contracts = await fetchLeapsContracts()
+      const metas = await resolveLeaps(session, contracts)
+      const specs: SubSpec[] = []
+      for (const m of metas) {
+        if (leapsSeen.has(m.streamer) || equity.includes(m.streamer) || options.some((o) => o.streamer === m.streamer)) continue
+        leapsSeen.add(m.streamer)
+        registerSymbol({ symbol: m.streamer, kind: 'option', underlying: m.ticker, expiration_date: m.expirationDate, strike: m.strike, option_type: m.optionType })
+        specs.push({ type: 'Quote', symbol: m.streamer }, { type: 'Greeks', symbol: m.streamer }, { type: 'Summary', symbol: m.streamer }, { type: 'Trade', symbol: m.streamer })
+      }
+      for (let i = 0; i < specs.length; i += CHUNK) await client.subscribe(specs.slice(i, i + CHUNK))
+      console.log(`[leaps] ${contracts.length} contracts, ${metas.length} resolved, ${specs.length / 4} newly subscribed`)
+    } catch (e) {
+      console.error('[leaps] refresh failed:', e)
+    }
+  }
+  await applyLeaps()
+  setInterval(applyLeaps, LEAPS_REFRESH_MS)
 
   // Refresh the chain plan every 4 hours — strikes get added as spot
   // moves, and tomorrow's expirations roll in. We don't reconnect the
