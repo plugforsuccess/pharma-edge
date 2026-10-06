@@ -1,0 +1,44 @@
+# Magnitude test (owner, 2026-10-06): does any signal predict that a big
+# move is coming, in either direction? See scripts/magnitude-test.mjs and
+# docs/signal-engine/preregistration.md ("the magnitude test"). Prints the
+# table and uploads magnitude.json; writes nothing to the database.
+
+name: Magnitude test
+
+on:
+  workflow_dispatch:
+  push:
+    branches-ignore: [main]
+    paths:
+      - scripts/magnitude-test.mjs
+      - .github/workflows/magnitude-test.yml
+
+concurrency:
+  group: magnitude-test
+  cancel-in-progress: true
+
+jobs:
+  magnitude:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Magnitude test
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          MAGNITUDE_OUT: magnitude.json
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: node scripts/magnitude-test.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: magnitude
+          path: magnitude.json
+          if-no-files-found: ignore
+          retention-days: 90

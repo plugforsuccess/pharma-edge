@@ -250,6 +250,16 @@ async function main() {
     console.log(`\nPre-registered test (${PRIMARY_RULE} → targets, premium ${prereg.premium.calibrated ?? 'uncalibrated'}): ${prereg.verdict.verdict.toUpperCase()} — ${prereg.verdict.why}`)
     if (g) for (const k of ['all', 'P1', 'P2']) { const p = g.marked[k]; console.log(`  ${k.padEnd(3)} n ${p.n} months ${p.months} · strategy ${pct(p.strategy.mean)} · SPY ${pct(p.spy.mean)} · diff ${pct(p.spy.diff)} [${pct(p.spy.lo)}, ${pct(p.spy.hi)}] · random pctl ${p.random.percentile == null ? '—' : Math.round(p.random.percentile * 100)} · DCA diff ${pct(p.dca.diff)} · lost½ ${pct(p.strategy.lostHalf)} vs ${pct(p.spy.lostHalf)}`) }
     console.log('  by premium (all, diff vs SPY):', prereg.premium.grid.map((pm) => `${pm}: ${pct(prereg.grid[String(pm)]?.[PRIMARY_RULE]?.marked.all.spy.diff)}`).join(' · '))
+    // The swing grid's random controls, so the reading survives a failed insert.
+    const sw = prereg.swing
+    if (sw?.rules) {
+      console.log('\nSwing exit — rule vs random entries (same months, same exit; avg per trade, rule percentile among replications):')
+      for (const [rule, r] of Object.entries(sw.rules)) for (const key of sw.controlKeys ?? [sw.defaultKey]) {
+        const own = r.variants?.[key]?.all, c = r.randomByVariant?.[key] ?? (key === sw.defaultKey ? r.random : null)
+        if (!own || !c?.reps) continue
+        console.log(`  ${rule.padEnd(10)} ${key.padEnd(16)} n ${String(own.n).padStart(5)}  rule hit ${pct(own.hitRate)} avg ${pct(own.avg)} · random hit ${pct(c.hitRate)} avg ${pct(c.avg)} · pctl ${c.avgPercentile == null ? '—' : Math.round(c.avgPercentile * 100)}`)
+      }
+    }
   }
   if (process.env.REPLAY_OUT) { const { writeFileSync } = await import('node:fs'); writeFileSync(process.env.REPLAY_OUT, JSON.stringify(summary)) }
   if (process.env.REPLAY_TRADES_OUT && tradeRows.length) {
@@ -263,8 +273,22 @@ async function main() {
 
   const { createClient } = await import('@supabase/supabase-js')
   const db = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } })
-  const { data: run, error } = await db.from('replay_runs').insert({ as_of: asOf, tickers: results.length, summary }).select('id').single()
-  if (error) throw new Error(`replay_runs insert: ${error.message}`)
+  // The insert once failed with a bare "fetch failed" after a successful
+  // 10-minute replay (2026-10-05): retry with backoff and name the cause.
+  const insertRun = async () => {
+    let last = null
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      try {
+        const { data, error } = await db.from('replay_runs').insert({ as_of: asOf, tickers: results.length, summary }).select('id').single()
+        if (!error) return data
+        last = new Error(error.message)
+      } catch (e) { last = e }
+      console.warn(`replay_runs insert attempt ${attempt} failed: ${last?.message}${last?.cause ? ` (${last.cause.code ?? last.cause.message ?? last.cause})` : ''}; summary ${Math.round(JSON.stringify(summary).length / 1024)} KB`)
+      if (attempt < 4) await new Promise((r) => setTimeout(r, 5000 * attempt))
+    }
+    throw new Error(`replay_runs insert: ${last?.message}`)
+  }
+  const run = await insertRun()
   console.log('\nWrote replay_runs.')
   for (let i = 0; i < tradeRows.length; i += 500) {
     const batch = tradeRows.slice(i, i + 500).map((r) => ({ ...r, run_id: run.id }))

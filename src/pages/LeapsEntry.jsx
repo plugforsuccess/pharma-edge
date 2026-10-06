@@ -305,7 +305,7 @@ export default function LeapsEntry() {
       ) : (
         <div className="md:grid md:grid-cols-[1fr_280px] md:gap-x-5 md:items-start">
           <div className="min-w-0 md:order-1">
-            <StatusPanel s={s} model={model} params={params} suite={suite} dailySuite={dailySuite} confirmDays={confirmDays} tfLabel={SUITE_TIMEFRAMES[suiteTf].label.toLowerCase()} conf={conf} pool={pool} trend={trend} />
+            <StatusPanel s={s} model={model} params={params} suite={suite} dailySuite={dailySuite} confirmDays={confirmDays} tfLabel={SUITE_TIMEFRAMES[suiteTf].label.toLowerCase()} conf={conf} pool={pool} trend={trend} metrics={data?.metrics ?? null} />
             {<SuitePanel pack={suitePack} failed={suiteData?.error && suiteData.tf === suiteTf} tf={suiteTf} onTf={pickSuiteTf} holdings={holdings} onJump={jumpPeriod} onOpenPane={setExpanded}
               buyZone={!!s?.cond?.all} />}
             <PlanCard plan={plan} loading={weeklyData === null} failed={!!weeklyData?.error} trend={trend} />
@@ -473,7 +473,33 @@ function Key({ glyph, className, children }) {
   )
 }
 
-function StatusPanel({ s, model, params, suite, dailySuite, confirmDays, tfLabel, conf, pool, trend = null }) {
+// Tastytrade market metrics (owner, 2026-10-06; market_metrics, nightly):
+// the broker's IV rank / percentile, IV vs 30-day HV, next earnings and
+// liquidity — context under the conditions, not a condition.
+function MetricsRow({ m }) {
+  const pct = (x) => (x == null ? null : `${Number(x).toFixed(0)}`)
+  const ivs = m.iv != null ? `${(m.iv * 100).toFixed(0)}%` : null
+  const hv = m.hv_30 != null ? `${(m.hv_30 * 100).toFixed(0)}%` : null
+  const earn = m.earnings_date ? new Date(`${m.earnings_date}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null
+  const parts = [
+    m.iv_rank != null && `IV Rank ${pct(m.iv_rank)}`,
+    m.iv_percentile != null && `IV %ile ${pct(m.iv_percentile)}`,
+    ivs && hv && `IV ${ivs} vs HV30 ${hv}`,
+    earn && `Earnings ${earn}${m.earnings_time === 'BTO' ? ' pre-mkt' : m.earnings_time === 'AMC' ? ' after close' : ''}`,
+    m.liquidity_rating != null && `Liquidity ${m.liquidity_rating}/4`,
+  ].filter(Boolean)
+  if (!parts.length) return null
+  const when = m.updated_at ? new Date(m.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''
+  return (
+    <li className="px-5 py-2.5 min-h-[48px] flex items-center gap-3">
+      <span className="shrink-0 h-6 w-6 rounded-full flex items-center justify-center border border-dashed border-border text-muted text-[10px]" aria-hidden>tt</span>
+      <span className="flex-1 min-w-0 text-xs text-subtle leading-snug font-mono-tab">{parts.join(' · ')}</span>
+      <span className="shrink-0 text-[11px] text-muted">Tastytrade{when ? ` · ${when}` : ''}</span>
+    </li>
+  )
+}
+
+function StatusPanel({ s, model, params, suite, dailySuite, confirmDays, tfLabel, conf, pool, trend = null, metrics = null }) {
   // Momentum beside the verdict (owner, 2026-10-04): a YES next to a Bravo
   // bear is an early entry (the dip is still in progress), not a contradiction.
   const momentumUp = dailySuite?.bravo?.regime?.[dailySuite.bravo.regime.length - 1] === 1
@@ -598,6 +624,7 @@ function StatusPanel({ s, model, params, suite, dailySuite, confirmDays, tfLabel
             {macdAgo == null ? 'no cross' : macdAgo === 0 ? 'crossed up today' : `crossed up ${macdAgo}d ago`}
           </span>
         </li>
+        {metrics && <MetricsRow m={metrics} />}
         {suite && FEATURES.hardening && (
           <li className="px-5 py-2.5 flex items-center gap-3 min-h-[48px]">
             <span className={clsx('shrink-0 h-6 w-6 rounded-full flex items-center justify-center border border-dashed',

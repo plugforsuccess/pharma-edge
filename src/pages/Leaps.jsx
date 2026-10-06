@@ -1215,7 +1215,7 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
               ? `No tax inside the account · est. ${usd(calc.estimated_tax)} at ${ratePct(calc.tax_rate)} when withdrawn · before 59½ +${usd(calc.early_penalty)} penalty`
               : calc.sheltered ? `No tax inside ${calc.account_type === 'hsa' ? 'an' : 'a'} ${accountLabel(calc.account_type)}`
               : calc.gain > 0
-              ? `${usd(income?.after_tax_gain ?? calc.after_tax_gain)} after-tax gain · est. tax ${usd(calc.estimated_tax)} at ${ratePct(calc.tax_rate)}`
+              ? <><span className="text-fg">{usd(income?.after_tax_gain ?? calc.after_tax_gain)}</span> after-tax gain · est. tax {usd(calc.estimated_tax)} at {ratePct(calc.tax_rate)}</>
               : 'Loss — no tax on sale'}
           </div>
         )}

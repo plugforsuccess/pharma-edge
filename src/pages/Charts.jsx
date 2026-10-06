@@ -166,7 +166,7 @@ export default function Charts() {
       }
       out.push({ id: `x:${p.ticker}`, group: 'ideas', ticker: p.ticker,
         title: `Buy ${p.ticker} ${shortDate(c.expiration)} $${c.strike} call`,
-        body: `${rec} Delta ${c.delta.toFixed(2)} · about ${money(c.mid * 100)} per contract (mid) · ${c.dte} days to expiry.`,
+        body: `${rec} Delta ${c.delta.toFixed(2)} · about ${money(c.mid * 100)} per contract (mid)${liveText(c)} · ${c.dte} days to expiry.`,
         verdict: 'Index', tone: 'green', from: 'Index call',
         lines: [{ v: c.strike, label: 'Strike', gold: true }, { v: c.strike + c.mid, label: 'Break-even' }],
         expiration: c.expiration })
@@ -183,7 +183,7 @@ export default function Charts() {
       }
       out.push({ id: `i:${p.ticker}`, group: 'ideas', ticker: p.ticker,
         title: `Buy ${p.ticker} ${shortDate(c.expiration)} $${c.strike} call`,
-        body: `${why}. Delta ${c.delta.toFixed(2)} · about ${money(c.mid * 100)} per contract (mid) · ${c.dte} days to expiry.`,
+        body: `${why}. Delta ${c.delta.toFixed(2)} · about ${money(c.mid * 100)} per contract (mid)${liveText(c)} · ${c.dte} days to expiry.`,
         verdict: 'Buy', tone: 'green', from: 'LEAPS ideas',
         lines: [{ v: c.strike, label: 'Strike', gold: true }, { v: c.strike + c.mid, label: 'Break-even' }],
         expiration: c.expiration })
@@ -576,6 +576,17 @@ const VERDICT_TONE = {
 // same days as every stock signal, against the single-name rules (same
 // exits, open trades at their mark). Once the `index` rule has run (SPY
 // at month ends), its own numbers lead.
+// Live bid / ask from the dxlink-worker (owner, 2026-10-06): suggest-leaps
+// attaches `live` when dxlink_quotes has the contract; "live" within 20
+// minutes of the last frame, else the last quote with its age.
+function liveText(c) {
+  const l = c.live
+  if (!l || l.bid == null || l.ask == null) return ''
+  const ageMin = l.updated_at ? Math.round((Date.now() - Date.parse(l.updated_at)) / 60000) : null
+  const tag = ageMin == null ? '' : ageMin <= 20 ? 'live' : ageMin < 120 ? `${ageMin} min ago` : ageMin < 48 * 60 ? `${Math.round(ageMin / 60)}h ago` : 'last'
+  return ` · bid ${money(l.bid)} / ask ${money(l.ask)}${tag ? ` (${tag})` : ''}`
+}
+
 function indexRecordText(rec) {
   const pct = (v) => (v == null ? null : `${v >= 0 ? '+' : '−'}${Math.round(Math.abs(v) * 100)}%`)
   if (!rec?.rules) return 'The plain index call — the benchmark every stock signal is tested against.'

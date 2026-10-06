@@ -251,3 +251,118 @@ worth paper trading if it removes most of 2022's trades while keeping
 2023–25's average within ~5 points, *and* the gated hit rate and average
 hold in the last two years. A gate that merely trims trade count in every
 year is noise.
+
+**Amendment 2026-10-05, after the third grid (112 variants) was read on
+main** (owner: "Add it"). The random-entry control ran for the default
+variant only (pivot target, 6-month cap), where every entry rule sat at or
+below the random entries (momentum at the 4th percentile, +3% vs +4%).
+The variants that led the grid — momentum entries, sell the whole call at
++50% / +75%, 12- or 18-month cap, no stop: +17% to +26% per trade, 2023–26
+positive, 2022 −17% to −23% — had no control, so their average cannot be
+split between the entry, the exit and the bull market. The control now
+also runs, with 50 replications per ticker and the same random dates per
+ticker across variants, for exactly those four ungated variants
+(`SWING_CONTROL_KEYS`: `opt50:252:none`, `opt50:378:none`,
+`opt75:252:none`, `opt75:378:none`), each against its own exit; gated
+variants get none (the gate was neutral for momentum). **Reading, fixed
+before the run:** a variant is a candidate for paper trading only if the
+rule's average sits at or above the 90th percentile of its random
+replications *and* beats the random average by ≥ 8 points per trade; at
+the 50th–90th percentile the exit is doing the work and any entry would
+do (then the question becomes the exit's own merit against the index
+call); below the 50th the entry is selecting worse-than-random dates.
+Nothing live changes on this result.
+
+**Result, 2026-10-06 (run 37388507234, 545 tickers, calibrated premium),
+read against the rule above.** Rule avg vs random avg per trade, and the
+rule's percentile among 50 replications (random entries in the same
+months, same exit, same random dates per ticker across variants):
+
+| Entry | +50% · 12 mo | +50% · 18 mo | +75% · 12 mo | +75% · 18 mo |
+|---|---|---|---|---|
+| Momentum | +17 vs +17 (26th) | +18 vs +19 (16th) | +24 vs +23 (72nd) | +26 vs +26 (58th) |
+| Buy setup | +6 vs +6 (86th) | +8 vs +8 (82nd) | +11 vs +9 (100th) | +13 vs +12 (100th) |
+| Confluence | +5 vs +8 (0th) | +7 vs +10 (0th) | +9 vs +11 (0th) | +12 vs +14 (0th) |
+| Triple | +6 vs +8 (2nd) | +7 vs +10 (0th) | +8 vs +11 (0th) | +10 vs +14 (0th) |
+
+Hit rates match the random entries' within 2 points everywhere. **No
+variant meets the candidate bar** (≥ 90th percentile *and* ≥ 8 points
+over random). Momentum sits in the 16th–72nd band: the exit is doing the
+work, and any entry in the same months would have done about as well.
+The buy setup clears the percentile on the +75% targets (100th) but by
+1–2 points, not 8 — its random dates' spread is just narrow. Confluence
+and Triple pick worse-than-random dates on every option-target exit.
+Consequence per the rule: no paper-trading candidate from this grid; the
+next question is the exit's own merit against the index call, not the
+entry.
+
+## Added 2026-10-06 (owner: "run it"): the magnitude test
+
+**Question.** Does any signal predict that a big move is coming, in either
+direction? The swing-grid control showed the entries don't pick better
+*directional* days than random. The owner's goal is 15–40% stock swings
+on long calls or puts; a signal that can't even say "something big is
+coming" is describing the past.
+
+**Measure** (`scripts/magnitude-test.mjs`, `.github/workflows/magnitude-test.yml`):
+for every signal day on every universe ticker, the biggest absolute move
+of the close within the next 60 trading days (`|move|`), its up and down
+halves, the share of signal days with `|move|` ≥ 15% / 25% / 40%, and the
+realized vol over the window. Signals: the replay's buy entries (setup,
+zone, confluence, triple, bravo, recovery), the sell side (sell score
+reaching 2, Bravo bear turning on), cross-sectional momentum month ends,
+and a **cheap-vol** entry (20-day historical vol's 252-day rank crossing
+below 25) as the first look at the vol-rank idea. Control: random days in
+the same months on the same ticker, same count, 50 seeded replications;
+plus every day of every ticker as the base rate. Periods P1 / P2 as
+before. No option pricing, no exits — the stock's path only.
+
+**Reading, fixed before the run.** A signal "predicts magnitude" when its
+mean `|move|` sits at or above the 90th percentile of its random
+replications *and* exceeds the random mean by ≥ 3 points (e.g. 18% vs
+15%), *and* its ≥ 15% share is also ≥ 90th percentile. Then a
+direction-agnostic structure (a straddle / strangle, or a call *and* a put
+sized by the signal) is worth a pre-registered test of its own. Below
+that, the signals carry no information about size either; the path is the
+vol-rank entry (if cheap-vol passes the same bar) or the index, and no
+chart signal is presented as predictive. Realized vol after a signal is
+reported for context only — vol clustering is expected and is not the
+claim being tested. Caveat: a sell-side signal firing after a crash will
+show a large past move, not a future one — only the forward window counts
+here.
+
+**Result, 2026-10-06 (run 37394575424, 545 tickers, 642,842 ticker-days).**
+Mean biggest |move| within 60 trading days, signal vs random days in the
+same months on the same ticker (50 replications), and the signal's
+percentile on |move| / ≥ 15% share:
+
+| Signal | n | \|move\| | random | ≥15% | random | pctl |
+|---|---|---|---|---|---|---|
+| Any day | 642,842 | 19.5% | — | 50.5% | — | — |
+| Buy setup | 2,527 | 18.0% | 17.5% | 44.8% | 42.9% | 100th / 100th |
+| Buy zone | 5,524 | 17.6% | 17.1% | 44.4% | 42.1% | 100th / 100th |
+| Confluence | 12,978 | 18.7% | 18.9% | 45.7% | 45.8% | 0th / 38th |
+| Triple | 328 | 18.4% | 18.5% | 48.2% | 47.0% | 26th / 78th |
+| Bravo ◆ | 45,456 | 18.1% | 18.5% | 43.0% | 43.7% | 0th / 0th |
+| Recovery | 1,598 | 17.5% | 18.1% | 43.7% | 45.3% | 0th / 2nd |
+| Sell score 2+ | 20,141 | 19.6% | 19.4% | 49.8% | 49.0% | 100th / 100th |
+| Bravo bear | 35,513 | 21.7% | 20.9% | 57.5% | 55.9% | 100th / 100th |
+| Cheap vol | 14,272 | 19.4% | 19.2% | 49.1% | 48.3% | 100th / 100th |
+| Momentum | 1,452 | 34.4% | 34.6% | 76.4% | 73.9% | 20th / 100th |
+
+**No signal meets the bar.** The largest gap over random is Bravo bear at
++0.8 points; the rule asked for ≥ 3. Several signals sit at the 100th
+percentile only because the random spread is narrow at these counts —
+the gaps are 0.2–0.8 points, i.e. nothing. The buy-side entries sit
+*below* the any-day base rate (18% vs 19.5%): dip-buying conditions
+select calmer stretches. Cheap vol does not precede bigger moves (19.4%
+vs 19.2%): a low-vol regime persists, so the vol-rank idea cannot rest
+on "more movement is coming" — only on the premium being cheap. Momentum
+days see 34% moves and 76% of them clear 15% within 60 days, twice the
+universe — but random days on the same names in the same months see the
+same, so that is **which stocks** momentum selects (high-vol names in
+uptrends), not **when**. Consequence per the rule: no chart signal is
+presented as predictive of size or direction; no direction-agnostic
+trade is built on them. What the data does support is stock selection
+by momentum (the names that move) with the exit doing the work, and the
+index call.

@@ -30,7 +30,49 @@
 // here. verify_jwt=true.
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { yahooBars, yahooOptions, callDelta } from '../_shared/yahoo.ts'
+import { buildOccSymbol } from '../_shared/tastytrade.ts'
+
+// Tastytrade (owner, 2026-10-06): market_metrics gives the broker's IV
+// rank per underlying (used as vol rank when present — the engine's
+// actual rule; the HV-rank stand-in stays as the fallback), picked
+// contracts go to leaps_watch so the dxlink-worker streams them, and the
+// latest dxlink_quotes row for each contract rides along as `live`.
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
+const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+const db = SUPABASE_URL && SERVICE_KEY ? createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } }) : null
+
+async function ivRanks(symbols: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>()
+  if (!db) return out
+  const { data } = await db.from('market_metrics').select('symbol, iv_rank, updated_at').in('symbol', symbols)
+  for (const r of data ?? []) {
+    if (r.iv_rank == null) continue
+    if (Date.now() - Date.parse(r.updated_at) > 7 * 86400e3) continue // stale → fall back to HV rank
+    out.set(String(r.symbol), Number(r.iv_rank))
+  }
+  return out
+}
+
+type Live = { bid: number | null; ask: number | null; mid: number | null; iv: number | null; delta: number | null; updated_at: string } | null
+async function liveQuote(ticker: string, expiration: string, strike: number): Promise<Live> {
+  if (!db) return null
+  const { data } = await db.from('dxlink_quotes').select('bid, ask, mid, iv, delta, updated_at')
+    .eq('underlying', ticker).eq('expiration_date', expiration).eq('strike', strike).eq('option_type', 'C').eq('kind', 'option')
+    .order('updated_at', { ascending: false }).limit(1).maybeSingle()
+  if (!data) return null
+  return { bid: data.bid ?? null, ask: data.ask ?? null, mid: data.mid ?? null, iv: data.iv ?? null, delta: data.delta ?? null, updated_at: String(data.updated_at) }
+}
+
+async function watchContracts(rows: Array<{ ticker: string; expiration: string; strike: number; source: string }>) {
+  if (!db || !rows.length) return
+  const now = new Date().toISOString()
+  const { error } = await db.from('leaps_watch').upsert(rows.map((r) => ({
+    occ_symbol: buildOccSymbol(r.ticker, r.expiration, 'C', r.strike), ticker: r.ticker, expiration_date: r.expiration, strike: r.strike, option_type: 'C', source: r.source, updated_at: now,
+  })), { onConflict: 'occ_symbol' })
+  if (error) console.warn('leaps_watch upsert failed:', error.message)
+}
 
 const SECTORS = ['XLK', 'XLF', 'XLV', 'XLE', 'XLI', 'XLY', 'XLP', 'XLU', 'XLB', 'XLRE', 'XLC']
 const BENCHMARK = 'SPY'
@@ -137,6 +179,7 @@ serve(async (req) => {
     const closes = Object.fromEntries(await Promise.all(tickers.map(async (t) => [t, await dailyCloses(t)] as const)))
     const bench12 = ret(closes[BENCHMARK], 252)
 
+    const ivr = await ivRanks([...SECTORS, ...INDEX])
     const metrics = SECTORS.map((t) => {
       const c = closes[t]
       const sma200 = c.length >= 200 ? c.slice(-200).reduce((s, x) => s + x, 0) / 200 : null
@@ -146,7 +189,8 @@ serve(async (req) => {
         ret_3m: ret(c, 63), ret_6m: ret(c, 126), ret_12m: r12,
         rel_strength: r12 != null && bench12 != null ? r12 - bench12 : null,
         above_200dma: sma200 != null && c[c.length - 1] > sma200,
-        vol_rank: volRank(c),
+        vol_rank: ivr.get(t) ?? volRank(c),
+        vol_rank_source: ivr.has(t) ? 'tastytrade_iv_rank' : 'hv20_1y',
       }
     }).filter((m) => m.ret_3m != null && m.ret_6m != null && m.ret_12m != null && m.rel_strength != null)
 
@@ -181,8 +225,8 @@ serve(async (req) => {
       const c = closes[t]
       const spot = c[c.length - 1]
       const sma200 = c.length >= 200 ? c.slice(-200).reduce((s, x) => s + x, 0) / 200 : null
-      const vol = volRank(c)
-      const base = { ticker: t, spot, ret_3m: ret(c, 63), ret_6m: ret(c, 126), ret_12m: ret(c, 252), above_200dma: sma200 != null && spot > sma200, vol_rank: vol }
+      const vol = ivr.get(t) ?? volRank(c)
+      const base = { ticker: t, spot, ret_3m: ret(c, 63), ret_6m: ret(c, 126), ret_12m: ret(c, 252), above_200dma: sma200 != null && spot > sma200, vol_rank: vol, vol_rank_source: ivr.has(t) ? 'tastytrade_iv_rank' : 'hv20_1y' }
       try {
         const sel = pickContract(await longCalls(t, spot), vol)
         const reason = sel.contract ? null
@@ -196,8 +240,21 @@ serve(async (req) => {
       }
     }))
 
+    // Stream the picked contracts (dxlink-worker reads leaps_watch) and
+    // attach whatever the worker already has for them.
+    const chosen = [
+      ...picks.filter((p) => p.contract).map((p) => ({ ticker: p.ticker, expiration: p.contract!.expiration, strike: p.contract!.strike, source: 'suggest' })),
+      ...index.filter((p) => p.contract).map((p) => ({ ticker: p.ticker, expiration: p.contract!.expiration, strike: p.contract!.strike, source: 'index' })),
+    ]
+    await watchContracts(chosen)
+    for (const p of [...picks, ...index]) {
+      if (!p.contract) continue
+      ;(p.contract as Record<string, unknown>).live = await liveQuote(p.ticker, p.contract.expiration, p.contract.strike)
+    }
+
     const body = {
-      success: true, as_of: new Date().toISOString(), benchmark: BENCHMARK, vol_rank_source: 'hv20_1y', source: 'yahoo',
+      success: true, as_of: new Date().toISOString(), benchmark: BENCHMARK,
+      vol_rank_source: ivr.size === SECTORS.length + INDEX.length ? 'tastytrade_iv_rank' : ivr.size ? 'mixed' : 'hv20_1y', source: 'yahoo',
       rules: { ...CONTRACT, topN: CORE.topN, weights: CORE.weights }, picks, ranked, index,
     }
     cache = { at: Date.now(), body }

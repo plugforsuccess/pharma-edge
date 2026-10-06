@@ -1,0 +1,42 @@
+# Momentum picks today (owner, 2026-10-06). Prints the current top decile
+# of the cross-sectional momentum rule; writes nothing. See
+# scripts/momentum-now.mjs.
+
+name: Momentum now
+
+on:
+  workflow_dispatch:
+  push:
+    branches-ignore: [main]
+    paths:
+      - scripts/momentum-now.mjs
+      - .github/workflows/momentum-now.yml
+
+concurrency:
+  group: momentum-now
+  cancel-in-progress: true
+
+jobs:
+  momentum:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Momentum now
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          MOMENTUM_OUT: momentum.json
+        run: node scripts/momentum-now.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: momentum
+          path: momentum.json
+          if-no-files-found: ignore
+          retention-days: 30

@@ -99,9 +99,13 @@ export function calibrate(results, ivRows) {
 // exit", 2026-10-05): every entry rule × 16 exit variants at the calibrated
 // premium — hit rate, days to target, hit / miss returns, by period and by
 // signal year; a random-entry control (same months, same swing exit) for
-// the default variant only.
+// the default variant and, since the first full grid was read (2026-10-05,
+// "Add it"), for the ungated option-target variants that led it — fixed
+// here, not chosen per run: +50% / +75% on the call × 12 / 18-month cap,
+// no stop. Each variant's control uses its own exit.
 export const SWING_RULES = ['setup', 'confluence', 'momentum', 'triple']
 const SWING_RANDOM_REPS = 50
+export const SWING_CONTROL_KEYS = ['opt50:252:none', 'opt50:378:none', 'opt75:252:none', 'opt75:378:none']
 export function swingVariants() {
   const out = []
   for (const gate of SWING_GRID.gates ?? [null]) for (const [target, pct] of SWING_GRID.targets) for (const maxHold of SWING_GRID.holds) for (const stopPct of SWING_GRID.stops) {
@@ -152,7 +156,8 @@ export function runSwingGrid({ results, premium, spyBars = null, ivByTicker = ne
   const regimeOn = spyRegime(spyBars)
   const defaultKey = variants.find((v) => !v.gate && v.swing.target === SWING.target && v.swing.maxHold === SWING.maxHold && v.swing.stopPct === SWING.stopPct)?.key
   const acc = Object.fromEntries(SWING_RULES.map((r) => [r, Object.fromEntries(variants.map((v) => [v.key, []]))]))
-  const randomAcc = Object.fromEntries(SWING_RULES.map((r) => [r, []]))
+  const controlKeys = [...new Set([defaultKey, ...SWING_CONTROL_KEYS].filter((k) => k && variants.some((v) => v.key === k)))]
+  const randomAcc = Object.fromEntries(SWING_RULES.map((r) => [r, Object.fromEntries(controlKeys.map((k) => [k, []]))]))
   let n = 0
   for (const r of results) {
     const pricing = pricingFor(r.bars, { premium, dividends: dividendsByTicker.get(r.ticker) ?? {}, realIv: ivByTicker.get(r.ticker) ?? null })
@@ -164,12 +169,12 @@ export function runSwingGrid({ results, premium, spyBars = null, ivByTicker = ne
       for (const v of variants) {
         const trades = replayFromEntries(r.bars, v.gate === 'spy200' ? gated : entries, { exitRule: 'swing', swing: v.swing, highs, sell: r.sig.sell, ...pricing })
         for (const t of trades) acc[rule][v.key].push(compact(t))
-        if (v.key === defaultKey && trades.length) {
-          const rng = mulberry32(hash(r.ticker) ^ 0x5157)
+        if (randomAcc[rule][v.key] && trades.length) {
+          const rng = mulberry32(hash(r.ticker) ^ 0x5157) // same seed per ticker for every variant: the same random dates, a different exit
           const dates = trades.map((t) => t.signalT)
           for (let k = 0; k < SWING_RANDOM_REPS; k++) {
             const rt = replayFromEntries(r.bars, randomEntries(r.bars, dates, rng), { exitRule: 'swing', swing: v.swing, highs, ...pricing })
-            const a = (randomAcc[rule][k] ??= { n: 0, hits: 0, sum: 0 })
+            const a = (randomAcc[rule][v.key][k] ??= { n: 0, hits: 0, sum: 0 })
             for (const t of rt) { a.n++; if (t.hit) a.hits++; a.sum += t.optionReturn }
           }
         }
@@ -177,16 +182,20 @@ export function runSwingGrid({ results, premium, spyBars = null, ivByTicker = ne
     }
     if (++n % 100 === 0) log(`  swing grid: ${n}/${results.length}`)
   }
-  const out = { grid: SWING_GRID, defaultKey, variants: variants.map((v) => ({ key: v.key, gate: v.gate, ...v.swing })), rules: {} }
+  const out = { grid: SWING_GRID, defaultKey, controlKeys, variants: variants.map((v) => ({ key: v.key, gate: v.gate, ...v.swing })), rules: {} }
+  const mean = (xs) => (xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : null)
+  const pctile = (xs, v) => (xs.length && v != null ? xs.filter((x) => x <= v).length / xs.length : null)
   for (const rule of SWING_RULES) {
     const perVariant = Object.fromEntries(variants.map((v) => [v.key, swingSummary(acc[rule][v.key])]))
-    const reps = (randomAcc[rule] ?? []).filter((a) => a && a.n > 0)
-    const randomHit = reps.map((a) => a.hits / a.n)
-    const randomAvg = reps.map((a) => a.sum / a.n)
-    const mean = (xs) => (xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : null)
-    const own = perVariant[defaultKey]?.all
-    const pctile = (xs, v) => (xs.length && v != null ? xs.filter((x) => x <= v).length / xs.length : null)
-    out.rules[rule] = { variants: perVariant, random: { reps: reps.length, hitRate: r4(mean(randomHit)), avg: r4(mean(randomAvg)), hitPercentile: r4(pctile(randomHit, own?.hitRate)), avgPercentile: r4(pctile(randomAvg, own?.avg)) } }
+    const control = (key) => {
+      const reps = (randomAcc[rule][key] ?? []).filter((a) => a && a.n > 0)
+      const randomHit = reps.map((a) => a.hits / a.n)
+      const randomAvg = reps.map((a) => a.sum / a.n)
+      const own = perVariant[key]?.all
+      return { reps: reps.length, hitRate: r4(mean(randomHit)), avg: r4(mean(randomAvg)), hitPercentile: r4(pctile(randomHit, own?.hitRate)), avgPercentile: r4(pctile(randomAvg, own?.avg)) }
+    }
+    const randomByVariant = Object.fromEntries(controlKeys.map((k) => [k, control(k)]))
+    out.rules[rule] = { variants: perVariant, random: randomByVariant[defaultKey], randomByVariant }
   }
   return out
 }

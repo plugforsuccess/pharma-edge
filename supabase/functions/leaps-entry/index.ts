@@ -74,6 +74,13 @@ async function storedIv(ticker: string): Promise<Array<{ t: string; iv: number }
     .filter((p) => p.iv >= 0.02 && p.iv <= 3)
 }
 
+async function storedMetrics(ticker: string): Promise<Record<string, unknown> | null> {
+  if (!SUPABASE_URL || !SERVICE_KEY) return null
+  const db = createClient(SUPABASE_URL, SERVICE_KEY)
+  const { data } = await db.from('market_metrics').select('*').eq('symbol', ticker).maybeSingle()
+  return data ?? null
+}
+
 async function atmIv(symbol: string): Promise<{ iv: number | null; expiry: string | null }> {
   try {
     const first = await yahooOptions(symbol)
@@ -136,10 +143,14 @@ serve(async (req) => {
   }
   if (bars.length < 60) return json({ success: false, error: 'not enough price history' }, 404)
 
-  const [ivPoints, today] = await Promise.all([storedIv(ticker), atmIv(symbol)])
+  const [ivPoints, today, metrics] = await Promise.all([storedIv(ticker), atmIv(symbol), storedMetrics(ticker)])
   const out = {
     success: true, ticker, source: 'yahoo', bars,
     iv_points: ivPoints, iv_today: today.iv, iv_today_expiry: today.expiry,
+    // Tastytrade market metrics (market_metrics, nightly) — IV rank /
+    // percentile, HV, beta, liquidity, next earnings — null until the
+    // market-metrics job has run for this ticker.
+    metrics,
   }
   cache.set(ticker, { at: Date.now(), body: out })
   return json(out)

@@ -1,0 +1,40 @@
+# Tastytrade market metrics (owner, 2026-10-06): IV index / rank /
+# percentile, historical vols, beta, liquidity, next earnings and dividend
+# for the chart universe → market_metrics (+ iv_history, source
+# 'tastytrade'). Weekdays 22:30 UTC, after iv-quotes.yml so the broker's IV
+# replaces the Yahoo scrape for the day. Same curl-the-edge-function
+# pattern as entry-scan.yml.
+
+name: Market metrics
+
+on:
+  schedule:
+    - cron: '30 22 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Fetch and report without writing'
+        type: boolean
+        default: false
+
+jobs:
+  metrics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Call market-metrics
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+        run: |
+          resp=$(curl -sS --max-time 600 -w "\n%{http_code}" -X POST \
+            "${SUPABASE_URL}/functions/v1/market-metrics" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "{\"dry_run\": ${DRY_RUN}}")
+          code=$(echo "$resp" | tail -n1)
+          body=$(echo "$resp" | sed '$d')
+          echo "$body" | head -c 4000; echo
+          [ "$code" = "200" ] || { echo "HTTP $code"; exit 1; }
+          echo "$body" | grep -q '"success":true' || { echo "function reported errors"; exit 1; }
