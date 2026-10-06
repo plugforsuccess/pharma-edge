@@ -330,3 +330,39 @@ reported for context only — vol clustering is expected and is not the
 claim being tested. Caveat: a sell-side signal firing after a crash will
 show a large past move, not a future one — only the forward window counts
 here.
+
+**Result, 2026-10-06 (run 37394575424, 545 tickers, 642,842 ticker-days).**
+Mean biggest |move| within 60 trading days, signal vs random days in the
+same months on the same ticker (50 replications), and the signal's
+percentile on |move| / ≥ 15% share:
+
+| Signal | n | \|move\| | random | ≥15% | random | pctl |
+|---|---|---|---|---|---|---|
+| Any day | 642,842 | 19.5% | — | 50.5% | — | — |
+| Buy setup | 2,527 | 18.0% | 17.5% | 44.8% | 42.9% | 100th / 100th |
+| Buy zone | 5,524 | 17.6% | 17.1% | 44.4% | 42.1% | 100th / 100th |
+| Confluence | 12,978 | 18.7% | 18.9% | 45.7% | 45.8% | 0th / 38th |
+| Triple | 328 | 18.4% | 18.5% | 48.2% | 47.0% | 26th / 78th |
+| Bravo ◆ | 45,456 | 18.1% | 18.5% | 43.0% | 43.7% | 0th / 0th |
+| Recovery | 1,598 | 17.5% | 18.1% | 43.7% | 45.3% | 0th / 2nd |
+| Sell score 2+ | 20,141 | 19.6% | 19.4% | 49.8% | 49.0% | 100th / 100th |
+| Bravo bear | 35,513 | 21.7% | 20.9% | 57.5% | 55.9% | 100th / 100th |
+| Cheap vol | 14,272 | 19.4% | 19.2% | 49.1% | 48.3% | 100th / 100th |
+| Momentum | 1,452 | 34.4% | 34.6% | 76.4% | 73.9% | 20th / 100th |
+
+**No signal meets the bar.** The largest gap over random is Bravo bear at
++0.8 points; the rule asked for ≥ 3. Several signals sit at the 100th
+percentile only because the random spread is narrow at these counts —
+the gaps are 0.2–0.8 points, i.e. nothing. The buy-side entries sit
+*below* the any-day base rate (18% vs 19.5%): dip-buying conditions
+select calmer stretches. Cheap vol does not precede bigger moves (19.4%
+vs 19.2%): a low-vol regime persists, so the vol-rank idea cannot rest
+on "more movement is coming" — only on the premium being cheap. Momentum
+days see 34% moves and 76% of them clear 15% within 60 days, twice the
+universe — but random days on the same names in the same months see the
+same, so that is **which stocks** momentum selects (high-vol names in
+uptrends), not **when**. Consequence per the rule: no chart signal is
+presented as predictive of size or direction; no direction-agnostic
+trade is built on them. What the data does support is stock selection
+by momentum (the names that move) with the exit doing the work, and the
+index call.
