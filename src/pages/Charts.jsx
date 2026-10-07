@@ -12,6 +12,7 @@ import TickerDrawer from '../components/TickerDrawer'
 import { CHART_TICKERS } from '../lib/chartTickers'
 import PriceChart from '../components/PriceChart'
 import ConfluenceLeaders from '../components/ConfluenceLeaders'
+import MomentumList from '../components/MomentumList'
 import { placePins, measure, fibLevels, autoSwing, stepPin } from '../utils/chartTools'
 
 // Charts — the stocks where the app suggests a LEAPS trade, with the trade
@@ -342,7 +343,8 @@ export default function Charts() {
         </button>
       </header>
 
-      {/* The universe ranked on confluence (nightly), then this page's chart. */}
+      {/* Momentum first (the tested stock picks), then confluence (nightly), then this page's chart. */}
+      <MomentumList />
       <ConfluenceLeaders mine={myTickers} />
 
       {loading ? (

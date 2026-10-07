@@ -26,8 +26,10 @@ export default function SignalRecord() {
   const [opt, setOpt] = useState(undefined)
   const [entry, setEntry] = useState('confluence')
   const [allMissed, setAllMissed] = useState(false)
+  const [fwd, setFwd] = useState(undefined)
   useEffect(() => {
     let cancelled = false
+    supabase.rpc('forward_record', { p_limit: 40 }).then(({ data, error }) => { if (!cancelled) setFwd(error ? null : data ?? null) })
     supabase.from('replay_runs').select('run_at, as_of, tickers, summary').order('run_at', { ascending: false }).limit(1)
       .then(({ data, error }) => { if (!cancelled) setRow(error ? null : data?.[0] ?? null) })
     supabase.from('optimizer_runs').select('run_at, as_of, tickers, summary').order('run_at', { ascending: false }).limit(1)
@@ -52,6 +54,8 @@ export default function SignalRecord() {
           {s && <div className="text-xs text-muted">{s.tickers} tickers · 5 years · as LEAPS, no hindsight · {day(s.as_of)}</div>}
         </div>
       </header>
+
+      <ForwardCard f={fwd} />
 
       {row === undefined ? (
         <div className="space-y-4" aria-busy="true">{[0, 1, 2].map((k) => <div key={k} className="h-40 rounded-2xl bg-card border border-border animate-pulse" />)}</div>
@@ -477,6 +481,73 @@ function Split({ label, g }) {
       <div className={clsx('mt-0.5 text-base font-semibold font-mono-tab', tone(g?.avg))}>{pctS(g?.avg)}</div>
       <div className="text-[11px] text-muted font-mono-tab">{share(g?.winRate)} win · {g?.closed ?? 0}</div>
     </div>
+  )
+}
+
+// The forward record (owner, 2026-10-07): every setup the app shows, logged
+// the night it appears (momentum picks and BUY SETUP rows) and graded by one
+// plan — sell the whole call at +75%, else after 18 months — with the call
+// marked nightly like the replay. setup_log refuses edits and deletes; each
+// day is sealed with a root hash over its rows (setup_log_days), ready to
+// anchor publicly. The numbers start at zero and grow; nothing is backfilled.
+const KIND_LABEL = { momentum: 'Momentum', buy_setup: 'Buy setup' }
+const STATUS = { open: ['Open', 'text-subtle'], hit: ['Hit target', 'text-green-400'], capped: ['18-mo cap', 'text-amber-300'], expired: ['Expired', 'text-rose-300'] }
+function ForwardCard({ f }) {
+  if (f === undefined) return <div className="h-32 rounded-2xl bg-card border border-border animate-pulse mb-4" aria-busy="true" />
+  const totals = f?.totals ?? {}
+  const kinds = Object.keys(KIND_LABEL).filter((k) => totals[k])
+  const rows = f?.rows ?? []
+  return (
+    <Card title="Forward record">
+      <p className="text-xs text-muted leading-5">
+        Every setup the app shows is logged the night it appears and graded by the same plan: sell the whole call at +75%, or after 18 months. Logged rows can't be edited or deleted, and each day is sealed with a hash. Calls are marked from recent volatility — estimates, not fills.
+      </p>
+      {!kinds.length ? (
+        <p className="mt-3 text-sm text-subtle">Nothing logged yet. Logging starts with the next nightly run after the close.</p>
+      ) : (
+        <>
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            {kinds.map((k) => {
+              const t = totals[k]
+              return (
+                <div key={k} className="rounded-xl bg-bg-elev px-3.5 py-3">
+                  <div className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold">{KIND_LABEL[k]}</div>
+                  <div className="mt-1 text-sm font-mono-tab">{t.logged} logged · {t.open} open</div>
+                  <div className="text-xs text-subtle font-mono-tab">
+                    {t.hit} hit the target{t.closed ? ` of ${t.closed} closed` : ''}
+                  </div>
+                  <div className="text-xs font-mono-tab">
+                    <span className="text-muted">Call, all at mark </span><span className={tone(t.avg_call)}>{pctS(t.avg_call)}</span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <div className="mt-4 -mx-5 overflow-x-auto">
+            <table className="w-full text-[11px] font-mono-tab">
+              <thead><tr className="text-muted border-t border-hairline"><th className="text-left font-normal px-5 py-2">Logged</th><th className="text-left font-normal pr-3">Ticker</th><th className="text-left font-normal pr-3">Kind</th><th className="text-left font-normal pr-3">Status</th><th className="text-right font-normal pr-3">Call</th><th className="text-right font-normal pr-5">Stock</th></tr></thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={`${r.logged_on}-${r.kind}-${r.ticker}`} className="border-t border-hairline">
+                    <td className="px-5 py-1.5 text-subtle whitespace-nowrap">{day(r.logged_on)}</td>
+                    <td className="pr-3"><Link to={`/charts/entry/${encodeURIComponent(r.ticker)}`} className="text-fg">{r.ticker}</Link></td>
+                    <td className="pr-3 text-subtle">{KIND_LABEL[r.kind] ?? r.kind}</td>
+                    <td className={clsx('pr-3 whitespace-nowrap', STATUS[r.status]?.[1] ?? 'text-subtle')}>{STATUS[r.status]?.[0] ?? r.status}</td>
+                    <td className={clsx('text-right pr-3', tone(r.call_ret))}>{pctS(r.call_ret)}</td>
+                    <td className={clsx('text-right pr-5', tone(r.stock_ret))}>{pctS(r.stock_ret)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {f.last_day && (
+            <p className="mt-3 text-[11px] text-muted break-all">
+              {day(f.last_day.logged_on)} sealed · {f.last_day.n} rows · <span className="font-mono">{f.last_day.root_hash}</span>
+            </p>
+          )}
+        </>
+      )}
+    </Card>
   )
 }
 

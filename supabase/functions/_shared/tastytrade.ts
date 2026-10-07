@@ -28,17 +28,25 @@ interface EnvConfig {
   bootstrapRefreshToken: string | undefined
 }
 
+// A base URL secret stored as a bare host ("api.tastyworks.com") broke every
+// fetch with "Invalid URL" (2026-10-06); accept either form.
+function withScheme(url: string | undefined, fallback: string): string {
+  const v = (url ?? '').trim().replace(/\/+$/, '')
+  if (!v) return fallback
+  return /^https?:\/\//i.test(v) ? v : `https://${v}`
+}
+
 function envConfig(env: TtEnv): EnvConfig {
   if (env === 'cert') {
     return {
-      baseUrl: Deno.env.get('TASTYTRADE_CERT_BASE_URL') || 'https://api.cert.tastyworks.com',
+      baseUrl: withScheme(Deno.env.get('TASTYTRADE_CERT_BASE_URL'), 'https://api.cert.tastyworks.com'),
       clientId: Deno.env.get('TASTYTRADE_CERT_CLIENT_ID'),
       clientSecret: Deno.env.get('TASTYTRADE_CERT_CLIENT_SECRET'),
       bootstrapRefreshToken: Deno.env.get('TASTYTRADE_CERT_REFRESH_TOKEN'),
     }
   }
   return {
-    baseUrl: Deno.env.get('TASTYTRADE_BASE_URL') || 'https://api.tastyworks.com',
+    baseUrl: withScheme(Deno.env.get('TASTYTRADE_BASE_URL'), 'https://api.tastyworks.com'),
     clientId: Deno.env.get('TASTYTRADE_CLIENT_ID'),
     clientSecret: Deno.env.get('TASTYTRADE_CLIENT_SECRET'),
     bootstrapRefreshToken: Deno.env.get('TASTYTRADE_REFRESH_TOKEN'),
