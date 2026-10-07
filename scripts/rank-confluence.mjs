@@ -34,6 +34,8 @@ import { confluenceModel, poolStats, blendedEstimate, baselineStats, MIN_SCORE, 
 import { alignCloses } from '../src/utils/signalSuite.js'
 import { dailyBars, mapLimit, sources } from './lib/marketData.mjs'
 import { blockers, buyVerdict, sellVerdict, tradeSpec, structureStop, momentum, ownRecord, holdReason } from './lib/verdict.mjs'
+import { momentumToday, moveGroups, forwardOutcome, SWING_PLAN } from '../src/utils/momentumList.js'
+import { createHash } from 'node:crypto'
 
 const args = process.argv.slice(2)
 const MODE = (args[args.indexOf('--mode') + 1] && args.includes('--mode')) ? args[args.indexOf('--mode') + 1] : 'dry-run'
@@ -57,7 +59,7 @@ export function analyze(ticker, bars, spy = null) {
   // E+T+B convergence already computed in confluenceFlags; get today's value
   const etbToday = conf.buy.flags.etb?.[lastIdx]?.fired ?? false
   return {
-    ticker, asOf: bars[lastIdx].t, close: bars[lastIdx].c,
+    ticker, asOf: bars[lastIdx].t, close: bars[lastIdx].c, bars,
     trendUp: model.status.slope200 != null && model.status.slope200 > 0,
     conditionsMet: ['band', 'rising', 'trend', 'rsi', 'iv'].filter((k) => c[k]).length,
     etbConvergence: etbToday,
@@ -194,6 +196,17 @@ async function main() {
     console.log(`\nTop ${TOP} ${side}:`)
     for (const r of top) console.log(`  ${String(r.rank).padStart(2)}. ${r.ticker.padEnd(6)} ${r.score}/5 ${r.combo.padEnd(28)} 3M ${pct(r.est_3m)} 6M ${pct(r.est_6m)}  at turn ${pct(r.est_at_turn)}  (own ${r.own_n}, pool ${r.pool_n})`)
   }
+  // Momentum list (owner, 2026-10-07): today's top decile on the 12-1 rule,
+  // each with the call the replay would price and the names it moves with.
+  const mom = momentumToday(results.map((r) => ({ ticker: r.ticker, bars: r.bars })))
+  const byTicker = new Map(results.map((r) => [r.ticker, r]))
+  const groups = moveGroups(mom.picks.map((p) => ({ ticker: p.ticker, closes: byTicker.get(p.ticker).closes })))
+  const momRows = mom.picks.map((p) => ({
+    as_of: p.asOf, ticker: p.ticker, rank: p.rank, score: p.score, close: p.close, vs200: p.vs200, r1m: p.r1m, off_high: p.offHigh, hv60: p.hv60,
+    trade: tradeSpec(byTicker.get(p.ticker).bars), move_group: groups.get(p.ticker)?.group ?? p.ticker, peers: groups.get(p.ticker)?.peers ?? [], eligible: mom.eligible,
+  }))
+  console.log(`\nMomentum: ${mom.scored} scored, ${mom.eligible} above their 200-day, top decile ${momRows.length}:`)
+  for (const m of momRows) console.log(`  ${String(m.rank).padStart(2)}. ${m.ticker.padEnd(6)} 12-1 ${pct(m.score)}  vs200 ${pct(m.vs200)}  ${m.trade ? `call $${m.trade.strike} ${m.trade.expiry} ≈$${Math.round(m.trade.cost * 100)}` : ''}${m.peers.length ? `  moves with ${m.peers.join(', ')}` : ''}`)
   if (MODE === 'dry-run') return
 
   const { createClient } = await import('@supabase/supabase-js')
@@ -231,7 +244,14 @@ async function main() {
     }
   }
   console.log(`\nWrote ${rows.length} rank rows and ${pool.length} pool rows.`)
+  if (momRows.length) {
+    const { error } = await db.from('momentum_picks').upsert(momRows.map((m) => ({ ...m, updated_at: now })), { onConflict: 'as_of,ticker' })
+    if (error) throw new Error(`momentum_picks: ${error.message}`)
+    console.log(`Wrote ${momRows.length} momentum picks for ${momRows[0].as_of}.`)
+  }
   if (MODE !== 'full') return
+
+  try { await forwardRecord(db, { asOf, momRows, rows, byTicker }) } catch (e) { console.error(`Forward record failed: ${e.message}`) }
 
   // Alerts: new entries into a top 10 among each user's tickers.
   const entered = rows.filter((r) => r.rank != null && r.rank <= TOP && !prevTop.has(`${r.side}:${r.ticker}`))
@@ -275,6 +295,58 @@ async function main() {
 
 // Resend email — a placeholder until the account and sender are set up:
 // with no RESEND_API_KEY it logs and skips (the bell still has the alert).
+// The forward record (owner, 2026-10-07): log every setup the night it
+// first appears — momentum picks and BUY SETUP rows — with the call it
+// priced and the plan it is graded by (SWING_PLAN), one open log per
+// ticker and kind at a time; seal the day with a root hash; then walk every
+// open log forward on today's bars. setup_log / setup_log_days refuse
+// updates and deletes in the database; setup_outcomes is the grading.
+async function forwardRecord(db, { asOf, momRows, rows, byTicker }) {
+  const { data: logs, error: e1 } = await db.from('setup_log').select('id, logged_on, kind, ticker, strike, expiry, cost, target, hold_days')
+  if (e1) throw new Error(`setup_log read: ${e1.message}`)
+  const { data: outs, error: e2 } = await db.from('setup_outcomes').select('log_id, status')
+  if (e2) throw new Error(`setup_outcomes read: ${e2.message}`)
+  const closed = new Set((outs ?? []).filter((o) => o.status !== 'open').map((o) => o.log_id))
+  const openKey = new Set((logs ?? []).filter((l) => !closed.has(l.id)).map((l) => `${l.kind}:${l.ticker}`))
+  const candidates = [
+    ...momRows.filter((m) => m.trade).map((m) => ({ kind: 'momentum', ticker: m.ticker, rank: m.rank, close: m.close, trade: m.trade, payload: { score: m.score, vs200: m.vs200, peers: m.peers } })),
+    ...rows.filter((r) => r.side === 'buy' && r.verdict === 'enter' && r.trade).map((r) => ({ kind: 'buy_setup', ticker: r.ticker, rank: r.rank, close: r.close, trade: r.trade, payload: { combo: r.combo, score: r.score, momentum: r.momentum, stop: r.stop_price } })),
+  ]
+  const fresh = candidates.filter((c) => !openKey.has(`${c.kind}:${c.ticker}`)).map((c) => ({
+    logged_on: asOf, kind: c.kind, ticker: c.ticker, rank: c.rank ?? null, close: c.close,
+    strike: c.trade.strike, expiry: c.trade.expiry, cost: c.trade.cost, target: SWING_PLAN.target, hold_days: SWING_PLAN.holdDays,
+    payload: { ...c.payload, delta: c.trade.delta, vol: c.trade.vol, plan: SWING_PLAN.label },
+  }))
+  if (fresh.length) {
+    const { error } = await db.from('setup_log').upsert(fresh, { onConflict: 'logged_on,kind,ticker', ignoreDuplicates: true })
+    if (error) throw new Error(`setup_log insert: ${error.message}`)
+  }
+  // Seal the day: SHA-256 over the day's row hashes, ordered by kind, ticker.
+  const { data: day } = await db.from('setup_log').select('kind, ticker, row_hash').eq('logged_on', asOf).order('kind').order('ticker')
+  if (day?.length) {
+    const root = createHash('sha256').update(day.map((d) => d.row_hash).join('\n')).digest('hex')
+    const { error } = await db.from('setup_log_days').upsert({ logged_on: asOf, n: day.length, root_hash: root }, { onConflict: 'logged_on', ignoreDuplicates: true })
+    if (error) console.error(`setup_log_days: ${error.message}`)
+  }
+  // Grade every open log on today's bars.
+  const { data: all } = await db.from('setup_log').select('id, logged_on, kind, ticker, strike, expiry, cost, target, hold_days')
+  const updates = []
+  for (const l of all ?? []) {
+    if (closed.has(l.id)) continue
+    const r = byTicker.get(l.ticker)
+    if (!r) continue
+    const o = forwardOutcome(r.bars, l)
+    if (o.status === 'unknown') continue
+    if (o.days === 0 && o.status === 'open') { updates.push({ log_id: l.id, status: 'open', last_date: l.logged_on, stock_ret: 0, call_ret: 0, peak_call_ret: 0, days: 0, closed_on: null, updated_at: new Date().toISOString() }); continue }
+    updates.push({ log_id: l.id, status: o.status, last_date: o.last_date, stock_ret: o.stock_ret, call_ret: o.call_ret, peak_call_ret: o.peak_call_ret, days: o.days, closed_on: o.closed_on ?? null, updated_at: new Date().toISOString() })
+  }
+  for (let i = 0; i < updates.length; i += 500) {
+    const { error } = await db.from('setup_outcomes').upsert(updates.slice(i, i + 500), { onConflict: 'log_id' })
+    if (error) throw new Error(`setup_outcomes: ${error.message}`)
+  }
+  console.log(`Forward record: logged ${fresh.length} new setups (${fresh.filter((f) => f.kind === 'momentum').length} momentum, ${fresh.filter((f) => f.kind === 'buy_setup').length} buy setup); graded ${updates.length}.`)
+}
+
 async function sendEmails(db, mail) {
   const key = process.env.RESEND_API_KEY
   const from = process.env.RESEND_FROM || 'Cash Moves <alerts@cashmoves.io>'

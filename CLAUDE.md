@@ -1556,6 +1556,38 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   latest row as `contract.live` and Charts shows "bid / ask (live)" (≤ 20
   min old, else the age). Redistribution of broker data to other users is
   an open question for counsel — fine on the owner's own screen.
+- **Momentum list + forward record** (owner, 2026-10-07: "1 and 3"; the
+  swing-grid and magnitude tests found momentum's stock picks — not its
+  timing — are what held up). **Momentum list:** `scripts/rank-confluence.mjs`
+  (every mode but dry-run) runs `momentumToday` (`src/utils/momentumList.js`,
+  `npm run momentumlist:check`) on the bars it already loads: 12-1 return,
+  above the 200-day, top tenth of the eligible (≥ 30), daily → 
+  **`momentum_picks`** (as_of × ticker, history kept; authenticated SELECT):
+  the call `tradeSpec` prices (0.75Δ, ~730 DTE, Black-Scholes on 60-day vol —
+  an estimate), and `moveGroups` (120-day return correlation ≥ 0.7,
+  union-find) so names that move together are flagged. Charts leads with
+  **`MomentumList`** (top 10, "Show all"): the call, about $ per contract,
+  % of `profiles.account_size` (amber over 5%), the plan `SWING_PLAN` (sell
+  the whole call at +75%, else after 18 months — the swing-grid variant that
+  led the test), a cluster warning ("SNDK, MU, WDC… move together"), and
+  one record line from **`momentum_record()`** (the latest replay's
+  `opt75:378:none` momentum result, losing years, and the random-entry
+  control: "the edge is which stocks move, not the day you buy").
+  **Forward record:** in full mode the job logs every momentum pick and
+  BUY SETUP row the night it first appears (one open log per kind × ticker)
+  into **`setup_log`** — the priced call, `SWING_PLAN`, payload; insert-only:
+  a BEFORE UPDATE OR DELETE trigger (`append_only_fn`) refuses edits even
+  for the service role, and `row_hash` = SHA-256 of
+  `setup_log_canonical(row)`, set by trigger (`logCanonical` in
+  momentumList.js builds the identical string — verified byte for byte).
+  Each logged day is sealed in **`setup_log_days`** (SHA-256 over the day's
+  row hashes, ordered by kind, ticker; append-only) — ready to anchor to the
+  public-record repo. `forwardOutcome` grades every open log nightly into
+  **`setup_outcomes`** (open / hit / capped / expired, call marked like the
+  replay). Signal record leads with the **Forward record** card
+  (`forward_record()`: totals per kind, latest 40 rows, the last day's root
+  hash). Nothing is backfilled; the record starts the first full run after
+  merge. Neither changes a live rule.
 - **Cross-sectional momentum, a secondary pre-registered rule** (owner,
   2026-10-05, "Word", after the Triple result — every chart-pattern entry
   tested had landed on the random control; slow momentum is the one entry
