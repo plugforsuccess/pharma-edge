@@ -153,6 +153,10 @@ export default function Layout() {
         </main>
       </div>
 
+      {/* Solid strip under the status bar (owner, 2026-10-07): page content
+          scrolled up behind the clock and battery on phones. */}
+      <div aria-hidden className="lg:hidden fixed inset-x-0 top-0 z-40 bg-bg pointer-events-none" style={{ height: 'env(safe-area-inset-top)' }} />
+
       <InstallPrompt />
       <OnboardingGate />
 

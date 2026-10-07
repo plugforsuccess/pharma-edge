@@ -1564,7 +1564,12 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   holdings, searched tickers). One section shows at a time; the choice is
   remembered on the device (`cm:charts-tab`, default Momentum); picking a
   ticker in Search switches to Ideas & holdings. Older notes below still say
-  "Confluence leaders" for the Pullbacks card.
+  "Confluence leaders" for the Pullbacks card. Pullbacks has an opt-in
+  **3+ signals** chip on the buy side (`cm:pullbacks-3plus`; filters
+  `score >= 3`, 2 stays the rule — the record difference is small: 3M 64%
+  vs 62% higher, gone by 6M). A solid strip under the phone status bar
+  (`Layout.jsx`, `env(safe-area-inset-top)`, z-40) keeps scrolled content
+  out from behind the clock on every page.
 - **Momentum list + forward record** (owner, 2026-10-07: "1 and 3"; the
   swing-grid and magnitude tests found momentum's stock picks — not its
   timing — are what held up). **Momentum list:** `scripts/rank-confluence.mjs`
