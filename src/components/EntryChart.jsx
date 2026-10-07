@@ -101,19 +101,22 @@ function zoneLegend(bar, lo, hi) {
 const fmt = (v, d = 2) => (v == null || !Number.isFinite(v) ? '—' : v.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }))
 const pct = (v, d = 1) => (v == null ? '—' : `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(d)}%`)
 const vol = (v) => (v == null || !Number.isFinite(v) ? '—' : v >= 1e9 ? `${(v / 1e9).toFixed(2)}B` : v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(0)}K` : String(Math.round(v)))
-// The bar under the crosshair (owner, 2026-10-07): open / high / low / close,
-// each with its % change from the previous bar's close, and volume with its
-// % change from the previous bar's volume.
+// The bar under the crosshair (owner, 2026-10-07): three rows —
+// Open · Close, Low · High, then Vol with its % change from the previous
+// bar's volume and Price, the close's % change from the previous close.
 function barLegend(bars, i) {
   const b = i == null ? null : bars?.[i]
   if (!b) return []
   const prev = i > 0 ? bars[i - 1] : null
-  const ch = (x) => (prev?.c > 0 && Number.isFinite(x) ? ((x / prev.c) - 1) * 100 : null)
   const tone = (x) => (x == null ? 'text-subtle' : x >= 0 ? 'text-green-400' : 'text-rose-300')
-  const item = (label, x) => { const c = ch(x); return { label, value: fmt(x), sub: c == null ? null : pct(c, 2), subCls: tone(c), cls: 'text-fg' } }
+  const pc = prev?.c > 0 && Number.isFinite(b.c) ? ((b.c / prev.c) - 1) * 100 : null
   const vc = prev?.v > 0 && Number.isFinite(b.v) ? ((b.v / prev.v) - 1) * 100 : null
-  return [item('O', b.o), item('H', b.h), item('L', b.l), item('C', b.c),
-    { label: 'Vol', value: vol(b.v), sub: vc == null ? null : pct(vc, 0), subCls: tone(vc), cls: 'text-fg' }]
+  return [
+    [{ label: 'Open', value: fmt(b.o) }, { label: 'Close', value: fmt(b.c) }],
+    [{ label: 'Low', value: fmt(b.l) }, { label: 'High', value: fmt(b.h) }],
+    [{ label: 'Vol', value: vol(b.v), sub: vc == null ? null : pct(vc, 0), subCls: tone(vc) },
+      { label: 'Price', value: pc == null ? '—' : pct(pc, 2), cls: tone(pc) }],
+  ]
 }
 
 // Bar intervals the chart can draw. Weekly / monthly (owner, 2026-10-03:
@@ -588,11 +591,11 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
               </span>
             ))}
             {k === 'price' && (
-              <span className="basis-full flex flex-wrap items-center gap-x-2.5 gap-y-0.5">
-                {barLegend(bars, i).map((l) => (
-                  <span key={l.label} className="inline-flex items-center gap-1 bg-bg/70 rounded px-1 -mx-1">
+              <span className="basis-full grid grid-cols-[auto_auto] justify-start gap-x-4 gap-y-0.5">
+                {barLegend(bars, i).flat().map((l) => (
+                  <span key={l.label} className="inline-flex items-center gap-1 bg-bg/70 rounded px-1 -mx-1 whitespace-nowrap">
                     <span className="text-muted">{l.label}</span>
-                    <span className={l.cls}>{l.value}</span>
+                    <span className={l.cls ?? 'text-fg'}>{l.value}</span>
                     {l.sub && <span className={l.subCls}>{l.sub}</span>}
                   </span>
                 ))}
