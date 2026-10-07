@@ -1759,8 +1759,11 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   so out-of-order series landed in the wrong pane.
   **Timeframe: Daily (default) · Weekly · Monthly** (owner, 2026-10-03;
   daily = the chart's own bars, like TradingView on a daily chart — no
-  extra fetch; Daily came back once Hardening was hidden). The card's
-  switch (`cm:suite-tf:v2`) runs the whole suite on that interval, and
+  extra fetch; Daily came back once Hardening was hidden). The switch
+  sits at the **top of the chart card** (owner, 2026-10-07 — it was hard
+  to reach at the top of the Signal suite card, which now only names the
+  interval; a "Loading weekly candles…" line shows until the bars arrive).
+  It (`cm:suite-tf:v2`) runs the whole suite on that interval, and
   **the candles follow it** (owner, 2026-10-03): Weekly / Monthly draw
   those bars with the same indicator math run on them (200W / 50W
   averages, "% vs 200-week", weekly RSI / MACD, the suite on its own bars;
