@@ -148,6 +148,10 @@ export default function ConfluenceLeaders({ mine = [] }) {
   const [rows, setRows] = useState(null)
   const [accountSize, setAccountSize] = useState(null)
   const [baseline, setBaseline] = useState(null)
+  // "3+ signals" (owner, 2026-10-07): an opt-in stricter list on the buy
+  // side — 2 stays the rule; this only filters. Remembered on the device.
+  const [strict, setStrictState] = useState(() => { try { return localStorage.getItem('cm:pullbacks-3plus') === '1' } catch { return false } })
+  const setStrict = (v) => { setStrictState(v); try { localStorage.setItem('cm:pullbacks-3plus', v ? '1' : '0') } catch { /* storage off */ } }
   const mineKey = mine.join(',')
 
   useEffect(() => {
@@ -166,6 +170,7 @@ export default function ConfluenceLeaders({ mine = [] }) {
     let q = supabase.from('confluence_ranks')
       .select('ticker, side, as_of, close, score, rank, est_3m, est_6m, est_win_3m, est_win_6m, own_n, pool_n, verdict, hold_reason, blockers, trade, stop_price, momentum, own_record, est_med_3m, est_med_6m, est_badq_3m, est_badq_6m, est_beat_3m, est_beat_6m')
       .eq('side', side)
+    if (side === 'buy' && strict) q = q.gte('score', 3)
     q = scope === 'all'
       ? q.not('rank', 'is', null).order('rank').limit(10)
       : q.in('ticker', mine.length ? mine : ['—']).order('score', { ascending: false }).limit(40)
@@ -175,7 +180,7 @@ export default function ConfluenceLeaders({ mine = [] }) {
       .then(({ data }) => { if (!cancelled) setBaseline(data ?? null) })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [side, scope, mineKey])
+  }, [side, scope, mineKey, strict])
 
   // Yours: ranked first, then by score.
   const list = useMemo(() => (scope === 'all' ? rows : rows && [...rows].sort((a, b) => (a.rank ?? 1e9) - (b.rank ?? 1e9) || b.score - a.score)), [rows, scope])
@@ -205,6 +210,16 @@ export default function ConfluenceLeaders({ mine = [] }) {
             ))}
           </div>
         </div>
+        {side === 'buy' && (
+          <div className="mt-2.5 flex items-center gap-2">
+            <button type="button" aria-pressed={strict} onClick={() => setStrict(!strict)}
+              className={clsx('min-h-[32px] px-2.5 rounded-lg border text-[11px] font-semibold inline-flex items-center gap-1.5 transition',
+                strict ? 'border-violet-400/50 bg-violet-400/10 text-violet-300' : 'border-border text-muted hover:text-subtle')}>
+              {strict ? '✓' : '+'} 3+ signals
+            </button>
+            {strict && <span className="text-[11px] text-muted">Stricter: slightly better 3-month record, fewer names.</span>}
+          </div>
+        )}
         <p className="mt-2 text-xs text-muted">
           {side === 'buy'
             ? 'BUY SETUP = the entry rule is met today. EARLY = momentum is still falling; the rule buys anyway, a cautious entry waits for it to rise. NOT YET = what’s still missing. NOT NOW = the rule is met but it is already losing on this stock.'
@@ -215,7 +230,8 @@ export default function ConfluenceLeaders({ mine = [] }) {
         <div className="px-5 pb-5 space-y-2" aria-busy="true">{[0, 1, 2].map((i) => <div key={i} className="h-14 rounded-xl bg-bg-elev animate-pulse" />)}</div>
       ) : list.length === 0 ? (
         <div className="px-5 pb-5 text-sm text-subtle">
-          {scope === 'mine' ? (mine.length ? 'None of your tickers have signals today.' : 'Add tickers to Tracking or Portfolio to see them here.')
+          {side === 'buy' && strict ? 'No stock has 3 or more signals today. Turn off 3+ signals to see the 2-signal setups.'
+            : scope === 'mine' ? (mine.length ? 'None of your tickers have signals today.' : 'Add tickers to Tracking or Portfolio to see them here.')
             : 'No rankings yet — they run after each close.'}
         </div>
       ) : (
