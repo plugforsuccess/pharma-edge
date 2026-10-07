@@ -95,6 +95,8 @@ function Portalled({ when, children }) {
   return when ? createPortal(children, document.body) : children
 }
 
+const CHART_TABS = [['momentum', 'Momentum'], ['pullbacks', 'Pullbacks'], ['charts', 'Ideas & holdings']]
+
 export default function Charts() {
   const { user } = useAuth()
   const { federal, profile, positions, plan, ready, results } = useHoldings()
@@ -103,6 +105,10 @@ export default function Charts() {
   // The index call's record from the pre-registered test (index_call_record()).
   const [indexRecord, setIndexRecord] = useState(null)
   const [selected, setSelected] = useState(null)
+  // Tabs at the top (owner, 2026-10-07: "so the user doesn't have to scroll
+  // for eternity"): Momentum · Pullbacks · Ideas & holdings, remembered here.
+  const [tab, setTabState] = useState(() => { try { const t = localStorage.getItem('cm:charts-tab'); return CHART_TABS.some(([k]) => k === t) ? t : 'momentum' } catch { return 'momentum' } })
+  const setTab = (t) => { setTabState(t); try { localStorage.setItem('cm:charts-tab', t) } catch { /* storage off */ } }
   const [range, setRange] = useState('6mo')
   const [bars, setBars] = useState({})
   const [hover, setHover] = useState(null)
@@ -239,6 +245,7 @@ export default function Charts() {
     if (!sym) return
     setSearchOpen(false)
     setHover(null)
+    setTab('charts')
     const existing = items.find((x) => x.ticker === sym)
     if (existing) { setSelected(existing.id); return }
     saveRecent([sym, ...recent.filter((x) => x !== sym)].slice(0, RECENT_MAX))
@@ -343,11 +350,23 @@ export default function Charts() {
         </button>
       </header>
 
-      {/* Momentum first (the tested stock picks), then confluence (nightly), then this page's chart. */}
-      <MomentumList />
-      <ConfluenceLeaders mine={myTickers} />
+      {/* One list at a time: tabs pinned under the header. */}
+      <div className="sticky top-[env(safe-area-inset-top)] z-20 -mx-4 px-4 pt-1 pb-3 mb-1 bg-bg">
+        <div className="flex gap-0.5 p-0.5 rounded-xl bg-card border border-border" role="tablist" aria-label="Charts sections">
+          {CHART_TABS.map(([k, label]) => (
+            <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
+              className={clsx('flex-1 min-w-0 min-h-[40px] px-1 rounded-lg text-[13px] font-semibold transition truncate',
+                tab === k ? 'bg-bg-elev text-fg shadow-sm' : 'text-muted hover:text-subtle')}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
 
-      {loading ? (
+      {tab === 'momentum' && <MomentumList />}
+      {tab === 'pullbacks' && <ConfluenceLeaders mine={myTickers} />}
+
+      {tab !== 'charts' ? null : loading ? (
         <div className="text-xs text-muted py-8 text-center">Loading…</div>
       ) : allItems.length === 0 ? (
         <section className="bg-card border border-border rounded-2xl p-5">

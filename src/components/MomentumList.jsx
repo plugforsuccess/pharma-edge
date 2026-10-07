@@ -70,7 +70,14 @@ export default function MomentumList() {
     return [...m.values()].filter((g) => g.length >= 3).sort((a, b) => b.length - a.length)
   }, [rows])
 
-  if (rows && rows.length === 0) return null
+  if (rows && rows.length === 0) {
+    return (
+      <section className="bg-card border border-border rounded-2xl mb-5 p-5">
+        <h2 className="text-sm font-semibold">Momentum</h2>
+        <p className="mt-1 text-sm text-subtle">The list updates after each market close. Check back tonight.</p>
+      </section>
+    )
+  }
   const list = rows ? (all ? rows : rows.slice(0, SHOW)) : null
   const asOf = rows?.[0]?.as_of
 
