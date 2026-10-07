@@ -72,7 +72,8 @@ export const LAYERS = [
 const PRICE_H = 340
 const SUB_H = 112
 // Header strip above each pane's data (title + live values), px.
-const HEADER_PRICE = 46
+// Two rows over the price pane: averages, then the bar's OHLC + volume.
+const HEADER_PRICE = 64
 const HEADER_SUB = 30
 export const PANE_TITLES = {
   price: 'Price', dist: '% vs 200-day', rsi: 'RSI 14', macd: 'MACD 12·26·9', ivr: 'IV Rank',
@@ -99,6 +100,21 @@ function zoneLegend(bar, lo, hi) {
 
 const fmt = (v, d = 2) => (v == null || !Number.isFinite(v) ? '—' : v.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }))
 const pct = (v, d = 1) => (v == null ? '—' : `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(d)}%`)
+const vol = (v) => (v == null || !Number.isFinite(v) ? '—' : v >= 1e9 ? `${(v / 1e9).toFixed(2)}B` : v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(0)}K` : String(Math.round(v)))
+// The bar under the crosshair (owner, 2026-10-07): open / high / low / close,
+// each with its % change from the previous bar's close, and volume with its
+// % change from the previous bar's volume.
+function barLegend(bars, i) {
+  const b = i == null ? null : bars?.[i]
+  if (!b) return []
+  const prev = i > 0 ? bars[i - 1] : null
+  const ch = (x) => (prev?.c > 0 && Number.isFinite(x) ? ((x / prev.c) - 1) * 100 : null)
+  const tone = (x) => (x == null ? 'text-subtle' : x >= 0 ? 'text-green-400' : 'text-rose-300')
+  const item = (label, x) => { const c = ch(x); return { label, value: fmt(x), sub: c == null ? null : pct(c, 2), subCls: tone(c), cls: 'text-fg' } }
+  const vc = prev?.v > 0 && Number.isFinite(b.v) ? ((b.v / prev.v) - 1) * 100 : null
+  return [item('O', b.o), item('H', b.h), item('L', b.l), item('C', b.c),
+    { label: 'Vol', value: vol(b.v), sub: vc == null ? null : pct(vc, 0), subCls: tone(vc), cls: 'text-fg' }]
+}
 
 // Bar intervals the chart can draw. Weekly / monthly (owner, 2026-10-03:
 // the candles follow the Signal suite's timeframe) run the same indicator
@@ -123,6 +139,7 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
   const rangeRef = useRef(null)      // keeps zoom / pan across rebuilds
   const chartRef = useRef(null)
   const holdRef = useRef(0)
+  const priceHeadRef = useRef(null) // the price pane's header (it wraps on phones)
   const [hover, setHover] = useState(null)
   const [tops, setTops] = useState([])
   const [ticks, setTicks] = useState([])
@@ -456,7 +473,9 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
       ps.forEach((pane, pi) => {
         const h = pane.getHeight()
         if (!h) return
-        const top = Math.min(0.45, (shown[pi] === 'price' ? HEADER_PRICE : HEADER_SUB) / h)
+        // The price header wraps to more rows on narrow screens: use its real height.
+        const head = shown[pi] === 'price' ? Math.max(HEADER_PRICE, (priceHeadRef.current?.offsetHeight ?? 0) + 12) : HEADER_SUB
+        const top = Math.min(0.45, head / h)
         // Echo / Tango keep a signal lane under their line.
         const lane = shown[pi] === 'echo' || shown[pi] === 'tango'
         // Room for the date row under every pane but the last.
@@ -556,7 +575,7 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
       ) : null))}
       {shown.map((k, pi) => (
         <div key={k}>
-          <div className={`absolute left-3 right-[104px] pointer-events-none flex items-center gap-x-3 gap-y-0.5 text-[11px] leading-4 font-mono-tab ${k === 'price' ? 'flex-wrap' : 'flex-nowrap overflow-hidden whitespace-nowrap !gap-x-2'}`}
+          <div ref={k === 'price' ? priceHeadRef : undefined} className={`absolute left-3 right-[104px] pointer-events-none flex items-center gap-x-3 gap-y-0.5 text-[11px] leading-4 font-mono-tab ${k === 'price' ? 'flex-wrap' : 'flex-nowrap overflow-hidden whitespace-nowrap !gap-x-2'}`}
             style={{ top: (tops[pi] ?? 0) + 7 }}>
             <span className="bg-bg/80 rounded px-1 -mx-1 text-[11px] font-semibold text-violet-300">
               {paneTitle(k, tf)}{suiteLabel && (k === 'echo' || k === 'tango' || (k === 'price' && !daily)) ? ` · ${suiteLabel}` : ''}
@@ -568,6 +587,17 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
                 {l.value !== '' && <span className={l.cls}>{l.value}</span>}
               </span>
             ))}
+            {k === 'price' && (
+              <span className="basis-full flex flex-wrap items-center gap-x-2.5 gap-y-0.5">
+                {barLegend(bars, i).map((l) => (
+                  <span key={l.label} className="inline-flex items-center gap-1 bg-bg/70 rounded px-1 -mx-1">
+                    <span className="text-muted">{l.label}</span>
+                    <span className={l.cls}>{l.value}</span>
+                    {l.sub && <span className={l.subCls}>{l.sub}</span>}
+                  </span>
+                ))}
+              </span>
+            )}
           </div>
           {onExpand && !focus && (
             <button type="button" onClick={() => onExpand(k)} aria-label={`Expand ${paneTitle(k, tf)}`}
