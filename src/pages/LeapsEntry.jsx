@@ -306,7 +306,7 @@ export default function LeapsEntry() {
         <div className="md:grid md:grid-cols-[1fr_280px] md:gap-x-5 md:items-start">
           <div className="min-w-0 md:order-1">
             <StatusPanel s={s} model={model} params={params} suite={suite} dailySuite={dailySuite} confirmDays={confirmDays} tfLabel={SUITE_TIMEFRAMES[suiteTf].label.toLowerCase()} conf={conf} pool={pool} trend={trend} metrics={data?.metrics ?? null} />
-            {<SuitePanel pack={suitePack} failed={suiteData?.error && suiteData.tf === suiteTf} tf={suiteTf} onTf={pickSuiteTf} holdings={holdings} onJump={jumpPeriod} onOpenPane={setExpanded}
+            {<SuitePanel pack={suitePack} failed={suiteData?.error && suiteData.tf === suiteTf} tf={suiteTf} holdings={holdings} onJump={jumpPeriod} onOpenPane={setExpanded}
               buyZone={!!s?.cond?.all} />}
             <PlanCard plan={plan} loading={weeklyData === null} failed={!!weeklyData?.error} trend={trend} />
             <EventStatsCard ticker={ticker} daily={dailyTriple} onJumpDay={jumpDay} />
@@ -315,7 +315,27 @@ export default function LeapsEntry() {
           {/* Chart */}
           <div className="min-w-0 md:order-3 md:col-span-2">
             <section ref={chartBox} className="bg-card border border-border rounded-2xl mb-4 overflow-hidden scroll-mt-4">
-              <div className="px-5 pt-4 pb-2 flex items-end gap-3">
+              {/* Candle interval — drives the candles, the averages and the
+                  Signal suite together (one state, cm:suite-tf:v2). */}
+              <div className="px-5 pt-4">
+                <div className="grid grid-cols-3 gap-0.5 p-0.5 rounded-lg bg-bg-elev" role="tablist" aria-label="Candle interval">
+                  {Object.entries(SUITE_TIMEFRAMES).map(([k, v]) => (
+                    <button key={k} type="button" role="tab" aria-selected={suiteTf === k} onClick={() => pickSuiteTf(k)}
+                      className={clsx('min-h-[44px] rounded-md text-sm font-semibold transition',
+                        suiteTf === k ? 'bg-card text-violet-300 shadow-sm' : 'text-muted hover:text-subtle')}>
+                      {v.label}
+                    </button>
+                  ))}
+                </div>
+                {suiteTf !== '1d' && !periodMode && (
+                  <div className="mt-2 text-[11px] text-muted" aria-live="polite">
+                    {suiteData?.error && suiteData.tf === suiteTf
+                      ? `Couldn't load ${SUITE_TIMEFRAMES[suiteTf].label.toLowerCase()} bars — showing daily candles.`
+                      : `Loading ${SUITE_TIMEFRAMES[suiteTf].label.toLowerCase()} candles…`}
+                  </div>
+                )}
+              </div>
+              <div className="px-5 pt-3 pb-2 flex items-end gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="text-2xl font-semibold font-mono-tab leading-none">{money(shown?.c)}</div>
                   <div className="mt-1 text-[11px] text-muted font-mono-tab">
@@ -1040,19 +1060,12 @@ function Backtest({ model, suite, pack, conf, confirmDays, onJumpDay, onJumpPeri
 // fresh exit, else the latest) tiles — tap to see it on the chart —
 // then one row per pillar (Echo / Tango open their pane full screen; Bravo
 // turns its band on), then the user's positions in this ticker.
-function SuitePanel({ pack, failed, tf, onTf, holdings, onJump, onOpenPane, buyZone = false }) {
+function SuitePanel({ pack, failed, tf, holdings, onJump, onOpenPane, buyZone = false }) {
   const header = (
     <div className="px-5 pt-5 pb-4 flex items-center gap-3">
       <h2 className="flex-1 text-sm font-semibold">Signal suite</h2>
-      <div className="flex gap-0.5 p-0.5 rounded-lg bg-bg-elev" role="tablist" aria-label="Suite timeframe">
-        {Object.entries(SUITE_TIMEFRAMES).map(([k, v]) => (
-          <button key={k} type="button" role="tab" aria-selected={tf === k} onClick={() => onTf(k)}
-            className={clsx('min-h-[32px] px-3 rounded-md text-[11px] font-semibold transition',
-              tf === k ? 'bg-card text-violet-300 shadow-sm' : 'text-muted hover:text-subtle')}>
-            {v.label}
-          </button>
-        ))}
-      </div>
+      {/* The interval is picked on the chart; this just names it. */}
+      <span className="text-[11px] font-semibold text-violet-300">{SUITE_TIMEFRAMES[tf].label}</span>
     </div>
   )
   if (!pack) {
