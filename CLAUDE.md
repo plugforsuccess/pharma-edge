@@ -1556,6 +1556,15 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   latest row as `contract.live` and Charts shows "bid / ask (live)" (≤ 20
   min old, else the age). Redistribution of broker data to other users is
   an open question for counsel — fine on the owner's own screen.
+- **Charts tabs** (owner, 2026-10-07: "so the user doesn't have to scroll
+  for eternity"): a tab bar pinned under the header (sticky, below the safe
+  area) — **Momentum** (`MomentumList`) · **Pullbacks** (`ConfluenceLeaders`,
+  renamed from "Confluence leaders"; its side switch reads "Buy · dips" /
+  "Sell · stretched") · **Ideas & holdings** (the chart, LEAPS ideas, your
+  holdings, searched tickers). One section shows at a time; the choice is
+  remembered on the device (`cm:charts-tab`, default Momentum); picking a
+  ticker in Search switches to Ideas & holdings. Older notes below still say
+  "Confluence leaders" for the Pullbacks card.
 - **Momentum list + forward record** (owner, 2026-10-07: "1 and 3"; the
   swing-grid and magnitude tests found momentum's stock picks — not its
   timing — are what held up). **Momentum list:** `scripts/rank-confluence.mjs`

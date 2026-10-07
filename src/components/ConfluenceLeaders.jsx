@@ -4,7 +4,7 @@ import clsx from 'clsx'
 import { ChevronRight } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
-// Charts → Confluence leaders (owner, 2026-10-03; verdicts 2026-10-04: "it's
+// Charts → Pullbacks tab, formerly "Confluence leaders" (renamed 2026-10-07) (owner, 2026-10-03; verdicts 2026-10-04: "it's
 // not telling me how to enter"; plain words 2026-10-04: "a novice user may
 // find this confusing"): the universe ranked nightly by
 // scripts/rank-confluence.mjs. Each row answers three questions in plain
@@ -186,12 +186,12 @@ export default function ConfluenceLeaders({ mine = [] }) {
     <section className="bg-card border border-border rounded-2xl mb-5 overflow-hidden">
       <div className="px-5 pt-5 pb-3">
         <div className="flex items-baseline gap-2">
-          <h2 className="flex-1 text-sm font-semibold">Confluence leaders</h2>
+          <h2 className="flex-1 text-sm font-semibold">Pullbacks</h2>
           {asOf && <span className="text-[11px] text-muted">as of {day(asOf)}</span>}
         </div>
         <div className="mt-3 flex items-center gap-2">
           <div className="flex gap-0.5 p-0.5 rounded-lg bg-bg-elev" role="tablist" aria-label="Side">
-            {[['buy', 'Lows · buy'], ['sell', 'Highs · sell']].map(([key, label]) => (
+            {[['buy', 'Buy · dips'], ['sell', 'Sell · stretched']].map(([key, label]) => (
               <button key={key} type="button" role="tab" aria-selected={side === key} onClick={() => setSide(key)}
                 className={clsx('min-h-[36px] px-2.5 rounded-md text-xs font-semibold transition whitespace-nowrap',
                   side === key ? (key === 'buy' ? 'bg-card text-confluence shadow-sm' : 'bg-card text-suite-bear shadow-sm') : 'text-muted hover:text-subtle')}>{label}</button>
