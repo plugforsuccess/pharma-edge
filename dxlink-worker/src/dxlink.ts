@@ -21,7 +21,7 @@
 
 import type { StreamerAuth } from './tastytrade.ts'
 
-export type EventType = 'Quote' | 'Greeks' | 'Summary' | 'Trade' | 'Profile'
+export type EventType = 'Quote' | 'Greeks' | 'Summary' | 'Trade' | 'Profile' | 'TimeAndSale'
 
 export interface SubSpec {
   type: EventType
@@ -31,11 +31,15 @@ export interface SubSpec {
 // Field projections we care about, indexed by event type. The order
 // matters — dxFeed echoes back fields in this order in COMPACT format.
 const FEED_FIELDS: Record<EventType, string[]> = {
-  Quote:   ['eventType', 'eventSymbol', 'bidPrice', 'askPrice'],
+  // bidSize / askSize / bidTime / askTime feed NIGHTFLOW's liquidity view.
+  Quote:   ['eventType', 'eventSymbol', 'bidPrice', 'askPrice', 'bidSize', 'askSize', 'bidTime', 'askTime'],
   Greeks:  ['eventType', 'eventSymbol', 'volatility', 'delta', 'gamma', 'theta', 'vega', 'rho'],
   Summary: ['eventType', 'eventSymbol', 'openInterest', 'prevDayClosePrice', 'dayVolume'],
   Trade:   ['eventType', 'eventSymbol', 'time', 'price', 'size'],
   Profile: ['eventType', 'eventSymbol'],
+  // Every print with the NBBO at execution, sale conditions, the
+  // extended-hours flag, validity and NEW / CORRECTION / CANCEL type.
+  TimeAndSale: ['eventType', 'eventSymbol', 'time', 'sequence', 'index', 'exchangeCode', 'price', 'size', 'bidPrice', 'askPrice', 'exchangeSaleConditions', 'aggressorSide', 'extendedTradingHours', 'validTick', 'type'],
 }
 
 export type EventHandler = (event: Record<string, unknown>) => void | Promise<void>

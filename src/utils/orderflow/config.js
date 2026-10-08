@@ -1,0 +1,125 @@
+// NIGHTFLOW — Order Flow Intelligence Engine: configuration.
+//
+// Every threshold here is a starting hypothesis, not a validated value.
+// The backtest harness (backtest.js) re-fits the alert thresholds on
+// training events and reports them on held-out events; nothing in this
+// file is a probability.
+
+// Rolling windows, in milliseconds. "session" is handled separately.
+export const WINDOWS = Object.freeze({
+  '10s': 10_000,
+  '1m': 60_000,
+  '5m': 300_000,
+  '15m': 900_000,
+})
+
+// Hypothetical order sizes for the price-impact table (dollars).
+export const ORDER_SIZES = Object.freeze([250, 500, 1_000, 5_000, 10_000, 50_000, 100_000])
+
+// Selling Pressure Risk Score weights (percent). Initial hypotheses only.
+export const SCORE_WEIGHTS = Object.freeze({
+  cvd: 25,          // CVD deterioration
+  absorption: 20,   // sell-side absorption
+  bid: 20,          // bid liquidity deterioration
+  breakouts: 15,    // failed breakouts
+  spread: 10,       // spread expansion
+  dilution: 10,     // dilution and financing risk
+})
+
+export const SCORE_BANDS = Object.freeze([
+  { min: 75, key: 'severe', label: 'Severe liquidity / selling risk' },
+  { min: 50, key: 'distribution', label: 'Potential distribution' },
+  { min: 25, key: 'caution', label: 'Elevated caution' },
+  { min: 0, key: 'limited', label: 'Limited detected selling pressure' },
+])
+
+export const DEFAULT_CONFIG = Object.freeze({
+  // Classification
+  quoteLagMs: 0,              // shift quotes back in time vs trades (feed-specific; 0 = trade-time quote)
+  maxQuoteAgeMs: 5_000,       // older quote → tick-rule fallback
+  maxQuoteAgeEthMs: 30_000,   // thinner extended hours
+  offMarketSpreads: 3,        // price farther than N spreads (and offMarketPct) from mid = off-market
+  offMarketPct: 0.02,
+
+  // Data-quality gates for any signal
+  minTrades5m: 20,
+  minShares5m: 5_000,
+  minDollars5m: 25_000,
+  maxIndeterminateShare: 0.4,
+  minBaselineBuckets: 30,     // 10s buckets of history before baseline-relative signals
+
+  // Divergence
+  divergenceWindow: '5m',
+  strongDeltaRatio: 0.25,     // |buy−sell| / classified volume
+  mildDeltaRatio: 0.1,
+  flatSigma: 0.5,             // |return| below this × window σ counts as flat
+  minFlatPct: 0.002,          // …and never wider than ±0.2% for "flat" detection floor
+
+  // Absorption
+  absorptionMinConditions: 3,
+  lowImpactFraction: 0.33,    // actual move < 33% of the move the impact model expects
+  levelConcentration: 0.3,    // ≥ 30% of buy volume at one price level
+  nearHighPct: 0.005,
+  replenishRatio: 3,          // traded at a level ≥ 3× the largest size displayed there
+  resistanceLookbackMs: 1_800_000,
+  failedBreakMs: 300_000,
+  breakMarginPct: 0.002,      // a break must clear the level by 0.2% and fail back below by 0.2%
+
+  // Distribution
+  appreciationFull: 0.5,      // +50% from the reference price = factor 1
+  rejectionPullback: 0.01,    // a touch of the high that pulls back ≥ 1% counts as a rejection
+  rejectionNearPct: 0.005,
+
+  // Liquidity
+  withdrawalDrop: 0.5,        // displayed bid $ falls ≥ 50% vs its 5-minute median…
+  withdrawalMs: 30_000,       // …within 30 s…
+  withdrawalTradedShare: 0.5, // …and trades at the bid explain < 50% of the drop
+  displayedHaircut: 0.5,      // executable ≈ 50% of displayed beyond the first level (assumption)
+  impactY: 0.8,               // square-root impact coefficient (literature range ~0.5–1)
+
+  // Alerts
+  alertCooldownMs: 600_000,   // same condition, same severity: once per 10 min
+  sellAccelMultiple: 3,
+  spreadWidenMultiple: 2,
+  minSpreadWidenPct: 0.003,
+
+  // Score
+  minScoreCoverage: 0.7,      // at least 70% of the weight must be computable
+  weights: SCORE_WEIGHTS,
+})
+
+// Feed coverage — the venues each source can and cannot see. The engine
+// disables analytics for a session the active source doesn't cover.
+export const SOURCES = Object.freeze({
+  dxfeed_tastytrade: {
+    label: 'dxFeed via Tastytrade DXLink',
+    kind: 'live',
+    events: ['TimeAndSale', 'Quote'],
+    sessions: { premarket: true, regular: true, afterhours: true, overnight: false },
+    depth: false,
+    notes: [
+      'US equities consolidated tape (CTA/UTP SIPs): trades from every exchange and FINRA TRF prints (off-exchange / ATS / dark volume reported to the tape).',
+      'Quote is the consolidated best bid/offer (NBBO) with sizes and exchange codes — no Level 2 depth.',
+      'Extended hours: 4:00–9:30 and 16:00–20:00 ET prints are on the tape (extendedTradingHours flag).',
+      'Overnight (20:00–4:00 ET) ATS sessions such as Blue Ocean, Moomoo/24X overnight, Robinhood 24 Hour Market are NOT on the consolidated tape in real time — analytics are disabled for the overnight session.',
+      'Retail-licence data: display on the subscriber\'s own screen. Redistribution to other users needs a vendor agreement (open question for counsel).',
+      'Latency: streaming, typically sub-second from the SIP; the worker flushes snapshots every 2 s.',
+    ],
+  },
+  replay: {
+    label: 'Recorded prints (replay)',
+    kind: 'replay',
+    events: ['TimeAndSale', 'Quote'],
+    sessions: { premarket: true, regular: true, afterhours: true, overnight: false },
+    depth: false,
+    notes: ['Prints recorded by the worker from the live feed — same coverage as the live source.'],
+  },
+  synthetic: {
+    label: 'SYNTHETIC DEMO — generated data',
+    kind: 'synthetic',
+    events: ['TimeAndSale', 'Quote', 'Book'],
+    sessions: { premarket: true, regular: true, afterhours: true, overnight: true },
+    depth: true,
+    notes: ['Seeded simulation of scripted scenarios. Not market data. Used to exercise the detectors and the UI.'],
+  },
+})

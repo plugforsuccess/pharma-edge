@@ -173,3 +173,27 @@ function normCdf(x: number): number {
   const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-(x * x) / 2)
   return x >= 0 ? (1 + y) / 2 : (1 - y) / 2
 }
+
+// Float and shares outstanding (quoteSummary defaultKeyStatistics).
+export async function yahooKeyStats(symbol: string): Promise<{ floatShares: number | null; sharesOutstanding: number | null }> {
+  const { cookie, crumb } = await getYahooAuth()
+  const params = new URLSearchParams({ crumb, modules: 'defaultKeyStatistics' })
+  let last = 'no response'
+  for (const host of HOSTS) {
+    try {
+      const resp = await fetch(`https://${host}/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?${params}`, {
+        headers: { 'User-Agent': UA, Accept: 'application/json', Cookie: cookie }, signal: AbortSignal.timeout(8000),
+      })
+      if (resp.ok) {
+        const ks = (await resp.json())?.quoteSummary?.result?.[0]?.defaultKeyStatistics ?? {}
+        const raw = (v: unknown) => { const n = Number((v as { raw?: number })?.raw); return Number.isFinite(n) && n > 0 ? n : null }
+        return { floatShares: raw(ks.floatShares), sharesOutstanding: raw(ks.sharesOutstanding) }
+      }
+      last = String(resp.status)
+      if (resp.status === 401) cachedAuth = null
+    } catch (e) {
+      last = (e as Error).message
+    }
+  }
+  throw new YahooError(`yahoo key stats ${symbol}: ${last}`)
+}
