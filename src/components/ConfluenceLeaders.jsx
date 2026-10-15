@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import clsx from 'clsx'
 import { ChevronDown, ChevronRight, Minus, Plus } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { simulateCall, breakevenMoves, atmTrade, CALL_HORIZONS, STRIKES } from '../utils/callHistory'
+import { simulateCall, breakevenMoves, playContract, PLAYS } from '../utils/callHistory'
 
 // Charts → Pullbacks tab, formerly "Confluence leaders" (renamed 2026-10-07) (owner, 2026-10-03; verdicts 2026-10-04: "it's
 // not telling me how to enter"; plain words 2026-10-04: "a novice user may
@@ -34,13 +34,10 @@ const plainBlocker = (b) => (b.k === 'band' ? (/^Fall/.test(b.need ?? '') ? 'too
 const money = (x, d = 2) => `$${Number(x).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d })}`
 // "about $1,200" — nearest $100 from $1,000, nearest $10 below.
 const about = (x) => `about ${money(x >= 1000 ? Math.round(x / 100) * 100 : Math.round(x / 10) * 10, 0)}`
-const pct0 = (x) => `${Math.round(Math.abs(x) * 100)}%`
 const day = (t) => (t ? new Date(`${t}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }) : '')
 const monthYear = (t) => (t ? new Date(`${t}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' }) : '')
-const THIN_POOL = 30
 // Under this much room to the stop the row says the entry is at the edge of the zone.
 const EDGE_ROOM = 0.03
-const FEW_OWN = 5
 
 // Five segments, one per signal (filled = lit today).
 function SignalMeter({ score, side }) {
@@ -50,87 +47,6 @@ function SignalMeter({ score, side }) {
       <span className="flex gap-[3px]">{[0, 1, 2, 3, 4].map((i) => <span key={i} className={clsx('h-1.5 w-3 rounded-sm', i < score ? on : 'bg-border')} />)}</span>
       <span className="text-[11px] text-muted font-mono-tab">{score}/5</span>
     </span>
-  )
-}
-
-// Plain sentences, each number with its context: how often the pattern
-// appeared, how often it worked against how often any random day worked,
-// the typical result, the bad quarter, beat the market, and that the call
-// moves more than the stock.
-function TrackRecord({ r, side, baseline }) {
-  const H = side === 'buy' ? '6m' : '3m'
-  const avg = r[`est_${H}`]
-  const win = r[`est_win_${H}`]
-  const med = r[`est_med_${H}`]
-  const badq = r[`est_badq_${H}`]
-  const beat = r[`est_beat_${H}`]
-  if (avg == null || !r.pool_n) return null
-  const t = r.verdict === 'enter' ? r.trade : null
-  const levRaw = t && t.cost > 0 && r.close > 0 ? (t.delta * r.close) / t.cost : null
-  const lev = levRaw ? (levRaw < 3 ? levRaw.toFixed(1) : String(Math.round(levRaw))) : null
-  const times = (k) => (k === 1 ? 'once' : k === 2 ? 'twice' : `${k.toLocaleString('en-US')} times`)
-  const own = r.own_n === 0 ? `never on ${r.ticker}` : `${times(r.own_n)} on ${r.ticker}`
-  const num = (x, cls = 'text-fg') => <span className={clsx('font-mono-tab', cls)}>{x}</span>
-  const seen = <>Seen {num(times(r.pool_n), 'text-subtle')} across all stocks ({own}).</>
-  if (r.pool_n < THIN_POOL) return <p className="mt-2 text-[11px] leading-4 text-muted">{seen} Too few to judge.</p>
-  const months = side === 'buy' ? 'Six' : 'Three'
-  const dir = side === 'buy' ? 'higher' : 'lower'
-  const baseWin = baseline?.[`win_${H}`]
-  const vs = baseWin == null || win == null ? null
-    : win - baseWin > 0.08 ? 'better than' : win - baseWin < -0.08 ? 'worse than' : 'about the same as'
-  const good = (x) => (side === 'buy' ? x >= 0 : x <= 0)
-  const signed = (x) => `${x >= 0 ? '+' : '−'}${pct0(x)}`
-  // The bad quarter reads as a loss for buys, a rise for sells.
-  const badText = badq == null ? null
-    : side === 'buy'
-      ? (badq < 0 ? <>one case in four lost more than {num(pct0(badq), 'text-rose-300')}</> : <>even the worst quarter of cases gained {num(pct0(badq), 'text-green-400')} or more</>)
-      : (badq > 0 ? <>one case in four rose more than {num(pct0(badq), 'text-rose-300')}</> : <>even the worst quarter of cases fell {num(pct0(badq), 'text-green-400')} or more</>)
-  return (
-    <p className="mt-2 text-[11px] leading-4 text-muted">
-      {seen}{' '}
-      {months} months later the stock was {dir} {num(pct0(win))} of the time
-      {vs && <> — {vs} any random day ({num(pct0(baseWin), 'text-subtle')})</>}.
-      {med != null && <> The typical result was {num(signed(med), good(med) ? 'text-green-400' : 'text-rose-300')}</>}
-      {med != null && badText && <>; {badText}</>}{med != null && '.'}
-      {beat != null && <> It {side === 'buy' ? 'beat' : 'fell behind'} the S&P 500 {num(pct0(beat))} of the time.</>}
-      {lev && <> A call like this moves about {num(`${lev}×`, 'text-subtle')} the stock.</>}
-    </p>
-  )
-}
-
-// What the app's own rule did on this very stock — ahead of the pattern's
-// record across all stocks, and flagged when the two disagree.
-function OwnRecord({ r }) {
-  const o = r.own_record
-  if (!o) return null
-  const z = o.zone
-  const num = (x, cls = 'text-fg') => <span className={clsx('font-mono-tab', cls)}>{x}</span>
-  const signed = (x) => `${x >= 0 ? '+' : '−'}${pct0(x)}`
-  const tone = (x) => (x >= 0 ? 'text-green-400' : 'text-rose-300')
-  const times = (k) => (k === 1 ? 'once' : k === 2 ? 'twice' : `${k} times`)
-  const monthOf = (t) => new Date(`${t}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' })
-  const poolWin = r.est_win_6m
-  // The pattern looks fine but this stock's own trades lost: say so.
-  const disagree = z.n >= 1 && z.avg != null && z.avg < 0 && poolWin != null && poolWin >= 0.55
-  const rallies = o.moves?.n ? <> It caught {num(`${o.moves.caught} of ${o.moves.n}`)} of {r.ticker}’s big rallies{o.moves.why?.['already holding'] ? <> ({o.moves.why['already holding']} missed while holding an earlier, losing entry)</> : null}.</> : null
-  if (z.n === 0) {
-    return (
-      <p className="mt-2 text-[11px] leading-4 text-muted">
-        <span className="text-subtle font-semibold">On {r.ticker} itself:</span> this is the first time the rule has fired in 5 years
-        {o.confluence.n > 0 && <>; the broader 2-signal version fired {times(o.confluence.n)}, {o.confluence.wins} of {o.confluence.n} up (avg {num(signed(o.confluence.avg), tone(o.confluence.avg))} on the call)</>}.
-        {rallies}
-      </p>
-    )
-  }
-  return (
-    <p className={clsx('mt-2 text-[11px] leading-4', disagree ? 'text-amber-400' : 'text-muted')}>
-      <span className={clsx('font-semibold', disagree ? 'text-amber-400' : 'text-subtle')}>On {r.ticker} itself:</span> this rule has fired {num(times(z.n), disagree ? 'text-amber-400' : 'text-subtle')} in 5 years
-      {z.n > 0 && <> — {num(`${z.wins} of ${z.n}`, disagree ? 'text-amber-400' : 'text-fg')} up, averaging {num(signed(z.avg), tone(z.avg))} on the call{z.open_n > 0 && <> ({z.open_n} still open, counted at today’s mark)</>}</>}
-      {z.open && <>; the {monthOf(z.open.signal)} entry is still open at {num(signed(z.open.option), tone(z.open.option))}</>}.
-      {!z.open && o.confluence.open && <> A {monthOf(o.confluence.open.signal)} entry on similar signals is still open at {num(signed(o.confluence.open.option), tone(o.confluence.open.option))}.</>}
-      {rallies}
-      {disagree && <> <span className="font-semibold">{r.ticker}’s own history disagrees with the pattern’s record below.</span></>}
-    </p>
   )
 }
 
@@ -148,7 +64,11 @@ export default function ConfluenceLeaders({ mine = [] }) {
   const [scope, setScope] = useState('all')
   const [rows, setRows] = useState(null)
   const [accountSize, setAccountSize] = useState(null)
-  const [baseline, setBaseline] = useState(null)
+  // The play (owner, 2026-10-15): at-the-money calls — 1M / 3M / 6M / 12M
+  // for a 1–2 week swing, or the ~2-year LEAPS held to compound.
+  const [playKey, setPlayState] = useState(() => { try { const k = localStorage.getItem('cm:pullbacks-play'); return PLAYS.some((x) => x.key === k) ? k : '1M' } catch { return '1M' } })
+  const setPlay = (k) => { setPlayState(k); try { localStorage.setItem('cm:pullbacks-play', k) } catch { /* storage off */ } }
+  const play = PLAYS.find((x) => x.key === playKey)
   // "3+ signals" (owner, 2026-10-07): an opt-in stricter list on the buy
   // side — 2 stays the rule; this only filters. Remembered on the device.
   const [strict, setStrictState] = useState(() => { try { return localStorage.getItem('cm:pullbacks-3plus') === '1' } catch { return false } })
@@ -169,16 +89,13 @@ export default function ConfluenceLeaders({ mine = [] }) {
     let cancelled = false
     setRows(null)
     let q = supabase.from('confluence_ranks')
-      .select('ticker, side, as_of, close, score, rank, est_3m, est_6m, est_win_3m, est_win_6m, own_n, pool_n, verdict, hold_reason, blockers, trade, stop_price, momentum, own_record, est_med_3m, est_med_6m, est_badq_3m, est_badq_6m, est_beat_3m, est_beat_6m, call_hist')
+      .select('ticker, side, as_of, close, score, rank, est_3m, est_6m, est_win_3m, est_win_6m, own_n, pool_n, verdict, hold_reason, blockers, trade, stop_price, momentum, call_hist')
       .eq('side', side)
     if (side === 'buy' && strict) q = q.gte('score', 3)
     q = scope === 'all'
       ? q.not('rank', 'is', null).order('rank').limit(10)
       : q.in('ticker', mine.length ? mine : ['—']).order('score', { ascending: false }).limit(40)
     q.then(({ data, error }) => { if (!cancelled) setRows(error ? [] : data ?? []) })
-    // The baseline the record is read against: every ticker, every day.
-    supabase.from('confluence_pool').select('win_3m, win_6m, med_3m, med_6m').eq('side', side).eq('combo', '__any_day__').maybeSingle()
-      .then(({ data }) => { if (!cancelled) setBaseline(data ?? null) })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [side, scope, mineKey, strict])
@@ -221,11 +138,18 @@ export default function ConfluenceLeaders({ mine = [] }) {
             {strict && <span className="text-[11px] text-muted">Stricter: slightly better 3-month record, fewer names.</span>}
           </div>
         )}
-        <p className="mt-2 text-xs text-muted">
-          {side === 'buy'
-            ? 'BUY SETUP = the entry rule is met today. EARLY = momentum is still falling; the rule buys anyway, a cautious entry waits for it to rise. NOT YET = what’s still missing. NOT NOW = the rule is met but it is already losing on this stock.'
-            : 'Stocks showing 2+ sell signals near a high. For shares and spreads; a LEAPS follows its exit plan.'}
-        </p>
+        {side === 'buy' && (
+          <div className="mt-3">
+            <div className="grid grid-cols-5 gap-0.5 p-0.5 rounded-lg bg-bg-elev" role="tablist" aria-label="Call">
+              {PLAYS.map((x) => (
+                <button key={x.key} type="button" role="tab" aria-selected={playKey === x.key} onClick={() => setPlay(x.key)}
+                  className={clsx('min-h-[40px] rounded-md text-xs font-semibold', playKey === x.key ? 'bg-card text-violet-300 shadow-sm' : 'text-muted hover:text-subtle')}>{x.key}</button>
+              ))}
+            </div>
+            <p className="mt-1.5 text-[11px] text-muted">At-the-money call · {play.kind === 'swing' ? `${play.key} to expiry · hold 1–2 weeks` : 'about 2 years · hold 6–12 months'}</p>
+          </div>
+        )}
+        {side === 'sell' && <p className="mt-2 text-xs text-muted">2+ sell signals near a high. For shares and spreads; a LEAPS follows its exit plan.</p>}
       </div>
       {list === null ? (
         <div className="px-5 pb-5 space-y-2" aria-busy="true">{[0, 1, 2].map((i) => <div key={i} className="h-14 rounded-xl bg-bg-elev animate-pulse" />)}</div>
@@ -241,8 +165,9 @@ export default function ConfluenceLeaders({ mine = [] }) {
           <ul className="border-t border-hairline divide-y divide-hairline">
             {list.map((r) => {
               const v = VERDICT[r.verdict]
-              const trade = r.verdict === 'enter' ? r.trade : null
+              const trade = r.verdict === 'enter' && r.trade ? playContract({ S: r.close, vol: r.trade.vol, asOf: r.as_of, play }) : null
               const perContract = trade ? trade.cost * 100 : null
+              const ph = r.call_hist?.plays?.[playKey]
               const blockers = (r.blockers ?? []).map(plainBlocker)
               const room = r.stop_price != null && r.close > 0 ? 1 - r.stop_price / r.close : null
               const edge = room != null && room < EDGE_ROOM
@@ -268,7 +193,8 @@ export default function ConfluenceLeaders({ mine = [] }) {
                       <span className="mt-3 flex items-end gap-3 rounded-xl bg-bg-elev px-3.5 py-3">
                         <span className="flex-1 min-w-0">
                           <span className="block text-[11px] uppercase tracking-[0.12em] text-muted font-semibold">Buy</span>
-                          <span className="block text-sm font-semibold text-fg leading-5">{monthYear(trade.expiry)} {money(trade.strike, 0)} call</span>
+                          <span className="block text-sm font-semibold text-fg leading-5">{expiryLabel(trade.expiry, play)} {money(trade.strike, trade.strike < 25 ? 2 : 0)} call</span>
+                          <span className="block text-[11px] text-muted">{play.kind === 'swing' ? 'Hold 1–2 weeks' : 'Hold 6–12 months'}</span>
                         </span>
                         <span className="text-right">
                           <span className="block text-base font-semibold text-fg font-mono-tab leading-6">{about(perContract).replace('about ', '≈')}</span>
@@ -310,12 +236,11 @@ export default function ConfluenceLeaders({ mine = [] }) {
                     )}
                     {trade && edge && <span className="mt-1.5 block text-[11px] text-amber-400">This entry sits at the bottom edge of the buy zone.</span>}
 
-                    {/* Signals + record */}
+                    {/* Signals + one line of history */}
                     <span className="mt-3 block"><SignalMeter score={r.score} side={side} /></span>
-                    {side === 'buy' && (r.verdict === 'enter' || r.verdict === 'hold') && <OwnRecord r={r} />}
-                    <TrackRecord r={r} side={side} baseline={baseline} />
+                    {side === 'buy' && <PastLine ph={ph} />}
                   </Link>
-                  {side === 'buy' && (r.trade || r.call_hist) && <CallLab r={r} accountSize={accountSize} />}
+                  {side === 'buy' && r.trade && <PlayLab r={r} play={play} ph={ph} accountSize={accountSize} />}
                 </li>
               )
             })}
@@ -333,15 +258,32 @@ export default function ConfluenceLeaders({ mine = [] }) {
   )
 }
 
-// Gains & simulator (owner, 2026-10-15): under each buy row, collapsed.
-//   Past gains — the suggested call (~2 years, 0.75 delta) marked 1 / 3 / 6 /
-//   12 months after past signals: this stock, every stock, and any random
-//   day (the yardstick). From the nightly job (confluence_ranks.call_hist).
-//   Simulator — today's call valued for a stock move at each horizon,
-//   today's vol held (src/utils/callHistory.js).
+// Past results & what-if (owner, 2026-10-15: "it is crowded … 1, 3, 6, 12,
+// LEAPS on pullbacks"): the chosen at-the-money play after past dips on this
+// stock, every stock and any random day (confluence_ranks.call_hist.plays,
+// nightly), then today's contract valued for a stock move after each hold.
 const pctS = (x, d = 0) => (x == null ? '—' : `${x >= 0 ? '+' : '−'}${Math.abs(x * 100).toFixed(d)}%`)
 const usd0 = (x) => `${x < 0 ? '−' : '+'}$${Math.abs(Math.round(x)).toLocaleString('en-US')}`
 const tone = (x) => (x == null ? 'text-muted' : x >= 0 ? 'text-green-400' : 'text-rose-300')
+const holdWords = { '1W': '1 week', '2W': '2 weeks', '6M': '6 months', '12M': '12 months' }
+// Short expiries read as the date ("Nov 20"), LEAPS as the month ("Jan 2029").
+function expiryLabel(t, play) {
+  const d = new Date(`${t}T12:00:00Z`)
+  return play.kind === 'leaps' ? monthYear(t) : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: d.getUTCFullYear() === new Date().getUTCFullYear() ? undefined : 'numeric', timeZone: 'UTC' })
+}
+const lastHold = (st) => st?.at(-1)
+
+// "Past dips, 2 weeks: +18% · 58% up (any day +4%)"
+function PastLine({ ph }) {
+  const s = lastHold(ph?.pool?.setup), a = lastHold(ph?.pool?.any)
+  if (!s?.n) return null
+  return (
+    <span className="mt-1.5 block text-xs text-muted">
+      Past dips on all stocks, held {holdWords[s.label]}: <span className={clsx('font-mono-tab font-semibold', tone(s.avg))}>{pctS(s.avg)}</span> · {Math.round(s.win * 100)}% up
+      {a?.n ? <> · any day <span className="font-mono-tab">{pctS(a.avg)}</span></> : null}
+    </span>
+  )
+}
 
 function HistCell({ h }) {
   if (!h || !h.n) return <td className="px-1.5 py-2 text-center text-muted">—</td>
@@ -353,98 +295,74 @@ function HistCell({ h }) {
   )
 }
 
-function CallLab({ r, accountSize }) {
+const BUDGETS = [1000, 5000, 10000, 40000]
+
+function PlayLab({ r, play, ph, accountSize }) {
   const [open, setOpen] = useState(false)
-  const [hz, setHz] = useState('6M')
-  const [qty, setQty] = useState(1)
-  // In / at the money, remembered on the device.
-  const [strike, setStrikeState] = useState(() => { try { return localStorage.getItem('cm:pullbacks-strike') === 'atm' ? 'atm' : 'itm' } catch { return 'itm' } })
-  const setStrike = (k) => { setStrikeState(k); try { localStorage.setItem('cm:pullbacks-strike', k) } catch { /* private mode */ } }
-  const ch = strike === 'atm' ? r.call_hist?.atm : r.call_hist
-  const trade = useMemo(() => (strike === 'atm' ? atmTrade({ S: r.close, trade: r.trade, asOf: r.as_of }) : r.trade), [strike, r])
-  const ownSetup = ch?.own?.setup, ownConf = ch?.own?.confluence
-  const ownN = ownSetup?.[1]?.n ?? 0
-  const own = ownN >= 3 ? { stats: ownSetup, label: 'This stock · buy setup' } : { stats: ownConf, label: 'This stock · 2+ signals' }
-  const sim = useMemo(() => (open && trade ? simulateCall({ S: r.close, trade, asOf: r.as_of }) : null), [open, r, trade])
-  const be = useMemo(() => (open && trade ? breakevenMoves({ S: r.close, trade, asOf: r.as_of }) : null), [open, r, trade])
-  const rowsH = sim?.find((x) => x.label === hz)
-  const beH = be?.find((x) => x.label === hz)
+  const [hold, setHold] = useState(null)
+  const [budget, setBudgetState] = useState(() => { try { const b = Number(localStorage.getItem('cm:pullbacks-budget')); return BUDGETS.includes(b) ? b : 5000 } catch { return 5000 } })
+  const setBudget = (b) => { setBudgetState(b); try { localStorage.setItem('cm:pullbacks-budget', String(b)) } catch { /* storage off */ } }
+  const hk = play.holds.some((h) => h[0] === hold) ? hold : play.holds.at(-1)[0]
+  const trade = useMemo(() => playContract({ S: r.close, vol: r.trade?.vol, asOf: r.as_of, play }), [r, play])
+  const sim = useMemo(() => (open && trade ? simulateCall({ S: r.close, trade, asOf: r.as_of, moves: play.moves, horizons: play.holds }) : null), [open, r, trade, play])
+  const be = useMemo(() => (open && trade ? breakevenMoves({ S: r.close, trade, asOf: r.as_of, horizons: play.holds }) : null), [open, r, trade, play])
+  const ownSetup = ph?.own?.setup
+  const own = (ownSetup?.[0]?.n ?? 0) >= 3 ? { stats: ownSetup, label: 'buy setup' } : { stats: ph?.own?.confluence, label: '2+ signals' }
+  const qty = trade ? Math.max(1, Math.floor(budget / (trade.cost * 100))) : 1
   const cost = trade ? trade.cost * 100 * qty : null
-  const n = (st) => st?.find((x) => x.n)?.n ?? 0
+  const rowsH = sim?.find((x) => x.label === hk)
+  const beH = be?.find((x) => x.label === hk)
+  const nOf = (st) => st?.[0]?.n ?? 0
   return (
     <div className="px-5 pb-4 -mt-1">
       <button type="button" onClick={() => setOpen(!open)} aria-expanded={open}
         className="min-h-[40px] w-full flex items-center gap-2 rounded-xl border border-border px-3.5 text-xs font-semibold text-violet-300 hover:bg-card-hover/40">
-        <span className="flex-1 text-left">Past gains & profit simulator</span>
+        <span className="flex-1 text-left">Past results & what-if · {play.key}</span>
         <ChevronDown size={14} className={clsx('transition', open && 'rotate-180')} aria-hidden />
       </button>
       {open && (
         <div className="mt-3 space-y-4">
-          <div>
-            <div className="grid grid-cols-2 gap-0.5 p-0.5 rounded-lg bg-bg-elev" role="tablist" aria-label="Strike">
-              {Object.entries(STRIKES).map(([k, v]) => (
-                <button key={k} type="button" role="tab" aria-selected={strike === k} onClick={() => setStrike(k)}
-                  className={clsx('min-h-[44px] rounded-md text-xs font-semibold leading-tight', strike === k ? 'bg-card text-violet-300 shadow-sm' : 'text-muted')}>
-                  {v.label}<span className="block text-[11px] font-normal text-muted">{k === 'itm' ? 'the app’s pick · 0.75 delta' : v.short}</span>
-                </button>
-              ))}
-            </div>
-            <p className="mt-1.5 text-[11px] text-muted leading-relaxed">{strike === 'atm'
-              ? 'Cheaper per contract and moves more in % terms — bigger gains when the stock runs, bigger losses and faster decay when it doesn’t.'
-              : 'Costs more but behaves more like the stock: smaller % swings, less lost to time decay.'}</p>
-          </div>
-          {r.call_hist && !ch && <p className="text-[11px] text-muted">At-the-money history arrives with the next nightly run.</p>}
-          {ch && (
-            <div>
-              <div className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold mb-1">Past gains on this call</div>
-              <div className="overflow-x-auto -mx-1">
-                <table className="w-full text-xs">
-                  <thead><tr className="text-muted">
-                    <th className="text-left font-normal px-1.5 pb-1">Bought on…</th>
-                    {CALL_HORIZONS.map(([l]) => <th key={l} className="font-normal px-1.5 pb-1 text-center">{l}</th>)}
-                  </tr></thead>
-                  <tbody className="divide-y divide-hairline">
-                    <tr>
-                      <td className="px-1.5 py-2 text-subtle">{own.label}<span className="block text-[11px] text-muted">{n(own.stats)} {n(own.stats) === 1 ? "dip" : "dips"}</span></td>
-                      {CALL_HORIZONS.map(([l], i) => <HistCell key={l} h={own.stats?.[i]} />)}
-                    </tr>
-                    <tr>
-                      <td className="px-1.5 py-2 text-subtle">All stocks · buy setup<span className="block text-[11px] text-muted">{n(ch.pool?.setup).toLocaleString()} dips</span></td>
-                      {CALL_HORIZONS.map(([l], i) => <HistCell key={l} h={ch.pool?.setup?.[i]} />)}
-                    </tr>
-                    <tr>
-                      <td className="px-1.5 py-2 text-subtle">Any random day<span className="block text-[11px] text-muted">the yardstick</span></td>
-                      {CALL_HORIZONS.map(([l], i) => <HistCell key={l} h={ch.pool?.any?.[i]} />)}
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-              <p className="mt-1.5 text-[11px] text-muted leading-relaxed">
-                Average gain on the ~2-year {strike === 'atm' ? 'at-the-money' : 'in-the-money'} call if held that long, and how often it was up. A setup is only worth more than buying any day if its row beats the yardstick. Prices are Black-Scholes estimates from past volatility, not real quotes. Past results, not a forecast.
-              </p>
-            </div>
-          )}
+          {ph ? (
+            <table className="w-full text-xs">
+              <thead><tr className="text-muted">
+                <th className="text-left font-normal px-1.5 pb-1">Held</th>
+                <th className="font-normal px-1.5 pb-1 text-center">{r.ticker}<span className="block text-[11px]">{nOf(own.stats)} {nOf(own.stats) === 1 ? 'dip' : 'dips'}</span></th>
+                <th className="font-normal px-1.5 pb-1 text-center">All stocks<span className="block text-[11px]">{nOf(ph.pool?.setup).toLocaleString()} dips</span></th>
+                <th className="font-normal px-1.5 pb-1 text-center">Any day<span className="block text-[11px]">yardstick</span></th>
+              </tr></thead>
+              <tbody className="divide-y divide-hairline">
+                {play.holds.map(([l], i) => (
+                  <tr key={l}>
+                    <td className="px-1.5 py-2 text-subtle whitespace-nowrap">{holdWords[l]}</td>
+                    <HistCell h={own.stats?.[i]} />
+                    <HistCell h={ph.pool?.setup?.[i]} />
+                    <HistCell h={ph.pool?.any?.[i]} />
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : <p className="text-[11px] text-muted">Past results for this call arrive with the next nightly run.</p>}
           {trade && rowsH && (
             <div>
-              <div className="flex items-center gap-2 mb-1.5">
-                <span className="flex-1 text-[11px] uppercase tracking-[0.12em] text-muted font-semibold">Profit simulator</span>
-                <span className="inline-flex items-center rounded-lg border border-border">
-                  <button type="button" aria-label="Fewer contracts" onClick={() => setQty(Math.max(1, qty - 1))} className="min-h-[32px] min-w-[32px] flex items-center justify-center text-subtle"><Minus size={12} /></button>
-                  <span className="px-1 text-xs font-mono-tab">{qty} {qty === 1 ? 'contract' : 'contracts'}</span>
-                  <button type="button" aria-label="More contracts" onClick={() => setQty(Math.min(99, qty + 1))} className="min-h-[32px] min-w-[32px] flex items-center justify-center text-subtle"><Plus size={12} /></button>
-                </span>
-              </div>
-              <div className="text-xs text-subtle mb-2">
-                {monthYear(trade.expiry)} {money(trade.strike, trade.strike < 25 ? 2 : 0)} call{trade.delta ? ` · ${trade.delta.toFixed(2)} delta` : ''} · cost {about(cost).replace('about ', '≈')}{accountSize ? ` · ${(cost / accountSize * 100).toFixed(1)}% of account` : ''}
-              </div>
-              <div className="grid grid-cols-4 gap-0.5 p-0.5 rounded-lg bg-bg-elev mb-2" role="tablist" aria-label="Held for">
-                {CALL_HORIZONS.map(([l]) => (
-                  <button key={l} type="button" role="tab" aria-selected={hz === l} onClick={() => setHz(l)}
-                    className={clsx('min-h-[36px] rounded-md text-xs font-semibold', hz === l ? 'bg-card text-violet-300 shadow-sm' : 'text-muted')}>{l}</button>
+              <div className="grid grid-cols-4 gap-0.5 p-0.5 rounded-lg bg-bg-elev mb-2" role="tablist" aria-label="Amount">
+                {BUDGETS.map((b) => (
+                  <button key={b} type="button" role="tab" aria-selected={budget === b} onClick={() => setBudget(b)}
+                    className={clsx('min-h-[36px] rounded-md text-xs font-semibold font-mono-tab', budget === b ? 'bg-card text-violet-300 shadow-sm' : 'text-muted')}>${b / 1000}k</button>
                 ))}
               </div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="flex-1 text-xs text-subtle">
+                  <span className="font-mono-tab">{qty}</span> × {expiryLabel(trade.expiry, play)} {money(trade.strike, trade.strike < 25 ? 2 : 0)} call · <span className="font-mono-tab">{money(cost, 0)}</span>{accountSize ? ` · ${(cost / accountSize * 100).toFixed(1)}% of account` : ''}
+                </span>
+                <span className="grid grid-cols-2 gap-0.5 p-0.5 rounded-lg bg-bg-elev" role="tablist" aria-label="Held for">
+                  {play.holds.map(([l]) => (
+                    <button key={l} type="button" role="tab" aria-selected={hk === l} onClick={() => setHold(l)}
+                      className={clsx('min-h-[32px] px-2 rounded-md text-xs font-semibold', hk === l ? 'bg-card text-violet-300 shadow-sm' : 'text-muted')}>{l}</button>
+                  ))}
+                </span>
+              </div>
               <table className="w-full text-xs font-mono-tab">
-                <thead><tr className="text-muted text-right"><th className="text-left font-normal pb-1">If {r.ticker} is…</th><th className="font-normal pb-1">Call worth</th><th className="font-normal pb-1">Profit</th></tr></thead>
+                <thead><tr className="text-muted text-right"><th className="text-left font-normal pb-1">{r.ticker} in {holdWords[hk]}</th><th className="font-normal pb-1">Worth</th><th className="font-normal pb-1">Profit</th></tr></thead>
                 <tbody className="divide-y divide-hairline">
                   {rowsH.cells.map((c) => (
                     <tr key={c.move} className="text-right">
@@ -455,8 +373,8 @@ function CallLab({ r, accountSize }) {
                   ))}
                 </tbody>
               </table>
-              <p className="mt-1.5 text-[11px] text-muted leading-relaxed">
-                Break-even in {hz === '12M' ? '12 months' : hz.replace('M', ' months').replace('1 months', '1 month')}: {beH?.move == null ? '—' : <>{r.ticker} {pctS(beH.move, 1)} ({money(r.close * (1 + beH.move))})</>}. Today's volatility held; the call loses time value each month the stock goes nowhere. An estimate, not a quote.
+              <p className="mt-1.5 text-[11px] text-muted">
+                Break-even in {holdWords[hk]}: {beH?.move == null ? '—' : <>{pctS(beH.move, 1)} ({money(r.close * (1 + beH.move))})</>}. Estimates from past volatility, not quotes.
               </p>
             </div>
           )}

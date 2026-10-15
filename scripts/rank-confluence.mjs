@@ -37,7 +37,7 @@ import { blockers, buyVerdict, sellVerdict, tradeSpec, structureStop, momentum, 
 import { momentumToday, moveGroups, forwardOutcome, SWING_PLAN } from '../src/utils/momentumList.js'
 import { createHash } from 'node:crypto'
 import { replaySignals, trailingVol, OPTION_MODEL } from '../src/utils/replay.js'
-import { callHistory, anyDayHistory, callStats, ATM_MODEL } from '../src/utils/callHistory.js'
+import { callHistory, anyDayHistory, callStats, PLAYS, playModel } from '../src/utils/callHistory.js'
 
 const args = process.argv.slice(2)
 const MODE = (args[args.indexOf('--mode') + 1] && args.includes('--mode')) ? args[args.indexOf('--mode') + 1] : 'dry-run'
@@ -73,22 +73,29 @@ export function analyze(ticker, bars, spy = null) {
   }
 }
 
-// The suggested call marked 1 / 3 / 6 / 12 months after each past signal
-// (src/utils/callHistory.js): the BUY SETUP rule, the 2-signal version, and
-// every ~5th day as the yardstick.
+// The at-the-money plays (owner, 2026-10-15): 1M / 3M / 6M / 12M calls
+// marked after a 1- and 2-week hold, the ~2-year LEAPS after 6 and 12
+// months (src/utils/callHistory.js) — after each past BUY SETUP, each
+// 2-signal setup, and every ~5th day as the yardstick.
 function callPaths(bars, model, suite) {
   const sig = replaySignals(bars, model, suite)
   const vols = trailingVol(bars.map((b) => b.c), OPTION_MODEL.volBars)
-  const set = (opt) => ({ setup: callHistory(bars, sig.entry.setup, { vols, opt }), confluence: callHistory(bars, sig.entry.confluence, { vols, opt }), any: anyDayHistory(bars, { vols, opt }) })
-  // In the money (the app's 0.75-delta call) and at the money (strike at the price).
-  return { ...set(OPTION_MODEL), atm: set(ATM_MODEL) }
+  const out = {}
+  for (const p of PLAYS) {
+    const o = { vols, opt: playModel(p), horizons: p.holds }
+    out[p.key] = { setup: callHistory(bars, sig.entry.setup, o), confluence: callHistory(bars, sig.entry.confluence, o), any: anyDayHistory(bars, o) }
+  }
+  return out
 }
 
-// Universe-wide call history per rule (shared by every row).
+// Universe-wide play history per rule (shared by every row).
 export function callPool(results) {
-  const all = (k, atm = false) => results.flatMap((r) => (atm ? r.calls?.atm?.[k] : r.calls?.[k]) ?? [])
-  const set = (atm) => ({ setup: callStats(all('setup', atm)), confluence: callStats(all('confluence', atm)), any: callStats(all('any', atm)), tickers: results.length })
-  return { ...set(false), atm: set(true) }
+  const out = { tickers: results.length }
+  for (const p of PLAYS) {
+    const all = (k) => results.flatMap((r) => r.calls?.[p.key]?.[k] ?? [])
+    out[p.key] = { setup: callStats(all('setup'), p.holds), confluence: callStats(all('confluence'), p.holds), any: callStats(all('any'), p.holds) }
+  }
+  return out
 }
 
 const h = (est, label) => est?.horizons.find((x) => x.label === label)?.avg ?? null
@@ -124,8 +131,10 @@ export function rankAll(results, pools, calls = null) {
         stop_price: r.stop?.price ?? null, stop_date: r.stop?.date ?? null, momentum: r.momentum,
         own_record: side === 'buy' ? r.ownRecord : null,
         call_hist: side === 'buy' && r.calls ? {
-          own: { setup: callStats(r.calls.setup), confluence: callStats(r.calls.confluence) }, pool: { setup: calls.setup, confluence: calls.confluence, any: calls.any },
-          atm: { own: { setup: callStats(r.calls.atm.setup), confluence: callStats(r.calls.atm.confluence) }, pool: calls.atm },
+          plays: Object.fromEntries(PLAYS.map((p) => [p.key, {
+            own: { setup: callStats(r.calls[p.key].setup, p.holds), confluence: callStats(r.calls[p.key].confluence, p.holds) },
+            pool: { setup: calls[p.key].setup, any: calls[p.key].any },
+          }])),
         } : null,
       }
       rows.push(row)
@@ -213,7 +222,7 @@ async function main() {
   const baselines = Object.fromEntries(SIDES.map((side) => [side, baselineStats(results.map((r) => ({ closes: r.closes, market: r.market })), HORIZONS, side)]))
   const calls = callPool(results)
   const rows = rankAll(results, pools, calls)
-  for (const k of ['setup', 'confluence', 'any']) for (const [nm, src] of [['ITM', calls], ['ATM', calls.atm]]) console.log(`Call history ${nm} ${k.padEnd(10)} ${src[k].map((x) => `${x.label} n ${x.n} avg ${pct(x.avg)} win ${x.win == null ? '—' : Math.round(x.win * 100) + '%'}`).join(' · ')}`)
+  for (const p of PLAYS) for (const k of ['setup', 'any']) console.log(`Play ${p.key.padEnd(5)} ${k.padEnd(6)} ${calls[p.key][k].map((x) => `${x.label} n ${x.n} avg ${pct(x.avg)} win ${x.win == null ? '—' : Math.round(x.win * 100) + '%'}`).join(' · ')}`)
   const pool = poolRows(pools, results, asOf, baselines)
   for (const side of SIDES) { const b = baselines[side].horizons; console.log(`Baseline ${side}: any day, 3M win ${(b[0].winRate * 100).toFixed(0)}% median ${(b[0].median * 100).toFixed(1)}% · 6M win ${(b[1].winRate * 100).toFixed(0)}% median ${(b[1].median * 100).toFixed(1)}% beat ${b[1].beat == null ? '—' : (b[1].beat * 100).toFixed(0) + '%'}`) }
   console.log(`Analyzed ${results.length}/${universe.length} tickers in ${((Date.now() - t0) / 1000).toFixed(0)}s; ${failed.length} failed; as of ${asOf}; bars from Yahoo ${sources.yahoo}, edge ${sources.edge}.`)

@@ -1,5 +1,5 @@
 // npm run callhistory:check — src/utils/callHistory.js
-import { callPath, callHistory, anyDayHistory, callStats, simulateCall, breakevenMoves, CALL_HORIZONS, ATM_MODEL, atmTrade } from '../src/utils/callHistory.js'
+import { callPath, callHistory, anyDayHistory, callStats, simulateCall, breakevenMoves, CALL_HORIZONS, ATM_MODEL, atmTrade, PLAYS, playModel, playExpiry, playContract, SWING_HOLDS } from '../src/utils/callHistory.js'
 import { trailingVol, bsCall } from '../src/utils/replay.js'
 let pass = 0, fail = 0
 const ok = (name, cond) => { if (cond) pass++; else { fail++; console.log('FAIL', name) } }
@@ -37,5 +37,20 @@ ok('ATM strike = the entry price', Math.abs(atm.strike - bars[100].o) < 1e-9)
 ok('ATM costs less and moves more (%) than ITM on a rise', atm.cost < p.cost && atm.call[3] > p.call[3])
 const at = atmTrade({ S: 100, trade, asOf: '2026-10-15' })
 ok('ATM trade: strike at price, cheaper, delta ~0.6', at.strike === 100 && at.cost < trade.cost && at.delta > 0.5 && at.delta < 0.7)
+// Plays: at the money, 1M / 3M / 6M / 12M marked after 1 and 2 weeks, LEAPS after 6 / 12 months.
+ok('five plays', PLAYS.map((x) => x.key).join() === '1M,3M,6M,12M,LEAPS')
+const m1 = PLAYS[0], lp = PLAYS[4]
+const sw = callPath(bars, vols, 100, playModel(m1), m1.holds)
+ok('swing path: two holds, ATM strike', sw.call.length === 2 && Math.abs(sw.strike - bars[100].o) < 1e-9)
+ok('1M call costs less than the 2-year one', sw.cost < callPath(bars, vols, 100, playModel(lp), lp.holds).cost)
+ok('swing stats carry 1W / 2W', callStats(callHistory(bars, entries, { vols, opt: playModel(m1), horizons: m1.holds }), m1.holds).map((x) => x.label).join() === '1W,2W')
+ok('expiry is a Friday, near the target', [m1, PLAYS[1], PLAYS[3]].every((pl) => { const e = playExpiry('2026-10-15', pl); const d = new Date(`${e}T00:00:00Z`); const gap = (d - new Date('2026-10-15T00:00:00Z')) / 86400e3; return d.getUTCDay() === 5 && gap >= pl.dte * 0.75 && Math.abs(gap - pl.dte) <= 20 }))
+ok('LEAPS expiry is a January', playExpiry('2026-10-15', lp) === '2029-01-19')
+ok('1M expiry from Oct 15 = Nov 20', playExpiry('2026-10-15', m1) === '2026-11-20')
+const c1 = playContract({ S: 100, vol: 0.3, asOf: '2026-10-15', play: m1 })
+ok('ATM contract: strike at price, ~0.5 delta', c1.strike === 100 && c1.delta > 0.48 && c1.delta < 0.6)
+const ssim = simulateCall({ S: 100, trade: c1, asOf: '2026-10-15', moves: m1.moves, horizons: SWING_HOLDS })
+ok('swing sim: flat after 2 weeks loses more than after 1', ssim[1].cells[2].ret < ssim[0].cells[2].ret && ssim[0].cells[2].ret < 0)
+ok('swing sim: +10% in a week more than doubles a 1M ATM call', ssim[0].cells[4].ret > 1)
 console.log(`${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

@@ -1570,30 +1570,31 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   vs 62% higher, gone by 6M). A solid strip under the phone status bar
   (`Layout.jsx`, `env(safe-area-inset-top)`, z-40) keeps scrolled content
   out from behind the clock on every page.
-- **Past gains & profit simulator on Pullbacks** (owner, 2026-10-15: "see
-  profit simulators and historical gains on the different calls for 1M,
-  3M, 6M, +12M"). Every buy row has a collapsed "Past gains & profit
-  simulator" panel (`CallLab` in `ConfluenceLeaders.jsx`). **Past gains:**
-  the suggested call (~730 DTE, 0.75Δ, the replay's Black-Scholes pricing,
-  2% slippage each way) bought the open after each past signal and marked
-  1 / 3 / 6 / 12 months later, re-marked on the vol known then — average
-  and share up for this stock (BUY SETUP rule; the 2-signal version when
-  it has < 3 cases), all stocks, and **any random day** (every 5th day of
-  every ticker — the yardstick the setup must beat). One signal per dip:
-  a signal within 21 trading days of the last one counted is skipped
-  (`CLUSTER_GAP`). Computed nightly by `rank-confluence.mjs` →
-  `confluence_ranks.call_hist` (own + pool). **Simulator:** today's call
-  valued for a stock move of −20…+30% at each horizon, today's vol held,
-  with a contracts stepper and the break-even move. Math in
-  `src/utils/callHistory.js` (`npm run callhistory:check`). Estimates, not
-  quotes; no exit plan in the history (fixed holding periods).
-  **Strike switch** (owner, 2026-10-15: "rather than in the money we might
-  want to explore at the money"): **In the money** (the app's 0.75-delta
-  pick) / **At the money** (strike at the price, ~0.6 delta on a 2-year
-  call; `ATM_MODEL`, `atmTrade`), remembered on the device
-  (`cm:pullbacks-strike`); both the history (`call_hist.atm`, computed
-  nightly beside the ITM one) and the simulator follow it. The app's
-  suggestion stays the 0.75-delta call — the switch is for comparison.
+- **Pullbacks plays — at the money** (owner, 2026-10-15: "it is crowded …
+  1, 3, 6, 12, LEAPS on pullbacks … pullbacks at the money, either short
+  term contracts catching the swing holding 1-2 weeks, and then LEAPS that
+  are compounding"). The buy side has one chip row **1M · 3M · 6M · 12M ·
+  LEAPS** (`cm:pullbacks-play`, default 1M); every BUY SETUP row shows that
+  **at-the-money** call (strike at the price, `playContract`: the
+  third-Friday expiry nearest the target, January for LEAPS; Black-Scholes
+  on the row's 60-day vol, 2% slippage) with "Hold 1–2 weeks" (1M–12M, the
+  swing) or "Hold 6–12 months" (LEAPS), momentum, exit below, the signal
+  meter and **one** history line ("Past dips on all stocks, held 2 weeks:
+  +10% · 39% up · any day +16%"). The long track-record and own-record
+  paragraphs are gone from the row (the NOT NOW verdict still covers a rule
+  already losing on the ticker). Under each buy row, collapsed: **Past
+  results & what-if** — a table per hold (1 / 2 weeks, or 6 / 12 months) ×
+  this stock (BUY SETUP, the 2-signal version under 3 cases) / all stocks /
+  any day (every 5th day — the yardstick), then a what-if sized by amount
+  ($1k / $5k / $10k / $40k, `cm:pullbacks-budget`, contracts = amount ÷
+  cost) with stock moves (−10…+15% swing, −20…+30% LEAPS), worth, profit and
+  the break-even. History: `PLAYS` in `src/utils/callHistory.js`
+  (`npm run callhistory:check`), computed nightly by `rank-confluence.mjs`
+  → `confluence_ranks.call_hist.plays[key]` (own setup / 2-signal + pool
+  setup / any day), one signal per dip (`CLUSTER_GAP` 21). Estimates, not
+  quotes: real IV after a dip usually sits above trailing realised vol, so
+  short-dated history reads optimistic. The 0.75-delta `trade` stays on the
+  row for the forward record and the entry chart.
 - **Momentum list + forward record** (owner, 2026-10-07: "1 and 3"; the
   swing-grid and magnitude tests found momentum's stock picks — not its
   timing — are what held up). **Momentum list:** `scripts/rank-confluence.mjs`
