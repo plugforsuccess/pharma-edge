@@ -1570,6 +1570,30 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   vs 62% higher, gone by 6M). A solid strip under the phone status bar
   (`Layout.jsx`, `env(safe-area-inset-top)`, z-40) keeps scrolled content
   out from behind the clock on every page.
+- **Past gains & profit simulator on Pullbacks** (owner, 2026-10-15: "see
+  profit simulators and historical gains on the different calls for 1M,
+  3M, 6M, +12M"). Every buy row has a collapsed "Past gains & profit
+  simulator" panel (`CallLab` in `ConfluenceLeaders.jsx`). **Past gains:**
+  the suggested call (~730 DTE, 0.75Δ, the replay's Black-Scholes pricing,
+  2% slippage each way) bought the open after each past signal and marked
+  1 / 3 / 6 / 12 months later, re-marked on the vol known then — average
+  and share up for this stock (BUY SETUP rule; the 2-signal version when
+  it has < 3 cases), all stocks, and **any random day** (every 5th day of
+  every ticker — the yardstick the setup must beat). One signal per dip:
+  a signal within 21 trading days of the last one counted is skipped
+  (`CLUSTER_GAP`). Computed nightly by `rank-confluence.mjs` →
+  `confluence_ranks.call_hist` (own + pool). **Simulator:** today's call
+  valued for a stock move of −20…+30% at each horizon, today's vol held,
+  with a contracts stepper and the break-even move. Math in
+  `src/utils/callHistory.js` (`npm run callhistory:check`). Estimates, not
+  quotes; no exit plan in the history (fixed holding periods).
+  **Strike switch** (owner, 2026-10-15: "rather than in the money we might
+  want to explore at the money"): **In the money** (the app's 0.75-delta
+  pick) / **At the money** (strike at the price, ~0.6 delta on a 2-year
+  call; `ATM_MODEL`, `atmTrade`), remembered on the device
+  (`cm:pullbacks-strike`); both the history (`call_hist.atm`, computed
+  nightly beside the ITM one) and the simulator follow it. The app's
+  suggestion stays the 0.75-delta call — the switch is for comparison.
 - **Momentum list + forward record** (owner, 2026-10-07: "1 and 3"; the
   swing-grid and magnitude tests found momentum's stock picks — not its
   timing — are what held up). **Momentum list:** `scripts/rank-confluence.mjs`

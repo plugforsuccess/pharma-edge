@@ -36,6 +36,8 @@ import { dailyBars, mapLimit, sources } from './lib/marketData.mjs'
 import { blockers, buyVerdict, sellVerdict, tradeSpec, structureStop, momentum, ownRecord, holdReason } from './lib/verdict.mjs'
 import { momentumToday, moveGroups, forwardOutcome, SWING_PLAN } from '../src/utils/momentumList.js'
 import { createHash } from 'node:crypto'
+import { replaySignals, trailingVol, OPTION_MODEL } from '../src/utils/replay.js'
+import { callHistory, anyDayHistory, callStats, ATM_MODEL } from '../src/utils/callHistory.js'
 
 const args = process.argv.slice(2)
 const MODE = (args[args.indexOf('--mode') + 1] && args.includes('--mode')) ? args[args.indexOf('--mode') + 1] : 'dry-run'
@@ -67,7 +69,26 @@ export function analyze(ticker, bars, spy = null) {
     closes: bars.map((b) => b.c), market, ownRecord: ownRecord(bars, model, suite),
     buy: { today: conf.buy.today, setups: conf.buy.setups, lastSignal: lastSignal(conf.buy.flags) },
     sell: { today: conf.sell.today, setups: conf.sell.setups, lastSignal: lastSignal(conf.sell.flags) },
+    calls: callPaths(bars, model, suite),
   }
+}
+
+// The suggested call marked 1 / 3 / 6 / 12 months after each past signal
+// (src/utils/callHistory.js): the BUY SETUP rule, the 2-signal version, and
+// every ~5th day as the yardstick.
+function callPaths(bars, model, suite) {
+  const sig = replaySignals(bars, model, suite)
+  const vols = trailingVol(bars.map((b) => b.c), OPTION_MODEL.volBars)
+  const set = (opt) => ({ setup: callHistory(bars, sig.entry.setup, { vols, opt }), confluence: callHistory(bars, sig.entry.confluence, { vols, opt }), any: anyDayHistory(bars, { vols, opt }) })
+  // In the money (the app's 0.75-delta call) and at the money (strike at the price).
+  return { ...set(OPTION_MODEL), atm: set(ATM_MODEL) }
+}
+
+// Universe-wide call history per rule (shared by every row).
+export function callPool(results) {
+  const all = (k, atm = false) => results.flatMap((r) => (atm ? r.calls?.atm?.[k] : r.calls?.[k]) ?? [])
+  const set = (atm) => ({ setup: callStats(all('setup', atm)), confluence: callStats(all('confluence', atm)), any: callStats(all('any', atm)), tickers: results.length })
+  return { ...set(false), atm: set(true) }
 }
 
 const h = (est, label) => est?.horizons.find((x) => x.label === label)?.avg ?? null
@@ -78,7 +99,7 @@ const hz = (est, label, k) => est?.horizons.find((x) => x.label === label)?.[k] 
 // Tier 1: E+T+B convergence (Echo + Tango + Bravo within 10 bars)
 // Tier 2: other combos
 // Within each tier, sorted by: score, conditions_met, last_signal, est_6m
-export function rankAll(results, pools) {
+export function rankAll(results, pools, calls = null) {
   const rows = []
   for (const side of SIDES) {
     const cands = []
@@ -102,6 +123,10 @@ export function rankAll(results, pools) {
         blockers: side === 'buy' ? r.blockers : null, trade: side === 'buy' ? r.trade : null,
         stop_price: r.stop?.price ?? null, stop_date: r.stop?.date ?? null, momentum: r.momentum,
         own_record: side === 'buy' ? r.ownRecord : null,
+        call_hist: side === 'buy' && r.calls ? {
+          own: { setup: callStats(r.calls.setup), confluence: callStats(r.calls.confluence) }, pool: { setup: calls.setup, confluence: calls.confluence, any: calls.any },
+          atm: { own: { setup: callStats(r.calls.atm.setup), confluence: callStats(r.calls.atm.confluence) }, pool: calls.atm },
+        } : null,
       }
       rows.push(row)
       // Eligible: 2+ signals (buy: with the 200-day rising). The setup's
@@ -186,7 +211,9 @@ async function main() {
   const asOf = results.map((r) => r.asOf).sort().pop()
   const pools = Object.fromEntries(SIDES.map((side) => [side, poolStats(results.map((r) => r[side].setups), HORIZONS, side)]))
   const baselines = Object.fromEntries(SIDES.map((side) => [side, baselineStats(results.map((r) => ({ closes: r.closes, market: r.market })), HORIZONS, side)]))
-  const rows = rankAll(results, pools)
+  const calls = callPool(results)
+  const rows = rankAll(results, pools, calls)
+  for (const k of ['setup', 'confluence', 'any']) for (const [nm, src] of [['ITM', calls], ['ATM', calls.atm]]) console.log(`Call history ${nm} ${k.padEnd(10)} ${src[k].map((x) => `${x.label} n ${x.n} avg ${pct(x.avg)} win ${x.win == null ? '—' : Math.round(x.win * 100) + '%'}`).join(' · ')}`)
   const pool = poolRows(pools, results, asOf, baselines)
   for (const side of SIDES) { const b = baselines[side].horizons; console.log(`Baseline ${side}: any day, 3M win ${(b[0].winRate * 100).toFixed(0)}% median ${(b[0].median * 100).toFixed(1)}% · 6M win ${(b[1].winRate * 100).toFixed(0)}% median ${(b[1].median * 100).toFixed(1)}% beat ${b[1].beat == null ? '—' : (b[1].beat * 100).toFixed(0) + '%'}`) }
   console.log(`Analyzed ${results.length}/${universe.length} tickers in ${((Date.now() - t0) / 1000).toFixed(0)}s; ${failed.length} failed; as of ${asOf}; bars from Yahoo ${sources.yahoo}, edge ${sources.edge}.`)
