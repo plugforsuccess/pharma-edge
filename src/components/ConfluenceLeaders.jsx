@@ -348,7 +348,7 @@ function HistCell({ h }) {
   return (
     <td className="px-1.5 py-2 text-center">
       <span className={clsx('block font-semibold font-mono-tab', tone(h.avg))}>{pctS(h.avg)}</span>
-      <span className="block text-[11px] text-muted font-mono-tab">{Math.round(h.win * 100)}% up</span>
+      <span className="block text-[11px] text-muted font-mono-tab whitespace-nowrap">{Math.round(h.win * 100)}% up</span>
     </td>
   )
 }
@@ -430,7 +430,7 @@ function CallLab({ r, accountSize }) {
                 <tbody className="divide-y divide-hairline">
                   {rowsH.cells.map((c) => (
                     <tr key={c.move} className="text-right">
-                      <td className="text-left py-1.5"><span className={tone(c.move)}>{c.move === 0 ? 'flat' : pctS(c.move)}</span> <span className="text-muted">{money(r.close * (1 + c.move))}</span></td>
+                      <td className="text-left py-1.5"><span className={c.move === 0 ? 'text-subtle' : tone(c.move)}>{c.move === 0 ? 'flat' : pctS(c.move)}</span> <span className="text-muted">{money(r.close * (1 + c.move))}</span></td>
                       <td className="py-1.5">{money(c.value * 100 * qty, 0)}</td>
                       <td className={clsx('py-1.5 font-semibold', tone(c.pnl))}>{usd0(c.pnl * qty)} <span className="font-normal text-[11px]">{pctS(c.ret)}</span></td>
                     </tr>
