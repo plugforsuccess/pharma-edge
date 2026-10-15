@@ -1,0 +1,141 @@
+// Historical validation for NIGHTFLOW.
+//
+// Signals come only from causal snapshots (the engine sees events up to
+// each snapshot time). Hindsight is used for one thing: labelling which
+// moments became significant selloffs, to grade the signals. Thresholds
+// are chosen on training days and reported on held-out days.
+
+import { runStream } from './engine.js'
+import { median, mean } from './stats.js'
+
+export const SELL_ALERTS = Object.freeze(['selling_acceleration', 'sell_absorption', 'bid_withdrawal', 'failed_breakout', 'spread_widening', 'sell_replenishment', 'momentum_exhaustion', 'distribution', 'positive_cvd_stall'])
+
+// Price path from valid prints, for labelling and grading.
+function pricePath(events) {
+  const dead = new Set(events.filter((e) => e.kind === 'trade' && (e.type === 'CANCEL' || e.type === 'CORRECTION')).map((e) => e.id))
+  return events
+    .filter((e) => e.kind === 'trade' && e.type !== 'CANCEL' && !dead.has(e.id) && e.valid !== false && !(e.conds && /[ZULWB4PCNRV7GHQMO65]/.test(e.conds)))
+    .map((e) => ({ t: e.t, p: e.price }))
+}
+
+function idxAt(path, t) {
+  let lo = 0, hi = path.length
+  while (lo < hi) { const m = (lo + hi) >> 1; if (path[m].t <= t) lo = m + 1; else hi = m }
+  return lo - 1
+}
+
+// Significant selloffs: a local peak followed by a fall ≥ dropPct within
+// horizonMs. Returns { peakT, peak, troughT, trough, firstLegT } — firstLegT
+// is when the fall first reached a third of dropPct.
+export function labelSelloffs(path, { dropPct = 0.15, horizonMs = 3_600_000 } = {}) {
+  const out = []
+  let i = 0
+  while (i < path.length) {
+    const p0 = path[i]
+    let j = i + 1, minP = p0.p, minJ = i, hitJ = -1, maxP = p0.p, maxJ = i
+    for (; j < path.length && path[j].t - p0.t <= horizonMs; j++) {
+      if (path[j].p > maxP && hitJ < 0) { maxP = path[j].p; maxJ = j }
+      if (path[j].p < minP) { minP = path[j].p; minJ = j }
+      if (hitJ < 0 && path[j].p <= maxP * (1 - dropPct)) hitJ = j
+    }
+    if (hitJ >= 0) {
+      const peak = path[maxJ]
+      let firstLeg = hitJ
+      for (let k = maxJ; k <= hitJ; k++) if (path[k].p <= peak.p * (1 - dropPct / 3)) { firstLeg = k; break }
+      out.push({ peakT: peak.t, peak: peak.p, troughT: path[minJ].t, trough: path[minJ].p, firstLegT: path[firstLeg].t })
+      i = Math.max(minJ, hitJ) + 1
+    } else i++
+  }
+  return out
+}
+
+// Run the engine over one symbol-day and keep what the grading needs.
+export function collectSignals(day, { config, stepMs = 5_000, source = 'replay' } = {}) {
+  const snaps = []
+  const r = runStream(day.events, {
+    symbol: day.symbol, source, config, context: day.context, stepMs,
+    onSnapshot: (s) => snaps.push({
+      t: s.t, session: s.session, score: s.score?.value ?? null, status: s.status,
+      price: s.windows?.['10s']?.close ?? s.windows?.['1m']?.close ?? null,
+      cost10kBps: s.liquidity?.impact?.sell?.find((x) => x.usd === 10_000)?.modelBps ?? null,
+      halfSpreadBps: s.quote?.spreadPct != null ? s.quote.spreadPct / 2 * 1e4 : null,
+    }),
+  })
+  return { symbol: day.symbol, date: day.date, snaps, alerts: r.alerts, path: pricePath(day.events) }
+}
+
+// Turn a rule into signal times (deduped per `dedupeMs`).
+export function signalsFor(run, rule, dedupeMs = 900_000) {
+  const times = []
+  if (rule.kind === 'score') {
+    for (const s of run.snaps) if (s.score != null && s.score >= rule.threshold && (!times.length || s.t - times[times.length - 1].t >= dedupeMs)) times.push(s)
+  } else {
+    const types = new Set(rule.types ?? SELL_ALERTS)
+    for (const a of run.alerts) {
+      if (!types.has(a.type) || a.severity < (rule.minSeverity ?? 1)) continue
+      if (times.length && a.t - times[times.length - 1].t < dedupeMs) continue
+      const s = run.snaps.find((x) => x.t >= a.t) ?? run.snaps[run.snaps.length - 1]
+      times.push({ ...s, t: a.t, alertType: a.type })
+    }
+  }
+  return times
+}
+
+export function grade(runs, rule, { dropPct = 0.15, horizonMs = 3_600_000, leadMs = 1_800_000, fpDrop = 0.05 } = {}) {
+  let selloffs = 0, preceded = 0
+  const sig = []
+  for (const run of runs) {
+    const labels = labelSelloffs(run.path, { dropPct, horizonMs })
+    const signals = signalsFor(run, rule)
+    selloffs += labels.length
+    for (const L of labels) if (signals.some((s) => s.t >= L.peakT - leadMs && s.t <= L.firstLegT)) preceded++
+    for (const s of signals) {
+      const i = idxAt(run.path, s.t)
+      if (i < 0) continue
+      const p0 = run.path[i].p
+      let maxP = p0, minP = p0, reversalMs = null
+      const at = {}
+      for (let j = i + 1; j < run.path.length && run.path[j].t - s.t <= horizonMs; j++) {
+        const { t, p } = run.path[j]
+        maxP = Math.max(maxP, p); minP = Math.min(minP, p)
+        if (reversalMs == null && p <= p0 * (1 - fpDrop)) reversalMs = t - s.t
+        for (const [k, ms] of [['5m', 300_000], ['15m', 900_000], ['60m', 3_600_000]]) if (t - s.t <= ms) at[k] = p / p0 - 1
+      }
+      sig.push({ t: s.t, session: s.session, truePositive: minP <= p0 * (1 - fpDrop), reversalMs, mae: maxP / p0 - 1, fwd: at, costBps: (s.cost10kBps ?? s.halfSpreadBps ?? null) })
+    }
+  }
+  const tp = sig.filter((s) => s.truePositive)
+  const bySession = {}
+  for (const s of sig) {
+    const b = (bySession[s.session] ??= { n: 0, tp: 0 })
+    b.n++; if (s.truePositive) b.tp++
+  }
+  const fwd = (k) => { const v = sig.map((s) => s.fwd[k]).filter((x) => x != null); return { mean: mean(v), median: median(v), n: v.length } }
+  return {
+    rule, selloffs, preceded, coverage: selloffs ? preceded / selloffs : null,
+    signals: sig.length, falsePositiveRate: sig.length ? 1 - tp.length / sig.length : null,
+    medianReversalMin: median(tp.map((s) => s.reversalMs).filter((x) => x != null)) / 60_000 || null,
+    maeMedian: median(sig.map((s) => s.mae)), maeP90: sig.length ? [...sig.map((s) => s.mae)].sort((a, b) => a - b)[Math.floor(sig.length * 0.9)] : null,
+    after: { '5m': fwd('5m'), '15m': fwd('15m'), '60m': fwd('60m') },
+    bySession: Object.fromEntries(Object.entries(bySession).map(([k, v]) => [k, { ...v, precision: v.tp / v.n }])),
+    costBpsMedian: median(sig.map((s) => s.costBps).filter((x) => x != null)),
+  }
+}
+
+// Fit the score threshold on training days (by date), report on test days.
+export function walkForward(days, { config, trainShare = 0.7, thresholds = [25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75], gradeOpts } = {}) {
+  const dates = [...new Set(days.map((d) => d.date))].sort()
+  const cut = dates[Math.max(1, Math.floor(dates.length * trainShare)) - 1]
+  const runs = days.map((d) => collectSignals(d, { config, source: d.source ?? 'replay' }))
+  const train = runs.filter((r) => r.date <= cut), test = runs.filter((r) => r.date > cut)
+  const f1 = (g) => { const p = g.falsePositiveRate == null ? 0 : 1 - g.falsePositiveRate; const c = g.coverage ?? 0; return p + c ? (2 * p * c) / (p + c) : 0 }
+  const fits = thresholds.map((th) => { const g = grade(train, { kind: 'score', threshold: th }, gradeOpts); return { threshold: th, f1: f1(g), g } })
+  const best = fits.reduce((a, b) => (b.f1 > a.f1 ? b : a), fits[0])
+  return {
+    trainDates: dates.filter((d) => d <= cut), testDates: dates.filter((d) => d > cut),
+    chosenThreshold: best.threshold, train: best.g,
+    test: test.length ? grade(test, { kind: 'score', threshold: best.threshold }, gradeOpts) : null,
+    alertsTest: test.length ? grade(test, { kind: 'alerts', types: SELL_ALERTS, minSeverity: 2 }, gradeOpts) : null,
+    grid: fits.map((f) => ({ threshold: f.threshold, f1: f.f1, coverage: f.g.coverage, falsePositiveRate: f.g.falsePositiveRate, signals: f.g.signals })),
+  }
+}

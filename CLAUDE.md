@@ -1822,6 +1822,52 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   by kind (ROC shown as due at sale); the rate breakdown
   (`components/RateBreakdown.jsx`, shared with Portfolio's View rates).
 
+## NIGHTFLOW (`/orderflow`) — order-flow intelligence
+
+Built 2026-10-08 (owner: "NIGHTFLOW — Order Flow Intelligence Engine").
+Buy/sell pressure for low-float stocks: CVD (10 s / 1 m / 5 m / 15 m /
+session), price-vs-CVD divergence A–E, sell-side absorption (aggressive
+buying + ≥ 2 of 4 independent conditions), distribution risk (9 factors,
+profit-taking vs sustained only when the data says so, else
+"uncertain"), liquidity / withdrawal / hypothetical fills ($250–$100k,
+displayed vs executable vs modelled), the 0–100 Selling Pressure Risk
+Score (weights 25/20/20/15/10/10 — **hypotheses, not validated**) and
+alerts with evidence, quote quality, source and limitations. Full spec,
+feed coverage and validation plan: **`docs/nightflow/README.md`**.
+- **One engine** — `src/utils/orderflow/` (pure JS). The dxlink-worker
+  runs a generated copy (`dxlink-worker/src/orderflow/`, plus
+  `_shared/orderflowDilution.js`): edit `src/utils/orderflow/`, then
+  `npm run orderflow:sync`; `npm run orderflow:check` (73 checks) fails on
+  a stale copy. Classification is Lee–Ready on the NBBO stamped on each
+  dxFeed TimeAndSale print, tick-rule fallback; late / out-of-sequence /
+  average-price / auction / off-market prints are volume but never
+  classified; corrections and cancels are applied by id. Never candle
+  colour.
+- **Data:** live = dxFeed TimeAndSale + Quote + Summary through the
+  existing Tastytrade DXLink worker (`orderflow.ts`) for symbols in
+  `orderflow_watchlist` (owner-managed, ≤ 25) → `orderflow_state` /
+  `orderflow_alerts` (realtime) + `orderflow_prints` / `orderflow_quotes`
+  (30-day replay store). **No Level 2** on that feed (depth beyond the
+  NBBO is modelled and labelled) and **no overnight ATS coverage** — the
+  engine disables analytics in 20:00–04:00 ET rather than estimate.
+  Dilution: `orderflow-dilution` edge function (SEC EDGAR filings + Yahoo
+  float, 12 h cache in `orderflow_dilution`).
+- **Modes:** Live (offline banner when the worker is down — nothing
+  invented), Replay (recorded day, run in the browser on a clock; alerts
+  link to "Replay this moment"), Synthetic (seeded scripted scenarios,
+  banner "SYNTHETIC DEMO — generated data, not market data", symbol
+  DEMO). "What's running on what" lists live / replay / synthetic / model
+  / unavailable per function.
+- **Validation:** `npm run orderflow:backtest -- --db --symbols … --from …
+  --to …` (walk-forward score threshold, coverage, false positives, time
+  to reversal, MAE, outcomes, sessions, costs). **Not validated on real
+  data yet**; claim nothing predictive until held-out results support it.
+- **Safety:** monitoring, alerts and simulation only — no orders, no
+  brokerage credentials, no automation without a separately approved
+  implementation. Never add spoofing, wash trading, manipulative order
+  placement or anything trading on MNPI. Live analytics wait on the
+  dxlink-worker deploy (Fly billing).
+
 ## Simulator (`/simulator`)
 
 After-tax what-if sandbox; nothing is saved. Same math as `/leaps`.
@@ -1921,7 +1967,8 @@ with `ldp/README.md`. Tests: `python -m pytest -q ldp` (CI:
              GitHub commit SHA stored back to signal
 
 Continuous — dxlink-worker (Fly.io)
-             Streams Greeks + OI to dxlink_quotes during RTH
+             Streams Greeks + OI to dxlink_quotes during RTH; NIGHTFLOW
+             prints / quotes / snapshots / alerts for orderflow_watchlist
 
 Periodic   — monitor-positions.yml
              Polls Tastytrade for fill status on open orders

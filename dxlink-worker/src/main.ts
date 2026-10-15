@@ -44,6 +44,7 @@ import {
   TRACKED_TICKERS,
 } from './tickers.ts'
 import { fetchLeapsContracts, resolveLeaps, LEAPS_REFRESH_MS } from './leaps.ts'
+import { isOrderflowSymbol, orderflowOnQuote, orderflowOnSummary, orderflowOnTrade, refreshOrderflowWatchlist, startOrderflowLoops, ORDERFLOW_REFRESH_MS } from './orderflow.ts'
 
 interface OptionMeta {
   streamer: string
@@ -202,6 +203,7 @@ async function main() {
       const t = ev.eventType as string
       switch (t) {
         case 'Quote':
+          if (isOrderflowSymbol(sym)) orderflowOnQuote(sym, ev)
           applyEvent(sym, {
             bid: numOrNull(ev.bidPrice),
             ask: numOrNull(ev.askPrice),
@@ -217,11 +219,16 @@ async function main() {
           })
           return
         case 'Summary':
+          if (isOrderflowSymbol(sym)) orderflowOnSummary(sym, ev)
           applyEvent(sym, {
             open_interest: numOrNull(ev.openInterest),
             prev_close: numOrNull(ev.prevDayClosePrice),
             day_volume: numOrNull(ev.dayVolume),
           })
+          return
+        case 'TimeAndSale':
+          // NIGHTFLOW (orderflow.ts): every equity print on the watchlist.
+          orderflowOnTrade(sym, ev)
           return
         case 'Trade': {
           // Twin destinations:
@@ -283,6 +290,20 @@ async function main() {
     await client.subscribe(allSpecs.slice(i, i + CHUNK))
   }
   console.log(`[main] sent ${allSpecs.length} subscription specs`)
+
+  // NIGHTFLOW order-flow watchlist (orderflow.ts): TimeAndSale + Quote +
+  // Summary for each active symbol, refreshed every 5 minutes.
+  const applyOrderflow = async () => {
+    try {
+      const specs = await refreshOrderflowWatchlist()
+      if (specs.length) await client.subscribe(specs)
+    } catch (e) {
+      console.warn('[orderflow] refresh failed', e)
+    }
+  }
+  await applyOrderflow()
+  setInterval(applyOrderflow, ORDERFLOW_REFRESH_MS)
+  startOrderflowLoops()
 
   // LEAPS contracts (leaps.ts): the app's picked and held long-dated
   // calls, on top of the GEX plan. Subscribed the same way; refreshed

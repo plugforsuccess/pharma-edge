@@ -1,0 +1,29 @@
+// Dilution / financing risk from SEC filings (EDGAR submissions list).
+// Pure: takes the filing list, returns a 0–1 factor and a plain summary.
+// It flags filings that let a company sell stock; it can't know whether
+// or when shares will actually be sold.
+
+const ACTIVE = /^(424B[1-5]|S-1(\/A)?|F-1(\/A)?|S-3ASR|F-3ASR|EFFECT)$/
+const SHELF = /^(S-3(\/A)?|F-3(\/A)?)$/
+
+// filings: [{ form, filed: 'YYYY-MM-DD', items?: '3.02,…' }], newest first or any order.
+export function dilutionRisk(filings, nowMs = Date.now()) {
+  if (!Array.isArray(filings)) return { score: null, level: 'unknown', summary: 'filings unavailable', hits: [] }
+  const days = (f) => (nowMs - Date.parse(`${f.filed}T00:00:00Z`)) / 86_400_000
+  const hits = []
+  for (const f of filings) {
+    const d = days(f)
+    if (d < 0 || d > 365) continue
+    const form = String(f.form).toUpperCase()
+    if (ACTIVE.test(form) && d <= 30) hits.push({ ...f, weight: 1, why: form.startsWith('424B') ? 'prospectus supplement — shares being offered' : `${form} registration / effectiveness` })
+    else if (form === '8-K' && /3\.02/.test(f.items ?? '') && d <= 30) hits.push({ ...f, weight: 1, why: '8-K item 3.02 — unregistered sale of equity' })
+    else if (ACTIVE.test(form) && d <= 90) hits.push({ ...f, weight: 0.7, why: `${form} in the last 90 days` })
+    else if (SHELF.test(form) && d <= 365) hits.push({ ...f, weight: 0.5, why: 'shelf registration on file (can fund an at-the-market offering)' })
+    else if (form === 'S-8' && d <= 90) hits.push({ ...f, weight: 0.2, why: 'S-8 employee share registration' })
+  }
+  hits.sort((a, b) => b.weight - a.weight || b.filed.localeCompare(a.filed))
+  const score = hits.length ? hits[0].weight : 0
+  const level = score >= 1 ? 'active' : score >= 0.5 ? 'shelf' : score > 0 ? 'minor' : 'none'
+  const summary = hits.length ? `${hits[0].form} filed ${hits[0].filed}: ${hits[0].why}${hits.length > 1 ? ` (+${hits.length - 1} more)` : ''}` : 'no offering filings in the last year'
+  return { score, level, summary, hits: hits.slice(0, 8) }
+}

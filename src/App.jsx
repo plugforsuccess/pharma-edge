@@ -37,6 +37,7 @@ const Bot = lazy(() => import('./pages/Bot'))
 const Leaps = lazy(() => import('./pages/Leaps'))
 const LeapsOnboarding = lazy(() => import('./pages/LeapsOnboarding'))
 const Simulator = lazy(() => import('./pages/Simulator'))
+const OrderFlow = lazy(() => import('./pages/OrderFlow'))
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -121,6 +122,7 @@ export default function App() {
             <Route path="settings" element={<Settings />} />
             <Route path="markets" element={<Markets />} />
             <Route path="markets/king-board" element={<KingBoard />} />
+            <Route path="orderflow" element={<OrderFlow />} />
             <Route path="wheel" element={hidden(FEATURES.wheel, <Wheel />)} />
             <Route path="picks" element={hidden(FEATURES.wheel, <WheelWatchlist />)} />
             <Route path="leaps" element={<Leaps />} />

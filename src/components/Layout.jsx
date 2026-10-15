@@ -12,6 +12,7 @@ import {
   Settings,
   Shield,
   Wallet,
+  Waves,
 } from 'lucide-react'
 import InstallPrompt from './InstallPrompt'
 import OnboardingGate from './OnboardingGate'
@@ -46,6 +47,7 @@ const navTabs = [
 const navFull = [
   ...navTabs,
   { to: '/bot', icon: Bot, label: 'LEAPS bot' },
+  { to: '/orderflow', icon: Waves, label: 'NIGHTFLOW' },
   { to: '/simulator', icon: Calculator, label: 'Simulator' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ]
