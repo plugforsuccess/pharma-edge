@@ -1,0 +1,36 @@
+# One-off research (owner, 2026-10-15: "what's the pattern for the winners"):
+# entry-day traits of winning vs losing pullback LEAPS across the universe,
+# walk-forward (train < 2024, test 2024 →). Prints the report and uploads
+# winner-traits.json. See scripts/winner-traits.mjs. Writes nothing to the DB.
+
+name: Winner traits
+
+on:
+  workflow_dispatch:
+  push:
+    branches-ignore: [main]
+    paths:
+      - scripts/winner-traits.mjs
+      - .github/workflows/winner-traits.yml
+
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Study
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/winner-traits.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: winner-traits
+          path: winner-traits.json
+          retention-days: 30
