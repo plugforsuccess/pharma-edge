@@ -387,11 +387,11 @@ function CallLab({ r, accountSize }) {
                   </tr></thead>
                   <tbody className="divide-y divide-hairline">
                     <tr>
-                      <td className="px-1.5 py-2 text-subtle">{own.label}<span className="block text-[11px] text-muted">{n(own.stats)} times</span></td>
+                      <td className="px-1.5 py-2 text-subtle">{own.label}<span className="block text-[11px] text-muted">{n(own.stats)} {n(own.stats) === 1 ? "dip" : "dips"}</span></td>
                       {CALL_HORIZONS.map(([l], i) => <HistCell key={l} h={own.stats?.[i]} />)}
                     </tr>
                     <tr>
-                      <td className="px-1.5 py-2 text-subtle">All stocks · buy setup<span className="block text-[11px] text-muted">{n(ch.pool?.setup).toLocaleString()} times</span></td>
+                      <td className="px-1.5 py-2 text-subtle">All stocks · buy setup<span className="block text-[11px] text-muted">{n(ch.pool?.setup).toLocaleString()} dips</span></td>
                       {CALL_HORIZONS.map(([l], i) => <HistCell key={l} h={ch.pool?.setup?.[i]} />)}
                     </tr>
                     <tr>

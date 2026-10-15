@@ -45,11 +45,21 @@ export function callPath(bars, vols, e, opt = OPTION_MODEL) {
   return { t: bars[e - 1].t, strike: K, cost, call, stock }
 }
 
-// Every signal in `entries` (boolean per bar, true at the signal's close).
-export function callHistory(bars, entries, { vols = null, opt = OPTION_MODEL } = {}) {
+// Signals in `entries` (boolean per bar, true at the signal's close), one
+// per cluster: a signal within `gap` trading days of the last one counted is
+// the same dip re-triggering, not a new case (else one dip reads as "10
+// times, 100% up").
+export const CLUSTER_GAP = 21
+export function callHistory(bars, entries, { vols = null, opt = OPTION_MODEL, gap = CLUSTER_GAP } = {}) {
   const v = vols ?? trailingVol(bars.map((b) => b.c), opt.volBars)
   const out = []
-  for (let i = 0; i < entries.length - 1; i++) if (entries[i]) { const p = callPath(bars, v, i + 1, opt); if (p) out.push(p) }
+  let last = -Infinity
+  for (let i = 0; i < entries.length - 1; i++) {
+    if (!entries[i] || i - last < gap) continue
+    last = i
+    const p = callPath(bars, v, i + 1, opt)
+    if (p) out.push(p)
+  }
   return out
 }
 
