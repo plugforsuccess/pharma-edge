@@ -1,5 +1,5 @@
 // npm run callhistory:check — src/utils/callHistory.js
-import { callPath, callHistory, anyDayHistory, callStats, simulateCall, breakevenMoves, CALL_HORIZONS } from '../src/utils/callHistory.js'
+import { callPath, callHistory, anyDayHistory, callStats, simulateCall, breakevenMoves, CALL_HORIZONS, ATM_MODEL, atmTrade } from '../src/utils/callHistory.js'
 import { trailingVol, bsCall } from '../src/utils/replay.js'
 let pass = 0, fail = 0
 const ok = (name, cond) => { if (cond) pass++; else { fail++; console.log('FAIL', name) } }
@@ -32,5 +32,10 @@ ok('P&L per contract = (value − cost) × 100', Math.abs(cell(2, 0.1).pnl - (ce
 const be = breakevenMoves({ S: 100, trade, asOf: '2026-10-15' })
 ok('break-even move rises with time', be[0].move > 0 && be[3].move > be[0].move)
 ok('horizons 1M/3M/6M/12M', CALL_HORIZONS.map((h) => h[0]).join() === '1M,3M,6M,12M')
+const atm = callPath(bars, vols, 100, ATM_MODEL)
+ok('ATM strike = the entry price', Math.abs(atm.strike - bars[100].o) < 1e-9)
+ok('ATM costs less and moves more (%) than ITM on a rise', atm.cost < p.cost && atm.call[3] > p.call[3])
+const at = atmTrade({ S: 100, trade, asOf: '2026-10-15' })
+ok('ATM trade: strike at price, cheaper, delta ~0.6', at.strike === 100 && at.cost < trade.cost && at.delta > 0.5 && at.delta < 0.7)
 console.log(`${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

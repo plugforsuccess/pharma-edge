@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import clsx from 'clsx'
 import { ChevronDown, ChevronRight, Minus, Plus } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { simulateCall, breakevenMoves, CALL_HORIZONS } from '../utils/callHistory'
+import { simulateCall, breakevenMoves, atmTrade, CALL_HORIZONS, STRIKES } from '../utils/callHistory'
 
 // Charts → Pullbacks tab, formerly "Confluence leaders" (renamed 2026-10-07) (owner, 2026-10-03; verdicts 2026-10-04: "it's
 // not telling me how to enter"; plain words 2026-10-04: "a novice user may
@@ -357,15 +357,19 @@ function CallLab({ r, accountSize }) {
   const [open, setOpen] = useState(false)
   const [hz, setHz] = useState('6M')
   const [qty, setQty] = useState(1)
-  const ch = r.call_hist
+  // In / at the money, remembered on the device.
+  const [strike, setStrikeState] = useState(() => { try { return localStorage.getItem('cm:pullbacks-strike') === 'atm' ? 'atm' : 'itm' } catch { return 'itm' } })
+  const setStrike = (k) => { setStrikeState(k); try { localStorage.setItem('cm:pullbacks-strike', k) } catch { /* private mode */ } }
+  const ch = strike === 'atm' ? r.call_hist?.atm : r.call_hist
+  const trade = useMemo(() => (strike === 'atm' ? atmTrade({ S: r.close, trade: r.trade, asOf: r.as_of }) : r.trade), [strike, r])
   const ownSetup = ch?.own?.setup, ownConf = ch?.own?.confluence
   const ownN = ownSetup?.[1]?.n ?? 0
   const own = ownN >= 3 ? { stats: ownSetup, label: 'This stock · buy setup' } : { stats: ownConf, label: 'This stock · 2+ signals' }
-  const sim = useMemo(() => (open && r.trade ? simulateCall({ S: r.close, trade: r.trade, asOf: r.as_of }) : null), [open, r])
-  const be = useMemo(() => (open && r.trade ? breakevenMoves({ S: r.close, trade: r.trade, asOf: r.as_of }) : null), [open, r])
+  const sim = useMemo(() => (open && trade ? simulateCall({ S: r.close, trade, asOf: r.as_of }) : null), [open, r, trade])
+  const be = useMemo(() => (open && trade ? breakevenMoves({ S: r.close, trade, asOf: r.as_of }) : null), [open, r, trade])
   const rowsH = sim?.find((x) => x.label === hz)
   const beH = be?.find((x) => x.label === hz)
-  const cost = r.trade ? r.trade.cost * 100 * qty : null
+  const cost = trade ? trade.cost * 100 * qty : null
   const n = (st) => st?.find((x) => x.n)?.n ?? 0
   return (
     <div className="px-5 pb-4 -mt-1">
@@ -376,6 +380,20 @@ function CallLab({ r, accountSize }) {
       </button>
       {open && (
         <div className="mt-3 space-y-4">
+          <div>
+            <div className="grid grid-cols-2 gap-0.5 p-0.5 rounded-lg bg-bg-elev" role="tablist" aria-label="Strike">
+              {Object.entries(STRIKES).map(([k, v]) => (
+                <button key={k} type="button" role="tab" aria-selected={strike === k} onClick={() => setStrike(k)}
+                  className={clsx('min-h-[44px] rounded-md text-xs font-semibold leading-tight', strike === k ? 'bg-card text-violet-300 shadow-sm' : 'text-muted')}>
+                  {v.label}<span className="block text-[11px] font-normal text-muted">{k === 'itm' ? 'the app’s pick · 0.75 delta' : v.short}</span>
+                </button>
+              ))}
+            </div>
+            <p className="mt-1.5 text-[11px] text-muted leading-relaxed">{strike === 'atm'
+              ? 'Cheaper per contract and moves more in % terms — bigger gains when the stock runs, bigger losses and faster decay when it doesn’t.'
+              : 'Costs more but behaves more like the stock: smaller % swings, less lost to time decay.'}</p>
+          </div>
+          {r.call_hist && !ch && <p className="text-[11px] text-muted">At-the-money history arrives with the next nightly run.</p>}
           {ch && (
             <div>
               <div className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold mb-1">Past gains on this call</div>
@@ -402,11 +420,11 @@ function CallLab({ r, accountSize }) {
                 </table>
               </div>
               <p className="mt-1.5 text-[11px] text-muted leading-relaxed">
-                Average gain on the ~2-year call {r.trade ? `(${Math.round((r.trade.delta ?? 0.75) * 100)} delta)` : ''} if held that long, and how often it was up. A setup is only worth more than buying any day if its row beats the yardstick. Prices are Black-Scholes estimates from past volatility, not real quotes. Past results, not a forecast.
+                Average gain on the ~2-year {strike === 'atm' ? 'at-the-money' : 'in-the-money'} call if held that long, and how often it was up. A setup is only worth more than buying any day if its row beats the yardstick. Prices are Black-Scholes estimates from past volatility, not real quotes. Past results, not a forecast.
               </p>
             </div>
           )}
-          {r.trade && rowsH && (
+          {trade && rowsH && (
             <div>
               <div className="flex items-center gap-2 mb-1.5">
                 <span className="flex-1 text-[11px] uppercase tracking-[0.12em] text-muted font-semibold">Profit simulator</span>
@@ -417,7 +435,7 @@ function CallLab({ r, accountSize }) {
                 </span>
               </div>
               <div className="text-xs text-subtle mb-2">
-                {monthYear(r.trade.expiry)} {money(r.trade.strike, 0)} call · cost {about(cost).replace('about ', '≈')}{accountSize ? ` · ${(cost / accountSize * 100).toFixed(1)}% of account` : ''}
+                {monthYear(trade.expiry)} {money(trade.strike, trade.strike < 25 ? 2 : 0)} call{trade.delta ? ` · ${trade.delta.toFixed(2)} delta` : ''} · cost {about(cost).replace('about ', '≈')}{accountSize ? ` · ${(cost / accountSize * 100).toFixed(1)}% of account` : ''}
               </div>
               <div className="grid grid-cols-4 gap-0.5 p-0.5 rounded-lg bg-bg-elev mb-2" role="tablist" aria-label="Held for">
                 {CALL_HORIZONS.map(([l]) => (

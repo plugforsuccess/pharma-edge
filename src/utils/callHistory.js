@@ -13,7 +13,16 @@
 // Simulator: today's suggested call valued for a stock move at each
 // horizon, holding today's vol — what-ifs, not predictions.
 
-import { OPTION_MODEL, bsCall, strikeForDelta, trailingVol } from './replay.js'
+import { OPTION_MODEL, bsCall, strikeForDelta, trailingVol, normCdf } from './replay.js'
+
+// Strike choice (owner, 2026-10-15: "rather than in the money we might want
+// to explore at the money"): in the money = the app's 0.75-delta call; at
+// the money = strike at the stock price (a ~2-year ATM call is ~0.6 delta).
+export const STRIKES = Object.freeze({
+  itm: { label: 'In the money', short: '0.75 delta' },
+  atm: { label: 'At the money', short: 'strike ≈ price' },
+})
+export const ATM_MODEL = Object.freeze({ ...OPTION_MODEL, atm: true })
 
 // [label, trading days, calendar days]
 export const CALL_HORIZONS = Object.freeze([['1M', 21, 30], ['3M', 63, 91], ['6M', 126, 182], ['12M', 252, 365]])
@@ -29,7 +38,7 @@ export function callPath(bars, vols, e, opt = OPTION_MODEL) {
   if (!(vols[e - 1] > 0)) return null
   const S0 = bars[e].o > 0 ? bars[e].o : bars[e].c
   const T0 = opt.dte / 365
-  const K = strikeForDelta(S0, T0, v0, opt.delta)
+  const K = opt.atm ? S0 : strikeForDelta(S0, T0, v0, opt.delta)
   const cost = bsCall(S0, K, T0, v0) * (1 + opt.slippage)
   if (!(cost > 0)) return null
   const call = [], stock = []
@@ -124,4 +133,17 @@ export function breakevenMoves({ S, trade, asOf, opt = OPTION_MODEL }) {
     for (let k = 0; k < 60; k++) { const mid = (lo + hi) / 2; if (f(mid) < 0) lo = mid; else hi = mid }
     return { label, move: r3(hi) }
   })
+}
+
+// Today's at-the-money version of a row's trade: same expiry and vol, the
+// strike at the price (nearest $1, $0.50 under $25), priced the same way.
+export function atmTrade({ S, trade, asOf, opt = OPTION_MODEL }) {
+  if (!(S > 0) || !trade?.expiry) return null
+  const T = days(asOf, trade.expiry) / 365
+  const vol = Math.max(trade.vol ?? 0, opt.volFloor)
+  const step = S < 25 ? 0.5 : 1
+  const K = Math.round(S / step) * step
+  const cost = bsCall(S, K, T, vol) * (1 + opt.slippage)
+  const d1 = (Math.log(S / K) + (opt.rate + vol * vol / 2) * T) / (vol * Math.sqrt(T))
+  return { strike: K, cost: Math.round(cost * 100) / 100, vol: trade.vol, expiry: trade.expiry, delta: Math.round(normCdf(d1) * 100) / 100, breakeven: Math.round((K + cost) * 100) / 100 }
 }

@@ -1587,6 +1587,13 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   with a contracts stepper and the break-even move. Math in
   `src/utils/callHistory.js` (`npm run callhistory:check`). Estimates, not
   quotes; no exit plan in the history (fixed holding periods).
+  **Strike switch** (owner, 2026-10-15: "rather than in the money we might
+  want to explore at the money"): **In the money** (the app's 0.75-delta
+  pick) / **At the money** (strike at the price, ~0.6 delta on a 2-year
+  call; `ATM_MODEL`, `atmTrade`), remembered on the device
+  (`cm:pullbacks-strike`); both the history (`call_hist.atm`, computed
+  nightly beside the ITM one) and the simulator follow it. The app's
+  suggestion stays the 0.75-delta call — the switch is for comparison.
 - **Momentum list + forward record** (owner, 2026-10-07: "1 and 3"; the
   swing-grid and magnitude tests found momentum's stock picks — not its
   timing — are what held up). **Momentum list:** `scripts/rank-confluence.mjs`
