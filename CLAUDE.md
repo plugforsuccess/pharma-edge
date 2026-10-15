@@ -1579,22 +1579,29 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   third-Friday expiry nearest the target, January for LEAPS; Black-Scholes
   on the row's 60-day vol, 2% slippage) with "Hold 1–2 weeks" (1M–12M, the
   swing) or "Hold 6–12 months" (LEAPS), momentum, exit below, the signal
-  meter and **one** history line ("Past dips on all stocks, held 2 weeks:
-  +10% · 39% up · any day +16%"). The long track-record and own-record
+  meter and **one** history line ("Past signals, all stocks, over 1M:
+  stock +1% · 1M call to expiry −20%"). The long track-record and own-record
   paragraphs are gone from the row (the NOT NOW verdict still covers a rule
-  already losing on the ticker). Under each buy row, collapsed: **Past
-  results & what-if** — a table per hold (1 / 2 weeks, or 6 / 12 months) ×
-  this stock (BUY SETUP, the 2-signal version under 3 cases) / all stocks /
-  any day (every 5th day — the yardstick), then a what-if sized by amount
-  ($1k / $5k / $10k / $40k, `cm:pullbacks-budget`, contracts = amount ÷
-  cost) with stock moves (−10…+15% swing, −20…+30% LEAPS), worth, profit and
-  the break-even. History: `PLAYS` in `src/utils/callHistory.js`
-  (`npm run callhistory:check`), computed nightly by `rank-confluence.mjs`
-  → `confluence_ranks.call_hist.plays[key]` (own setup / 2-signal + pool
-  setup / any day), one signal per dip (`CLUSTER_GAP` 21). Estimates, not
-  quotes: real IV after a dip usually sits above trailing realised vol, so
-  short-dated history reads optimistic. The 0.75-delta `trade` stays on the
-  row for the forward record and the entry chart.
+  already losing on the ticker). **History is the stock against itself**
+  (owner, 2026-10-15: "it can't really be compared to the S&P … compared to
+  itself on the same signal for the same durations as the calls … spot gain
+  over the 1M, 3M, 6M, 12M, 2 year intervals"): after each past signal, the
+  stock's gain over 1M / 3M / 6M / 12M / 2Y beside the matching ATM call
+  bought the next open and **held to expiry** — no random-day or S&P
+  column. Under each buy row, collapsed: **Past results & what-if** — that
+  table for all five spans (This stock = BUY SETUP, the 2-signal version
+  under 3 cases / All stocks; tapping a row picks the play), then a what-if
+  sized by amount ($1k / $5k / $10k / $40k, `cm:pullbacks-budget`,
+  contracts = amount ÷ cost) after the play's holds (1 / 2 weeks, or 6 / 12
+  months) with stock moves (−10…+15% swing, −20…+30% LEAPS), worth, profit
+  and the break-even. History: `PLAYS` / `playSpan` in
+  `src/utils/callHistory.js` (`npm run callhistory:check`), computed nightly
+  by `rank-confluence.mjs` → `confluence_ranks.call_hist.plays[key]`
+  (`own.setup` / `own.confluence` / `pool.setup`, each `{ n, stock,
+  stockMedian, stockWin, avg, median, win, … }`), one signal per dip
+  (`CLUSTER_GAP` 21). Estimates, not quotes: real IV after a dip usually
+  sits above trailing realised vol. The 0.75-delta `trade` stays on the row
+  for the forward record and the entry chart.
 - **Momentum list + forward record** (owner, 2026-10-07: "1 and 3"; the
   swing-grid and magnitude tests found momentum's stock picks — not its
   timing — are what held up). **Momentum list:** `scripts/rank-confluence.mjs`

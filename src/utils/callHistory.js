@@ -31,12 +31,17 @@ export const SWING_HOLDS = Object.freeze([['1W', 5, 7], ['2W', 10, 14]])
 export const LEAPS_HOLDS = Object.freeze([['6M', 126, 182], ['12M', 252, 365]])
 export const SWING_MOVES = Object.freeze([-0.1, -0.05, 0, 0.05, 0.1, 0.15])
 export const PLAYS = Object.freeze([
-  { key: '1M', dte: 30, kind: 'swing', holds: SWING_HOLDS, moves: SWING_MOVES },
-  { key: '3M', dte: 91, kind: 'swing', holds: SWING_HOLDS, moves: SWING_MOVES },
-  { key: '6M', dte: 182, kind: 'swing', holds: SWING_HOLDS, moves: SWING_MOVES },
-  { key: '12M', dte: 365, kind: 'swing', holds: SWING_HOLDS, moves: SWING_MOVES },
-  { key: 'LEAPS', dte: 730, kind: 'leaps', holds: LEAPS_HOLDS, moves: SIM_MOVES },
+  { key: '1M', span: '1M', dte: 30, bars: 21, kind: 'swing', holds: SWING_HOLDS, moves: SWING_MOVES },
+  { key: '3M', span: '3M', dte: 91, bars: 63, kind: 'swing', holds: SWING_HOLDS, moves: SWING_MOVES },
+  { key: '6M', span: '6M', dte: 182, bars: 126, kind: 'swing', holds: SWING_HOLDS, moves: SWING_MOVES },
+  { key: '12M', span: '12M', dte: 365, bars: 252, kind: 'swing', holds: SWING_HOLDS, moves: SWING_MOVES },
+  { key: 'LEAPS', span: '2Y', dte: 730, bars: 504, kind: 'leaps', holds: LEAPS_HOLDS, moves: SIM_MOVES },
 ])
+// History per play (owner, 2026-10-15: "compared to itself on the same
+// signal for the same durations as the calls … spot gain over the 1M, 3M,
+// 6M, 12M, 2 year intervals"): the stock's gain over the call's life beside
+// the call held to expiry, both from the same signal.
+export const playSpan = (play) => Object.freeze([[play.span, play.bars, play.dte]])
 export const playModel = (play) => ({ ...ATM_MODEL, dte: play.dte })
 const DAY = 86_400_000
 const days = (a, b) => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / DAY)
@@ -99,7 +104,7 @@ function quant(sorted, q) { return sorted.length ? sorted[Math.min(sorted.length
 export function callStats(paths, horizons = CALL_HORIZONS) {
   return horizons.map(([label], h) => {
     const rs = paths.map((p) => p.call[h]).filter((x) => x != null).sort((a, b) => a - b)
-    const ss = paths.map((p) => p.stock[h]).filter((x) => x != null)
+    const ss = paths.map((p) => p.stock[h]).filter((x) => x != null).sort((a, b) => a - b)
     if (!rs.length) return { label, n: 0 }
     return {
       label, n: rs.length,
@@ -109,6 +114,8 @@ export function callStats(paths, horizons = CALL_HORIZONS) {
       badq: r3(quant(rs, 0.25)),
       worst: r3(rs[0]), best: r3(rs[rs.length - 1]),
       stock: r3(ss.reduce((a, x) => a + x, 0) / ss.length),
+      stockMedian: r3(quant(ss, 0.5)),
+      stockWin: r3(ss.filter((x) => x > 0).length / ss.length),
     }
   })
 }

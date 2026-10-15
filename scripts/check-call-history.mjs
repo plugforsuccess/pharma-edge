@@ -1,5 +1,5 @@
 // npm run callhistory:check — src/utils/callHistory.js
-import { callPath, callHistory, anyDayHistory, callStats, simulateCall, breakevenMoves, CALL_HORIZONS, ATM_MODEL, atmTrade, PLAYS, playModel, playExpiry, playContract, SWING_HOLDS } from '../src/utils/callHistory.js'
+import { callPath, callHistory, anyDayHistory, callStats, simulateCall, breakevenMoves, CALL_HORIZONS, ATM_MODEL, atmTrade, PLAYS, playModel, playExpiry, playContract, SWING_HOLDS, playSpan } from '../src/utils/callHistory.js'
 import { trailingVol, bsCall } from '../src/utils/replay.js'
 let pass = 0, fail = 0
 const ok = (name, cond) => { if (cond) pass++; else { fail++; console.log('FAIL', name) } }
@@ -52,5 +52,12 @@ ok('ATM contract: strike at price, ~0.5 delta', c1.strike === 100 && c1.delta > 
 const ssim = simulateCall({ S: 100, trade: c1, asOf: '2026-10-15', moves: m1.moves, horizons: SWING_HOLDS })
 ok('swing sim: flat after 2 weeks loses more than after 1', ssim[1].cells[2].ret < ssim[0].cells[2].ret && ssim[0].cells[2].ret < 0)
 ok('swing sim: +10% in a week more than doubles a 1M ATM call', ssim[0].cells[4].ret > 1)
+// History over the call's life: stock vs the ATM call held to expiry, same signals.
+ok('spans 1M/3M/6M/12M/2Y', PLAYS.map((x) => x.span).join() === '1M,3M,6M,12M,2Y')
+const sp = callStats(callHistory(bars, entries, { vols, opt: playModel(m1), horizons: playSpan(m1) }), playSpan(m1))[0]
+ok('span stats carry the stock gain and its win rate', sp.n > 0 && sp.stock != null && sp.stockWin != null && sp.stockMedian != null)
+const toExp = callPath(bars, vols, 100, playModel(m1), playSpan(m1))
+const S0 = bars[100].o, Sx = bars[121].c
+ok('1M call held to expiry ≈ intrinsic', Math.abs((toExp.call[0] + 1) * toExp.cost - Math.max(0, Sx - S0) * 0.98) < 0.5)
 console.log(`${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

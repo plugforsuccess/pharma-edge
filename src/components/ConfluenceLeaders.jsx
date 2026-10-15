@@ -238,9 +238,9 @@ export default function ConfluenceLeaders({ mine = [] }) {
 
                     {/* Signals + one line of history */}
                     <span className="mt-3 block"><SignalMeter score={r.score} side={side} /></span>
-                    {side === 'buy' && <PastLine ph={ph} />}
+                    {side === 'buy' && <PastLine ph={ph} play={play} />}
                   </Link>
-                  {side === 'buy' && r.trade && <PlayLab r={r} play={play} ph={ph} accountSize={accountSize} />}
+                  {side === 'buy' && r.trade && <PlayLab r={r} play={play} setPlay={setPlay} accountSize={accountSize} />}
                 </li>
               )
             })}
@@ -259,8 +259,10 @@ export default function ConfluenceLeaders({ mine = [] }) {
 }
 
 // Past results & what-if (owner, 2026-10-15: "it is crowded … 1, 3, 6, 12,
-// LEAPS on pullbacks"): the chosen at-the-money play after past dips on this
-// stock, every stock and any random day (confluence_ranks.call_hist.plays,
+// LEAPS on pullbacks"; then "compared to itself on the same signal for the
+// same durations as the calls … spot gain over 1M, 3M, 6M, 12M, 2 year"):
+// after past signals, the stock's gain over each span beside the matching
+// at-the-money call held to expiry (confluence_ranks.call_hist.plays,
 // nightly), then today's contract valued for a stock move after each hold.
 const pctS = (x, d = 0) => (x == null ? '—' : `${x >= 0 ? '+' : '−'}${Math.abs(x * 100).toFixed(d)}%`)
 const usd0 = (x) => `${x < 0 ? '−' : '+'}$${Math.abs(Math.round(x)).toLocaleString('en-US')}`
@@ -271,77 +273,90 @@ function expiryLabel(t, play) {
   const d = new Date(`${t}T12:00:00Z`)
   return play.kind === 'leaps' ? monthYear(t) : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: d.getUTCFullYear() === new Date().getUTCFullYear() ? undefined : 'numeric', timeZone: 'UTC' })
 }
-const lastHold = (st) => st?.at(-1)
 
-// "Past dips, 2 weeks: +18% · 58% up (any day +4%)"
-function PastLine({ ph }) {
-  const s = lastHold(ph?.pool?.setup), a = lastHold(ph?.pool?.any)
+// "After past signals (all stocks), over 1M: stock +1% · this call +3%"
+function PastLine({ ph, play }) {
+  const s = ph?.pool?.setup
   if (!s?.n) return null
   return (
     <span className="mt-1.5 block text-xs text-muted">
-      Past dips on all stocks, held {holdWords[s.label]}: <span className={clsx('font-mono-tab font-semibold', tone(s.avg))}>{pctS(s.avg)}</span> · {Math.round(s.win * 100)}% up
-      {a?.n ? <> · any day <span className="font-mono-tab">{pctS(a.avg)}</span></> : null}
+      Past signals, all stocks, over {play.span}: stock <span className={clsx('font-mono-tab font-semibold', tone(s.stock))}>{pctS(s.stock)}</span>
+      {' · '}{play.kind === 'leaps' ? 'LEAPS' : `${play.key} call`} to expiry <span className={clsx('font-mono-tab font-semibold', tone(s.avg))}>{pctS(s.avg)}</span>
     </span>
   )
 }
 
-function HistCell({ h }) {
-  if (!h || !h.n) return <td className="px-1.5 py-2 text-center text-muted">—</td>
+function Cell({ avg, win }) {
+  if (avg == null) return <td className="px-1.5 py-2 text-center text-muted">—</td>
   return (
     <td className="px-1.5 py-2 text-center">
-      <span className={clsx('block font-semibold font-mono-tab', tone(h.avg))}>{pctS(h.avg)}</span>
-      <span className="block text-[11px] text-muted font-mono-tab whitespace-nowrap">{Math.round(h.win * 100)}% up</span>
+      <span className={clsx('block font-semibold font-mono-tab', tone(avg))}>{pctS(avg)}</span>
+      <span className="block text-[11px] text-muted font-mono-tab whitespace-nowrap">{Math.round(win * 100)}% up</span>
     </td>
   )
 }
 
 const BUDGETS = [1000, 5000, 10000, 40000]
 
-function PlayLab({ r, play, ph, accountSize }) {
+function PlayLab({ r, play, setPlay, accountSize }) {
   const [open, setOpen] = useState(false)
   const [hold, setHold] = useState(null)
   const [budget, setBudgetState] = useState(() => { try { const b = Number(localStorage.getItem('cm:pullbacks-budget')); return BUDGETS.includes(b) ? b : 5000 } catch { return 5000 } })
   const setBudget = (b) => { setBudgetState(b); try { localStorage.setItem('cm:pullbacks-budget', String(b)) } catch { /* storage off */ } }
+  const plays = r.call_hist?.plays
+  // This stock (BUY SETUP; the 2-signal version under 3 cases) or all stocks.
+  const ownSetupN = plays?.['1M']?.own?.setup?.n ?? 0
+  const ownKey = ownSetupN >= 3 ? 'setup' : 'confluence'
+  const [scopeH, setScopeH] = useState(() => ((plays?.['1M']?.own?.[ownKey]?.n ?? 0) >= 3 ? 'own' : 'pool'))
+  const statOf = (p) => (scopeH === 'own' ? plays?.[p.key]?.own?.[ownKey] : plays?.[p.key]?.pool?.setup)
   const hk = play.holds.some((h) => h[0] === hold) ? hold : play.holds.at(-1)[0]
   const trade = useMemo(() => playContract({ S: r.close, vol: r.trade?.vol, asOf: r.as_of, play }), [r, play])
   const sim = useMemo(() => (open && trade ? simulateCall({ S: r.close, trade, asOf: r.as_of, moves: play.moves, horizons: play.holds }) : null), [open, r, trade, play])
   const be = useMemo(() => (open && trade ? breakevenMoves({ S: r.close, trade, asOf: r.as_of, horizons: play.holds }) : null), [open, r, trade, play])
-  const ownSetup = ph?.own?.setup
-  const own = (ownSetup?.[0]?.n ?? 0) >= 3 ? { stats: ownSetup, label: 'buy setup' } : { stats: ph?.own?.confluence, label: '2+ signals' }
   const qty = trade ? Math.max(1, Math.floor(budget / (trade.cost * 100))) : 1
   const cost = trade ? trade.cost * 100 * qty : null
   const rowsH = sim?.find((x) => x.label === hk)
   const beH = be?.find((x) => x.label === hk)
-  const nOf = (st) => st?.[0]?.n ?? 0
+  const n1 = statOf(PLAYS[0])?.n ?? 0
   return (
     <div className="px-5 pb-4 -mt-1">
       <button type="button" onClick={() => setOpen(!open)} aria-expanded={open}
         className="min-h-[40px] w-full flex items-center gap-2 rounded-xl border border-border px-3.5 text-xs font-semibold text-violet-300 hover:bg-card-hover/40">
-        <span className="flex-1 text-left">Past results & what-if · {play.key}</span>
+        <span className="flex-1 text-left">Past results & what-if</span>
         <ChevronDown size={14} className={clsx('transition', open && 'rotate-180')} aria-hidden />
       </button>
       {open && (
         <div className="mt-3 space-y-4">
-          {ph ? (
-            <table className="w-full text-xs">
-              <thead><tr className="text-muted">
-                <th className="text-left font-normal px-1.5 pb-1">Held</th>
-                <th className="font-normal px-1.5 pb-1 text-center">{r.ticker}<span className="block text-[11px]">{nOf(own.stats)} {nOf(own.stats) === 1 ? 'dip' : 'dips'}</span></th>
-                <th className="font-normal px-1.5 pb-1 text-center">All stocks<span className="block text-[11px]">{nOf(ph.pool?.setup).toLocaleString()} dips</span></th>
-                <th className="font-normal px-1.5 pb-1 text-center">Any day<span className="block text-[11px]">yardstick</span></th>
-              </tr></thead>
-              <tbody className="divide-y divide-hairline">
-                {play.holds.map(([l], i) => (
-                  <tr key={l}>
-                    <td className="px-1.5 py-2 text-subtle whitespace-nowrap">{holdWords[l]}</td>
-                    <HistCell h={own.stats?.[i]} />
-                    <HistCell h={ph.pool?.setup?.[i]} />
-                    <HistCell h={ph.pool?.any?.[i]} />
-                  </tr>
+          {plays?.['1M']?.pool ? (
+            <div>
+              <div className="grid grid-cols-2 gap-0.5 p-0.5 rounded-lg bg-bg-elev mb-2" role="tablist" aria-label="Whose history">
+                {[['own', `${r.ticker}${ownKey === 'confluence' ? ' · 2+ signals' : ''}`], ['pool', 'All stocks']].map(([k, l]) => (
+                  <button key={k} type="button" role="tab" aria-selected={scopeH === k} onClick={() => setScopeH(k)}
+                    className={clsx('min-h-[36px] rounded-md text-xs font-semibold', scopeH === k ? 'bg-card text-violet-300 shadow-sm' : 'text-muted')}>{l}</button>
                 ))}
-              </tbody>
-            </table>
-          ) : <p className="text-[11px] text-muted">Past results for this call arrive with the next nightly run.</p>}
+              </div>
+              <table className="w-full text-xs">
+                <thead><tr className="text-muted">
+                  <th className="text-left font-normal px-1.5 pb-1">After the signal</th>
+                  <th className="font-normal px-1.5 pb-1 text-center">Stock</th>
+                  <th className="font-normal px-1.5 pb-1 text-center">ATM call<span className="block text-[11px]">held to expiry</span></th>
+                </tr></thead>
+                <tbody className="divide-y divide-hairline">
+                  {PLAYS.map((p) => {
+                    const st = statOf(p)
+                    return (
+                      <tr key={p.key} onClick={() => setPlay(p.key)} className={clsx('cursor-pointer', p.key === play.key && 'bg-violet-400/10')}>
+                        <td className="px-1.5 py-2 text-subtle whitespace-nowrap">{p.span}<span className="block text-[11px] text-muted">{st?.n ?? 0} {st?.n === 1 ? 'signal' : 'signals'}</span></td>
+                        <Cell avg={st?.n ? st.stock : null} win={st?.stockWin} />
+                        <Cell avg={st?.n ? st.avg : null} win={st?.win} />
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+              <p className="mt-1.5 text-[11px] text-muted">Same signals, same span: the stock's gain vs the {PLAYS.map((p) => p.span).join(' / ')} at-the-money call bought the next open and held to expiry.{scopeH === 'own' && n1 < 5 ? ' Few cases on this stock.' : ''}</p>
+            </div>
+          ) : <p className="text-[11px] text-muted">Past results arrive with the next nightly run.</p>}
           {trade && rowsH && (
             <div>
               <div className="grid grid-cols-4 gap-0.5 p-0.5 rounded-lg bg-bg-elev mb-2" role="tablist" aria-label="Amount">

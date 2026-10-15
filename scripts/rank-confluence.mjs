@@ -37,7 +37,7 @@ import { blockers, buyVerdict, sellVerdict, tradeSpec, structureStop, momentum, 
 import { momentumToday, moveGroups, forwardOutcome, SWING_PLAN } from '../src/utils/momentumList.js'
 import { createHash } from 'node:crypto'
 import { replaySignals, trailingVol, OPTION_MODEL } from '../src/utils/replay.js'
-import { callHistory, anyDayHistory, callStats, PLAYS, playModel } from '../src/utils/callHistory.js'
+import { callHistory, callStats, PLAYS, playModel, playSpan } from '../src/utils/callHistory.js'
 
 const args = process.argv.slice(2)
 const MODE = (args[args.indexOf('--mode') + 1] && args.includes('--mode')) ? args[args.indexOf('--mode') + 1] : 'dry-run'
@@ -73,17 +73,16 @@ export function analyze(ticker, bars, spy = null) {
   }
 }
 
-// The at-the-money plays (owner, 2026-10-15): 1M / 3M / 6M / 12M calls
-// marked after a 1- and 2-week hold, the ~2-year LEAPS after 6 and 12
-// months (src/utils/callHistory.js) — after each past BUY SETUP, each
-// 2-signal setup, and every ~5th day as the yardstick.
+// The at-the-money plays (owner, 2026-10-15): after each past BUY SETUP
+// and each 2-signal setup, the stock's gain over 1M / 3M / 6M / 12M / 2Y
+// beside the matching ATM call held to expiry (src/utils/callHistory.js).
 function callPaths(bars, model, suite) {
   const sig = replaySignals(bars, model, suite)
   const vols = trailingVol(bars.map((b) => b.c), OPTION_MODEL.volBars)
   const out = {}
   for (const p of PLAYS) {
-    const o = { vols, opt: playModel(p), horizons: p.holds }
-    out[p.key] = { setup: callHistory(bars, sig.entry.setup, o), confluence: callHistory(bars, sig.entry.confluence, o), any: anyDayHistory(bars, o) }
+    const o = { vols, opt: playModel(p), horizons: playSpan(p) }
+    out[p.key] = { setup: callHistory(bars, sig.entry.setup, o), confluence: callHistory(bars, sig.entry.confluence, o) }
   }
   return out
 }
@@ -93,7 +92,7 @@ export function callPool(results) {
   const out = { tickers: results.length }
   for (const p of PLAYS) {
     const all = (k) => results.flatMap((r) => r.calls?.[p.key]?.[k] ?? [])
-    out[p.key] = { setup: callStats(all('setup'), p.holds), confluence: callStats(all('confluence'), p.holds), any: callStats(all('any'), p.holds) }
+    out[p.key] = { setup: callStats(all('setup'), playSpan(p)), confluence: callStats(all('confluence'), playSpan(p)) }
   }
   return out
 }
@@ -132,8 +131,8 @@ export function rankAll(results, pools, calls = null) {
         own_record: side === 'buy' ? r.ownRecord : null,
         call_hist: side === 'buy' && r.calls ? {
           plays: Object.fromEntries(PLAYS.map((p) => [p.key, {
-            own: { setup: callStats(r.calls[p.key].setup, p.holds), confluence: callStats(r.calls[p.key].confluence, p.holds) },
-            pool: { setup: calls[p.key].setup, any: calls[p.key].any },
+            own: { setup: callStats(r.calls[p.key].setup, playSpan(p))[0], confluence: callStats(r.calls[p.key].confluence, playSpan(p))[0] },
+            pool: { setup: calls[p.key].setup[0] },
           }])),
         } : null,
       }
@@ -222,7 +221,7 @@ async function main() {
   const baselines = Object.fromEntries(SIDES.map((side) => [side, baselineStats(results.map((r) => ({ closes: r.closes, market: r.market })), HORIZONS, side)]))
   const calls = callPool(results)
   const rows = rankAll(results, pools, calls)
-  for (const p of PLAYS) for (const k of ['setup', 'any']) console.log(`Play ${p.key.padEnd(5)} ${k.padEnd(6)} ${calls[p.key][k].map((x) => `${x.label} n ${x.n} avg ${pct(x.avg)} win ${x.win == null ? '—' : Math.round(x.win * 100) + '%'}`).join(' · ')}`)
+  for (const p of PLAYS) for (const k of ['setup', 'confluence']) { const x = calls[p.key][k][0]; console.log(`Play ${p.span.padEnd(3)} ${k.padEnd(10)} n ${x.n} · stock avg ${pct(x.stock)} med ${pct(x.stockMedian)} up ${Math.round((x.stockWin ?? 0) * 100)}% · ATM call to expiry avg ${pct(x.avg)} med ${pct(x.median)} up ${Math.round((x.win ?? 0) * 100)}%`) }
   const pool = poolRows(pools, results, asOf, baselines)
   for (const side of SIDES) { const b = baselines[side].horizons; console.log(`Baseline ${side}: any day, 3M win ${(b[0].winRate * 100).toFixed(0)}% median ${(b[0].median * 100).toFixed(1)}% · 6M win ${(b[1].winRate * 100).toFixed(0)}% median ${(b[1].median * 100).toFixed(1)}% beat ${b[1].beat == null ? '—' : (b[1].beat * 100).toFixed(0) + '%'}`) }
   console.log(`Analyzed ${results.length}/${universe.length} tickers in ${((Date.now() - t0) / 1000).toFixed(0)}s; ${failed.length} failed; as of ${asOf}; bars from Yahoo ${sources.yahoo}, edge ${sources.edge}.`)
