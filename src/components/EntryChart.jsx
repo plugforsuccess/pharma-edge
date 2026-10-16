@@ -73,6 +73,9 @@ export const LAYERS = [
 ]
 const PRICE_H = 340
 const SUB_H = 112
+// The range / interval row inside the price pane, under its dates (owner,
+// 2026-10-16: the row sat below the indicator panes, not under the chart).
+const FOOTER_H = 50
 // Header strip above each pane's data (title + live values), px.
 // Two rows over the price pane: averages, then the bar's OHLC + volume.
 const HEADER_PRICE = 64
@@ -182,7 +185,7 @@ export const DAILY_ONLY_PANES = new Set(['ivr', 'ivhv', 'conf'])
 // A date row under every pane but the last (which has the chart's own axis).
 const DATE_ROW = 16
 
-export default function EntryChart({ bars, model, suite, conf = null, suiteLabel = null, panes, layers = [], onHover, onExpand, focus = null, fill = null, jump = null, tf = '1d', plain = false, range = null, style = 'candles', pins = null, fib = null, picking = false, onPick = null }) {
+export default function EntryChart({ bars, model, suite, conf = null, suiteLabel = null, panes, layers = [], onHover, onExpand, focus = null, fill = null, jump = null, tf = '1d', plain = false, range = null, style = 'candles', pins = null, fib = null, picking = false, onPick = null, priceFooter = null }) {
   const iv = INTERVALS[tf] ?? INTERVALS['1d']
   const daily = tf === '1d'
   const box = useRef(null)
@@ -203,7 +206,11 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
   const [toolsVersion, setToolsVersion] = useState(0)
   const shown = focus ? [focus] : ['price', ...SUB_PANES.map(([k]) => k).filter((k) => panes.includes(k) && (daily || !DAILY_ONLY_PANES.has(k)))]
   const showPrice = shown[0] === 'price'
-  const height = fill ?? (showPrice ? PRICE_H : 0) + (shown.length - (showPrice ? 1 : 0)) * SUB_H
+  // The footer sits inside the price pane when panes follow it; with the
+  // price pane alone it simply follows the chart.
+  const footerIn = !!priceFooter && !focus && showPrice && shown.length > 1
+  const priceH = PRICE_H + (footerIn ? FOOTER_H : 0)
+  const height = fill ?? (showPrice ? priceH : 0) + (shown.length - (showPrice ? 1 : 0)) * SUB_H
   const key = `${shown.join(',')}|${layers.join(',')}|${tf}|${style}`
 
   useEffect(() => {
@@ -496,7 +503,7 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
 
     // Pane heights: price first, the rest equal.
     const all = chart.panes()
-    all.forEach((pane, i) => pane.setStretchFactor(i === 0 && showPrice ? PRICE_H / SUB_H : 1))
+    all.forEach((pane, i) => pane.setStretchFactor(i === 0 && showPrice ? priceH / SUB_H : 1))
 
     // Zoom: keep the last view on rebuilds; default to the last two years.
     const n = bars.length
@@ -583,8 +590,14 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
         const lane = shown[pi] === 'echo' || shown[pi] === 'tango'
         // Room for the date row under every pane but the last.
         const dates = pi < ps.length - 1 ? DATE_ROW : 0
-        const bottom = shown[pi] === 'price' ? Math.min(0.45, 0.06 + dates / h) : Math.min(0.45, ((lane ? LANE_PX + 6 : h * 0.05) + dates) / h)
+        const foot = shown[pi] === 'price' && footerIn ? FOOTER_H : 0
+        const bottom = shown[pi] === 'price' ? Math.min(0.5, 0.06 + (dates + foot) / h) : Math.min(0.45, ((lane ? LANE_PX + 6 : h * 0.05) + dates) / h)
         chart.priceScale('right', pi).applyOptions({ scaleMargins: { top, bottom } })
+        // Volume keeps the bottom sixth above the dates and the footer.
+        if (shown[pi] === 'price' && foot) {
+          const vb = (dates + foot) / h
+          try { chart.priceScale('vol', pi).applyOptions({ scaleMargins: { top: Math.max(0, 1 - vb - 0.16), bottom: vb } }) } catch { /* no volume */ }
+        }
         if (shown[pi] === 'price') chart.priceScale('zone', pi).applyOptions({ scaleMargins: { top, bottom: 0 } })
       })
       setTops(ps.map((pane) => { const top = y; y += pane.getHeight() + 1; return top }))
@@ -711,18 +724,24 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
   }
 
   return (
+    <>
     <div className="relative" style={{ height }}>
       <div ref={box} className="absolute inset-0" />
       {/* Pane dividers: a 2px line over the chart's 1px separator, so panes read as separate. */}
       {/* Date rows under every pane but the last (the chart's own axis is there). */}
       {shown.map((k, pi) => (pi < shown.length - 1 && tops[pi + 1] != null ? (
         <div key={`dates-${k}`} className="absolute inset-x-0 pointer-events-none text-[10px] leading-none font-mono-tab text-muted"
-          style={{ top: tops[pi + 1] - DATE_ROW + 2, height: DATE_ROW - 4 }} aria-hidden>
+          style={{ top: tops[pi + 1] - DATE_ROW + 2 - (pi === 0 && footerIn ? FOOTER_H : 0), height: DATE_ROW - 4 }} aria-hidden>
           {ticks.map((tk) => (
             <span key={tk.x} className={`absolute -translate-x-1/2 whitespace-nowrap ${tk.strong ? 'text-subtle font-semibold' : ''}`} style={{ left: tk.x }}>{tk.label}</span>
           ))}
         </div>
       ) : null))}
+      {footerIn && tops[1] != null && (
+        <div className="absolute inset-x-0 z-20 bg-card flex items-center" style={{ top: tops[1] - FOOTER_H, height: FOOTER_H }}>
+          <div className="w-full">{priceFooter}</div>
+        </div>
+      )}
       {shown.map((k, pi) => (pi > 0 && tops[pi] != null ? (
         <div key={`sep-${k}`} className="absolute inset-x-0 h-[2px] bg-border-hover pointer-events-none" style={{ top: tops[pi] - 1.5 }} aria-hidden />
       ) : null))}
@@ -762,5 +781,7 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
         </div>
       ))}
     </div>
+    {priceFooter && !footerIn && !focus ? priceFooter : null}
+    </>
   )
 }
