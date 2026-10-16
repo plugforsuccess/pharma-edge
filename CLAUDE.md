@@ -1653,7 +1653,8 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   1M–LEAPS segmented control, then one rounded list — ticker + the play
   ("Nov 20 $90 call · $190") on the left, a 3-month sparkline, a price pill
   green / red by the 3-month move (grey for non-leaders). Tapping a row
-  opens it in place: hero price + 3-month change, a large filled sparkline,
+  opens it in place (the row's sparkline and price pill hide; the ticker
+  and the call sit centered on a row above — owner, 2026-10-16): hero price + 3-month change, a large filled sparkline,
   the Buy card, four tiles (Momentum, Exit below, Past year, Option price),
   signals, the history line, Past results & what-if and a gold "Open
   chart" button. Sparkline data = `confluence_ranks.spark` (last 63

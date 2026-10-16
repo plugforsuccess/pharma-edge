@@ -560,18 +560,22 @@ function LeaderRow({ r, play, setPlay, accountSize, open, onToggle }) {
   return (
     <li>
       <button type="button" onClick={onToggle} aria-expanded={open}
-        className="w-full min-h-[68px] px-4 py-3 flex items-center gap-3 text-left hover:bg-card-hover/40 transition">
-        <span className="flex-1 min-w-0">
-          <span className="flex items-center gap-1.5">
-            <span className="text-[15px] font-semibold text-fg">{r.ticker}</span>
-          </span>
+        className={clsx('w-full min-h-[68px] px-4 py-3 flex items-center gap-3 hover:bg-card-hover/40 transition', open ? 'justify-center text-center' : 'text-left')}>
+        {/* Open (owner, 2026-10-16): no sparkline or price pill — the ticker
+            and the call sit centered above the hero price and 3M chart. */}
+        <span className={clsx('min-w-0', open ? 'flex-none' : 'flex-1')}>
+          <span className="block text-[15px] font-semibold text-fg">{r.ticker}</span>
           <span className={clsx('block text-xs truncate', isLeader ? 'text-subtle' : 'text-muted')}>{sub}</span>
         </span>
-        <Sparkline values={spark} className={clsx('w-[72px] shrink-0', up ? 'text-green-400' : 'text-red-400', !isLeader && 'opacity-50')} />
-        <span className={clsx('shrink-0 min-w-[78px] px-2.5 py-1.5 rounded-lg text-[13px] font-semibold font-mono-tab text-center',
-          !isLeader ? 'bg-bg-elev text-subtle' : up ? 'bg-green-400 text-bg' : 'bg-red-400 text-bg')}>
-          {money(r.close)}
-        </span>
+        {!open && (
+          <>
+            <Sparkline values={spark} className={clsx('w-[72px] shrink-0', up ? 'text-green-400' : 'text-red-400', !isLeader && 'opacity-50')} />
+            <span className={clsx('shrink-0 min-w-[78px] px-2.5 py-1.5 rounded-lg text-[13px] font-semibold font-mono-tab text-center',
+              !isLeader ? 'bg-bg-elev text-subtle' : up ? 'bg-green-400 text-bg' : 'bg-red-400 text-bg')}>
+              {money(r.close)}
+            </span>
+          </>
+        )}
       </button>
 
       {open && (
