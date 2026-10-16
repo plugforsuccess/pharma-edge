@@ -1611,7 +1611,9 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   kept in view), the interval menu (`IntervalMenu`: 5m · 15m · 1h · D · W ·
   M, opens upward) and a candles / line icon; the drawing tools and Panels
   chips sit under that row. The card opens with the price header, then the
-  chart.
+  chart. The same row (`controlsRow`) sits under the **full-screen** chart
+  (`FullPane` `footer`; owner, 2026-10-16: "why can't I toggle daily /
+  weekly / monthly from within the chart without exiting?").
   **Weekly / monthly bars** (owner, 2026-10-16: INTC's "weekly" candles were
   Mar 1 → Jun 1): Yahoo's `range=max` quietly returns 3-month bars for a
   long history, so `yahooChart` sends an explicit `period1=0&period2=now`

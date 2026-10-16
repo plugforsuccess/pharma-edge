@@ -283,6 +283,27 @@ export default function LeapsEntry() {
     if (!INTRADAY_TF.has(k)) pickSuiteTf(k)
     pickRange(CANDLES.find(([c]) => c === k)[3])
   }
+  // Range + interval + candles / line: under the chart and in full screen
+  // (owner, 2026-10-16: "why can't I toggle … from within the chart").
+  const controlsRow = (
+    <div className="px-2 py-1.5 border-t border-hairline flex items-center gap-1">
+      <div className="flex-1 min-w-0 flex gap-0.5 overflow-x-auto no-scrollbar" role="tablist" aria-label="Range">
+        {RANGES.map(([k]) => (
+          <button key={k} type="button" role="tab" aria-selected={range.key === k} onClick={() => pickRange(k)}
+            ref={range.key === k ? keepInRow : undefined}
+            className={clsx('shrink-0 min-h-[36px] min-w-[38px] px-2 rounded-md text-xs font-semibold font-mono-tab transition',
+              range.key === k ? 'bg-bg-elev text-fg' : 'text-muted hover:text-subtle')}>{k}</button>
+        ))}
+      </div>
+      <span className="w-px h-5 bg-hairline shrink-0" aria-hidden />
+      <IntervalMenu value={candle} onPick={pickCandle} />
+      <button type="button" onClick={() => pickStyle(chartStyle === 'line' ? 'candles' : 'line')}
+        aria-label={chartStyle === 'line' ? 'Show candles' : 'Show line'} title={chartStyle === 'line' ? 'Candles' : 'Line'}
+        className="shrink-0 min-h-[36px] min-w-[36px] flex items-center justify-center rounded-md text-muted hover:text-fg">
+        {chartStyle === 'line' ? <ChartCandlestick size={16} /> : <ChartLine size={16} />}
+      </button>
+    </div>
+  )
   const suitePack = useMemo(() => {
     if (!bars?.length) return null
     if (suiteTf === '1d') {
@@ -500,23 +521,7 @@ export default function LeapsEntry() {
               {/* Range + interval, a row right under the chart (owner,
                   2026-10-16: "how TradingView has the date range and interval
                   toggle a row below the chart"). */}
-              <div className="px-2 py-1.5 border-t border-hairline flex items-center gap-1">
-                <div className="flex-1 min-w-0 flex gap-0.5 overflow-x-auto no-scrollbar" role="tablist" aria-label="Range">
-                  {RANGES.map(([k]) => (
-                    <button key={k} type="button" role="tab" aria-selected={range.key === k} onClick={() => pickRange(k)}
-                      ref={range.key === k ? keepInRow : undefined}
-                      className={clsx('shrink-0 min-h-[36px] min-w-[38px] px-2 rounded-md text-xs font-semibold font-mono-tab transition',
-                        range.key === k ? 'bg-bg-elev text-fg' : 'text-muted hover:text-subtle')}>{k}</button>
-                  ))}
-                </div>
-                <span className="w-px h-5 bg-hairline shrink-0" aria-hidden />
-                <IntervalMenu value={candle} onPick={pickCandle} />
-                <button type="button" onClick={() => pickStyle(chartStyle === 'line' ? 'candles' : 'line')}
-                  aria-label={chartStyle === 'line' ? 'Show candles' : 'Show line'} title={chartStyle === 'line' ? 'Candles' : 'Line'}
-                  className="shrink-0 min-h-[36px] min-w-[36px] flex items-center justify-center rounded-md text-muted hover:text-fg">
-                  {chartStyle === 'line' ? <ChartCandlestick size={16} /> : <ChartLine size={16} />}
-                </button>
-              </div>
+              {controlsRow}
               <div className="px-5">
                 {intraday && !intraBars && (
                   <div className="pb-2 text-[11px] text-muted" aria-live="polite">
@@ -636,7 +641,7 @@ export default function LeapsEntry() {
       )}
 
       {expanded && chart && (
-        <FullPane title={`${ticker} · ${paneTitle(expanded, chart.tf)}`} onClose={() => setExpanded(null)}>
+        <FullPane title={`${ticker} · ${paneTitle(expanded, chart.tf)}`} onClose={() => setExpanded(null)} footer={controlsRow}>
           {(h) => <EntryChart bars={chart.bars} model={chart.model} suite={chart.suite} conf={periodMode || !SUITE ? null : conf} tf={chart.tf} suiteLabel={intraBars ? CANDLES.find(([k]) => k === candle)[1] : SUITE_TIMEFRAMES[suiteTf].label} panes={shownPanes} layers={shownLayers} plain={!SUITE} range={range} style={chartStyle} pins={chartPins} fib={fib} focus={expanded} fill={h} />}
         </FullPane>
       )}
@@ -688,7 +693,7 @@ function ToggleGroup({ label, items, isOn, onToggle }) {
 // (owner, 2026-10-05: "can't pan or pinch, can't close"). The portal takes
 // it out of <main>; touch-action: none hands every touch to the chart; the
 // real scroller is locked while it is open.
-function FullPane({ title, onClose, children }) {
+function FullPane({ title, onClose, children, footer = null }) {
   const body = useRef(null)
   const close = useRef(onClose)
   close.current = onClose
@@ -718,6 +723,7 @@ function FullPane({ title, onClose, children }) {
         </button>
       </div>
       <div ref={body} className="flex-1 min-h-0">{h ? children(h) : null}</div>
+      {footer}
     </div>,
     document.body,
   )
