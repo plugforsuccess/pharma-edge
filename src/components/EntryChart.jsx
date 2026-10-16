@@ -531,15 +531,20 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
         if (x == null) continue
         const dayLabel = `${MONTHS[+b.slice(5, 7) - 1]} ${+b.slice(8, 10)}`
         if (a.slice(0, 4) !== b.slice(0, 4)) years.push({ x, label: b.slice(0, 4), strong: true })
-        else if (span < 730 && a.slice(5, 7) !== b.slice(5, 7)) months.push({ x, label: MONTHS[+b.slice(5, 7) - 1] })
+        else if (a.slice(5, 7) !== b.slice(5, 7)) months.push({ x, label: MONTHS[+b.slice(5, 7) - 1], q: (+b.slice(5, 7) - 1) % 3 === 0 })
         else if (intraday && a.slice(0, 10) !== b.slice(0, 10)) days.push({ x, label: dayLabel })
-        else if (!intraday && span < 150 && new Date(msOf(bars[k].t)).getUTCDay() < new Date(msOf(bars[k - 1].t)).getUTCDay()) days.push({ x, label: dayLabel })
+        else if (!intraday && span < 400 && new Date(msOf(bars[k].t)).getUTCDay() < new Date(msOf(bars[k - 1].t)).getUTCDay()) days.push({ x, label: dayLabel })
         else if (intraday && span < 2 && a.slice(11, 13) !== b.slice(11, 13)) hours.push({ x, label: clock(+b.slice(11, 13), +b.slice(14, 16)) })
       }
       const out = []
       const fits = (x, gap = 56) => out.every((o) => Math.abs(o.x - x) >= gap)
+      // Denser labels (owner, 2026-10-16: "the x axis date range labels are
+      // too large of intervals"): every month that fits, quarter months
+      // (Jan / Apr / Jul / Oct) first so a long view reads evenly, then
+      // week starts in the gaps under ~13 months.
       for (const y of years) if (fits(y.x)) out.push(y)
-      for (const m of months) if (fits(m.x)) out.push(m)
+      for (const m of months) if (m.q && fits(m.x, 44)) out.push(m)
+      for (const m of months) if (!m.q && fits(m.x, 44)) out.push(m)
       for (const d of days) if (fits(d.x, 46)) out.push(d)
       for (const h of hours) if (fits(h.x, 52)) out.push(h)
       setTicks(out)

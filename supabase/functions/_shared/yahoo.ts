@@ -50,7 +50,11 @@ export async function yahooBars(symbol: string, range: string): Promise<Bar[]> {
 export async function yahooChart(symbol: string, range: string, interval: string): Promise<{ bars: Bar[]; prevClose: number | null }> {
   // Minute / hour bars carry a time; day, week and month bars a date.
   const intraday = /m$|h$/.test(interval)
-  const path = `/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=${interval}&includePrePost=false`
+  // range=max quietly downsamples: a long history asked for in weeks comes
+  // back in 3-month bars (owner, 2026-10-16: INTC's "weekly" candles were
+  // Mar 1 → Jun 1). An explicit period keeps the interval asked for.
+  const span = range === 'max' ? `period1=0&period2=${Math.floor(Date.now() / 1000)}` : `range=${range}`
+  const path = `/v8/finance/chart/${encodeURIComponent(symbol)}?${span}&interval=${interval}&includePrePost=false`
   let last = 'no response'
   for (const host of HOSTS) {
     try {

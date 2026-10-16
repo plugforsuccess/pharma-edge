@@ -1612,6 +1612,11 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   M, opens upward) and a candles / line icon; the drawing tools and Panels
   chips sit under that row. The card opens with the price header, then the
   chart.
+  **Weekly / monthly bars** (owner, 2026-10-16: INTC's "weekly" candles were
+  Mar 1 → Jun 1): Yahoo's `range=max` quietly returns 3-month bars for a
+  long history, so `yahooChart` sends an explicit `period1=0&period2=now`
+  for 'max'. **Date rows** label every month that fits (quarter months
+  first, ≥ 44px apart) at any zoom, and week starts under ~13 months.
 - **Signal suite sunset** (owner, 2026-10-16: "Do it, I guess we no longer
   need the signal suite card, triple record card, plan card"). The
   leader-timing study (`scripts/leader-timing.mjs`,
