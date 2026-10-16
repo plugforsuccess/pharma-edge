@@ -31,7 +31,8 @@
     "orderflow:check": "node scripts/check-orderflow.mjs && node scripts/sync-orderflow.mjs --check",
     "orderflow:sync": "node scripts/sync-orderflow.mjs",
     "orderflow:backtest": "node scripts/orderflow-backtest.mjs",
-    "callhistory:check": "node scripts/check-call-history.mjs"
+    "callhistory:check": "node scripts/check-call-history.mjs",
+    "leaders:check": "node scripts/check-leaders.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",

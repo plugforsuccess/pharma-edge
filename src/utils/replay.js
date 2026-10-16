@@ -260,7 +260,8 @@ export function oneTrade(bars, closes, sigma, i, { exitRule = 'targets', plan = 
   const q0 = yieldAt ? (yieldAt(i) ?? 0) : 0
   const slip = slipAt ? slipAt(i) : opt.slippage
   const T0 = opt.dte / 365
-  const K = strikeForDelta(S0, T0, v0, opt.delta, opt.rate, q0)
+  // opt.atm (src/utils/callHistory.js ATM_MODEL): strike at the entry price.
+  const K = opt.atm ? S0 : strikeForDelta(S0, T0, v0, opt.delta, opt.rate, q0)
   const cost = bsCall(S0, K, T0, v0, opt.rate, q0) * (1 + slip)
   const expiry = dayMs(bars[e].t) + opt.dte * DAY_MS
   const sw = useSwing ? swingTargetAt(bars, e, S0, highs, swing) : null

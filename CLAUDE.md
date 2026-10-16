@@ -1570,30 +1570,79 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   vs 62% higher, gone by 6M). A solid strip under the phone status bar
   (`Layout.jsx`, `env(safe-area-inset-top)`, z-40) keeps scrolled content
   out from behind the clock on every page.
-- **Past gains & profit simulator on Pullbacks** (owner, 2026-10-15: "see
-  profit simulators and historical gains on the different calls for 1M,
-  3M, 6M, +12M"). Every buy row has a collapsed "Past gains & profit
-  simulator" panel (`CallLab` in `ConfluenceLeaders.jsx`). **Past gains:**
-  the suggested call (~730 DTE, 0.75Δ, the replay's Black-Scholes pricing,
-  2% slippage each way) bought the open after each past signal and marked
-  1 / 3 / 6 / 12 months later, re-marked on the vol known then — average
-  and share up for this stock (BUY SETUP rule; the 2-signal version when
-  it has < 3 cases), all stocks, and **any random day** (every 5th day of
-  every ticker — the yardstick the setup must beat). One signal per dip:
-  a signal within 21 trading days of the last one counted is skipped
-  (`CLUSTER_GAP`). Computed nightly by `rank-confluence.mjs` →
-  `confluence_ranks.call_hist` (own + pool). **Simulator:** today's call
-  valued for a stock move of −20…+30% at each horizon, today's vol held,
-  with a contracts stepper and the break-even move. Math in
-  `src/utils/callHistory.js` (`npm run callhistory:check`). Estimates, not
-  quotes; no exit plan in the history (fixed holding periods).
-  **Strike switch** (owner, 2026-10-15: "rather than in the money we might
-  want to explore at the money"): **In the money** (the app's 0.75-delta
-  pick) / **At the money** (strike at the price, ~0.6 delta on a 2-year
-  call; `ATM_MODEL`, `atmTrade`), remembered on the device
-  (`cm:pullbacks-strike`); both the history (`call_hist.atm`, computed
-  nightly beside the ITM one) and the simulator follow it. The app's
-  suggestion stays the 0.75-delta call — the switch is for comparison.
+- **Charts = Leaders** (owner, 2026-10-16: "The charts tab should
+  essentially be only leaders"). With `FEATURES.chartsExtras` off (the
+  default) `/charts` is the Leaders list alone (`ConfluenceLeaders
+  leadersOnly`: title "Leaders", buy side only, 3+ signals chip beside Top
+  10 / Yours) — no tab bar, no Momentum list, no Ideas & holdings chart, no
+  sell side; Search opens `/charts/entry/:ticker` for any ticker. The tabs
+  and their code stay; flip the flag to bring them back.
+- **Leaders, Robinhood-style** (owner, 2026-10-16: "Can we make the UI
+  state of the art like Robinhood app?"). `LeadersView` / `LeaderRow` in
+  `ConfluenceLeaders.jsx` (the `leadersOnly` render): a page-level header
+  ("As of … close", big "Leaders", "N strong stocks pulling back · tap one
+  for the play"), round pill chips (Top 10 · Yours · 3+ signals), a round
+  1M–LEAPS segmented control, then one rounded list — ticker + the play
+  ("Nov 20 $90 call · $190") on the left, a 3-month sparkline, a price pill
+  green / red by the 3-month move (grey for non-leaders). Tapping a row
+  opens it in place: hero price + 3-month change, a large filled sparkline,
+  the Buy card, four tiles (Momentum, Exit below, Past year, Option price),
+  signals, the history line, Past results & what-if and a gold "Open
+  chart" button. Sparkline data = `confluence_ranks.spark` (last 63
+  closes, nightly).
+- **Leaders only** (owner, 2026-10-16: "We only want leaders"). The
+  winner-traits study (`scripts/winner-traits.mjs`,
+  `.github/workflows/winner-traits.yml`, research only, no DB writes:
+  ~9,700 past pullback entries as at-the-money 2-year calls with the exit
+  plan; traits found on 2021–23, checked on 2024 →) found no entry-day
+  trait that separates winners from losers (≈1 in 4 lose half whatever the
+  filter), but strength tilts the odds. **Leaders rule** (`LEADER` in
+  `src/utils/leaders.js`, `npm run leaders:check`; thresholds = the train
+  medians): 12-1 return > +17%, close ≥ 9% above the 200-day, the 200-day
+  up ≥ 1.4% over 20 days, 60-day vol in the cheaper 45% of its past year,
+  S&P 500 above its 200-day. Out of sample: leaders win 61%, median +54%,
+  lost half 24% (n 1,024) vs non-leaders 50% / +0% / 27%; the old BUY SETUP
+  (dip to the 200-day) did +1%. The nightly ranking ranks **only leaders**
+  with 2+ signals on a rising 200-day (`buyVerdict`: `enter` = LEADER · BUY,
+  `notleader` = NOT A LEADER with the misses in words, `watch`; NOT YET /
+  NOT NOW retired), sorted by signals, momentum up, then 12-1 return;
+  `confluence_ranks.leader` / `leader_traits` (traits + `misses`). Rows show
+  "+34% past year · 14% above a rising 200-day · options cheap for it". The
+  forward record logs leader entries as kind `leader` (earlier `buy_setup`
+  rows keep their meaning). Market regime still dominates: 2026 entries are
+  −21% median so far (open, marked).
+- **Pullbacks plays — at the money** (owner, 2026-10-15: "it is crowded …
+  1, 3, 6, 12, LEAPS on pullbacks … pullbacks at the money, either short
+  term contracts catching the swing holding 1-2 weeks, and then LEAPS that
+  are compounding"). The buy side has one chip row **1M · 3M · 6M · 12M ·
+  LEAPS** (`cm:pullbacks-play`, default 1M); every BUY SETUP row shows that
+  **at-the-money** call (strike at the price, `playContract`: the
+  third-Friday expiry nearest the target, January for LEAPS; Black-Scholes
+  on the row's 60-day vol, 2% slippage) with "Hold 1–2 weeks" (1M–12M, the
+  swing) or "Hold 6–12 months" (LEAPS), momentum, exit below, the signal
+  meter and **one** history line ("Past signals, all stocks, over 1M:
+  stock +1% · 1M call to expiry −20%"). The long track-record and own-record
+  paragraphs are gone from the row (the NOT NOW verdict still covers a rule
+  already losing on the ticker). **History is the stock against itself**
+  (owner, 2026-10-15: "it can't really be compared to the S&P … compared to
+  itself on the same signal for the same durations as the calls … spot gain
+  over the 1M, 3M, 6M, 12M, 2 year intervals"): after each past signal, the
+  stock's gain over 1M / 3M / 6M / 12M / 2Y beside the matching ATM call
+  bought the next open and **held to expiry** — no random-day or S&P
+  column. Under each buy row, collapsed: **Past results & what-if** — that
+  table for all five spans (This stock = BUY SETUP, the 2-signal version
+  under 3 cases / All stocks; tapping a row picks the play), then a what-if
+  sized by amount ($1k / $5k / $10k / $40k, `cm:pullbacks-budget`,
+  contracts = amount ÷ cost) after the play's holds (1 / 2 weeks, or 6 / 12
+  months) with stock moves (−10…+15% swing, −20…+30% LEAPS), worth, profit
+  and the break-even. History: `PLAYS` / `playSpan` in
+  `src/utils/callHistory.js` (`npm run callhistory:check`), computed nightly
+  by `rank-confluence.mjs` → `confluence_ranks.call_hist.plays[key]`
+  (`own.setup` / `own.confluence` / `pool.setup`, each `{ n, stock,
+  stockMedian, stockWin, avg, median, win, … }`), one signal per dip
+  (`CLUSTER_GAP` 21). Estimates, not quotes: real IV after a dip usually
+  sits above trailing realised vol. The 0.75-delta `trade` stays on the row
+  for the forward record and the entry chart.
 - **Momentum list + forward record** (owner, 2026-10-07: "1 and 3"; the
   swing-grid and magnitude tests found momentum's stock picks — not its
   timing — are what held up). **Momentum list:** `scripts/rank-confluence.mjs`

@@ -490,7 +490,7 @@ function Split({ label, g }) {
 // marked nightly like the replay. setup_log refuses edits and deletes; each
 // day is sealed with a root hash over its rows (setup_log_days), ready to
 // anchor publicly. The numbers start at zero and grow; nothing is backfilled.
-const KIND_LABEL = { momentum: 'Momentum', buy_setup: 'Buy setup' }
+const KIND_LABEL = { momentum: 'Momentum', buy_setup: 'Buy setup', leader: 'Leader' }
 const STATUS = { open: ['Open', 'text-subtle'], hit: ['Hit target', 'text-green-400'], capped: ['18-mo cap', 'text-amber-300'], expired: ['Expired', 'text-rose-300'] }
 function ForwardCard({ f }) {
   if (f === undefined) return <div className="h-32 rounded-2xl bg-card border border-border animate-pulse mb-4" aria-busy="true" />

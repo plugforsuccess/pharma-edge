@@ -553,3 +553,7 @@ select {
   text-overflow: ellipsis;
 }
 select::-ms-expand { display: none; }
+
+/* Horizontal chip rows that scroll without a visible bar. */
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
