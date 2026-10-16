@@ -517,11 +517,10 @@ export default function LeapsEntry() {
                   </div>
                 )}
               </div>
-              <EntryChart bars={chart.bars} model={chart.model} suite={chart.suite} conf={periodMode || !SUITE ? null : conf} tf={chart.tf} suiteLabel={intraBars ? CANDLES.find(([k]) => k === candle)[1] : SUITE_TIMEFRAMES[suiteTf].label} panes={shownPanes} layers={shownLayers} plain={!SUITE} range={range} style={chartStyle} pins={chartPins} fib={fib} picking={picking} onPick={onPick} onHover={setHover} onExpand={setExpanded} jump={jump} />
+              <EntryChart bars={chart.bars} model={chart.model} suite={chart.suite} conf={periodMode || !SUITE ? null : conf} tf={chart.tf} suiteLabel={intraBars ? CANDLES.find(([k]) => k === candle)[1] : SUITE_TIMEFRAMES[suiteTf].label} panes={shownPanes} layers={shownLayers} plain={!SUITE} range={range} style={chartStyle} pins={chartPins} fib={fib} picking={picking} onPick={onPick} onHover={setHover} onExpand={setExpanded} jump={jump} priceFooter={controlsRow} />
               {/* Range + interval, a row right under the chart (owner,
                   2026-10-16: "how TradingView has the date range and interval
                   toggle a row below the chart"). */}
-              {controlsRow}
               <div className="px-5">
                 {intraday && !intraBars && (
                   <div className="pb-2 text-[11px] text-muted" aria-live="polite">

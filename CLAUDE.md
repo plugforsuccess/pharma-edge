@@ -1611,7 +1611,11 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   kept in view), the interval menu (`IntervalMenu`: 5m · 15m · 1h · D · W ·
   M, opens upward) and a candles / line icon; the drawing tools and Panels
   chips sit under that row. The card opens with the price header, then the
-  chart. The same row (`controlsRow`) sits under the **full-screen** chart
+  chart. The row lives **inside the price pane, under its dates and above the
+  indicator panels** (`priceFooter` on `EntryChart`, `FOOTER_H`; the price
+  pane grows by its height and volume stays above it — owner, 2026-10-16:
+  below the panels "is a problem"); with no panels it follows the chart.
+  The same row (`controlsRow`) sits under the **full-screen** chart
   (`FullPane` `footer`; owner, 2026-10-16: "why can't I toggle daily /
   weekly / monthly from within the chart without exiting?").
   **Weekly / monthly bars** (owner, 2026-10-16: INTC's "weekly" candles were
