@@ -25,8 +25,11 @@ import { suiteModel } from '../src/utils/signalSuite.js'
 import { replaySignals, trailingVol, oneTrade, OPTION_MODEL } from '../src/utils/replay.js'
 import { ATM_MODEL, CLUSTER_GAP } from '../src/utils/callHistory.js'
 import { dailyBars, mapLimit, sources } from './lib/marketData.mjs'
+import { LEADER, leaderSeries, leaderMisses } from '../src/utils/leaders.js'
 
 const SPLIT = '2024-01-01'
+let spyBarsAll = []
+const todayStatus = []
 const universe = (process.env.TICKERS ? process.env.TICKERS.split(',') : CHART_TICKERS.map((t) => t.symbol))
   .map((s) => s.trim().toUpperCase()).filter((s) => /^[A-Z][A-Z0-9.-]{0,11}$/.test(s))
 
@@ -102,6 +105,9 @@ function tradesFor(ticker, bars, spyAt) {
     s200: sma(c, 200), r14: rsi(c), vol: trailingVol(c, OPTION_MODEL.volBars), spyAt,
     regime: suite.bravo.regime, score: sig.buyScore,
   }
+  const ls = leaderSeries(bars, spyBarsAll, { vol: ctx.vol })
+  const n = bars.length
+  todayStatus.push({ ticker, misses: leaderMisses(ls.at(n - 1)), score: sig.buyScore[n - 1], rising: sig.rising[n - 1] })
   const out = []
   for (const rule of ['setup', 'confluence']) {
     let last = -Infinity
@@ -110,7 +116,7 @@ function tradesFor(ticker, bars, spyAt) {
       last = i
       const f = features(bars, i, ctx)
       if (!f) return
-      const row = { ticker, rule, t: bars[i].t, f }
+      const row = { ticker, rule, t: bars[i].t, f, lt: ls.at(i) }
       for (const [k, opt] of [['atm', ATM_MODEL], ['itm', OPTION_MODEL]]) {
         const tr = oneTrade(bars, c, ctx.vol, i, { exitRule: 'targets', opt })
         if (tr) row[k] = { ret: tr.optionReturn, open: tr.open, days: tr.days, stock: tr.stockReturn, how: tr.exits.map((x) => x.reason).join('+') || 'open' }
@@ -171,6 +177,7 @@ const score = (s) => (s.n ? ((s.median ?? 0) - 0.5 * s.lostHalf) * (s.n / (s.n +
 
 // ── main ──
 const spyBars = await dailyBars('SPY')
+spyBarsAll = spyBars
 const spyC = spyBars.map((b) => b.c), spyS = sma(spyC, 200)
 const spyMap = new Map(spyBars.map((b, i) => [b.t, { c: b.c, s200: spyS[i] }]))
 const spyAt = (t) => spyMap.get(t) ?? null
@@ -231,6 +238,25 @@ for (const rule of ['setup', 'confluence']) {
     R.filters.push({ name: fl.name, train: fl.tr, test: te })
     console.log(`  ${fl.name}\n      train ${line(fl.tr)}\n      test  ${line(te)}`)
   }
+  // The Leaders rule as a whole, and its parts (src/utils/leaders.js).
+  const { mom12, vs200, slope200, volRankMax, spyUp } = LEADER
+  const VARIANTS = [
+    ['strength: mom12 + vs200 + slope200', { mom12, vs200, slope200 }],
+    ['strength + S&P up', { mom12, vs200, slope200, spyUp }],
+    ['strength + cheap options', { mom12, vs200, slope200, volRankMax }],
+    ['LEADER (all five)', LEADER],
+  ]
+  console.log(`\nLeaders rule (thresholds = train medians; volatility cut = the worst train fifth) — baseline test: ${line(R.test)}`)
+  R.leaders = []
+  for (const [name, rl] of VARIANTS) {
+    const pass = (r) => leaderMisses(r.lt, rl).length === 0
+    const tr = stats(train.filter(pass)), te = stats(test.filter(pass)), no = stats(test.filter((r) => !pass(r)))
+    R.leaders.push({ name, train: tr, test: te, testRest: no })
+    console.log(`  ${name}\n      train ${line(tr)}\n      test  ${line(te)}\n      test, not leaders ${line(no)}`)
+    const ys = [...new Set(rows.map((r) => r.t.slice(0, 4)))].sort()
+    console.log(`      by year: ${ys.map((y) => { const s2 = stats(rows.filter((r) => r.t.startsWith(y) && pass(r))); return `${y} n ${s2.n} med ${P(s2.median)} win ${W(s2.win)}` }).join(' · ')}`)
+  }
+
   // By year, for context.
   console.log('\nBy signal year')
   const years = [...new Set(rows.map((r) => r.t.slice(0, 4)))].sort()
@@ -239,5 +265,9 @@ for (const rule of ['setup', 'confluence']) {
   console.log('')
   report.rules[rule] = R
 }
+const nowLeaders = todayStatus.filter((x) => x.misses.length === 0)
+console.log(`Today: ${nowLeaders.length} leaders of ${todayStatus.length}; with 2+ signals and a rising 200-day: ${nowLeaders.filter((x) => x.score >= 2 && x.rising).map((x) => x.ticker).join(', ') || 'none'}`)
+const missCount = {}; for (const x of todayStatus) for (const m of x.misses) missCount[m] = (missCount[m] ?? 0) + 1
+console.log(`Misses today: ${JSON.stringify(missCount)}`)
 writeFileSync('winner-traits.json', JSON.stringify({ ...report, rows: all.map((r) => ({ ticker: r.ticker, rule: r.rule, t: r.t, ...r.f, atm: r.atm?.ret, atmOpen: r.atm?.open, atmDays: r.atm?.days, atmHow: r.atm?.how, itm: r.itm?.ret })) }))
 console.log('wrote winner-traits.json')
