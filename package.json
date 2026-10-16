@@ -32,6 +32,7 @@
     "orderflow:sync": "node scripts/sync-orderflow.mjs",
     "orderflow:backtest": "node scripts/orderflow-backtest.mjs",
     "callhistory:check": "node scripts/check-call-history.mjs",
+    "themes:check": "node scripts/check-themes.mjs",
     "leaders:check": "node scripts/check-leaders.mjs"
   },
   "dependencies": {

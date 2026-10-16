@@ -1653,11 +1653,46 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   1M–LEAPS segmented control, then one rounded list — ticker + the play
   ("Nov 20 $90 call · $190") on the left, a 3-month sparkline, a price pill
   green / red by the 3-month move (grey for non-leaders). Tapping a row
-  opens it in place: hero price + 3-month change, a large filled sparkline,
+  opens it in place (the row's sparkline and price pill hide; the ticker
+  and the company name sit centered on a row above — ticker 28px bold,
+  name in gold (`companyName`: the ticker list's label, `FULL_NAMES` where
+  that label is the symbol); no "Buy · at the money" eyebrow on the Buy
+  card; owner, 2026-10-16): hero price + 3-month change, a large filled sparkline,
   the Buy card, four tiles (Momentum, Exit below, Past year, Option price),
   signals, the history line, Past results & what-if and a gold "Open
   chart" button. Sparkline data = `confluence_ranks.spark` (last 63
   closes, nightly).
+- **Past results graded on the exit plan** (owner, 2026-10-16: "the exit
+  is how we make money"; "is the average the most useful metric? is 71% up
+  the right word choice?"). Each history cell leads with the **typical
+  trade** (median), then "higher / profitable N of 10 (owner chose "profitable")", the bad case ("1 in
+  4: −45% or worse", the 25th percentile) and the average, smaller (`Cell`
+  in `ConfluenceLeaders.jsx`). The call column is "Call · with your exit
+  plan", no longer held to expiry: **swing plays (1M–12M) sell it all at
+  +40%** (owner: "sell all at 40-50%" — the low end; the first close at or
+  above it), **else after 2 weeks** (10 trading days); **LEAPS** use the
+  playbook (70% at +100%, 15% at +200%, runner on a 30% trail, out with 6
+  months left). `SWING_EXIT` / `exitTrade` / `exitHistory` / `exitStats` in
+  `callHistory.js` (on `oneTrade`; open trades at their mark); nightly →
+  `call_hist.plays[key].own.exit` / `pool.exit`. The Buy card's one line
+  reads "Past leaders with your exit plan: typical trade +7% · profitable 6
+  of 10 times". The stock column keeps the span (1M … 2Y).
+- **Same bet** (owner, 2026-10-16: the top 10 sat in chips and oil; "is
+  cluster the best taxonomy you can come up with?" — replaced the CLUSTER
+  tag). Each ticker is named after the **industry fund it tracks** most
+  closely over 120 trading days (`src/utils/themes.js`, `THEMES`: SMH "Chips & AI" (LITE, BE land there too),
+  XOP Oil, CRAK Refiners, OIH, KRE, XBI, IHF Health insurers, ITB … then the
+  broad XL* funds as fallbacks (XLE named "Oil" so XOM / XLE join the producers), −0.05 so chips don't read as "Tech"; below
+  0.6 correlation → no theme; `npm run themes:check`). The nightly ranking
+  fetches the funds and writes `leader_traits.theme` ({ name, etf, corr })
+  plus `leader_traits.moves_with` (`moveGroups`, ≥ 0.7). The Leaders list:
+  a coloured theme tag beside the ticker when 2+ leaders in view share it
+  (`BET_TONES`, one colour per bet), a summary under the title — "Top 10 =
+  5 bets: Chips 4 · Oil 2 · Refiners 2 · LITE · BE" (`betsOf`) — and on an
+  opened row a "Same bet: Chips — Moves with MU, INTC, AMD — they rise and
+  fall together. Pick one, or size them as one position." card (falls back
+  to "Moves with other leaders" from `moves_with` when no theme is shared).
+  Swing plays (1M–12M) all hold 2 weeks at most (owner, same day).
 - **Leaders only** (owner, 2026-10-16: "We only want leaders"). The
   winner-traits study (`scripts/winner-traits.mjs`,
   `.github/workflows/winner-traits.yml`, research only, no DB writes:

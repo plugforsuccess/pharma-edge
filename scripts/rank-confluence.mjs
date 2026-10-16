@@ -37,8 +37,9 @@ import { blockers, buyVerdict, sellVerdict, tradeSpec, structureStop, momentum, 
 import { momentumToday, moveGroups, forwardOutcome, SWING_PLAN } from '../src/utils/momentumList.js'
 import { createHash } from 'node:crypto'
 import { replaySignals, trailingVol, OPTION_MODEL } from '../src/utils/replay.js'
-import { callHistory, callStats, PLAYS, playModel, playSpan } from '../src/utils/callHistory.js'
+import { callHistory, callStats, exitHistory, exitStats, PLAYS, playModel, playSpan } from '../src/utils/callHistory.js'
 import { leaderSeries, leaderMisses } from '../src/utils/leaders.js'
+import { THEMES, themeOf, returnsByDate } from '../src/utils/themes.js'
 
 const args = process.argv.slice(2)
 const MODE = (args[args.indexOf('--mode') + 1] && args.includes('--mode')) ? args[args.indexOf('--mode') + 1] : 'dry-run'
@@ -93,7 +94,13 @@ function callPaths(bars, spy) {
   const ls = leaderSeries(bars, spy ?? [], { vol: vols })
   const leaderDays = bars.map((_, i) => leaderMisses(ls.at(i)).length === 0)
   const out = {}
-  for (const p of PLAYS) out[p.key] = { leader: callHistory(bars, leaderDays, { vols, opt: playModel(p), horizons: playSpan(p) }) }
+  for (const p of PLAYS) {
+    out[p.key] = {
+      leader: callHistory(bars, leaderDays, { vols, opt: playModel(p), horizons: playSpan(p) }),
+      // The same leader days graded on the exit plan (owner, 2026-10-16).
+      exit: exitHistory(bars, leaderDays, p, { vols }),
+    }
+  }
   return out
 }
 
@@ -102,7 +109,7 @@ export function callPool(results) {
   const out = { tickers: results.length }
   for (const p of PLAYS) {
     const all = (k) => results.flatMap((r) => r.calls?.[p.key]?.[k] ?? [])
-    out[p.key] = { leader: callStats(all('leader'), playSpan(p)) }
+    out[p.key] = { leader: callStats(all('leader'), playSpan(p)), exit: exitStats(all('exit')) }
   }
   return out
 }
@@ -145,8 +152,8 @@ export function rankAll(results, pools, calls = null) {
         spark: side === 'buy' ? r.closes.slice(-63).map((c) => Math.round(c * 100) / 100) : null,
         call_hist: side === 'buy' && r.calls ? {
           plays: Object.fromEntries(PLAYS.map((p) => [p.key, {
-            own: { leader: callStats(r.calls[p.key].leader, playSpan(p))[0] },
-            pool: { leader: calls[p.key].leader[0] },
+            own: { leader: callStats(r.calls[p.key].leader, playSpan(p))[0], exit: exitStats(r.calls[p.key].exit) },
+            pool: { leader: calls[p.key].leader[0], exit: calls[p.key].exit },
           }])),
         } : null,
       }
@@ -176,6 +183,23 @@ export function rankAll(results, pools, calls = null) {
         || (side === 'buy' ? (b.est_6m ?? 0) - (a.est_6m ?? 0) : (a.est_3m ?? 0) - (b.est_3m ?? 0))
     })
     cands.forEach((row, k) => { row.rank = k + 1 })
+    // Cluster risk (owner, 2026-10-16): leaders whose last 120 days of
+    // returns correlate ≥ 0.7 move together — buying several is one bet.
+    // Peers listed in rank order on the row's leader_traits.moves_with.
+    if (side === 'buy' && cands.length > 1) {
+      const closesOf = new Map(results.map((r) => [r.ticker, r.closes]))
+      const groups = moveGroups(cands.map((c) => ({ ticker: c.ticker, closes: closesOf.get(c.ticker) ?? [] })))
+      const rankOf = new Map(cands.map((c) => [c.ticker, c.rank]))
+      for (const c of cands) {
+        const peers = groups.get(c.ticker)?.peers ?? []
+        if (c.leader_traits) c.leader_traits.moves_with = peers.sort((a, b) => rankOf.get(a) - rankOf.get(b))
+      }
+    }
+    // The kind of bet (owner, 2026-10-16): the industry fund it tracks.
+    if (side === 'buy') {
+      const themeOfTicker = new Map(results.map((r) => [r.ticker, r.theme]))
+      for (const c of cands) if (c.leader_traits) c.leader_traits.theme = themeOfTicker.get(c.ticker) ?? null
+    }
   }
   return rows
 }
@@ -213,8 +237,14 @@ async function main() {
   // The S&P 500 once, for "beat the market" (null → the record has no beat rate).
   let spy = null
   try { spy = await dailyBars('SPY') } catch (e) { console.log(`SPY unavailable (${e.message}) — no market comparison this run.`) }
+  // Industry funds, for naming what kind of bet each leader is (themes.js).
+  const fundReturns = new Map()
+  await mapLimit(THEMES.map(([etf]) => etf), CONCURRENCY, async (etf) => {
+    try { fundReturns.set(etf, returnsByDate(await dailyBars(etf))) } catch (e) { console.log(`theme fund ${etf} unavailable (${e.message})`) }
+  })
+  console.log(`Theme funds: ${fundReturns.size}/${THEMES.length}`)
   const results = (await mapLimit(universe, CONCURRENCY, async (ticker) => {
-    try { return analyze(ticker, await dailyBars(ticker), spy) } catch (e) { failed.push(`${ticker}: ${e.message}`); return null } finally {
+    try { const bars = await dailyBars(ticker); const a = analyze(ticker, bars, spy); return a && { ...a, theme: themeOf(ticker, bars, fundReturns) } } catch (e) { failed.push(`${ticker}: ${e.message}`); return null } finally {
       done++
       if (done % 50 === 0) console.log(`  ${done}/${universe.length} · ${failed.length} failed · ${((Date.now() - t0) / 1000).toFixed(0)}s`)
       // Yahoo blocking this runner: stop instead of retrying for hours.
@@ -236,7 +266,7 @@ async function main() {
     const top = rows.filter((r) => r.side === side && r.rank != null).sort((a, b) => a.rank - b.rank).slice(0, TOP)
     console.log(`\nTop ${TOP} ${side}:`)
     for (const r of top) console.log(side === 'buy'
-      ? `  ${String(r.rank).padStart(2)}. ${r.ticker.padEnd(6)} 12-1 ${pct(r.leader_traits?.mom12)}  vs200 ${pct(r.leader_traits?.vs200)}  200d slope ${pct(r.leader_traits?.slope200)}  vol rank ${pct(r.leader_traits?.volRank)}`
+      ? `  ${String(r.rank).padStart(2)}. ${r.ticker.padEnd(6)} 12-1 ${pct(r.leader_traits?.mom12)}  vs200 ${pct(r.leader_traits?.vs200)}  200d slope ${pct(r.leader_traits?.slope200)}  vol rank ${pct(r.leader_traits?.volRank)}${r.leader_traits?.theme ? `  [${r.leader_traits.theme.name} ${r.leader_traits.theme.corr}]` : ''}${r.leader_traits?.moves_with?.length ? `  moves with ${r.leader_traits.moves_with.join(', ')}` : ''}`
       : `  ${String(r.rank).padStart(2)}. ${r.ticker.padEnd(6)} ${r.score}/5 ${String(r.combo ?? '').padEnd(28)} 3M ${pct(r.est_3m)} 6M ${pct(r.est_6m)}  at turn ${pct(r.est_at_turn)}  (own ${r.own_n}, pool ${r.pool_n})`)
   }
   // Momentum list (owner, 2026-10-07): today's top decile on the 12-1 rule,

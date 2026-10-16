@@ -3,7 +3,9 @@ import { Link } from 'react-router-dom'
 import clsx from 'clsx'
 import { ChevronDown, ChevronRight, Minus, Plus } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { simulateCall, breakevenMoves, playContract, PLAYS } from '../utils/callHistory'
+import { CHART_TICKERS } from '../lib/chartTickers'
+import { betsOf } from '../utils/themes'
+import { simulateCall, breakevenMoves, playContract, PLAYS, SWING_EXIT } from '../utils/callHistory'
 
 // Charts → Pullbacks tab, formerly "Confluence leaders" (renamed 2026-10-07) (owner, 2026-10-03; verdicts 2026-10-04: "it's
 // not telling me how to enter"; plain words 2026-10-04: "a novice user may
@@ -314,23 +316,37 @@ function expiryLabel(t, play) {
 }
 
 // "After past signals (all stocks), over 1M: stock +1% · this call +3%"
+// One line under the Buy card: the play graded on the exit plan, all leaders.
 function PastLine({ ph, play }) {
-  const s = ph?.pool?.leader ?? ph?.pool?.setup
-  if (!s?.n) return null
+  const e = ph?.pool?.exit
+  if (!e?.n) return null
   return (
     <span className="mt-1.5 block text-xs text-muted">
-      Past leaders, all stocks, over {play.span}: stock <span className={clsx('font-mono-tab font-semibold', tone(s.stock))}>{pctS(s.stock)}</span>
-      {' · '}{play.kind === 'leaps' ? 'LEAPS' : `${play.key} call`} to expiry <span className={clsx('font-mono-tab font-semibold', tone(s.avg))}>{pctS(s.avg)}</span>
+      Past leaders with your exit plan: typical trade <span className={clsx('font-mono-tab font-semibold', tone(e.median))}>{pctS(e.median)}</span>
+      {' · '}profitable {oneIn10(e.win)}
     </span>
   )
 }
 
-function Cell({ avg, win }) {
-  if (avg == null) return <td className="px-1.5 py-2 text-center text-muted">—</td>
+// "7 of 10" — plain odds instead of "71% up" (owner, 2026-10-16).
+const oneIn10 = (w) => (w == null ? '—' : `${Math.round(w * 10)} of 10 times`)
+
+// A history cell (owner, 2026-10-16): the typical result (median) as the
+// headline, how often (higher / profitable, out of 10), the bad case (the
+// worst quarter) and the average, smaller.
+function Cell({ s, kind }) {
+  if (!s?.n) return <td className="px-1.5 py-2 text-center text-muted align-top">—</td>
+  const stock = kind === 'stock'
+  const med = stock ? s.stockMedian : s.median
+  const win = stock ? s.stockWin : s.win
+  const bad = stock ? s.stockBadq : s.badq
+  const avg = stock ? s.stock : s.avg
   return (
-    <td className="px-1.5 py-2 text-center">
-      <span className={clsx('block font-semibold font-mono-tab', tone(avg))}>{pctS(avg)}</span>
-      <span className="block text-[11px] text-muted font-mono-tab whitespace-nowrap">{Math.round(win * 100)}% up</span>
+    <td className="px-1.5 py-2 text-center align-top">
+      <span className={clsx('block text-sm font-semibold font-mono-tab', tone(med))}>{pctS(med)}</span>
+      <span className="block text-[11px] text-subtle whitespace-nowrap">{stock ? 'higher' : 'profitable'} {win == null ? '—' : `${Math.round(win * 10)} of 10`}</span>
+      {bad != null && <span className="block text-[11px] text-muted font-mono-tab whitespace-nowrap">1 in 4: {pctS(bad)} or worse</span>}
+      {avg != null && <span className="block text-[11px] text-muted font-mono-tab whitespace-nowrap">avg {pctS(avg)}</span>}
     </td>
   )
 }
@@ -349,6 +365,7 @@ function PlayLab({ r, play, setPlay, accountSize }) {
   const ownKey = plays?.['1M']?.own?.leader ? 'leader' : (plays?.['1M']?.own?.setup?.n ?? 0) >= 3 ? 'setup' : 'confluence'
   const [scopeH, setScopeH] = useState(() => ((plays?.['1M']?.own?.[ownKey]?.n ?? 0) >= 3 ? 'own' : 'pool'))
   const statOf = (p) => (scopeH === 'own' ? plays?.[p.key]?.own?.[ownKey] : plays?.[p.key]?.pool?.leader ?? plays?.[p.key]?.pool?.setup)
+  const exitOf = (p) => plays?.[p.key]?.[scopeH]?.exit
   const hk = play.holds.some((h) => h[0] === hold) ? hold : play.holds.at(-1)[0]
   const trade = useMemo(() => playContract({ S: r.close, vol: r.trade?.vol, asOf: r.as_of, play }), [r, play])
   const sim = useMemo(() => (open && trade ? simulateCall({ S: r.close, trade, asOf: r.as_of, moves: play.moves, horizons: play.holds }) : null), [open, r, trade, play])
@@ -378,23 +395,24 @@ function PlayLab({ r, play, setPlay, accountSize }) {
               <table className="w-full text-xs">
                 <thead><tr className="text-muted">
                   <th className="text-left font-normal px-1.5 pb-1">After buying</th>
-                  <th className="font-normal px-1.5 pb-1 text-center">Stock</th>
-                  <th className="font-normal px-1.5 pb-1 text-center">ATM call<span className="block text-[11px]">held to expiry</span></th>
+                  <th className="font-normal px-1.5 pb-1 text-center">Stock<span className="block text-[11px]">over the span</span></th>
+                  <th className="font-normal px-1.5 pb-1 text-center">Call<span className="block text-[11px]">with your exit plan</span></th>
                 </tr></thead>
                 <tbody className="divide-y divide-hairline">
                   {PLAYS.map((p) => {
                     const st = statOf(p)
+                    const ex = exitOf(p)
                     return (
                       <tr key={p.key} onClick={() => setPlay(p.key)} className={clsx('cursor-pointer', p.key === play.key && 'bg-violet-400/10')}>
                         <td className="px-1.5 py-2 text-subtle whitespace-nowrap">{p.span}<span className="block text-[11px] text-muted">{st?.n ?? 0} {st?.n === 1 ? 'signal' : 'signals'}</span></td>
-                        <Cell avg={st?.n ? st.stock : null} win={st?.stockWin} />
-                        <Cell avg={st?.n ? st.avg : null} win={st?.win} />
+                        <Cell s={st} kind="stock" />
+                        <Cell s={ex} kind="call" />
                       </tr>
                     )
                   })}
                 </tbody>
               </table>
-              <p className="mt-1.5 text-[11px] text-muted">Past days it was a leader (one a month), same span: the stock's gain vs the {PLAYS.map((p) => p.span).join(' / ')} at-the-money call bought the next open and held to expiry.{scopeH === 'own' && n1 < 5 ? ' Few cases on this stock.' : ''}</p>
+              <p className="mt-1.5 text-[11px] text-muted">Past days it was a leader (one a month). Big number = the typical trade (the middle one). Stock = its move over the span. Call = the at-the-money call bought the next open and sold on your exit plan: 1M–12M sell it all at +{Math.round(SWING_EXIT.target * 100)}%, else after 2 weeks; LEAPS sell 70% at +100%, 15% at +200%, trail the rest 30%.{scopeH === 'own' && n1 < 5 ? ' Few cases on this stock.' : ''}{!plays?.['1M']?.pool?.exit ? ' Exit-plan results arrive with the next nightly run.' : ''}</p>
             </div>
           ) : <p className="text-[11px] text-muted">Past results arrive with the next nightly run.</p>}
           {trade && rowsH && (
@@ -493,6 +511,15 @@ function Tile({ label, value, sub, tone = 'text-fg' }) {
 function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, setPlay, accountSize, asOf, mine }) {
   const [open, setOpen] = useState(null)
   const leaders = list?.filter((r) => r.verdict === 'enter').length ?? 0
+  // What kind of bet each leader is (owner, 2026-10-16): leaders sharing an
+  // industry theme are one bet — "Top 10 = 5 bets: Chips 4 · Oil 2 …".
+  const bets = useMemo(() => betsOf((list ?? []).filter((r) => r.verdict === 'enter')
+    .map((r) => ({ ticker: r.ticker, theme: r.leader_traits?.theme?.name ?? null }))), [list])
+  const betOf = useMemo(() => {
+    const m = new Map()
+    bets.filter((b) => !b.alone).forEach((b, k) => b.tickers.forEach((t) => m.set(t, { name: b.name, peers: b.tickers.filter((x) => x !== t), tone: BET_TONES[k % BET_TONES.length] })))
+    return m
+  }, [bets])
   return (
     <section className="mb-5">
       <div className="mb-4">
@@ -503,6 +530,18 @@ function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, 
             ? `${leaders} ${leaders === 1 ? 'stock meets' : 'stocks meet'} the Leaders rule · tap one for the play`
             : 'Your tickers · leaders first'}
         </p>
+        {bets.length > 0 && bets.length < leaders && (
+          <p className="mt-1.5 text-sm text-subtle">
+            {scope === 'all' ? 'Top 10' : 'Yours'} = <span className="font-semibold text-fg">{bets.length} {bets.length === 1 ? 'bet' : 'bets'}</span>:{' '}
+            {bets.map((b, k) => (
+              <span key={b.name}>
+                {k > 0 && <span className="text-muted"> · </span>}
+                {b.alone ? <span className="text-subtle">{b.name}</span>
+                  : <span className={clsx('font-semibold', betOf.get(b.tickers[0])?.tone.text)}>{b.name} {b.tickers.length}</span>}
+              </span>
+            ))}
+          </p>
+        )}
       </div>
 
       <div className="-mx-4 px-4 flex gap-2 overflow-x-auto no-scrollbar pb-1">
@@ -528,7 +567,7 @@ function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, 
       ) : (
         <ul className="mt-4 rounded-2xl bg-card border border-border overflow-hidden divide-y divide-hairline">
           {list.map((r) => (
-            <LeaderRow key={r.ticker} r={r} play={play} setPlay={setPlay} accountSize={accountSize}
+            <LeaderRow key={r.ticker} r={r} bet={betOf.get(r.ticker)} play={play} setPlay={setPlay} accountSize={accountSize}
               open={open === r.ticker} onToggle={() => setOpen(open === r.ticker ? null : r.ticker)} />
           ))}
         </ul>
@@ -543,7 +582,32 @@ function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, 
   )
 }
 
-function LeaderRow({ r, play, setPlay, accountSize, open, onToggle }) {
+// Company names for the open row's header (owner, 2026-10-16). The ticker
+// list keeps terse labels; these fill the ones whose label is the symbol.
+const FULL_NAMES = {
+  ADP: 'Automatic Data Processing', AIG: 'American International Group', AMD: 'Advanced Micro Devices',
+  ASML: 'ASML Holding', CSX: 'CSX Corp.', EQT: 'EQT Corp.', FIS: 'Fidelity National Information Services',
+  IBM: 'International Business Machines', IFF: 'International Flavors & Fragrances', KKR: 'KKR & Co.',
+  MSCI: 'MSCI Inc.', NVR: 'NVR Inc.', PTC: 'PTC Inc.', RTX: 'RTX Corp.', SLB: 'SLB (Schlumberger)',
+  UDR: 'UDR Inc.', UPS: 'United Parcel Service',
+}
+const NAME_OF = new Map(CHART_TICKERS.map((t) => [t.symbol, t.label]))
+const companyName = (sym) => {
+  const n = FULL_NAMES[sym] ?? NAME_OF.get(sym)
+  return n && n !== sym ? n : null
+}
+
+// One colour per bet in view (theme tokens / Tailwind ramps, never hex).
+const BET_TONES = [
+  { chip: 'bg-amber-400/15 text-amber-300', text: 'text-amber-300', card: 'border-amber-400/30 bg-amber-400/5' },
+  { chip: 'bg-sky-400/15 text-sky-300', text: 'text-sky-300', card: 'border-sky-400/30 bg-sky-400/5' },
+  { chip: 'bg-violet-400/15 text-violet-300', text: 'text-violet-300', card: 'border-violet-400/30 bg-violet-400/5' },
+  { chip: 'bg-teal-400/15 text-teal-300', text: 'text-teal-300', card: 'border-teal-400/30 bg-teal-400/5' },
+  { chip: 'bg-orange-400/15 text-orange-300', text: 'text-orange-300', card: 'border-orange-400/30 bg-orange-400/5' },
+  { chip: 'bg-pink-400/15 text-pink-300', text: 'text-pink-300', card: 'border-pink-400/30 bg-pink-400/5' },
+]
+
+function LeaderRow({ r, bet, play, setPlay, accountSize, open, onToggle }) {
   const isLeader = r.verdict === 'enter'
   const trade = useMemo(() => (isLeader && r.trade ? playContract({ S: r.close, vol: r.trade.vol, asOf: r.as_of, play }) : null), [isLeader, r, play])
   const spark = r.spark?.length ? r.spark : null
@@ -554,24 +618,36 @@ function LeaderRow({ r, play, setPlay, accountSize, open, onToggle }) {
   const room = r.stop_price != null && r.close > 0 ? 1 - r.stop_price / r.close : null
   const ph = r.call_hist?.plays?.[play.key]
   const why = (t?.misses ?? []).map((m) => MISS[m] ?? m)
+  // Leaders this one moves with (120-day correlation ≥ 0.7) — the fallback
+  // when it shares no theme with another leader in view.
+  const peers = isLeader ? (t?.moves_with ?? []) : []
   const sub = isLeader && trade ? `${expiryLabel(trade.expiry, play)} ${money(trade.strike, trade.strike < 25 ? 2 : 0)} call · ${about(per).replace('about ', '')}`
     : r.verdict === 'notleader' ? `Not yet a leader${why[0] ? ` · ${why[0]}` : ''}`
     : r.verdict === 'watch' ? 'Long-term trend falling' : 'Signals today'
   return (
     <li>
       <button type="button" onClick={onToggle} aria-expanded={open}
-        className="w-full min-h-[68px] px-4 py-3 flex items-center gap-3 text-left hover:bg-card-hover/40 transition">
-        <span className="flex-1 min-w-0">
-          <span className="flex items-center gap-1.5">
-            <span className="text-[15px] font-semibold text-fg">{r.ticker}</span>
+        className={clsx('w-full min-h-[68px] px-4 py-3 flex items-center gap-3 hover:bg-card-hover/40 transition', open ? 'justify-center text-center' : 'text-left')}>
+        {/* Open (owner, 2026-10-16): no sparkline or price pill — the ticker
+            and the call sit centered above the hero price and 3M chart. */}
+        <span className={clsx('min-w-0', open ? 'flex-none' : 'flex-1')}>
+          <span className={clsx('flex items-center gap-1.5', open && 'justify-center')}>
+            <span className={clsx('font-semibold text-fg', open ? 'text-[28px] leading-9 font-bold tracking-tight' : 'text-[15px]')}>{r.ticker}</span>
+            {!open && bet && <span className={clsx('px-1.5 py-px rounded-full text-[11px] font-semibold', bet.tone.chip)}>{bet.name}</span>}
           </span>
-          <span className={clsx('block text-xs truncate', isLeader ? 'text-subtle' : 'text-muted')}>{sub}</span>
+          {open
+            ? companyName(r.ticker) && <span className="mt-0.5 block truncate text-sm font-semibold text-amber-300">{companyName(r.ticker)}</span>
+            : <span className={clsx('block text-xs truncate', isLeader ? 'text-subtle' : 'text-muted')}>{sub}</span>}
         </span>
-        <Sparkline values={spark} className={clsx('w-[72px] shrink-0', up ? 'text-green-400' : 'text-red-400', !isLeader && 'opacity-50')} />
-        <span className={clsx('shrink-0 min-w-[78px] px-2.5 py-1.5 rounded-lg text-[13px] font-semibold font-mono-tab text-center',
-          !isLeader ? 'bg-bg-elev text-subtle' : up ? 'bg-green-400 text-bg' : 'bg-red-400 text-bg')}>
-          {money(r.close)}
-        </span>
+        {!open && (
+          <>
+            <Sparkline values={spark} className={clsx('w-[72px] shrink-0', up ? 'text-green-400' : 'text-red-400', !isLeader && 'opacity-50')} />
+            <span className={clsx('shrink-0 min-w-[78px] px-2.5 py-1.5 rounded-lg text-[13px] font-semibold font-mono-tab text-center',
+              !isLeader ? 'bg-bg-elev text-subtle' : up ? 'bg-green-400 text-bg' : 'bg-red-400 text-bg')}>
+              {money(r.close)}
+            </span>
+          </>
+        )}
       </button>
 
       {open && (
@@ -591,7 +667,6 @@ function LeaderRow({ r, play, setPlay, accountSize, open, onToggle }) {
             <div className="mt-4 rounded-2xl bg-bg-elev p-4">
               <div className="flex items-start gap-3">
                 <div className="flex-1 min-w-0">
-                  <div className="text-[11px] text-muted">Buy · at the money</div>
                   <div className="text-lg font-semibold leading-7 whitespace-nowrap">{expiryLabel(trade.expiry, play)} {money(trade.strike, trade.strike < 25 ? 2 : 0)} call</div>
                   <div className="text-xs text-subtle">{play.kind === 'swing' ? 'Hold 1–2 weeks' : 'Hold 6–12 months'}</div>
                 </div>
@@ -608,6 +683,18 @@ function LeaderRow({ r, play, setPlay, accountSize, open, onToggle }) {
               <div className="mt-0.5 text-sm text-subtle">{why.join(' · ')}</div>
             </div>
           )}
+
+          {(bet || peers.length > 0) && (() => {
+            const with_ = bet ? bet.peers : peers
+            return (
+              <div className={clsx('mt-2 rounded-2xl border px-4 py-3', bet ? bet.tone.card : 'border-amber-400/30 bg-amber-400/5')}>
+                <div className={clsx('text-sm font-semibold', bet ? bet.tone.text : 'text-amber-300')}>{bet ? `Same bet: ${bet.name}` : 'Moves with other leaders'}</div>
+                <div className="mt-0.5 text-sm text-subtle">
+                  Moves with {with_.slice(0, 4).join(', ')}{with_.length > 4 ? ` and ${with_.length - 4} more` : ''} — they rise and fall together. Pick one, or size them as one position.
+                </div>
+              </div>
+            )
+          })()}
 
           {isLeader && (
             <div className="mt-2 grid grid-cols-2 gap-2">

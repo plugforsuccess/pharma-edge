@@ -1,5 +1,5 @@
 // npm run callhistory:check — src/utils/callHistory.js
-import { callPath, callHistory, anyDayHistory, callStats, simulateCall, breakevenMoves, CALL_HORIZONS, ATM_MODEL, atmTrade, PLAYS, playModel, playExpiry, playContract, SWING_HOLDS, playSpan } from '../src/utils/callHistory.js'
+import { callPath, callHistory, anyDayHistory, callStats, simulateCall, breakevenMoves, CALL_HORIZONS, ATM_MODEL, atmTrade, PLAYS, playModel, playExpiry, playContract, SWING_HOLDS, playSpan, exitTrade, exitHistory, exitStats, SWING_EXIT } from '../src/utils/callHistory.js'
 import { trailingVol, bsCall } from '../src/utils/replay.js'
 let pass = 0, fail = 0
 const ok = (name, cond) => { if (cond) pass++; else { fail++; console.log('FAIL', name) } }
@@ -59,5 +59,24 @@ ok('span stats carry the stock gain and its win rate', sp.n > 0 && sp.stock != n
 const toExp = callPath(bars, vols, 100, playModel(m1), playSpan(m1))
 const S0 = bars[100].o, Sx = bars[121].c
 ok('1M call held to expiry ≈ intrinsic', Math.abs((toExp.call[0] + 1) * toExp.cost - Math.max(0, Sx - S0) * 0.98) < 0.5)
+// Exit plan grading (owner, 2026-10-16): swing = all out at +40% or after 2 weeks.
+{
+  const closes = bars.map((b) => b.c)
+  const swing = PLAYS[0], leaps = PLAYS[PLAYS.length - 1]
+  const tr = exitTrade(bars, closes, vols, 100, swing)
+  ok('swing trade closes within the 2-week window', tr && !tr.open && tr.endI - tr.i <= SWING_EXIT.maxHold)
+  ok('swing exit is all-or-nothing (one sale)', tr.exits.length === 1 && Math.abs(tr.exits[0].frac - 1) < 1e-9)
+  ok('swing sale is target or cap', ['target', 'cap'].includes(tr.exits[0].reason))
+  const jump = bars.map((b, i) => (i > 300 && i <= 320 ? { ...b, o: b.o * (1 + (i - 300) * 0.02), h: b.h * (1 + (i - 300) * 0.02), l: b.l * (1 + (i - 300) * 0.02), c: b.c * (1 + (i - 300) * 0.02) } : i > 320 ? { ...b, o: b.o * 1.4, h: b.h * 1.4, l: b.l * 1.4, c: b.c * 1.4 } : b))
+  const tj = exitTrade(jump, jump.map((b) => b.c), trailingVol(jump.map((b) => b.c), 60), 300, swing)
+  ok('a sharp rally hits the +40% target', tj.exits[0].reason === 'target' && tj.optionReturn > 0.3)
+  const tl = exitTrade(bars, closes, vols, 100, leaps)
+  ok('LEAPS uses the playbook (not a 2-week cap)', tl && !tl.exits.some((x) => x.reason === 'cap'))
+  const eh = exitHistory(bars, entries, swing, { vols })
+  ok('one graded trade per signal', eh.length === 3)
+  const es = exitStats([{ ret: -0.5, days: 10 }, { ret: -0.1, days: 10 }, { ret: 0.2, days: 3, hit: false }, { ret: 0.45, days: 2, hit: true }])
+  ok('exit stats: median, win, bad quarter, average', es.n === 4 && es.median === -0.1 && es.win === 0.5 && es.badq === -0.5 && es.avg === 0.013 && es.hit === 0.25)
+  ok('exit stats empty', exitStats([]).n === 0)
+}
 console.log(`${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

@@ -19,7 +19,8 @@
 // after a 1- and 2-week hold, and the ~2-year LEAPS marked after 6 and 12
 // months. Every function below takes `horizons` (default CALL_HORIZONS).
 
-import { OPTION_MODEL, bsCall, strikeForDelta, trailingVol, normCdf } from './replay.js'
+import { OPTION_MODEL, bsCall, strikeForDelta, trailingVol, normCdf, oneTrade } from './replay.js'
+import { EXIT_PLAYBOOK } from './afterTax.js'
 
 // At the money = strike at the stock price (a ~2-year ATM call is ~0.6 delta).
 export const ATM_MODEL = Object.freeze({ ...OPTION_MODEL, atm: true })
@@ -45,6 +46,57 @@ export const playSpan = (play) => Object.freeze([[play.span, play.bars, play.dte
 export const playModel = (play) => ({ ...ATM_MODEL, dte: play.dte })
 const DAY = 86_400_000
 const days = (a, b) => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / DAY)
+
+// Graded on the owner's exit plan (2026-10-16: "the exit is how we make
+// money"), not held to expiry. Swing calls (1M–12M): sell everything once the
+// call closes +40% or more (owner: "sell all at 40-50%" — the low end, so a
+// target counts as reached the first close it's met), else sell after 2 weeks
+// (10 trading days, the "hold 1–2 weeks" window). LEAPS: the playbook — 70%
+// at +100%, 15% at +200%, the runner on a 30% trail, out with 6 months left.
+export const SWING_EXIT = Object.freeze({ target: 0.40, maxHold: 10 })
+export function exitTrade(bars, closes, vols, i, play) {
+  const opt = playModel(play)
+  if (play.kind === 'leaps') return oneTrade(bars, closes, vols, i, { exitRule: 'targets', opt })
+  return oneTrade(bars, closes, vols, i, {
+    exitRule: 'swing', opt, plan: { ...EXIT_PLAYBOOK, rollDays: 0 },
+    swing: { target: 'opt', pct: SWING_EXIT.target, maxHold: SWING_EXIT.maxHold, stopPct: null },
+  })
+}
+
+// One graded trade per cluster of signals (same gap as callHistory).
+export function exitHistory(bars, entries, play, { vols = null, gap = CLUSTER_GAP } = {}) {
+  const closes = bars.map((b) => b.c)
+  const v = vols ?? trailingVol(closes, OPTION_MODEL.volBars)
+  const out = []
+  let last = -Infinity
+  for (let i = 0; i < entries.length - 1; i++) {
+    if (!entries[i] || i - last < gap) continue
+    last = i
+    const tr = exitTrade(bars, closes, v, i, play)
+    if (tr) out.push({ t: tr.signalT, ret: Math.round(tr.optionReturn * 1000) / 1000, open: tr.open, hit: tr.exits.some((x) => x.reason === 'target' || x.reason === 't1'), days: tr.days })
+  }
+  return out
+}
+
+// The headline numbers for graded trades: the typical (median) result, how
+// often it made money, the bad case (25th percentile — "1 in 4 did this or
+// worse") and the average (what every trade together earned). Open trades
+// count at their mark.
+export function exitStats(trades) {
+  const rs = trades.map((t) => t.ret).filter((x) => x != null).sort((a, b) => a - b)
+  if (!rs.length) return { n: 0 }
+  const ds = trades.map((t) => t.days).filter((x) => x != null).sort((a, b) => a - b)
+  return {
+    n: rs.length,
+    median: r3(quant(rs, 0.5)),
+    win: r3(rs.filter((x) => x > 0).length / rs.length),
+    badq: r3(quant(rs, 0.25)),
+    avg: r3(rs.reduce((a, x) => a + x, 0) / rs.length),
+    hit: r3(trades.filter((t) => t.hit).length / trades.length),
+    open: trades.filter((t) => t.open).length,
+    days: ds.length ? quant(ds, 0.5) : null,
+  }
+}
 
 // One call bought at bar e's open (signal at e − 1's close), marked at each
 // horizon. Returns null when there's no vol yet.
@@ -116,6 +168,7 @@ export function callStats(paths, horizons = CALL_HORIZONS) {
       stock: r3(ss.reduce((a, x) => a + x, 0) / ss.length),
       stockMedian: r3(quant(ss, 0.5)),
       stockWin: r3(ss.filter((x) => x > 0).length / ss.length),
+      stockBadq: r3(quant(ss, 0.25)),
     }
   })
 }
