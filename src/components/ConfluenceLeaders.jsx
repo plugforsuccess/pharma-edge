@@ -4,6 +4,7 @@ import clsx from 'clsx'
 import { ChevronDown, ChevronRight, Minus, Plus } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { CHART_TICKERS } from '../lib/chartTickers'
+import { betsOf } from '../utils/themes'
 import { simulateCall, breakevenMoves, playContract, PLAYS, SWING_EXIT } from '../utils/callHistory'
 
 // Charts → Pullbacks tab, formerly "Confluence leaders" (renamed 2026-10-07) (owner, 2026-10-03; verdicts 2026-10-04: "it's
@@ -510,6 +511,15 @@ function Tile({ label, value, sub, tone = 'text-fg' }) {
 function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, setPlay, accountSize, asOf, mine }) {
   const [open, setOpen] = useState(null)
   const leaders = list?.filter((r) => r.verdict === 'enter').length ?? 0
+  // What kind of bet each leader is (owner, 2026-10-16): leaders sharing an
+  // industry theme are one bet — "Top 10 = 5 bets: Chips 4 · Oil 2 …".
+  const bets = useMemo(() => betsOf((list ?? []).filter((r) => r.verdict === 'enter')
+    .map((r) => ({ ticker: r.ticker, theme: r.leader_traits?.theme?.name ?? null }))), [list])
+  const betOf = useMemo(() => {
+    const m = new Map()
+    bets.filter((b) => !b.alone).forEach((b, k) => b.tickers.forEach((t) => m.set(t, { name: b.name, peers: b.tickers.filter((x) => x !== t), tone: BET_TONES[k % BET_TONES.length] })))
+    return m
+  }, [bets])
   return (
     <section className="mb-5">
       <div className="mb-4">
@@ -520,6 +530,18 @@ function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, 
             ? `${leaders} ${leaders === 1 ? 'stock meets' : 'stocks meet'} the Leaders rule · tap one for the play`
             : 'Your tickers · leaders first'}
         </p>
+        {bets.length > 0 && bets.length < leaders && (
+          <p className="mt-1.5 text-sm text-subtle">
+            {scope === 'all' ? 'Top 10' : 'Yours'} = <span className="font-semibold text-fg">{bets.length} {bets.length === 1 ? 'bet' : 'bets'}</span>:{' '}
+            {bets.map((b, k) => (
+              <span key={b.name}>
+                {k > 0 && <span className="text-muted"> · </span>}
+                {b.alone ? <span className="text-subtle">{b.name}</span>
+                  : <span className={clsx('font-semibold', betOf.get(b.tickers[0])?.tone.text)}>{b.name} {b.tickers.length}</span>}
+              </span>
+            ))}
+          </p>
+        )}
       </div>
 
       <div className="-mx-4 px-4 flex gap-2 overflow-x-auto no-scrollbar pb-1">
@@ -545,7 +567,7 @@ function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, 
       ) : (
         <ul className="mt-4 rounded-2xl bg-card border border-border overflow-hidden divide-y divide-hairline">
           {list.map((r) => (
-            <LeaderRow key={r.ticker} r={r} play={play} setPlay={setPlay} accountSize={accountSize}
+            <LeaderRow key={r.ticker} r={r} bet={betOf.get(r.ticker)} play={play} setPlay={setPlay} accountSize={accountSize}
               open={open === r.ticker} onToggle={() => setOpen(open === r.ticker ? null : r.ticker)} />
           ))}
         </ul>
@@ -575,7 +597,17 @@ const companyName = (sym) => {
   return n && n !== sym ? n : null
 }
 
-function LeaderRow({ r, play, setPlay, accountSize, open, onToggle }) {
+// One colour per bet in view (theme tokens / Tailwind ramps, never hex).
+const BET_TONES = [
+  { chip: 'bg-amber-400/15 text-amber-300', text: 'text-amber-300', card: 'border-amber-400/30 bg-amber-400/5' },
+  { chip: 'bg-sky-400/15 text-sky-300', text: 'text-sky-300', card: 'border-sky-400/30 bg-sky-400/5' },
+  { chip: 'bg-violet-400/15 text-violet-300', text: 'text-violet-300', card: 'border-violet-400/30 bg-violet-400/5' },
+  { chip: 'bg-teal-400/15 text-teal-300', text: 'text-teal-300', card: 'border-teal-400/30 bg-teal-400/5' },
+  { chip: 'bg-orange-400/15 text-orange-300', text: 'text-orange-300', card: 'border-orange-400/30 bg-orange-400/5' },
+  { chip: 'bg-pink-400/15 text-pink-300', text: 'text-pink-300', card: 'border-pink-400/30 bg-pink-400/5' },
+]
+
+function LeaderRow({ r, bet, play, setPlay, accountSize, open, onToggle }) {
   const isLeader = r.verdict === 'enter'
   const trade = useMemo(() => (isLeader && r.trade ? playContract({ S: r.close, vol: r.trade.vol, asOf: r.as_of, play }) : null), [isLeader, r, play])
   const spark = r.spark?.length ? r.spark : null
@@ -586,7 +618,8 @@ function LeaderRow({ r, play, setPlay, accountSize, open, onToggle }) {
   const room = r.stop_price != null && r.close > 0 ? 1 - r.stop_price / r.close : null
   const ph = r.call_hist?.plays?.[play.key]
   const why = (t?.misses ?? []).map((m) => MISS[m] ?? m)
-  // Cluster risk (owner, 2026-10-16): other leaders that move with this one.
+  // Leaders this one moves with (120-day correlation ≥ 0.7) — the fallback
+  // when it shares no theme with another leader in view.
   const peers = isLeader ? (t?.moves_with ?? []) : []
   const sub = isLeader && trade ? `${expiryLabel(trade.expiry, play)} ${money(trade.strike, trade.strike < 25 ? 2 : 0)} call · ${about(per).replace('about ', '')}`
     : r.verdict === 'notleader' ? `Not yet a leader${why[0] ? ` · ${why[0]}` : ''}`
@@ -600,7 +633,7 @@ function LeaderRow({ r, play, setPlay, accountSize, open, onToggle }) {
         <span className={clsx('min-w-0', open ? 'flex-none' : 'flex-1')}>
           <span className={clsx('flex items-center gap-1.5', open && 'justify-center')}>
             <span className={clsx('font-semibold text-fg', open ? 'text-[28px] leading-9 font-bold tracking-tight' : 'text-[15px]')}>{r.ticker}</span>
-            {!open && peers.length > 0 && <span className="px-1.5 py-px rounded-full bg-amber-400/15 text-amber-300 text-[10px] font-semibold uppercase tracking-wide">Cluster</span>}
+            {!open && bet && <span className={clsx('px-1.5 py-px rounded-full text-[11px] font-semibold', bet.tone.chip)}>{bet.name}</span>}
           </span>
           {open
             ? companyName(r.ticker) && <span className="mt-0.5 block truncate text-sm font-semibold text-amber-300">{companyName(r.ticker)}</span>
@@ -651,14 +684,17 @@ function LeaderRow({ r, play, setPlay, accountSize, open, onToggle }) {
             </div>
           )}
 
-          {peers.length > 0 && (
-            <div className="mt-2 rounded-2xl border border-amber-400/30 bg-amber-400/5 px-4 py-3">
-              <div className="text-sm font-semibold text-amber-300">Cluster risk</div>
-              <div className="mt-0.5 text-sm text-subtle">
-                Moves with {peers.slice(0, 4).join(', ')}{peers.length > 4 ? ` and ${peers.length - 4} more` : ''}. Buying more than one of these is really one bet.
+          {(bet || peers.length > 0) && (() => {
+            const with_ = bet ? bet.peers : peers
+            return (
+              <div className={clsx('mt-2 rounded-2xl border px-4 py-3', bet ? bet.tone.card : 'border-amber-400/30 bg-amber-400/5')}>
+                <div className={clsx('text-sm font-semibold', bet ? bet.tone.text : 'text-amber-300')}>{bet ? `Same bet: ${bet.name}` : 'Moves with other leaders'}</div>
+                <div className="mt-0.5 text-sm text-subtle">
+                  Moves with {with_.slice(0, 4).join(', ')}{with_.length > 4 ? ` and ${with_.length - 4} more` : ''} — they rise and fall together. Pick one, or size them as one position.
+                </div>
               </div>
-            </div>
-          )}
+            )
+          })()}
 
           {isLeader && (
             <div className="mt-2 grid grid-cols-2 gap-2">

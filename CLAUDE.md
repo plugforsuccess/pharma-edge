@@ -1677,14 +1677,22 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   `call_hist.plays[key].own.exit` / `pool.exit`. The Buy card's one line
   reads "Past leaders with your exit plan: typical trade +7% · profitable 6
   of 10 times". The stock column keeps the span (1M … 2Y).
-- **Cluster risk** (owner, 2026-10-16: the top 10 sat in chips and oil).
-  The nightly ranking runs `moveGroups` (momentumList.js: 120-day return
-  correlation ≥ 0.7) over every ranked leader → `leader_traits.moves_with`
-  (peers in rank order; no migration). A leader with peers shows a small
-  amber **CLUSTER** chip beside its ticker in the list and, opened, an
-  amber "Cluster risk — Moves with MU, SNDK, WDC and 2 more. Buying more
-  than one of these is really one bet." card under the Buy card. Swing
-  plays (1M–12M) all hold 2 weeks at most (owner, same day — confirmed).
+- **Same bet** (owner, 2026-10-16: the top 10 sat in chips and oil; "is
+  cluster the best taxonomy you can come up with?" — replaced the CLUSTER
+  tag). Each ticker is named after the **industry fund it tracks** most
+  closely over 120 trading days (`src/utils/themes.js`, `THEMES`: SMH Chips,
+  XOP Oil, CRAK Refiners, OIH, KRE, XBI, IHF Health insurers, ITB … then the
+  broad XL* funds as fallbacks, −0.05 so chips don't read as "Tech"; below
+  0.6 correlation → no theme; `npm run themes:check`). The nightly ranking
+  fetches the funds and writes `leader_traits.theme` ({ name, etf, corr })
+  plus `leader_traits.moves_with` (`moveGroups`, ≥ 0.7). The Leaders list:
+  a coloured theme tag beside the ticker when 2+ leaders in view share it
+  (`BET_TONES`, one colour per bet), a summary under the title — "Top 10 =
+  5 bets: Chips 4 · Oil 2 · Refiners 2 · LITE · BE" (`betsOf`) — and on an
+  opened row a "Same bet: Chips — Moves with MU, INTC, AMD — they rise and
+  fall together. Pick one, or size them as one position." card (falls back
+  to "Moves with other leaders" from `moves_with` when no theme is shared).
+  Swing plays (1M–12M) all hold 2 weeks at most (owner, same day).
 - **Leaders only** (owner, 2026-10-16: "We only want leaders"). The
   winner-traits study (`scripts/winner-traits.mjs`,
   `.github/workflows/winner-traits.yml`, research only, no DB writes:
