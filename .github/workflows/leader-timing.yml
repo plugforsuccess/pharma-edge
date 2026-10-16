@@ -1,0 +1,36 @@
+# One-off research (owner, 2026-10-16: "Should echo tango bravo be sunset"):
+# does a timing signal add anything to the Leaders rule? See
+# scripts/leader-timing.mjs. Prints the report, uploads leader-timing.json,
+# writes nothing to the DB.
+
+name: Leader timing
+
+on:
+  workflow_dispatch:
+  push:
+    branches-ignore: [main]
+    paths:
+      - scripts/leader-timing.mjs
+      - .github/workflows/leader-timing.yml
+
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Study
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/leader-timing.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: leader-timing
+          path: leader-timing.json
+          retention-days: 30

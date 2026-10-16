@@ -2,11 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import clsx from 'clsx'
-import { ArrowDown, ArrowLeft, ArrowUp, Check, ChevronRight, Info, Maximize2, Plus, RotateCcw, Search, X } from 'lucide-react'
+import { ArrowDown, ArrowLeft, ArrowUp, Check, ChevronLeft, ChevronRight, Info, Maximize2, Plus, RotateCcw, Search, Sparkles, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { CHART_TICKERS } from '../lib/chartTickers'
 import { entryModel, entryGaps, DEFAULT_PARAMS, HORIZONS } from '../utils/indicators'
-import EntryChart, { LAYERS, SUB_PANES, DAILY_ONLY_PANES, paneTitle } from '../components/EntryChart'
+import EntryChart, { LAYERS, SUB_PANES, DAILY_ONLY_PANES, paneTitle, RANGES, rangeStart, INTRADAY_TF } from '../components/EntryChart'
 import { suiteModel, forwardReturns, horizonStats, normalizePeriods, suiteOnDays, periodKey, SUITE_TIMEFRAMES } from '../utils/signalSuite'
 import TickerDrawer from '../components/TickerDrawer'
 import NumberInput from '../components/NumberInput'
@@ -14,6 +14,13 @@ import { FEATURES } from '../lib/features'
 import ReplayCard from '../components/ReplayCard'
 import { confluenceModel, COMPONENTS, MIN_MATCHES } from '../utils/confluence'
 import { trendQuality, tripleStatus, reclaimPlan } from '../utils/plan'
+import LeaderPanel from '../components/LeaderPanel'
+import { placePins, measure as measurePins, fibLevels, autoSwing, stepPin } from '../utils/chartTools'
+import { leaderSeries } from '../utils/leaders'
+
+const SUITE = FEATURES.signalSuite
+// Panes that only belong to the signal suite / buy-zone rule.
+const SUITE_PANES = new Set(['echo', 'tango', 'conf'])
 
 // /charts/entry/:ticker — the LEAPS entry chart. Price with 200 / 50 SMA and
 // the weekly 50 EMA, five indicator panes, the combined buy-zone signal
@@ -33,6 +40,14 @@ const DEFAULT_LAYERS = ['triple', 'zone', 'bravoSignals', 'exits', 'swings']
 // from a buy-zone signal (either side) confirms it (Hardening is hidden:
 // FEATURES.hardening).
 const SUITE_TF_KEY = 'cm:suite-tf:v2'
+const RANGE_KEY = 'cm:entry-range'
+const CANDLE_KEY = 'cm:entry-candle'
+const STYLE_KEY = 'cm:entry-style'
+// Candle sizes (owner, 2026-10-16: Robinhood's bar lengths). Intraday bars
+// come from price-history (Yahoo: 5 / 15-minute up to 60 days, hourly up to
+// two years); day / week / month from leaps-entry. Each size opens on the
+// range that suits it.
+const CANDLES = [['5m', '5 min', '5d', '1D'], ['15m', '15 min', '1mo', '1W'], ['60m', '1 hour', '6mo', '1M'], ['1d', 'Day', null, '1Y'], ['1wk', 'Week', null, '5Y'], ['1mo', 'Month', null, 'Max']]
 const CONFIRM_DAYS = { '1d': 10, '1wk': 10, '1mo': 21 }
 // [key, label, min, max, decimals, suffix]
 const FIELDS = [
@@ -65,7 +80,18 @@ const shortDay = (t) => {
   const d = new Date(`${t}T12:00:00Z`)
   return `${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })} ’${String(d.getUTCFullYear()).slice(2)}`
 }
-const day = (t) => new Date(`${t}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
+// US regular session, Mon–Fri 9:30–16:00 New York time (holidays aside).
+function marketOpenNow() {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', minute: 'numeric', hour12: false })
+    .formatToParts(new Date()).map((x) => [x.type, x.value]))
+  if (p.weekday === 'Sat' || p.weekday === 'Sun') return false
+  const mins = (+p.hour % 24) * 60 + +p.minute
+  return mins >= 9 * 60 + 30 && mins <= 16 * 60 + 5
+}
+// Daily bars carry 'YYYY-MM-DD'; intraday bars unix seconds of ET wall clock read as UTC.
+const day = (t) => (typeof t === 'number'
+  ? new Date(t * 1000).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'UTC' })
+  : new Date(`${t}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }))
 
 export default function LeapsEntry() {
   const { ticker: raw } = useParams()
@@ -111,10 +137,53 @@ export default function LeapsEntry() {
   }, [ticker])
 
   const params = useMemo(() => parseParams(draft), [draft])
-  const bars = data?.bars ?? null
+  // Live price (owner, 2026-10-16): during US market hours today's 5-minute
+  // bars are refetched every minute (price-history, 2-minute server cache)
+  // and folded into today's daily candle. Yahoo prices — near real-time for
+  // most US listings, not a broker feed; true streaming waits on the
+  // dxlink-worker deploy.
+  const [live, setLive] = useState(null)
+  useEffect(() => {
+    let cancelled = false
+    let timer = 0
+    const tick = () => {
+      if (!marketOpenNow()) { timer = window.setTimeout(tick, 5 * 60 * 1000); return }
+      supabase.functions.invoke('price-history', { body: { ticker, range: '1d' } }).then(({ data: d }) => {
+        if (cancelled) return
+        const ib = d?.success ? d.bars : null
+        if (ib?.length) {
+          const t = new Date(ib[0].t * 1000).toISOString().slice(0, 10)
+          setLive({ t, o: ib[0].o, h: Math.max(...ib.map((b) => b.h)), l: Math.min(...ib.map((b) => b.l)), c: ib[ib.length - 1].c, v: ib.reduce((a, b) => a + (b.v || 0), 0), at: ib[ib.length - 1].t })
+        }
+        timer = window.setTimeout(tick, 60 * 1000)
+      })
+    }
+    setLive(null)
+    tick()
+    return () => { cancelled = true; window.clearTimeout(timer) }
+  }, [ticker])
+  const bars = useMemo(() => {
+    const b = data?.bars ?? null
+    if (!b?.length || !live) return b
+    const last = b[b.length - 1]
+    if (live.t < last.t) return b
+    const today = { t: live.t, o: live.t === last.t ? last.o : live.o, h: live.t === last.t ? Math.max(last.h, live.h) : live.h, l: live.t === last.t ? Math.min(last.l, live.l) : live.l, c: live.c, v: Math.max(live.v, live.t === last.t ? last.v || 0 : 0) }
+    return live.t === last.t ? [...b.slice(0, -1), today] : [...b, today]
+  }, [data, live])
   const model = useMemo(() => (bars?.length
     ? entryModel(bars, { ivPoints: data.iv_points ?? [], ivToday: data.iv_today ?? null, params })
     : null), [bars, data, params])
+
+  // The Leaders check needs the S&P 500's 200-day: SPY daily bars (cached
+  // by the edge function), fetched once.
+  const [spyBars, setSpyBars] = useState(null)
+  useEffect(() => {
+    if (SUITE) return undefined
+    let cancelled = false
+    supabase.functions.invoke('leaps-entry', { body: { ticker: 'SPY' } }).then(({ data: d }) => { if (!cancelled) setSpyBars(d?.bars ?? []) })
+    return () => { cancelled = true }
+  }, [])
+  const leaderNow = useMemo(() => (bars?.length && !SUITE ? leaderSeries(bars, spyBars ?? []).at(bars.length - 1) : null), [bars, spyBars])
 
   const setField = (k, v) => {
     const next = { ...draft, [k]: v }
@@ -181,6 +250,38 @@ export default function LeapsEntry() {
     return () => { cancelled = true }
   }, [ticker, suiteTf, weeklyData])
   const pickSuiteTf = (tf) => { setSuiteTf(tf); saveJson(SUITE_TF_KEY, tf) }
+  // Candle size, remembered; intraday sizes fetch their own bars.
+  const [candle, setCandle] = useState(() => { const v = loadJson(CANDLE_KEY); return CANDLES.some(([k]) => k === v) ? v : (SUITE_TIMEFRAMES[suiteTf] ? suiteTf : '1d') })
+  const intraday = INTRADAY_TF.has(candle)
+  const [intraData, setIntraData] = useState(null)
+  useEffect(() => {
+    if (!intraday) { setIntraData(null); return undefined }
+    let cancelled = false
+    setIntraData(null)
+    const spec = CANDLES.find(([k]) => k === candle)
+    let timer = 0
+    const load = () => supabase.functions.invoke('price-history', { body: { ticker, range: spec[2], interval: candle } }).then(({ data: d, error }) => {
+      if (cancelled) return
+      const ok = !error && d?.success && d?.bars?.length
+      // A failed refresh keeps the candles already shown.
+      setIntraData((prev) => (ok ? { tf: candle, bars: d.bars } : prev?.bars ? prev : { tf: candle, error: true }))
+      // Live: refresh every minute while the market is open.
+      if (marketOpenNow()) timer = window.setTimeout(load, 60 * 1000)
+    })
+    load()
+    return () => { cancelled = true; window.clearTimeout(timer) }
+  }, [ticker, candle, intraday])
+  // Candles or a line, remembered.
+  const [chartStyle, setChartStyle] = useState(() => (loadJson(STYLE_KEY) === 'line' ? 'line' : 'candles'))
+  const pickStyle = (v) => { setChartStyle(v); saveJson(STYLE_KEY, v) }
+  // Range buttons (1D … Max), remembered on the device; n re-applies a tap.
+  const [range, setRange] = useState(() => { const v = loadJson(RANGE_KEY); return { key: RANGES.some(([k]) => k === v) ? v : '1Y', n: 0 } })
+  const pickRange = (key) => { setRange({ key, n: Date.now() }); saveJson(RANGE_KEY, key) }
+  const pickCandle = (k) => {
+    setCandle(k); saveJson(CANDLE_KEY, k)
+    if (!INTRADAY_TF.has(k)) pickSuiteTf(k)
+    pickRange(CANDLES.find(([c]) => c === k)[3])
+  }
   const suitePack = useMemo(() => {
     if (!bars?.length) return null
     if (suiteTf === '1d') {
@@ -254,8 +355,10 @@ export default function LeapsEntry() {
   // weekly / monthly draw those bars, with the indicator math run on them
   // and the suite on its own bars. The status card stays daily.
   const periodMode = suiteTf !== '1d' && !!suitePack
+  const intraBars = intraday && intraData?.tf === candle && intraData.bars ? intraData.bars : null
   const chart = useMemo(() => {
     if (!model) return null
+    if (intraBars) return { bars: intraBars, model: entryModel(intraBars, { params }), suite: null, tf: candle }
     if (!periodMode) return { bars, model, suite, tf: '1d' }
     const pbars = suitePack.periods.map(({ k, ...b }) => b)
     const pmodel = entryModel(pbars, { params })
@@ -263,16 +366,60 @@ export default function LeapsEntry() {
     // Daily bar → its period's index (for buy-zone backtest rows).
     const byKey = new Map(suitePack.periods.map((pp, pi) => [pp.k, pi]))
     return { bars: pbars, model: pmodel, suite: psuite, tf: suiteTf, periodOfDay: (i) => byKey.get(periodKey(bars[i].t, suiteTf)) ?? -1 }
-  }, [periodMode, bars, model, suite, suitePack, suiteTf, params])
+  }, [periodMode, bars, model, suite, suitePack, suiteTf, params, intraBars, candle])
   const s = model?.status
   // Jumps: a daily bar (buy-zone rows) or a suite period (tiles, suite rows).
   const jumpDay = (i) => jumpTo(chart?.periodOfDay ? chart.periodOfDay(i) : i)
   const jumpPeriod = (pi) => jumpTo(periodMode || suiteTf === '1d' ? pi : suite?.closeDays?.[pi] ?? -1)
+  // Sunset (FEATURES.signalSuite off): no Echo / Tango / Confluence panes,
+  // no price layers.
+  const paneItems = (periodMode || intraBars ? SUB_PANES.filter(([k]) => !DAILY_ONLY_PANES.has(k)) : SUB_PANES).filter(([k]) => SUITE || !SUITE_PANES.has(k))
+  const shownPanes = SUITE ? panes : panes.filter((k) => !SUITE_PANES.has(k))
+  const shownLayers = SUITE ? layers : []
   const cbars = chart?.bars ?? bars
+  // Drawing tools (owner, 2026-10-16), shared with the Charts price chart
+  // per ticker on this device (cm:chart-tools:TICKER).
+  const toolsKey = `cm:chart-tools:${ticker}`
+  const [tools, setTools] = useState({ ticker: null, pins: [], fib: false })
+  const [picking, setPicking] = useState(false)
+  useEffect(() => {
+    const saved = loadJson(toolsKey)
+    setTools({ ticker, pins: Array.isArray(saved?.pins) ? saved.pins.slice(0, 2) : [], fib: saved?.fib === true })
+    setPicking(false)
+  }, [ticker, toolsKey])
+  const saveTools = (next) => { setTools(next); saveJson(toolsKey, { pins: next.pins, fib: next.fib }) }
+  const placed = useMemo(() => (tools.ticker === ticker && cbars ? placePins(cbars, tools.pins) : null), [tools, ticker, cbars])
+  const move = useMemo(() => measurePins(placed), [placed])
+  const fib = useMemo(() => (tools.fib ? fibLevels(placed) : []), [tools.fib, placed])
+  const chartPins = useMemo(() => {
+    if (placed) return placed
+    if (tools.ticker === ticker && tools.pins.length === 1 && cbars) { const one = placePins(cbars, [tools.pins[0], tools.pins[0]]); return one ? [one[0]] : [] }
+    return []
+  }, [placed, tools, ticker, cbars])
+  const offRange = tools.ticker === ticker && tools.pins.length === 2 && cbars && !placed
+  const onPick = (pin) => {
+    if (!pin || tools.ticker !== ticker) return
+    let pins = tools.pins
+    if (pins.length < 2) pins = [...pins, pin]
+    else {
+      const idx = cbars.findIndex((b) => b.t === pin.t)
+      const nearer = placed && Math.abs(placed[0].i - idx) <= Math.abs(placed[1].i - idx) ? 0 : 1
+      const ordered = placed ? [{ t: placed[0].t, p: placed[0].p }, { t: placed[1].t, p: placed[1].p }] : pins
+      pins = ordered.map((x, k) => (k === nearer ? pin : x))
+    }
+    saveTools({ ...tools, pins })
+    if (pins.length === 2 && tools.pins.length < 2) setPicking(false)
+  }
+  const stepTool = (k, dir) => { const next = stepPin(cbars, placed, k, dir); if (next) saveTools({ ...tools, pins: next }) }
   const last = cbars ? cbars[cbars.length - 1] : null
   const shown = hover != null && cbars ? cbars[hover] : last
   const prev = hover != null && cbars ? cbars[hover - 1] : cbars?.[cbars.length - 2]
   const dayChange = shown && prev ? shown.c / prev.c - 1 : null
+  // Change over the selected range, to the bar under the finger (Robinhood's
+  // header): from the range's first bar's close.
+  const rangeBar = cbars?.length ? cbars[rangeStart(cbars, range.key)] : null
+  const rangeChange = shown && rangeBar?.c > 0 ? shown.c / rangeBar.c - 1 : null
+  const rangeLabel = range.key === 'Max' ? 'all time' : range.key === 'YTD' ? 'this year' : `past ${range.key}`
 
   return (
     <div className="px-4 py-4 pb-24 max-w-md md:max-w-3xl mx-auto">
@@ -284,7 +431,7 @@ export default function LeapsEntry() {
         <div className="flex-1 min-w-0">
           <div className="text-[11px] uppercase tracking-[0.14em] text-muted font-semibold">LEAPS entry</div>
           <h1 className="text-lg font-semibold leading-tight">{ticker}</h1>
-          {bars?.length > 0 && <TripleChips daily={dailyTriple} weekly={weekly?.triple ?? (weeklyData?.error ? false : null)} />}
+          {SUITE && bars?.length > 0 && <TripleChips daily={dailyTriple} weekly={weekly?.triple ?? (weeklyData?.error ? false : null)} />}
         </div>
         <button type="button" onClick={() => setSearchOpen(true)} aria-label="Search tickers"
           className="min-h-[44px] px-3 inline-flex items-center gap-2 rounded-xl bg-card border border-border text-sm text-subtle hover:text-fg transition">
@@ -305,11 +452,12 @@ export default function LeapsEntry() {
       ) : (
         <div className="md:grid md:grid-cols-[1fr_280px] md:gap-x-5 md:items-start">
           <div className="min-w-0 md:order-1">
-            <StatusPanel s={s} model={model} params={params} suite={suite} dailySuite={dailySuite} confirmDays={confirmDays} tfLabel={SUITE_TIMEFRAMES[suiteTf].label.toLowerCase()} conf={conf} pool={pool} trend={trend} metrics={data?.metrics ?? null} />
-            {<SuitePanel pack={suitePack} failed={suiteData?.error && suiteData.tf === suiteTf} tf={suiteTf} holdings={holdings} onJump={jumpPeriod} onOpenPane={setExpanded}
+            {!SUITE && <LeaderPanel traits={leaderNow} close={bars[bars.length - 1]?.c} asOf={bars[bars.length - 1]?.t} spyLoading={spyBars === null} />}
+            {SUITE && <StatusPanel s={s} model={model} params={params} suite={suite} dailySuite={dailySuite} confirmDays={confirmDays} tfLabel={SUITE_TIMEFRAMES[suiteTf].label.toLowerCase()} conf={conf} pool={pool} trend={trend} metrics={data?.metrics ?? null} />}
+            {SUITE && <SuitePanel pack={suitePack} failed={suiteData?.error && suiteData.tf === suiteTf} tf={suiteTf} holdings={holdings} onJump={jumpPeriod} onOpenPane={setExpanded}
               buyZone={!!s?.cond?.all} />}
-            <PlanCard plan={plan} loading={weeklyData === null} failed={!!weeklyData?.error} trend={trend} />
-            <EventStatsCard ticker={ticker} daily={dailyTriple} onJumpDay={jumpDay} />
+            {SUITE && <PlanCard plan={plan} loading={weeklyData === null} failed={!!weeklyData?.error} trend={trend} />}
+            {SUITE && <EventStatsCard ticker={ticker} daily={dailyTriple} onJumpDay={jumpDay} />}
           </div>
 
           {/* Chart */}
@@ -318,16 +466,30 @@ export default function LeapsEntry() {
               {/* Candle interval — drives the candles, the averages and the
                   Signal suite together (one state, cm:suite-tf:v2). */}
               <div className="px-5 pt-4">
-                <div className="grid grid-cols-3 gap-0.5 p-0.5 rounded-lg bg-bg-elev" role="tablist" aria-label="Candle interval">
-                  {Object.entries(SUITE_TIMEFRAMES).map(([k, v]) => (
-                    <button key={k} type="button" role="tab" aria-selected={suiteTf === k} onClick={() => pickSuiteTf(k)}
-                      className={clsx('min-h-[44px] rounded-md text-sm font-semibold transition',
-                        suiteTf === k ? 'bg-card text-violet-300 shadow-sm' : 'text-muted hover:text-subtle')}>
-                      {v.label}
+                <div className="flex items-center mb-1.5">
+                  <span className="flex-1 text-[11px] uppercase tracking-[0.12em] text-muted font-semibold">Candle size</span>
+                  <span className="inline-flex gap-0.5 p-0.5 rounded-full bg-bg-elev" role="tablist" aria-label="Chart style">
+                    {[['candles', 'Candles'], ['line', 'Line']].map(([k, l]) => (
+                      <button key={k} type="button" role="tab" aria-selected={chartStyle === k} onClick={() => pickStyle(k)}
+                        className={clsx('min-h-[32px] px-3 rounded-full text-[11px] font-semibold transition', chartStyle === k ? 'bg-fg text-bg' : 'text-muted hover:text-subtle')}>{l}</button>
+                    ))}
+                  </span>
+                </div>
+                <div className="grid grid-cols-6 gap-0.5 p-0.5 rounded-lg bg-bg-elev" role="tablist" aria-label="Candle size">
+                  {CANDLES.map(([k, label]) => (
+                    <button key={k} type="button" role="tab" aria-selected={candle === k} onClick={() => pickCandle(k)}
+                      className={clsx('min-h-[44px] rounded-md text-xs font-semibold transition leading-tight',
+                        candle === k ? 'bg-card text-violet-300 shadow-sm' : 'text-muted hover:text-subtle')}>
+                      {label}
                     </button>
                   ))}
                 </div>
-                {suiteTf !== '1d' && !periodMode && (
+                {intraday && !intraBars && (
+                  <div className="mt-2 text-[11px] text-muted" aria-live="polite">
+                    {intraData?.error ? `Couldn't load ${CANDLES.find(([k]) => k === candle)[1]} candles — showing daily.` : 'Loading intraday candles…'}
+                  </div>
+                )}
+                {!intraday && suiteTf !== '1d' && !periodMode && (
                   <div className="mt-2 text-[11px] text-muted" aria-live="polite">
                     {suiteData?.error && suiteData.tf === suiteTf
                       ? `Couldn't load ${SUITE_TIMEFRAMES[suiteTf].label.toLowerCase()} bars — showing daily candles.`
@@ -337,15 +499,28 @@ export default function LeapsEntry() {
               </div>
               <div className="px-5 pt-3 pb-2 flex items-end gap-3">
                 <div className="flex-1 min-w-0">
-                  <div className="text-2xl font-semibold font-mono-tab leading-none">{money(shown?.c)}</div>
-                  <div className="mt-1 text-[11px] text-muted font-mono-tab">
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-2xl font-semibold font-mono-tab leading-none">{money(shown?.c)}</span>
+                    {live && hover == null && (
+                      <span className="inline-flex items-center gap-1 text-[11px] text-green-400">
+                        <span className="h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse" aria-hidden />
+                        Live · {new Date(live.at * 1000).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'UTC' })} ET
+                      </span>
+                    )}
+                  </div>
+                  {rangeChange != null && (
+                    <div className={clsx('mt-1 text-sm font-semibold font-mono-tab', rangeChange < 0 ? 'text-rose-300' : 'text-green-400')}>
+                      {signed(rangeChange * 100, 2)} <span className="font-normal text-muted">{hover != null ? `since ${day(rangeBar.t)}` : rangeLabel}</span>
+                    </div>
+                  )}
+                  <div className="mt-0.5 text-[11px] text-muted font-mono-tab">
                     {shown && day(shown.t)}
                     {dayChange != null && (
-                      <span className={clsx('ml-2', dayChange < 0 ? 'text-rose-300' : 'text-green-400')}>{signed(dayChange * 100, 2)}</span>
+                      <span className={clsx('ml-2', dayChange < 0 ? 'text-rose-300' : 'text-green-400')}>{signed(dayChange * 100, 2)} {intraBars ? 'bar' : periodMode ? (suiteTf === '1wk' ? 'week' : 'month') : 'day'}</span>
                     )}
                   </div>
                 </div>
-                {hover != null && !periodMode && model.cond[hover] && (
+                {SUITE && hover != null && !periodMode && model.cond[hover] && (
                   <div className="text-right text-[11px] font-mono-tab">
                     <div className="text-muted">Conditions</div>
                     <div className={model.cond[hover].all ? 'text-green-400 font-semibold' : 'text-subtle'}>
@@ -354,18 +529,85 @@ export default function LeapsEntry() {
                   </div>
                 )}
               </div>
+              {/* Range (owner, 2026-10-16: Robinhood-style) — the window in view. */}
+              <div className="px-5 pb-3">
+                <div className="flex gap-1 overflow-x-auto no-scrollbar" role="tablist" aria-label="Range">
+                  {RANGES.map(([k]) => (
+                    <button key={k} type="button" role="tab" aria-selected={range.key === k} onClick={() => pickRange(k)}
+                      className={clsx('shrink-0 min-h-[36px] min-w-[44px] px-2.5 rounded-full text-xs font-semibold transition',
+                        range.key === k ? 'bg-fg text-bg' : 'text-muted hover:text-subtle')}>{k}</button>
+                  ))}
+                </div>
+              </div>
+              {/* Drawing tools: Measure (two pins), Fibonacci, Auto swing. */}
+              <div className="px-3 pb-2 flex items-center gap-1">
+                <ToolButton active={picking} onClick={() => setPicking((v) => !v)} label="Measure" />
+                <ToolButton active={tools.fib} onClick={() => saveTools({ ...tools, ticker, fib: !tools.fib })} label="Fibonacci" disabled={!placed} />
+                <ToolButton onClick={() => { const a = cbars && autoSwing(cbars.slice(rangeStart(cbars, range.key))); if (a) { saveTools({ ...tools, ticker, pins: a, fib: true }); setPicking(false) } }} label="Auto" icon={Sparkles} disabled={!cbars} />
+                <span className="flex-1" />
+                {(tools.pins.length > 0 || tools.fib) && (
+                  <button type="button" onClick={() => { saveTools({ ticker, pins: [], fib: false }); setPicking(false) }} aria-label="Clear drawings"
+                    className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-md text-muted hover:text-fg"><X size={14} /></button>
+                )}
+              </div>
+              {(picking || move || offRange) && (
+                <div className="px-5 pb-3 text-xs">
+                  {move ? (
+                    <div className="rounded-xl bg-bg-elev px-4 py-3">
+                      <div className="flex items-start gap-3">
+                        <div className={clsx('flex-1 min-w-0 font-mono-tab', move.change < 0 ? 'text-rose-300' : 'text-green-400')}>
+                          <span className="text-lg font-semibold">{move.change >= 0 ? '+' : '−'}{Math.abs(move.pct * 100).toFixed(2)}%</span>
+                          <span className="ml-2 text-sm">{move.change >= 0 ? '+' : '−'}{money(Math.abs(move.change))}</span>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <div className="text-sm text-fg">{move.candles} {move.candles === 1 ? 'candle' : 'candles'}</div>
+                          {move.days > 0 && <div className="text-[11px] text-muted">{move.days} calendar {move.days === 1 ? 'day' : 'days'}</div>}
+                        </div>
+                      </div>
+                      <div className="mt-3 pt-3 border-t border-hairline grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                        <PinCell letter="A" label="From" date={day(move.from.t)} price={money(move.from.p)} onStep={(dir) => stepTool(0, dir)} canBack={!!stepPin(cbars, placed, 0, -1)} canFwd={!!stepPin(cbars, placed, 0, 1)} />
+                        <span className="text-muted text-sm" aria-hidden>→</span>
+                        <PinCell letter="B" label="To" date={day(move.to.t)} price={money(move.to.p)} onStep={(dir) => stepTool(1, dir)} canBack={!!stepPin(cbars, placed, 1, -1)} canFwd={!!stepPin(cbars, placed, 1, 1)} />
+                      </div>
+                    </div>
+                  ) : offRange ? (
+                    <span className="text-muted">Your pins are outside these candles.</span>
+                  ) : (
+                    <span className="text-muted">Tap a candle for point {tools.pins.length === 0 ? 'A' : 'B'}. It snaps to the high or low.</span>
+                  )}
+                </div>
+              )}
+              {fib.length > 0 && (
+                <div className="px-5 pb-3 space-y-3 text-xs">
+                  {[['retracement', 'Pullback from B toward A'], ['extension', 'Targets past B']].map(([kind, title]) => (
+                    <div key={kind}>
+                      <div className="text-[11px] text-muted mb-1">{title}</div>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 font-mono-tab">
+                        {fib.filter((l) => l.kind === kind).map((l) => (
+                          <div key={`${l.kind}-${l.ratio}`} className="flex items-baseline gap-2">
+                            <span className={clsx('w-16', l.kind === 'extension' ? (l.up ? 'text-green-400' : 'text-rose-300') : l.ratio === 0.5 || l.ratio === 0.618 ? 'text-amber-300' : 'text-muted')}>
+                              {l.label}{l.ratio === 0 && l.kind === 'retracement' ? ' · B' : l.ratio === 1 ? ' · A' : ''}
+                            </span>
+                            <span className="text-subtle">{money(l.price)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
               {/* What's drawn: indicator panels, then layers on the price chart. */}
               <div className="px-5 pb-3 space-y-3">
-                <ToggleGroup label="Panels" items={periodMode ? SUB_PANES.filter(([k]) => !DAILY_ONLY_PANES.has(k)) : SUB_PANES} isOn={(k) => panes.includes(k)} onToggle={togglePane} />
-                <ToggleGroup label="On price" items={LAYERS} isOn={(k) => layers.includes(k)} onToggle={toggleLayer} />
+                <ToggleGroup label="Panels" items={paneItems} isOn={(k) => panes.includes(k)} onToggle={togglePane} />
+                {SUITE && <ToggleGroup label="On price" items={LAYERS} isOn={(k) => layers.includes(k)} onToggle={toggleLayer} />}
               </div>
-              <EntryChart bars={chart.bars} model={chart.model} suite={chart.suite} conf={periodMode ? null : conf} tf={chart.tf} suiteLabel={SUITE_TIMEFRAMES[suiteTf].label} panes={panes} layers={layers} onHover={setHover} onExpand={setExpanded} jump={jump} />
+              <EntryChart bars={chart.bars} model={chart.model} suite={chart.suite} conf={periodMode || !SUITE ? null : conf} tf={chart.tf} suiteLabel={intraBars ? CANDLES.find(([k]) => k === candle)[1] : SUITE_TIMEFRAMES[suiteTf].label} panes={shownPanes} layers={shownLayers} plain={!SUITE} range={range} style={chartStyle} pins={chartPins} fib={fib} picking={picking} onPick={onPick} onHover={setHover} onExpand={setExpanded} jump={jump} />
               <div className="px-5 py-3 border-t border-hairline flex flex-wrap gap-x-4 gap-y-1.5 text-[11px] text-muted">
-                {!periodMode && <Key className="text-green-400" glyph="▲">Buy signal</Key>}
-                {!periodMode && <Key className="text-green-400/50" glyph="●">MACD confirms</Key>}
+                {SUITE && !periodMode && <Key className="text-green-400" glyph="▲">Buy signal</Key>}
+                {SUITE && !periodMode && <Key className="text-green-400/50" glyph="●">MACD confirms</Key>}
                 <Key className="text-amber-300" glyph="●">Golden cross</Key>
                 <Key className="text-rose-300" glyph="●">Death cross</Key>
-                {!periodMode && <Key glyph={<span className="inline-block w-3 h-2.5 rounded-sm bg-green-400/15 align-middle" />}>Buy zone</Key>}
+                {SUITE && !periodMode && <Key glyph={<span className="inline-block w-3 h-2.5 rounded-sm bg-green-400/15 align-middle" />}>Buy zone</Key>}
                 {layers.includes('hardening') && <Key className="text-amber-300" glyph="▲">Hardening bull</Key>}
                 {layers.includes('hardening') && <Key className="text-rose-300" glyph="▼">Hardening bear</Key>}
                 {layers.includes('triple') && <Key className="text-suite-bull" glyph="◆">Triple bull (3)</Key>}
@@ -375,29 +617,35 @@ export default function LeapsEntry() {
                 {layers.includes('bravoSignals') && <Key className="text-suite-bear" glyph="◆">Bravo bear</Key>}
                 {layers.includes('exits') && <Key className="text-suite-bear" glyph="◇">Exit (E Echo · T Tango · B Bravo)</Key>}
                 {!periodMode && layers.includes('swings') && <Key className="text-confluence" glyph="●">Swing low (hindsight)</Key>}
-                {(panes.includes('echo') || panes.includes('tango')) && <Key className="text-suite-bull" glyph="◆">Echo / Tango bull</Key>}
-                {(panes.includes('echo') || panes.includes('tango')) && <Key className="text-suite-bear" glyph="◆">Echo / Tango bear</Key>}
+                {(shownPanes.includes('echo') || shownPanes.includes('tango')) && <Key className="text-suite-bull" glyph="◆">Echo / Tango bull</Key>}
+                {(shownPanes.includes('echo') || shownPanes.includes('tango')) && <Key className="text-suite-bear" glyph="◆">Echo / Tango bear</Key>}
               </div>
             </section>
           </div>
 
-          <div className="min-w-0 md:order-2">
-            <Thresholds draft={draft} setField={setField} reset={resetParams} isDefault={isDefault} />
-          </div>
+          {SUITE && (
+            <div className="min-w-0 md:order-2">
+              <Thresholds draft={draft} setField={setField} reset={resetParams} isDefault={isDefault} />
+            </div>
+          )}
 
-          <div className="min-w-0 md:order-4 md:col-span-2">
-            <Backtest model={model} suite={suite} pack={suitePack} conf={conf} confirmDays={confirmDays} onJumpDay={jumpDay} onJumpPeriod={jumpPeriod} />
-          </div>
+          {SUITE && (
+            <div className="min-w-0 md:order-4 md:col-span-2">
+              <Backtest model={model} suite={suite} pack={suitePack} conf={conf} confirmDays={confirmDays} onJumpDay={jumpDay} onJumpPeriod={jumpPeriod} />
+            </div>
+          )}
 
-          <div className="min-w-0 md:order-5 md:col-span-2">
-            <ReplayCard bars={bars} model={model} suite={dailySuite} onJumpDay={jumpDay} />
-          </div>
+          {SUITE && (
+            <div className="min-w-0 md:order-5 md:col-span-2">
+              <ReplayCard bars={bars} model={model} suite={dailySuite} onJumpDay={jumpDay} />
+            </div>
+          )}
         </div>
       )}
 
       {expanded && chart && (
         <FullPane title={`${ticker} · ${paneTitle(expanded, chart.tf)}`} onClose={() => setExpanded(null)}>
-          {(h) => <EntryChart bars={chart.bars} model={chart.model} suite={chart.suite} conf={periodMode ? null : conf} tf={chart.tf} suiteLabel={SUITE_TIMEFRAMES[suiteTf].label} panes={panes} layers={layers} focus={expanded} fill={h} />}
+          {(h) => <EntryChart bars={chart.bars} model={chart.model} suite={chart.suite} conf={periodMode || !SUITE ? null : conf} tf={chart.tf} suiteLabel={intraBars ? CANDLES.find(([k]) => k === candle)[1] : SUITE_TIMEFRAMES[suiteTf].label} panes={shownPanes} layers={shownLayers} plain={!SUITE} range={range} style={chartStyle} pins={chartPins} fib={fib} focus={expanded} fill={h} />}
         </FullPane>
       )}
 
@@ -1372,5 +1620,35 @@ function ConfluenceBacktest({ conf }) {
         </div>
       </div>
     </div>
+  )
+}
+
+// One pin of the measure card; ‹ › step it a candle earlier / later.
+function PinCell({ letter, label, date, price, onStep, canBack, canFwd }) {
+  const btn = 'shrink-0 h-9 w-7 -my-1.5 flex items-center justify-center rounded-md text-subtle hover:text-fg hover:bg-card disabled:opacity-30 disabled:hover:bg-transparent'
+  return (
+    <div className="min-w-0">
+      <div className="flex items-center gap-1.5 text-[11px] text-muted">
+        <span className="h-4 w-4 rounded-full bg-amber-400 text-bg text-[10px] font-bold flex items-center justify-center" aria-hidden>{letter}</span>
+        {label}
+      </div>
+      <div className="mt-1 text-xs text-subtle truncate">{date}</div>
+      <div className="flex items-center gap-1">
+        <span className="flex-1 min-w-0 text-[13px] font-mono-tab text-fg whitespace-nowrap">{price}</span>
+        <button type="button" className={btn} onClick={() => onStep(-1)} disabled={!canBack} aria-label={`Move ${letter} one candle earlier`}><ChevronLeft size={15} /></button>
+        <button type="button" className={btn} onClick={() => onStep(1)} disabled={!canFwd} aria-label={`Move ${letter} one candle later`}><ChevronRight size={15} /></button>
+      </div>
+    </div>
+  )
+}
+
+function ToolButton({ active, onClick, label, icon: Icon, disabled }) {
+  return (
+    <button type="button" onClick={onClick} disabled={disabled} aria-pressed={active ?? undefined}
+      className={clsx('min-h-[36px] px-2 inline-flex items-center gap-1.5 rounded-md text-xs font-semibold whitespace-nowrap transition disabled:opacity-40',
+        active ? 'bg-amber-400/15 text-amber-300' : 'text-subtle hover:text-fg')}>
+      {Icon && <Icon size={14} aria-hidden />}
+      {label}
+    </button>
   )
 }

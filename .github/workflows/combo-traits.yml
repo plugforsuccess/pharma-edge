@@ -1,0 +1,42 @@
+# One-off research (owner, 2026-10-16: "what did the 36% / the 66% have in
+# common?"): entry-day traits of setups that sat at a swing low, and of
+# setups that were higher 6 months later, for one combination and for every
+# 2+ signal setup; walk-forward. Prints the report and uploads
+# combo-traits.json. See scripts/combo-traits.mjs. Writes nothing to the DB.
+
+name: Combo traits
+
+on:
+  workflow_dispatch:
+    inputs:
+      combo:
+        description: 'Combination key, e.g. bravo+echo+macd'
+        default: 'bravo+echo+macd'
+  push:
+    branches-ignore: [main]
+    paths:
+      - scripts/combo-traits.mjs
+      - .github/workflows/combo-traits.yml
+
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Study
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          COMBO: ${{ inputs.combo || 'bravo+echo+macd' }}
+        run: node scripts/combo-traits.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: combo-traits
+          path: combo-traits.json
+          retention-days: 30

@@ -26,6 +26,13 @@
 //                  Pullbacks sell side (owner, 2026-10-16: "The charts tab
 //                  should essentially be only leaders"); off = Charts is the
 //                  Leaders list, Search opens the entry chart
+//   signalSuite  — Bravo / Echo / Tango, the confluence chips, Triple ◆, the
+//                  reclaim zone, the buy-zone status + thresholds, the Signal
+//                  suite / Triple record / Plan cards, the signal backtests
+//                  and the Replay card on the entry chart (owner, 2026-10-16:
+//                  sunset — the leader-timing study found a timing signal
+//                  added nothing to the Leaders rule); off = the entry chart
+//                  leads with the Leaders check and plain candles
 export const FEATURES = Object.freeze({
   wheel: false,
   logMove: false,
@@ -38,4 +45,5 @@ export const FEATURES = Object.freeze({
   tape: false,
   hardening: false,
   chartsExtras: false,
+  signalSuite: false,
 })

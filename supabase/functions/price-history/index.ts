@@ -1,6 +1,10 @@
 // price-history — daily bars for one ticker, for /charts.
 //
-// POST { ticker: "AAPL", range: "1d" | "5d" | "1mo" | "3mo" | "6mo" | "1y" | "2y" | "5y" | "max", crypto?: true }
+// POST { ticker: "AAPL", range: "1d" | "5d" | "1mo" | "3mo" | "6mo" | "1y" | "2y" | "5y" | "max", crypto?: true,
+//        interval?: "5m" | "15m" | "30m" | "60m" }
+//   interval (owner, 2026-10-16: intraday candle sizes on the entry chart)
+//   overrides the range's default; Yahoo serves 5m / 15m / 30m up to 60
+//   days back and 60m up to 730 days, so only those pairings are accepted.
 //   crypto: ticker is the coin ("BTC"), priced in USD.
 //   → { success, ticker, range, interval, source: "yahoo", prev_close, bars: [{ t, o, h, l, c, v }] }
 //     Daily ranges (and 5y weekly / max monthly bars): t = the bar's
@@ -29,7 +33,12 @@ function json(body: unknown, status = 200): Response {
 const INTERVAL: Record<string, string> = {
   '1d': '5m', '5d': '30m', '1mo': '1d', '3mo': '1d', '6mo': '1d', '1y': '1d', '2y': '1d', '5y': '1wk', max: '1mo',
 }
-const INTRADAY = new Set(['5m', '30m'])
+const INTRADAY = new Set(['5m', '15m', '30m', '60m'])
+// Explicit intraday intervals and the ranges Yahoo allows for each.
+const INTERVAL_RANGES: Record<string, Set<string>> = {
+  '5m': new Set(['1d', '5d', '1mo']), '15m': new Set(['1d', '5d', '1mo']), '30m': new Set(['1d', '5d', '1mo']),
+  '60m': new Set(['1d', '5d', '1mo', '3mo', '6mo', '1y', '2y']),
+}
 const CACHE_MS = 15 * 60 * 1000
 const INTRADAY_CACHE_MS = 2 * 60 * 1000
 const TICKER_RE = /^[A-Z][A-Z0-9.\-]{0,9}$/
@@ -45,13 +54,15 @@ serve(async (req) => {
   const range = String(body.range ?? '6mo')
   const crypto = body.crypto === true
   if (!TICKER_RE.test(ticker)) return json({ success: false, error: 'invalid ticker' }, 400)
-  const interval = INTERVAL[range]
-  if (!interval) return json({ success: false, error: 'invalid range' }, 400)
+  if (!INTERVAL[range]) return json({ success: false, error: 'invalid range' }, 400)
+  const asked = body.interval == null ? null : String(body.interval)
+  if (asked != null && !INTERVAL_RANGES[asked]?.has(range)) return json({ success: false, error: 'invalid interval for this range' }, 400)
+  const interval = asked ?? INTERVAL[range]
   const ttl = INTRADAY.has(interval) ? INTRADAY_CACHE_MS : CACHE_MS
 
   // Yahoo writes share classes with a dash (BRK.B → BRK-B).
   const symbol = crypto ? `${ticker}-USD` : ticker.replace(/\./g, '-')
-  const key = `${symbol}:${range}`
+  const key = `${symbol}:${range}:${interval}`
   const hit = cache.get(key)
   if (hit && Date.now() - hit.at < ttl) {
     return json({ success: true, ticker, range, interval, source: 'yahoo', prev_close: hit.prevClose, bars: hit.bars, cached: true })

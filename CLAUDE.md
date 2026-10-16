@@ -1570,6 +1570,68 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   vs 62% higher, gone by 6M). A solid strip under the phone status bar
   (`Layout.jsx`, `env(safe-area-inset-top)`, z-40) keeps scrolled content
   out from behind the clock on every page.
+- **Entry chart, Robinhood-style** (owner, 2026-10-16: "the chart should
+  have the capabilities of Robinhood … bar lengths can be toggled and the
+  dates on the x axis are detailed"). **Candle size** Daily · Weekly ·
+  Monthly (labelled); **range buttons** 1M · 3M · 6M · YTD · 1Y · 2Y · 5Y ·
+  Max (`RANGES` / `rangeStart` in `EntryChart.jsx`, `range` prop,
+  `cm:entry-range`, default 1Y; pinch / drag still zoom); the header shows
+  the change over the range ("+1.53% past 3M", "since Jul 28, 2025" while
+  scrubbing) above the bar's date and day / week / month change; **volume
+  bars** along the bottom fifth of the price pane; **dates**: axis ticks
+  "2026" / "Oct" / "Oct 14" (`tickMarkFormatter`), the crosshair tag "Tue,
+  Oct 14, 2026" / "Week of Oct 13, 2026" / "October 2026"
+  (`localization.timeFormatter`), and the date rows under each pane add
+  each week's first day under ~5 months. Copy: a stock failing the Leaders
+  rule reads **"NOT YET"** / "Not yet a leader" — never "NOT A LEADER"
+  (owner). **Then all four gaps** (owner, 2026-10-16: "Yes all 4"):
+  **intraday candles** — Candle size 5 min · 15 min · 1 hour · Day · Week ·
+  Month (`CANDLES` in `LeapsEntry.jsx`, `cm:entry-candle`; intraday from
+  `price-history` with its new optional `interval` — 5m / 15m / 30m up to
+  `1mo`, 60m up to `2y`; each size opens on its range: 5 min → 1D, 15 min
+  → 1W, 1 hour → 1M, Day → 1Y, Week → 5Y, Month → Max). Intraday `t` is
+  unix seconds of ET wall clock read as UTC: `msOf` / `dayParts` /
+  `INTRADAY_TF` in `EntryChart.jsx` handle both kinds (axis "10:30 AM",
+  crosshair "Tue, Oct 14 · 10:35 AM", date rows label each day and hours
+  under ~2 days), `weekKey` in `indicators.js` accepts seconds (copies
+  synced); intraday drops the daily-only panes; "% vs 200-bar". **Line /
+  Candles** toggle (`style` prop, `cm:entry-style`; the line is green / red
+  by the move over the bars loaded). **Measure · Fibonacci · Auto** on the
+  entry chart (`pins` / `fib` / `picking` / `onPick` props drawn on the live
+  chart; tap to pin, ‹ › step, no drag; Auto finds the biggest swing in the
+  selected range; saved per ticker in `cm:chart-tools:TICKER`, shared with
+  the Charts price chart). **Live price** — during US hours (Mon–Fri
+  9:30–16:05 ET, holidays not modelled) today's 5-minute bars are refetched
+  every minute and folded into today's daily candle; intraday candles
+  refresh every minute too; the header reads "Live · 10:42 AM ET". Yahoo
+  prices — near real-time for most US listings, not a broker feed; true
+  streaming still waits on the dxlink-worker deploy.
+- **Signal suite sunset** (owner, 2026-10-16: "Do it, I guess we no longer
+  need the signal suite card, triple record card, plan card"). The
+  leader-timing study (`scripts/leader-timing.mjs`,
+  `.github/workflows/leader-timing.yml`, research only; ATM 2-year calls
+  with the exit plan, 2024+ entries) found a timing signal adds nothing:
+  leader + 2 signals 61% win / +54% median (n 1,510) vs **leader any day 60% / +50% (n 2,790)** vs leader on a 5% dip
+  60% / +48% vs any stock any day 52% / +7%. So: **Leaders are bought any
+  day they qualify.** The nightly ranking ranks every leader (no signal
+  requirement), strongest 12-1 return first (`buyVerdict({ leader })` →
+  `enter` / `notleader`); "Past results" history = days the stock was a
+  leader, one per 21 trading days (`call_hist.plays[key].own.leader` /
+  `pool.leader`); alerts = one of a user's tickers **became a leader**
+  (ranked today, not last night; sell-signal alerts retired);
+  `entry-scan.yml` (buy-zone alerts) runs on dispatch only. Leaders list:
+  no signal meter, no 3+ chip; a "200-day trend" tile replaces Momentum.
+  **Entry chart** with `FEATURES.signalSuite` off (default): the
+  **Leaders panel** (`components/LeaderPanel.jsx`: LEADER / NOT A LEADER,
+  the five checks with today's values, the study's record line; SPY daily
+  bars fetched from `leaps-entry` for the S&P check) replaces the buy-zone
+  status, Signal suite, Triple record and Plan cards; the chart drops Echo /
+  Tango / Confluence panes, every price layer (Triple ◆, reclaim zone,
+  Bravo ◆, exits, swing lows) and the buy-zone shading / arrows (`plain`
+  prop on `EntryChart`); thresholds, backtests and the Replay card hide.
+  Candles, 50 / 200-day, W50, crosses, the 200-day / RSI / MACD / IV panes
+  and the Daily · Weekly · Monthly switch stay. All suite code stays —
+  flip the flag to bring it back.
 - **Charts = Leaders** (owner, 2026-10-16: "The charts tab should
   essentially be only leaders"). With `FEATURES.chartsExtras` off (the
   default) `/charts` is the Leaders list alone (`ConfluenceLeaders

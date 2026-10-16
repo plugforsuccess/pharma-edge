@@ -70,7 +70,7 @@ export function analyze(ticker, bars, spy = null) {
     closes: bars.map((b) => b.c), market, ownRecord: ownRecord(bars, model, suite),
     buy: { today: conf.buy.today, setups: conf.buy.setups, lastSignal: lastSignal(conf.buy.flags) },
     sell: { today: conf.sell.today, setups: conf.sell.setups, lastSignal: lastSignal(conf.sell.flags) },
-    calls: callPaths(bars, model, suite),
+    calls: callPaths(bars, spy),
     leader: leaderToday(bars, spy),
   }
 }
@@ -83,17 +83,17 @@ function leaderToday(bars, spy) {
   return { misses: leaderMisses(tr), traits: tr ? { mom12: r3(tr.mom12), vs200: r3(tr.vs200), slope200: r3(tr.slope200), volRank: r3(tr.volRank), spyUp: tr.spyUp } : null }
 }
 
-// The at-the-money plays (owner, 2026-10-15): after each past BUY SETUP
-// and each 2-signal setup, the stock's gain over 1M / 3M / 6M / 12M / 2Y
-// beside the matching ATM call held to expiry (src/utils/callHistory.js).
-function callPaths(bars, model, suite) {
-  const sig = replaySignals(bars, model, suite)
+// The at-the-money plays (owner, 2026-10-15; leaders 2026-10-16): after
+// each past day the stock was a leader (one per 21 trading days — the
+// Leaders rule, no timing signal), the stock's gain over 1M / 3M / 6M /
+// 12M / 2Y beside the matching ATM call held to expiry
+// (src/utils/callHistory.js).
+function callPaths(bars, spy) {
   const vols = trailingVol(bars.map((b) => b.c), OPTION_MODEL.volBars)
+  const ls = leaderSeries(bars, spy ?? [], { vol: vols })
+  const leaderDays = bars.map((_, i) => leaderMisses(ls.at(i)).length === 0)
   const out = {}
-  for (const p of PLAYS) {
-    const o = { vols, opt: playModel(p), horizons: playSpan(p) }
-    out[p.key] = { setup: callHistory(bars, sig.entry.setup, o), confluence: callHistory(bars, sig.entry.confluence, o) }
-  }
+  for (const p of PLAYS) out[p.key] = { leader: callHistory(bars, leaderDays, { vols, opt: playModel(p), horizons: playSpan(p) }) }
   return out
 }
 
@@ -102,7 +102,7 @@ export function callPool(results) {
   const out = { tickers: results.length }
   for (const p of PLAYS) {
     const all = (k) => results.flatMap((r) => r.calls?.[p.key]?.[k] ?? [])
-    out[p.key] = { setup: callStats(all('setup'), playSpan(p)), confluence: callStats(all('confluence'), playSpan(p)) }
+    out[p.key] = { leader: callStats(all('leader'), playSpan(p)) }
   }
   return out
 }
@@ -134,7 +134,7 @@ export function rankAll(results, pools, calls = null) {
         est_badq_3m: hz(est, '3M', 'badq'), est_badq_6m: hz(est, '6M', 'badq'),
         est_beat_3m: hz(est, '3M', 'beat'), est_beat_6m: hz(est, '6M', 'beat'),
         last_signal: r[side].lastSignal, etb_convergence: side === 'buy' ? r.etbConvergence : false, rank: null,
-        verdict: side === 'buy' ? buyVerdict({ score: now?.score ?? 0, trendUp: r.trendUp, leader: r.leader?.misses?.length === 0 }) : sellVerdict({ score: now?.score ?? 0, lit: now?.lit ?? [] }),
+        verdict: side === 'buy' ? buyVerdict({ leader: r.leader?.misses?.length === 0 }) : sellVerdict({ score: now?.score ?? 0, lit: now?.lit ?? [] }),
         hold_reason: hold,
         blockers: side === 'buy' ? r.blockers : null, trade: side === 'buy' ? r.trade : null,
         stop_price: r.stop?.price ?? null, stop_date: r.stop?.date ?? null, momentum: r.momentum,
@@ -145,27 +145,23 @@ export function rankAll(results, pools, calls = null) {
         spark: side === 'buy' ? r.closes.slice(-63).map((c) => Math.round(c * 100) / 100) : null,
         call_hist: side === 'buy' && r.calls ? {
           plays: Object.fromEntries(PLAYS.map((p) => [p.key, {
-            own: { setup: callStats(r.calls[p.key].setup, playSpan(p))[0], confluence: callStats(r.calls[p.key].confluence, playSpan(p))[0] },
-            pool: { setup: calls[p.key].setup[0] },
+            own: { leader: callStats(r.calls[p.key].leader, playSpan(p))[0] },
+            pool: { leader: calls[p.key].leader[0] },
           }])),
         } : null,
       }
       rows.push(row)
-      // Eligible: 2+ signals (buy: with the 200-day rising). The setup's
-      // history is NOT a gate — the universe replay's walk-forward test
-      // (2026-10-03) found "history says yes" trades did no better than
-      // "history says no" — so it only breaks ties.
-      const eligible = row.score >= MIN_SCORE && (side === 'buy' ? row.trend_up && row.leader : true)
+      // Eligible — buy: a leader today, no timing signal (owner, 2026-10-16:
+      // the leader-timing study found leaders bought any day did as well as
+      // leaders with 2+ signals — 60% / +50% vs 61% / +54% on 2024+ — so the
+      // signals no longer gate). Sell: 2+ sell signals (not shown in the app).
+      const eligible = side === 'buy' ? row.leader : row.score >= MIN_SCORE
       if (eligible) cands.push(row)
     }
     // Tier 1: E+T+B convergence (buy side only), then Tier 2: other 3+ signals
     cands.sort((a, b) => {
-      // Buy side: leaders only (owner, 2026-10-16), every one an entry —
-      // more signals first, then momentum up before early, then the
-      // stronger 12-month return.
+      // Buy side: leaders, strongest first (12-1 return; owner, 2026-10-16).
       if (side === 'buy') {
-        if (b.score !== a.score) return b.score - a.score
-        if ((a.momentum === 'up') !== (b.momentum === 'up')) return a.momentum === 'up' ? -1 : 1
         const m = (r) => r.leader_traits?.mom12 ?? 0
         if (m(b) !== m(a)) return m(b) - m(a)
       }
@@ -231,7 +227,7 @@ async function main() {
   const baselines = Object.fromEntries(SIDES.map((side) => [side, baselineStats(results.map((r) => ({ closes: r.closes, market: r.market })), HORIZONS, side)]))
   const calls = callPool(results)
   const rows = rankAll(results, pools, calls)
-  for (const p of PLAYS) for (const k of ['setup', 'confluence']) { const x = calls[p.key][k][0]; console.log(`Play ${p.span.padEnd(3)} ${k.padEnd(10)} n ${x.n} · stock avg ${pct(x.stock)} med ${pct(x.stockMedian)} up ${Math.round((x.stockWin ?? 0) * 100)}% · ATM call to expiry avg ${pct(x.avg)} med ${pct(x.median)} up ${Math.round((x.win ?? 0) * 100)}%`) }
+  for (const p of PLAYS) for (const k of ['leader']) { const x = calls[p.key][k][0]; console.log(`Play ${p.span.padEnd(3)} ${k.padEnd(10)} n ${x.n} · stock avg ${pct(x.stock)} med ${pct(x.stockMedian)} up ${Math.round((x.stockWin ?? 0) * 100)}% · ATM call to expiry avg ${pct(x.avg)} med ${pct(x.median)} up ${Math.round((x.win ?? 0) * 100)}%`) }
   const pool = poolRows(pools, results, asOf, baselines)
   for (const side of SIDES) { const b = baselines[side].horizons; console.log(`Baseline ${side}: any day, 3M win ${(b[0].winRate * 100).toFixed(0)}% median ${(b[0].median * 100).toFixed(1)}% · 6M win ${(b[1].winRate * 100).toFixed(0)}% median ${(b[1].median * 100).toFixed(1)}% beat ${b[1].beat == null ? '—' : (b[1].beat * 100).toFixed(0) + '%'}`) }
   console.log(`Analyzed ${results.length}/${universe.length} tickers in ${((Date.now() - t0) / 1000).toFixed(0)}s; ${failed.length} failed; as of ${asOf}; bars from Yahoo ${sources.yahoo}, edge ${sources.edge}.`)
@@ -239,7 +235,9 @@ async function main() {
   for (const side of SIDES) {
     const top = rows.filter((r) => r.side === side && r.rank != null).sort((a, b) => a.rank - b.rank).slice(0, TOP)
     console.log(`\nTop ${TOP} ${side}:`)
-    for (const r of top) console.log(`  ${String(r.rank).padStart(2)}. ${r.ticker.padEnd(6)} ${r.score}/5 ${r.combo.padEnd(28)} 3M ${pct(r.est_3m)} 6M ${pct(r.est_6m)}  at turn ${pct(r.est_at_turn)}  (own ${r.own_n}, pool ${r.pool_n})`)
+    for (const r of top) console.log(side === 'buy'
+      ? `  ${String(r.rank).padStart(2)}. ${r.ticker.padEnd(6)} 12-1 ${pct(r.leader_traits?.mom12)}  vs200 ${pct(r.leader_traits?.vs200)}  200d slope ${pct(r.leader_traits?.slope200)}  vol rank ${pct(r.leader_traits?.volRank)}`
+      : `  ${String(r.rank).padStart(2)}. ${r.ticker.padEnd(6)} ${r.score}/5 ${String(r.combo ?? '').padEnd(28)} 3M ${pct(r.est_3m)} 6M ${pct(r.est_6m)}  at turn ${pct(r.est_at_turn)}  (own ${r.own_n}, pool ${r.pool_n})`)
   }
   // Momentum list (owner, 2026-10-07): today's top decile on the 12-1 rule,
   // each with the call the replay would price and the names it moves with.
@@ -263,7 +261,7 @@ async function main() {
   // Yesterday's top 10s, for "entered the top 10".
   let prevRows = []
   try {
-    const { data } = await db.from('confluence_ranks').select('side, ticker, rank').not('rank', 'is', null).lte('rank', TOP)
+    const { data } = await db.from('confluence_ranks').select('side, ticker, rank').eq('side', 'buy').not('rank', 'is', null)
     prevRows = data ?? []
   } catch (e) {
     // Table may not exist yet or be inaccessible; continue without alert check
@@ -298,9 +296,11 @@ async function main() {
 
   try { await forwardRecord(db, { asOf, momRows, rows, byTicker }) } catch (e) { console.error(`Forward record failed: ${e.message}`) }
 
-  // Alerts: new entries into a top 10 among each user's tickers.
-  const entered = rows.filter((r) => r.rank != null && r.rank <= TOP && !prevTop.has(`${r.side}:${r.ticker}`))
-  if (!entered.length) { console.log('No new top-10 entries.'); return }
+  // Alerts (owner, 2026-10-16): one of a user's tickers became a leader
+  // (ranked today, not ranked last night). Sell-signal alerts retired with
+  // the signal suite.
+  const entered = rows.filter((r) => r.side === 'buy' && r.rank != null && !prevTop.has(`${r.side}:${r.ticker}`))
+  if (!entered.length) { console.log('No new leaders.'); return }
   const { data: users } = await db.from('profiles').select('id').eq('entry_alerts', true)
   const ids = (users ?? []).map((u) => u.id)
   if (!ids.length) return
@@ -323,7 +323,7 @@ async function main() {
       if (!mine) continue
       const kind = r.side === 'buy' ? 'confluence_top_buy' : 'confluence_top_sell'
       const message = r.side === 'buy'
-        ? `${r.ticker} is #${r.rank} for lows (buy) — ${r.score} of 5 signals agree; this setup averaged ${pct(r.est_6m)} over 6 months.`
+        ? `${r.ticker} is now a leader (#${r.rank}): ${pct(r.leader_traits?.mom12)} past year, ${pct(r.leader_traits?.vs200)} above a rising 200-day.`
         : `${r.ticker} is #${r.rank} for extended highs (exit) — ${r.score} of 5 sell signals agree; after this setup the stock averaged ${pct(r.est_3m)} over 3 months.`
       const { data, error } = await db.from('alerts').upsert({ user_id: id, alert_type: kind, ticker: r.ticker, event_date: r.as_of, message, sent_via: 'email' },
         { onConflict: 'user_id,alert_type,ticker,event_date', ignoreDuplicates: true }).select('id')

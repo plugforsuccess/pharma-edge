@@ -4,9 +4,11 @@ import { Maximize2 } from 'lucide-react'
 import { DiamondMarkers, LANE_PX } from './chartDiamonds'
 import { VerticalBands, ZoneFill } from './chartBands'
 import { tripleEvents } from '../utils/signalSuite'
+import { snapPin } from '../utils/chartTools'
 import {
   createChart, createSeriesMarkers, BaselineSeries, CandlestickSeries, HistogramSeries, LineSeries,
   ColorType, CrosshairMode, LineStyle, LineType,
+  TickMarkType,
 } from 'lightweight-charts'
 
 // LEAPS entry chart for /charts/entry/:ticker, on TradingView Lightweight
@@ -86,6 +88,7 @@ const SHOW_DAYS = 504 // two years of trading days in view by default
 export function paneTitle(k, tf = '1d') {
   if (k === 'dist' && tf === '1wk') return '% vs 200-week'
   if (k === 'dist' && tf === '1mo') return '% vs 200-month'
+  if (k === 'dist' && INTRADAY_TF.has(tf)) return '% vs 200-bar'
   return PANE_TITLES[k]
 }
 
@@ -119,12 +122,58 @@ function barLegend(bars, i) {
   ]
 }
 
+// Range buttons (owner, 2026-10-16: "the capabilities of Robinhood"): the
+// window shown, by calendar span from the latest bar; YTD from Jan 1; Max
+// = every bar loaded. Pinch / drag still zoom and pan freely after.
+export const RANGES = [['1D', { d: 1 }], ['1W', { d: 7 }], ['1M', { m: 1 }], ['3M', { m: 3 }], ['6M', { m: 6 }], ['YTD', 'ytd'], ['1Y', { m: 12 }], ['2Y', { m: 24 }], ['5Y', { m: 60 }], ['Max', 'max']]
+// Bar time → ms. Daily bars carry 'YYYY-MM-DD'; intraday bars unix seconds
+// of New York wall-clock time read as UTC (so UTC getters read ET).
+export const msOf = (t) => (typeof t === 'number' ? t * 1000 : Date.parse(`${String(t).slice(0, 10)}T00:00:00Z`))
+const isoOf = (t) => new Date(msOf(t)).toISOString()
+export const INTRADAY_TF = new Set(['5m', '15m', '60m'])
+// First bar index of a range on these bars (at least 8 bars in view).
+export function rangeStart(bars, key) {
+  const n = bars?.length ?? 0
+  if (!n) return 0
+  const spec = RANGES.find(([k]) => k === key)?.[1]
+  if (spec == null || spec === 'max') return 0
+  const last = new Date(msOf(bars[n - 1].t))
+  const y = last.getUTCFullYear(), mo = last.getUTCMonth(), d = last.getUTCDate()
+  // 1D = the latest bar's trading day.
+  const start = spec === 'ytd' ? Date.UTC(y, 0, 1) : spec.d === 1 ? Date.UTC(y, mo, d) : spec.d ? Date.UTC(y, mo, d - spec.d) : Date.UTC(y, mo - spec.m, d)
+  let i = n - 1
+  while (i > 0 && msOf(bars[i - 1].t) >= start) i--
+  return Math.max(0, Math.min(i, n - 8))
+}
+const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+// A lightweight-charts time ('YYYY-MM-DD', { year, month, day } or unix seconds) → parts.
+function dayParts(t) {
+  if (t && typeof t === 'object') return { y: t.year, m: t.month, d: t.day }
+  const dt = new Date(msOf(t))
+  return { y: dt.getUTCFullYear(), m: dt.getUTCMonth() + 1, d: dt.getUTCDate(), hh: dt.getUTCHours(), mm: dt.getUTCMinutes(), intraday: typeof t === 'number' }
+}
+const clock = (hh, mm) => `${((hh + 11) % 12) + 1}:${String(mm).padStart(2, '0')} ${hh < 12 ? 'AM' : 'PM'}`
+// The crosshair's date tag: "Tue, Oct 14, 2026" / "Tue, Oct 14 · 10:35 AM" /
+// "Week of Oct 13, 2026" / "October 2026".
+function crosshairDate(t, tf) {
+  const p = dayParts(t)
+  if (!p.y) return ''
+  if (tf === '1mo') return new Date(Date.UTC(p.y, p.m - 1, 1)).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' })
+  const dow = DOW[new Date(Date.UTC(p.y, p.m - 1, p.d)).getUTCDay()]
+  if (p.intraday) return `${dow}, ${MONTH_SHORT[p.m - 1]} ${p.d} · ${clock(p.hh, p.mm)}`
+  return tf === '1wk' ? `Week of ${MONTH_SHORT[p.m - 1]} ${p.d}, ${p.y}` : `${dow}, ${MONTH_SHORT[p.m - 1]} ${p.d}, ${p.y}`
+}
+
 // Bar intervals the chart can draw. Weekly / monthly (owner, 2026-10-03:
 // the candles follow the Signal suite's timeframe) run the same indicator
 // math on those bars — 50 / 200-week averages, weekly RSI and MACD — and
 // drop what only exists daily: the buy-zone shading and arrows, the IV
 // panes and the weekly-50-on-days line.
 export const INTERVALS = {
+  '5m': { unit: '', show: 78, jump: 39 },
+  '15m': { unit: '', show: 130, jump: 52 },
+  '60m': { unit: '', show: 140, jump: 70 },
   '1d': { unit: '', show: SHOW_DAYS, jump: 63 },
   '1wk': { unit: 'W', show: 260, jump: 26 },
   '1mo': { unit: 'M', show: 120, jump: 12 },
@@ -133,7 +182,7 @@ export const DAILY_ONLY_PANES = new Set(['ivr', 'ivhv', 'conf'])
 // A date row under every pane but the last (which has the chart's own axis).
 const DATE_ROW = 16
 
-export default function EntryChart({ bars, model, suite, conf = null, suiteLabel = null, panes, layers = [], onHover, onExpand, focus = null, fill = null, jump = null, tf = '1d' }) {
+export default function EntryChart({ bars, model, suite, conf = null, suiteLabel = null, panes, layers = [], onHover, onExpand, focus = null, fill = null, jump = null, tf = '1d', plain = false, range = null, style = 'candles', pins = null, fib = null, picking = false, onPick = null }) {
   const iv = INTERVALS[tf] ?? INTERVALS['1d']
   const daily = tf === '1d'
   const box = useRef(null)
@@ -146,10 +195,16 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
   const [hover, setHover] = useState(null)
   const [tops, setTops] = useState([])
   const [ticks, setTicks] = useState([])
+  // Drawing tools (owner, 2026-10-16: Measure / Fibonacci on this chart):
+  // the live price series for pins + Fib lines, and the tap handler.
+  const toolsRef = useRef(null)
+  const pickRef = useRef({ picking, onPick })
+  pickRef.current = { picking, onPick }
+  const [toolsVersion, setToolsVersion] = useState(0)
   const shown = focus ? [focus] : ['price', ...SUB_PANES.map(([k]) => k).filter((k) => panes.includes(k) && (daily || !DAILY_ONLY_PANES.has(k)))]
   const showPrice = shown[0] === 'price'
   const height = fill ?? (showPrice ? PRICE_H : 0) + (shown.length - (showPrice ? 1 : 0)) * SUB_H
-  const key = `${shown.join(',')}|${layers.join(',')}|${tf}`
+  const key = `${shown.join(',')}|${layers.join(',')}|${tf}|${style}`
 
   useEffect(() => {
     const el = box.current
@@ -173,7 +228,21 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
       },
       grid: { vertLines: { visible: false }, horzLines: { color: alpha(t.faint, 0.55) } },
       rightPriceScale: { borderVisible: false, minimumWidth: 56 },
-      timeScale: { borderVisible: false, rightOffset: 4, minBarSpacing: 0.5 },
+      // Dates in full (owner, 2026-10-16: "the dates on the x axis are
+      // detailed"): ticks read "2026" / "Oct" / "Oct 14"; the crosshair tag
+      // reads "Tue, Oct 14, 2026" (weekly: "Week of …", monthly: "October 2026").
+      timeScale: {
+        borderVisible: false, rightOffset: 4, minBarSpacing: 0.5,
+        tickMarkFormatter: (time, type) => {
+          const { y, m, d, hh, mm } = dayParts(time)
+          if (type === TickMarkType.Year) return String(y)
+          if (type === TickMarkType.Month) return MONTH_SHORT[m - 1]
+          if (type === TickMarkType.Time || type === TickMarkType.TimeWithSeconds) return clock(hh, mm)
+          return `${MONTH_SHORT[m - 1]} ${d}`
+        },
+        timeVisible: INTRADAY_TF.has(tf), secondsVisible: false,
+      },
+      localization: { locale: 'en-US', timeFormatter: (time) => crosshairDate(time, tf) },
       crosshair: {
         mode: CrosshairMode.Magnet,
         vertLine: { color: t.subtle, width: 1, style: LineStyle.Dashed, labelBackgroundColor: t.border },
@@ -202,15 +271,28 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
     // Buy-zone shading: full-height columns on signal days, its own scale.
     const zone = addS(HistogramSeries, { ...quiet, priceScaleId: 'zone', base: 0 }, 0)
     chart.priceScale('zone', 0).applyOptions({ visible: false, scaleMargins: { top: 0, bottom: 0 } })
-    zone.setData(bars.map((b, i) => (daily && model.cond[i]?.all
+    zone.setData(bars.map((b, i) => (daily && !plain && model.cond[i]?.all
       ? { time: b.t, value: 1, color: alpha(t.up, 0.13) }
       : { time: b.t })))
 
-    const candles = addS(CandlestickSeries, {
-      upColor: t.up, downColor: t.down, wickUpColor: t.up, wickDownColor: t.down, borderVisible: false,
-      priceLineColor: t.subtle, priceLineStyle: LineStyle.Dotted,
-    }, 0)
-    candles.setData(bars.map((b) => ({ time: b.t, open: b.o, high: b.h, low: b.l, close: b.c })))
+    // Candles, or a Robinhood-style line of closes (owner, 2026-10-16), green
+    // or red by the move over the bars loaded.
+    const lineUp = bars[bars.length - 1].c >= bars[0].c
+    const candles = style === 'line'
+      ? addS(LineSeries, { color: lineUp ? t.up : t.down, lineWidth: 2, priceLineColor: t.subtle, priceLineStyle: LineStyle.Dotted, crosshairMarkerRadius: 4 }, 0)
+      : addS(CandlestickSeries, {
+        upColor: t.up, downColor: t.down, wickUpColor: t.up, wickDownColor: t.down, borderVisible: false,
+        priceLineColor: t.subtle, priceLineStyle: LineStyle.Dotted,
+      }, 0)
+    candles.setData(style === 'line'
+      ? bars.map((b) => ({ time: b.t, value: b.c }))
+      : bars.map((b) => ({ time: b.t, open: b.o, high: b.h, low: b.l, close: b.c })))
+    // Volume bars along the bottom fifth of the price pane, coloured by the bar's direction.
+    if (bars.some((b) => b.v > 0)) {
+      const volS = addS(HistogramSeries, { ...quiet, priceScaleId: 'vol', priceFormat: { type: 'volume' } }, 0)
+      chart.priceScale('vol', 0).applyOptions({ visible: false, scaleMargins: { top: 0.82, bottom: 0 } })
+      volS.setData(bars.map((b) => ({ time: b.t, value: b.v || 0, color: alpha(b.c >= b.o ? t.up : t.down, 0.35) })))
+    }
     chart.priceScale('right', 0).applyOptions({ scaleMargins: { top: 0.06, bottom: 0.08 } })
 
     // Reclaim zone: Bravo's basis ± ½ ATR, filled between its edges (blue
@@ -284,8 +366,9 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
     }
     for (const i of model.golden) markers.push({ time: time[i], position: 'aboveBar', shape: 'circle', color: t.gold, text: 'Golden cross', size: 1 })
     for (const i of model.death) markers.push({ time: time[i], position: 'aboveBar', shape: 'circle', color: t.down, text: 'Death cross', size: 1 })
-    // Buy-zone arrows and MACD confirmations: daily only.
-    if (daily) {
+    // Buy-zone arrows and MACD confirmations: daily only (off when plain —
+    // the buy-zone rule is sunset with the signal suite).
+    if (daily && !plain) {
       for (const i of model.confirms) {
         if (!signalSet.has(i)) markers.push({ time: time[i], position: 'belowBar', shape: 'circle', color: alpha(t.up, 0.45), size: 0.6 })
       }
@@ -300,6 +383,7 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
     }
     markers.sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0))
     createSeriesMarkers(candles, markers)
+    toolsRef.current = { candles, markers: createSeriesMarkers(candles, []), line: null, fibLines: [], t }
     }
 
     // Sub-panes ----------------------------------------------------------
@@ -418,7 +502,7 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
     const n = bars.length
     // A new interval starts from its default window (bar indexes differ).
     if (rangeRef.current?.tf !== tf) rangeRef.current = null
-    chart.timeScale().setVisibleLogicalRange(rangeRef.current ?? { from: Math.max(0, n - iv.show), to: n - 1 + 4 })
+    chart.timeScale().setVisibleLogicalRange(rangeRef.current ?? { from: range ? rangeStart(bars, range.key) : Math.max(0, n - iv.show), to: n - 1 + 4 })
 
     // Date rows under the panes: month (or year) starts in view, at least
     // 64px apart — the same kind of labels as the chart's own axis.
@@ -430,23 +514,34 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
       if (!r) return
       const from = Math.max(1, Math.ceil(r.from))
       const to = Math.min(n - 1, Math.floor(r.to))
-      const span = to >= from ? (Date.parse(bars[to].t) - Date.parse(bars[from].t)) / 86400000 : 0
+      const span = to >= from ? (msOf(bars[to].t) - msOf(bars[from].t)) / 86400000 : 0
+      const intraday = typeof bars[0]?.t === 'number'
       // Years first (always labelled when they fit), then months in the gaps
-      // when the view is under two years.
+      // when the view is under two years, then days (each week's first day
+      // under ~5 months; every day on intraday bars), then times of day on
+      // intraday views under ~2 days.
       const years = []
       const months = []
+      const days = []
+      const hours = []
       for (let k = from; k <= to; k++) {
-        const a = String(bars[k - 1].t)
-        const b = String(bars[k].t)
+        const a = isoOf(bars[k - 1].t)
+        const b = isoOf(bars[k].t)
         const x = chart.timeScale().logicalToCoordinate(k)
         if (x == null) continue
+        const dayLabel = `${MONTHS[+b.slice(5, 7) - 1]} ${+b.slice(8, 10)}`
         if (a.slice(0, 4) !== b.slice(0, 4)) years.push({ x, label: b.slice(0, 4), strong: true })
         else if (span < 730 && a.slice(5, 7) !== b.slice(5, 7)) months.push({ x, label: MONTHS[+b.slice(5, 7) - 1] })
+        else if (intraday && a.slice(0, 10) !== b.slice(0, 10)) days.push({ x, label: dayLabel })
+        else if (!intraday && span < 150 && new Date(msOf(bars[k].t)).getUTCDay() < new Date(msOf(bars[k - 1].t)).getUTCDay()) days.push({ x, label: dayLabel })
+        else if (intraday && span < 2 && a.slice(11, 13) !== b.slice(11, 13)) hours.push({ x, label: clock(+b.slice(11, 13), +b.slice(14, 16)) })
       }
       const out = []
-      const fits = (x) => out.every((o) => Math.abs(o.x - x) >= 56)
+      const fits = (x, gap = 56) => out.every((o) => Math.abs(o.x - x) >= gap)
       for (const y of years) if (fits(y.x)) out.push(y)
       for (const m of months) if (fits(m.x)) out.push(m)
+      for (const d of days) if (fits(d.x, 46)) out.push(d)
+      for (const h of hours) if (fits(h.x, 52)) out.push(h)
       setTicks(out)
     }
     const keep = (r) => {
@@ -494,10 +589,24 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
     const ro = new ResizeObserver(() => requestAnimationFrame(measure))
     ro.observe(el)
 
+    // Measure: while picking, a tap drops a pin on that candle's high or low.
+    const onClick = (param) => {
+      const { picking: on, onPick: pick } = pickRef.current
+      const tl = toolsRef.current
+      if (!on || !pick || !param.point || !tl) return
+      const i = param.time != null ? index.get(timeKey(param.time)) : undefined
+      if (i == null) return
+      pick(snapPin(bars[i], tl.candles.coordinateToPrice(param.point.y)))
+    }
+    chart.subscribeClick(onClick)
+    setToolsVersion((x) => x + 1)
+
     return () => {
       cancelAnimationFrame(raf)
       if (tickRaf) cancelAnimationFrame(tickRaf)
       ro.disconnect()
+      chart.unsubscribeClick(onClick)
+      toolsRef.current = null
       chart.unsubscribeCrosshairMove(move)
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(keep)
       chart.remove()
@@ -507,6 +616,33 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
   }, [bars, model, suite, conf, key, tf])
 
   useLayoutEffect(() => { setHover(null) }, [bars])
+
+  // Pins (A, B, joined by a gold line) and Fibonacci levels on the live chart.
+  useEffect(() => {
+    const chart = chartRef.current
+    const tl = toolsRef.current
+    if (!chart || !tl) return
+    const { candles, markers, t } = tl
+    if (tl.line) { try { chart.removeSeries(tl.line) } catch { /* rebuilt */ } tl.line = null }
+    for (const pl of tl.fibLines) candles.removePriceLine(pl)
+    tl.fibLines = []
+    const list = pins ?? []
+    markers.setMarkers(list.map((pin, k) => ({ time: pin.t, position: 'atPriceMiddle', price: pin.p, shape: 'circle', color: t.gold, size: 1.8, text: k === 0 ? 'A' : 'B' })))
+    if (list.length === 2) {
+      tl.line = chart.addSeries(LineSeries, { color: t.gold, lineWidth: 2, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false, pointMarkersVisible: false }, 0)
+      tl.line.setData(list.map((pin) => ({ time: pin.t, value: pin.p })))
+    }
+    for (const l of fib ?? []) {
+      const strong = l.kind === 'retracement' && (l.ratio === 0.5 || l.ratio === 0.618)
+      const edge = l.kind === 'retracement' && (l.ratio === 0 || l.ratio === 1)
+      const color = l.kind === 'extension' ? (l.up ? t.up : t.down) : strong ? t.gold : edge ? t.muted : t.subtle
+      tl.fibLines.push(candles.createPriceLine({
+        price: l.price, title: l.kind === 'extension' ? `Ext ${l.label}` : `Fib ${l.label}${l.ratio === 0 ? ' · B' : l.ratio === 1 ? ' · A' : ''}`,
+        color, lineWidth: 1, lineStyle: l.kind === 'extension' ? LineStyle.SparseDotted : LineStyle.Dotted,
+        axisLabelVisible: true, axisLabelColor: alpha(color, 0.9), axisLabelTextColor: t.card ?? t.bg,
+      }))
+    }
+  }, [pins, fib, toolsVersion])
 
   // jump = { i, n } (n changes per request): center the view on bar i,
   // about three months either side, and put the crosshair there.
@@ -520,6 +656,15 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
     setHover(jump.i)
     hoverRef.current?.(jump.i)
   }, [jump, bars, tf, iv.jump])
+
+  // range = { key, n } (n changes per tap): show that window.
+  useEffect(() => {
+    const chart = chartRef.current
+    if (!chart || !range || !bars?.length) return
+    const r = { from: rangeStart(bars, range.key), to: bars.length - 1 + 4, tf }
+    rangeRef.current = r
+    chart.timeScale().setVisibleLogicalRange(r)
+  }, [range, bars, tf])
 
   // Legends follow the crosshair; off the chart they show the latest day.
   const i = hover ?? (bars?.length ? bars.length - 1 : null)
