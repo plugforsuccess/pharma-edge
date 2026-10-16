@@ -235,7 +235,9 @@ async function main() {
   for (const side of SIDES) {
     const top = rows.filter((r) => r.side === side && r.rank != null).sort((a, b) => a.rank - b.rank).slice(0, TOP)
     console.log(`\nTop ${TOP} ${side}:`)
-    for (const r of top) console.log(`  ${String(r.rank).padStart(2)}. ${r.ticker.padEnd(6)} ${r.score}/5 ${r.combo.padEnd(28)} 3M ${pct(r.est_3m)} 6M ${pct(r.est_6m)}  at turn ${pct(r.est_at_turn)}  (own ${r.own_n}, pool ${r.pool_n})`)
+    for (const r of top) console.log(side === 'buy'
+      ? `  ${String(r.rank).padStart(2)}. ${r.ticker.padEnd(6)} 12-1 ${pct(r.leader_traits?.mom12)}  vs200 ${pct(r.leader_traits?.vs200)}  200d slope ${pct(r.leader_traits?.slope200)}  vol rank ${pct(r.leader_traits?.volRank)}`
+      : `  ${String(r.rank).padStart(2)}. ${r.ticker.padEnd(6)} ${r.score}/5 ${String(r.combo ?? '').padEnd(28)} 3M ${pct(r.est_3m)} 6M ${pct(r.est_6m)}  at turn ${pct(r.est_at_turn)}  (own ${r.own_n}, pool ${r.pool_n})`)
   }
   // Momentum list (owner, 2026-10-07): today's top decile on the 12-1 rule,
   // each with the call the replay would price and the names it moves with.
