@@ -8,7 +8,7 @@
 // own. Leaders sharing a theme are one bet.
 
 export const THEMES = Object.freeze([
-  ['SMH', 'Chips'], ['IGV', 'Software'], ['HACK', 'Cybersecurity'], ['SKYY', 'Cloud'], ['FDN', 'Internet'],
+  ['SMH', 'Chips & AI'], ['IGV', 'Software'], ['HACK', 'Cybersecurity'], ['SKYY', 'Cloud'], ['FDN', 'Internet'],
   ['XOP', 'Oil'], ['CRAK', 'Refiners'], ['OIH', 'Oil services'], ['AMLP', 'Pipelines'],
   ['KRE', 'Regional banks'], ['KBE', 'Banks'], ['IAI', 'Brokers'], ['KIE', 'Insurance'],
   ['XBI', 'Biotech'], ['XPH', 'Pharma'], ['IHI', 'Medical devices'], ['IHF', 'Health insurers'],
@@ -16,7 +16,7 @@ export const THEMES = Object.freeze([
   ['XME', 'Metals & mining'], ['GDX', 'Gold miners'], ['URA', 'Uranium'], ['TAN', 'Solar'], ['LIT', 'Batteries'],
   ['PAVE', 'Infrastructure'], ['PBJ', 'Food & drink'],
   // Broad sector funds — the fallback names.
-  ['XLK', 'Tech'], ['XLE', 'Energy'], ['XLF', 'Financials'], ['XLV', 'Health care'], ['XLI', 'Industrials'],
+  ['XLK', 'Tech'], ['XLE', 'Oil'], ['XLF', 'Financials'], ['XLV', 'Health care'], ['XLI', 'Industrials'],
   ['XLB', 'Materials'], ['XLY', 'Consumer'], ['XLP', 'Staples'], ['XLU', 'Utilities'], ['XLC', 'Media & telecom'],
   ['XLRE', 'Real estate'],
 ])

@@ -1680,9 +1680,9 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
 - **Same bet** (owner, 2026-10-16: the top 10 sat in chips and oil; "is
   cluster the best taxonomy you can come up with?" — replaced the CLUSTER
   tag). Each ticker is named after the **industry fund it tracks** most
-  closely over 120 trading days (`src/utils/themes.js`, `THEMES`: SMH Chips,
+  closely over 120 trading days (`src/utils/themes.js`, `THEMES`: SMH "Chips & AI" (LITE, BE land there too),
   XOP Oil, CRAK Refiners, OIH, KRE, XBI, IHF Health insurers, ITB … then the
-  broad XL* funds as fallbacks, −0.05 so chips don't read as "Tech"; below
+  broad XL* funds as fallbacks (XLE named "Oil" so XOM / XLE join the producers), −0.05 so chips don't read as "Tech"; below
   0.6 correlation → no theme; `npm run themes:check`). The nightly ranking
   fetches the funds and writes `leader_traits.theme` ({ name, etf, corr })
   plus `leader_traits.moves_with` (`moveGroups`, ≥ 0.7). The Leaders list:
