@@ -65,11 +65,14 @@ export function holdReason(own, ticker) {
   return null
 }
 
-export function buyVerdict({ score, trendUp, cond, hold = null }) {
+// Leaders only (owner, 2026-10-16: "We only want leaders"): 2+ signals on a
+// rising 200-day in a stock that meets the Leaders rule (src/utils/leaders.js)
+// is the entry. The buy-zone dip (the old BUY SETUP) did worse out of sample
+// (scripts/winner-traits.mjs) and no longer gates; NOT YET / NOT NOW retire.
+export function buyVerdict({ score, trendUp, leader }) {
   if (score < MIN_SCORE) return null
   if (!trendUp) return 'watch'
-  if (!cond?.all) return 'wait'
-  return hold ? 'hold' : 'enter'
+  return leader ? 'enter' : 'notleader'
 }
 
 // Bravo's regime at the close: 'up' = close and fast EMA above the basis.

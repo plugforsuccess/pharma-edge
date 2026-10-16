@@ -38,6 +38,7 @@ import { momentumToday, moveGroups, forwardOutcome, SWING_PLAN } from '../src/ut
 import { createHash } from 'node:crypto'
 import { replaySignals, trailingVol, OPTION_MODEL } from '../src/utils/replay.js'
 import { callHistory, callStats, PLAYS, playModel, playSpan } from '../src/utils/callHistory.js'
+import { leaderSeries, leaderMisses } from '../src/utils/leaders.js'
 
 const args = process.argv.slice(2)
 const MODE = (args[args.indexOf('--mode') + 1] && args.includes('--mode')) ? args[args.indexOf('--mode') + 1] : 'dry-run'
@@ -70,7 +71,16 @@ export function analyze(ticker, bars, spy = null) {
     buy: { today: conf.buy.today, setups: conf.buy.setups, lastSignal: lastSignal(conf.buy.flags) },
     sell: { today: conf.sell.today, setups: conf.sell.setups, lastSignal: lastSignal(conf.sell.flags) },
     calls: callPaths(bars, model, suite),
+    leader: leaderToday(bars, spy),
   }
+}
+
+// Leaders (owner, 2026-10-16: "We only want leaders"; src/utils/leaders.js):
+// today's traits and the rules missed ([] = a leader).
+function leaderToday(bars, spy) {
+  const tr = leaderSeries(bars, spy ?? []).at(bars.length - 1)
+  const r3 = (x) => (x == null ? null : Math.round(x * 1000) / 1000)
+  return { misses: leaderMisses(tr), traits: tr ? { mom12: r3(tr.mom12), vs200: r3(tr.vs200), slope200: r3(tr.slope200), volRank: r3(tr.volRank), spyUp: tr.spyUp } : null }
 }
 
 // The at-the-money plays (owner, 2026-10-15): after each past BUY SETUP
@@ -124,11 +134,13 @@ export function rankAll(results, pools, calls = null) {
         est_badq_3m: hz(est, '3M', 'badq'), est_badq_6m: hz(est, '6M', 'badq'),
         est_beat_3m: hz(est, '3M', 'beat'), est_beat_6m: hz(est, '6M', 'beat'),
         last_signal: r[side].lastSignal, etb_convergence: side === 'buy' ? r.etbConvergence : false, rank: null,
-        verdict: side === 'buy' ? buyVerdict({ score: now?.score ?? 0, trendUp: r.trendUp, cond: r.cond, hold }) : sellVerdict({ score: now?.score ?? 0, lit: now?.lit ?? [] }),
+        verdict: side === 'buy' ? buyVerdict({ score: now?.score ?? 0, trendUp: r.trendUp, leader: r.leader?.misses?.length === 0 }) : sellVerdict({ score: now?.score ?? 0, lit: now?.lit ?? [] }),
         hold_reason: hold,
         blockers: side === 'buy' ? r.blockers : null, trade: side === 'buy' ? r.trade : null,
         stop_price: r.stop?.price ?? null, stop_date: r.stop?.date ?? null, momentum: r.momentum,
         own_record: side === 'buy' ? r.ownRecord : null,
+        leader: side === 'buy' ? r.leader?.misses?.length === 0 : null,
+        leader_traits: side === 'buy' && r.leader ? { ...r.leader.traits, misses: r.leader.misses } : null,
         call_hist: side === 'buy' && r.calls ? {
           plays: Object.fromEntries(PLAYS.map((p) => [p.key, {
             own: { setup: callStats(r.calls[p.key].setup, playSpan(p))[0], confluence: callStats(r.calls[p.key].confluence, playSpan(p))[0] },
@@ -141,23 +153,19 @@ export function rankAll(results, pools, calls = null) {
       // history is NOT a gate — the universe replay's walk-forward test
       // (2026-10-03) found "history says yes" trades did no better than
       // "history says no" — so it only breaks ties.
-      const eligible = row.score >= MIN_SCORE && (side === 'buy' ? row.trend_up : true)
+      const eligible = row.score >= MIN_SCORE && (side === 'buy' ? row.trend_up && row.leader : true)
       if (eligible) cands.push(row)
     }
     // Tier 1: E+T+B convergence (buy side only), then Tier 2: other 3+ signals
     cands.sort((a, b) => {
-      // Buy side (owner, 2026-10-05: quality, not room): BUY SETUP → NOT YET
-      // → NOT NOW; within setups more signals first, then momentum up before
-      // early, then the ticker's own record of the rule.
+      // Buy side: leaders only (owner, 2026-10-16), every one an entry —
+      // more signals first, then momentum up before early, then the
+      // stronger 12-month return.
       if (side === 'buy') {
-        const tier = (r) => (r.verdict === 'enter' ? 0 : r.verdict === 'wait' ? 1 : r.verdict === 'hold' ? 2 : 3)
-        if (tier(a) !== tier(b)) return tier(a) - tier(b)
-        if (a.verdict === 'enter' && b.verdict === 'enter') {
-          if (b.score !== a.score) return b.score - a.score
-          if ((a.momentum === 'up') !== (b.momentum === 'up')) return a.momentum === 'up' ? -1 : 1
-          const own = (r) => r.own_record?.zone?.avg ?? 0
-          if (own(b) !== own(a)) return own(b) - own(a)
-        }
+        if (b.score !== a.score) return b.score - a.score
+        if ((a.momentum === 'up') !== (b.momentum === 'up')) return a.momentum === 'up' ? -1 : 1
+        const m = (r) => r.leader_traits?.mom12 ?? 0
+        if (m(b) !== m(a)) return m(b) - m(a)
       }
       // Tier by E+T+B convergence (buy side) — tier 1 first
       if (side === 'buy') {
@@ -345,7 +353,7 @@ async function forwardRecord(db, { asOf, momRows, rows, byTicker }) {
   const openKey = new Set((logs ?? []).filter((l) => !closed.has(l.id)).map((l) => `${l.kind}:${l.ticker}`))
   const candidates = [
     ...momRows.filter((m) => m.trade).map((m) => ({ kind: 'momentum', ticker: m.ticker, rank: m.rank, close: m.close, trade: m.trade, payload: { score: m.score, vs200: m.vs200, peers: m.peers } })),
-    ...rows.filter((r) => r.side === 'buy' && r.verdict === 'enter' && r.trade).map((r) => ({ kind: 'buy_setup', ticker: r.ticker, rank: r.rank, close: r.close, trade: r.trade, payload: { combo: r.combo, score: r.score, momentum: r.momentum, stop: r.stop_price } })),
+    ...rows.filter((r) => r.side === 'buy' && r.verdict === 'enter' && r.trade).map((r) => ({ kind: 'leader', ticker: r.ticker, rank: r.rank, close: r.close, trade: r.trade, payload: { combo: r.combo, score: r.score, momentum: r.momentum, stop: r.stop_price, leader: r.leader_traits } })),
   ]
   const fresh = candidates.filter((c) => !openKey.has(`${c.kind}:${c.ticker}`)).map((c) => ({
     logged_on: asOf, kind: c.kind, ticker: c.ticker, rank: c.rank ?? null, close: c.close,
@@ -379,7 +387,7 @@ async function forwardRecord(db, { asOf, momRows, rows, byTicker }) {
     const { error } = await db.from('setup_outcomes').upsert(updates.slice(i, i + 500), { onConflict: 'log_id' })
     if (error) throw new Error(`setup_outcomes: ${error.message}`)
   }
-  console.log(`Forward record: logged ${fresh.length} new setups (${fresh.filter((f) => f.kind === 'momentum').length} momentum, ${fresh.filter((f) => f.kind === 'buy_setup').length} buy setup); graded ${updates.length}.`)
+  console.log(`Forward record: logged ${fresh.length} new setups (${fresh.filter((f) => f.kind === 'momentum').length} momentum, ${fresh.filter((f) => f.kind === 'leader').length} leader); graded ${updates.length}.`)
 }
 
 async function sendEmails(db, mail) {

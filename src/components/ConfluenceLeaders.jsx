@@ -15,7 +15,8 @@ import { simulateCall, breakevenMoves, playContract, PLAYS } from '../utils/call
 // Indicator names, per-share prices and the blended-history mechanics stay
 // on the entry chart, which every row opens.
 const VERDICT = {
-  enter: ['BUY SETUP', 'border-green-400/50 text-green-400'],
+  enter: ['LEADER · BUY', 'border-green-400/50 text-green-400'],
+  notleader: ['NOT A LEADER', 'border-border text-subtle'],
   wait: ['NOT YET', 'border-amber-400/50 text-amber-400'],
   hold: ['NOT NOW', 'border-rose-300/50 text-rose-300'],
   watch: ['NOT IN AN UPTREND', 'border-border text-subtle'],
@@ -29,6 +30,15 @@ const PLAIN = {
   rsi: "hasn't pulled back enough",
   trend: 'short-term trend still down',
   rising: 'long-term trend is falling',
+}
+// A missed Leaders rule, in words (src/utils/leaders.js).
+const MISS = {
+  mom12: 'not strong enough over the past year',
+  vs200: 'not far enough above its 200-day',
+  slope200: '200-day not rising fast enough',
+  volRank: 'options pricey vs its past year',
+  spyUp: 'S&P 500 below its 200-day',
+  history: 'not enough history',
 }
 const plainBlocker = (b) => (b.k === 'band' ? (/^Fall/.test(b.need ?? '') ? 'too far above its trend line' : 'too far below its trend line') : PLAIN[b.k] ?? b.label)
 const money = (x, d = 2) => `$${Number(x).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d })}`
@@ -46,6 +56,16 @@ function SignalMeter({ score, side }) {
     <span className="inline-flex items-center gap-1" aria-label={`${score} of 5 signals`}>
       <span className="flex gap-[3px]">{[0, 1, 2, 3, 4].map((i) => <span key={i} className={clsx('h-1.5 w-3 rounded-sm', i < score ? on : 'bg-border')} />)}</span>
       <span className="text-[11px] text-muted font-mono-tab">{score}/5</span>
+    </span>
+  )
+}
+
+// "+34% past year · 14% above a rising 200-day · options cheap for it"
+function LeaderLine({ t }) {
+  const p = (x) => `${x >= 0 ? '+' : '−'}${Math.round(Math.abs(x) * 100)}%`
+  return (
+    <span className="mt-2 block text-xs text-subtle">
+      <span className="font-mono-tab text-green-400">{p(t.mom12)}</span> past year · <span className="font-mono-tab">{Math.round(t.vs200 * 100)}%</span> above a rising 200-day{t.volRank != null && <> · options cheap for it (<span className="font-mono-tab">{Math.round(t.volRank * 100)}</span>th pct)</>}
     </span>
   )
 }
@@ -89,7 +109,7 @@ export default function ConfluenceLeaders({ mine = [] }) {
     let cancelled = false
     setRows(null)
     let q = supabase.from('confluence_ranks')
-      .select('ticker, side, as_of, close, score, rank, est_3m, est_6m, est_win_3m, est_win_6m, own_n, pool_n, verdict, hold_reason, blockers, trade, stop_price, momentum, call_hist')
+      .select('ticker, side, as_of, close, score, rank, est_3m, est_6m, est_win_3m, est_win_6m, own_n, pool_n, verdict, hold_reason, blockers, trade, stop_price, momentum, call_hist, leader, leader_traits')
       .eq('side', side)
     if (side === 'buy' && strict) q = q.gte('score', 3)
     q = scope === 'all'
@@ -103,8 +123,7 @@ export default function ConfluenceLeaders({ mine = [] }) {
   // Yours: ranked first, then by score.
   const list = useMemo(() => (scope === 'all' ? rows : rows && [...rows].sort((a, b) => (a.rank ?? 1e9) - (b.rank ?? 1e9) || b.score - a.score)), [rows, scope])
   const asOf = rows?.[0]?.as_of
-  const noEntry = side === 'buy' && scope === 'all' && list?.length > 0 && !list.some((r) => r.verdict === 'enter')
-
+  
   return (
     <section className="bg-card border border-border rounded-2xl mb-5 overflow-hidden">
       <div className="px-5 pt-5 pb-3">
@@ -138,6 +157,7 @@ export default function ConfluenceLeaders({ mine = [] }) {
             {strict && <span className="text-[11px] text-muted">Stricter: slightly better 3-month record, fewer names.</span>}
           </div>
         )}
+        {side === 'buy' && <p className="mt-2 text-xs text-muted">Leaders only: stocks up strongly over the past year, well above a rising 200-day, with options cheap for them, while the S&P 500 is above its 200-day.</p>}
         {side === 'buy' && (
           <div className="mt-3">
             <div className="grid grid-cols-5 gap-0.5 p-0.5 rounded-lg bg-bg-elev" role="tablist" aria-label="Call">
@@ -157,11 +177,10 @@ export default function ConfluenceLeaders({ mine = [] }) {
         <div className="px-5 pb-5 text-sm text-subtle">
           {side === 'buy' && strict ? 'No stock has 3 or more signals today. Turn off 3+ signals to see the 2-signal setups.'
             : scope === 'mine' ? (mine.length ? 'None of your tickers have signals today.' : 'Add tickers to Tracking or Portfolio to see them here.')
-            : 'No rankings yet — they run after each close.'}
+            : side === 'buy' ? 'No leader has 2+ signals today.' : 'No rankings yet — they run after each close.'}
         </div>
       ) : (
         <>
-          {noEntry && <p className="px-5 pb-3 text-xs text-amber-400">No stock meets the entry rule today. These are the closest, and what each still needs.</p>}
           <ul className="border-t border-hairline divide-y divide-hairline">
             {list.map((r) => {
               const v = VERDICT[r.verdict]
@@ -214,6 +233,12 @@ export default function ConfluenceLeaders({ mine = [] }) {
                         <span className="block text-sm text-rose-300 leading-5">The rule is met, but {r.hold_reason}.</span>
                       </span>
                     )}
+                    {r.verdict === 'notleader' && (
+                      <span className="mt-3 block rounded-xl bg-bg-elev px-3.5 py-3">
+                        <span className="block text-[11px] uppercase tracking-[0.12em] text-muted font-semibold">Signals, but not a leader</span>
+                        <span className="block text-sm text-subtle leading-5">{(r.leader_traits?.misses ?? []).map((m) => MISS[m] ?? m).join(' · ') || 'misses the Leaders rule'}</span>
+                      </span>
+                    )}
                     {r.verdict === 'watch' && (
                       <span className="mt-3 block rounded-xl bg-bg-elev px-3.5 py-3 text-sm text-subtle leading-5">Signals, but the long-term trend is falling — the rule doesn’t buy here.</span>
                     )}
@@ -234,6 +259,7 @@ export default function ConfluenceLeaders({ mine = [] }) {
                         )}
                       </span>
                     )}
+                    {trade && r.leader_traits && <LeaderLine t={r.leader_traits} />}
                     {trade && edge && <span className="mt-1.5 block text-[11px] text-amber-400">This entry sits at the bottom edge of the buy zone.</span>}
 
                     {/* Signals + one line of history */}

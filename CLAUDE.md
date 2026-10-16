@@ -1570,6 +1570,27 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   vs 62% higher, gone by 6M). A solid strip under the phone status bar
   (`Layout.jsx`, `env(safe-area-inset-top)`, z-40) keeps scrolled content
   out from behind the clock on every page.
+- **Leaders only** (owner, 2026-10-16: "We only want leaders"). The
+  winner-traits study (`scripts/winner-traits.mjs`,
+  `.github/workflows/winner-traits.yml`, research only, no DB writes:
+  ~9,700 past pullback entries as at-the-money 2-year calls with the exit
+  plan; traits found on 2021–23, checked on 2024 →) found no entry-day
+  trait that separates winners from losers (≈1 in 4 lose half whatever the
+  filter), but strength tilts the odds. **Leaders rule** (`LEADER` in
+  `src/utils/leaders.js`, `npm run leaders:check`; thresholds = the train
+  medians): 12-1 return > +17%, close ≥ 9% above the 200-day, the 200-day
+  up ≥ 1.4% over 20 days, 60-day vol in the cheaper 45% of its past year,
+  S&P 500 above its 200-day. Out of sample: leaders win 61%, median +54%,
+  lost half 24% (n 1,024) vs non-leaders 50% / +0% / 27%; the old BUY SETUP
+  (dip to the 200-day) did +1%. The nightly ranking ranks **only leaders**
+  with 2+ signals on a rising 200-day (`buyVerdict`: `enter` = LEADER · BUY,
+  `notleader` = NOT A LEADER with the misses in words, `watch`; NOT YET /
+  NOT NOW retired), sorted by signals, momentum up, then 12-1 return;
+  `confluence_ranks.leader` / `leader_traits` (traits + `misses`). Rows show
+  "+34% past year · 14% above a rising 200-day · options cheap for it". The
+  forward record logs leader entries as kind `leader` (earlier `buy_setup`
+  rows keep their meaning). Market regime still dominates: 2026 entries are
+  −21% median so far (open, marked).
 - **Pullbacks plays — at the money** (owner, 2026-10-15: "it is crowded …
   1, 3, 6, 12, LEAPS on pullbacks … pullbacks at the money, either short
   term contracts catching the swing holding 1-2 weeks, and then LEAPS that
