@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import clsx from 'clsx'
-import { ArrowDown, ArrowLeft, ArrowUp, Check, ChevronLeft, ChevronRight, Info, Maximize2, Plus, RotateCcw, Search, Sparkles, X } from 'lucide-react'
+import { ArrowDown, ArrowLeft, ArrowUp, ChartCandlestick, ChartLine, Check, ChevronDown, ChevronLeft, ChevronRight, Info, Maximize2, Plus, RotateCcw, Search, Sparkles, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { CHART_TICKERS } from '../lib/chartTickers'
 import { entryModel, entryGaps, DEFAULT_PARAMS, HORIZONS } from '../utils/indicators'
@@ -47,6 +47,7 @@ const STYLE_KEY = 'cm:entry-style'
 // come from price-history (Yahoo: 5 / 15-minute up to 60 days, hourly up to
 // two years); day / week / month from leaps-entry. Each size opens on the
 // range that suits it.
+const INTERVAL_SHORT = { '5m': '5m', '15m': '15m', '60m': '1h', '1d': 'D', '1wk': 'W', '1mo': 'M' }
 const CANDLES = [['5m', '5 min', '5d', '1D'], ['15m', '15 min', '1mo', '1W'], ['60m', '1 hour', '6mo', '1M'], ['1d', 'Day', null, '1Y'], ['1wk', 'Week', null, '5Y'], ['1mo', 'Month', null, 'Max']]
 const CONFIRM_DAYS = { '1d': 10, '1wk': 10, '1mo': 21 }
 // [key, label, min, max, decimals, suffix]
@@ -463,41 +464,7 @@ export default function LeapsEntry() {
           {/* Chart */}
           <div className="min-w-0 md:order-3 md:col-span-2">
             <section ref={chartBox} className="bg-card border border-border rounded-2xl mb-4 overflow-hidden scroll-mt-4">
-              {/* Candle interval — drives the candles, the averages and the
-                  Signal suite together (one state, cm:suite-tf:v2). */}
-              <div className="px-5 pt-4">
-                <div className="flex items-center mb-1.5">
-                  <span className="flex-1 text-[11px] uppercase tracking-[0.12em] text-muted font-semibold">Candle size</span>
-                  <span className="inline-flex gap-0.5 p-0.5 rounded-full bg-bg-elev" role="tablist" aria-label="Chart style">
-                    {[['candles', 'Candles'], ['line', 'Line']].map(([k, l]) => (
-                      <button key={k} type="button" role="tab" aria-selected={chartStyle === k} onClick={() => pickStyle(k)}
-                        className={clsx('min-h-[32px] px-3 rounded-full text-[11px] font-semibold transition', chartStyle === k ? 'bg-fg text-bg' : 'text-muted hover:text-subtle')}>{l}</button>
-                    ))}
-                  </span>
-                </div>
-                <div className="grid grid-cols-6 gap-0.5 p-0.5 rounded-lg bg-bg-elev" role="tablist" aria-label="Candle size">
-                  {CANDLES.map(([k, label]) => (
-                    <button key={k} type="button" role="tab" aria-selected={candle === k} onClick={() => pickCandle(k)}
-                      className={clsx('min-h-[44px] rounded-md text-xs font-semibold transition leading-tight',
-                        candle === k ? 'bg-card text-violet-300 shadow-sm' : 'text-muted hover:text-subtle')}>
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                {intraday && !intraBars && (
-                  <div className="mt-2 text-[11px] text-muted" aria-live="polite">
-                    {intraData?.error ? `Couldn't load ${CANDLES.find(([k]) => k === candle)[1]} candles — showing daily.` : 'Loading intraday candles…'}
-                  </div>
-                )}
-                {!intraday && suiteTf !== '1d' && !periodMode && (
-                  <div className="mt-2 text-[11px] text-muted" aria-live="polite">
-                    {suiteData?.error && suiteData.tf === suiteTf
-                      ? `Couldn't load ${SUITE_TIMEFRAMES[suiteTf].label.toLowerCase()} bars — showing daily candles.`
-                      : `Loading ${SUITE_TIMEFRAMES[suiteTf].label.toLowerCase()} candles…`}
-                  </div>
-                )}
-              </div>
-              <div className="px-5 pt-3 pb-2 flex items-end gap-3">
+              <div className="px-5 pt-4 pb-2 flex items-end gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-baseline gap-2">
                     <span className="text-2xl font-semibold font-mono-tab leading-none">{money(shown?.c)}</span>
@@ -529,16 +496,42 @@ export default function LeapsEntry() {
                   </div>
                 )}
               </div>
-              {/* Range (owner, 2026-10-16: Robinhood-style) — the window in view. */}
-              <div className="px-5 pb-3">
-                <div className="flex gap-1 overflow-x-auto no-scrollbar" role="tablist" aria-label="Range">
+              <EntryChart bars={chart.bars} model={chart.model} suite={chart.suite} conf={periodMode || !SUITE ? null : conf} tf={chart.tf} suiteLabel={intraBars ? CANDLES.find(([k]) => k === candle)[1] : SUITE_TIMEFRAMES[suiteTf].label} panes={shownPanes} layers={shownLayers} plain={!SUITE} range={range} style={chartStyle} pins={chartPins} fib={fib} picking={picking} onPick={onPick} onHover={setHover} onExpand={setExpanded} jump={jump} />
+              {/* Range + interval, a row right under the chart (owner,
+                  2026-10-16: "how TradingView has the date range and interval
+                  toggle a row below the chart"). */}
+              <div className="px-2 py-1.5 border-t border-hairline flex items-center gap-1">
+                <div className="flex-1 min-w-0 flex gap-0.5 overflow-x-auto no-scrollbar" role="tablist" aria-label="Range">
                   {RANGES.map(([k]) => (
                     <button key={k} type="button" role="tab" aria-selected={range.key === k} onClick={() => pickRange(k)}
-                      className={clsx('shrink-0 min-h-[36px] min-w-[44px] px-2.5 rounded-full text-xs font-semibold transition',
-                        range.key === k ? 'bg-fg text-bg' : 'text-muted hover:text-subtle')}>{k}</button>
+                      ref={range.key === k ? keepInRow : undefined}
+                      className={clsx('shrink-0 min-h-[36px] min-w-[38px] px-2 rounded-md text-xs font-semibold font-mono-tab transition',
+                        range.key === k ? 'bg-bg-elev text-fg' : 'text-muted hover:text-subtle')}>{k}</button>
                   ))}
                 </div>
+                <span className="w-px h-5 bg-hairline shrink-0" aria-hidden />
+                <IntervalMenu value={candle} onPick={pickCandle} />
+                <button type="button" onClick={() => pickStyle(chartStyle === 'line' ? 'candles' : 'line')}
+                  aria-label={chartStyle === 'line' ? 'Show candles' : 'Show line'} title={chartStyle === 'line' ? 'Candles' : 'Line'}
+                  className="shrink-0 min-h-[36px] min-w-[36px] flex items-center justify-center rounded-md text-muted hover:text-fg">
+                  {chartStyle === 'line' ? <ChartCandlestick size={16} /> : <ChartLine size={16} />}
+                </button>
               </div>
+              <div className="px-5">
+                {intraday && !intraBars && (
+                  <div className="pb-2 text-[11px] text-muted" aria-live="polite">
+                    {intraData?.error ? `Couldn't load ${CANDLES.find(([k]) => k === candle)[1]} candles — showing daily.` : 'Loading intraday candles…'}
+                  </div>
+                )}
+                {!intraday && suiteTf !== '1d' && !periodMode && (
+                  <div className="pb-2 text-[11px] text-muted" aria-live="polite">
+                    {suiteData?.error && suiteData.tf === suiteTf
+                      ? `Couldn't load ${SUITE_TIMEFRAMES[suiteTf].label.toLowerCase()} bars — showing daily candles.`
+                      : `Loading ${SUITE_TIMEFRAMES[suiteTf].label.toLowerCase()} candles…`}
+                  </div>
+                )}
+              </div>
+              <div className="pt-2" />
               {/* Drawing tools: Measure (two pins), Fibonacci, Auto swing. */}
               <div className="px-3 pb-2 flex items-center gap-1">
                 <ToolButton active={picking} onClick={() => setPicking((v) => !v)} label="Measure" />
@@ -601,22 +594,21 @@ export default function LeapsEntry() {
                 <ToggleGroup label="Panels" items={paneItems} isOn={(k) => panes.includes(k)} onToggle={togglePane} />
                 {SUITE && <ToggleGroup label="On price" items={LAYERS} isOn={(k) => layers.includes(k)} onToggle={toggleLayer} />}
               </div>
-              <EntryChart bars={chart.bars} model={chart.model} suite={chart.suite} conf={periodMode || !SUITE ? null : conf} tf={chart.tf} suiteLabel={intraBars ? CANDLES.find(([k]) => k === candle)[1] : SUITE_TIMEFRAMES[suiteTf].label} panes={shownPanes} layers={shownLayers} plain={!SUITE} range={range} style={chartStyle} pins={chartPins} fib={fib} picking={picking} onPick={onPick} onHover={setHover} onExpand={setExpanded} jump={jump} />
               <div className="px-5 py-3 border-t border-hairline flex flex-wrap gap-x-4 gap-y-1.5 text-[11px] text-muted">
                 {SUITE && !periodMode && <Key className="text-green-400" glyph="▲">Buy signal</Key>}
                 {SUITE && !periodMode && <Key className="text-green-400/50" glyph="●">MACD confirms</Key>}
                 <Key className="text-amber-300" glyph="●">Golden cross</Key>
                 <Key className="text-rose-300" glyph="●">Death cross</Key>
                 {SUITE && !periodMode && <Key glyph={<span className="inline-block w-3 h-2.5 rounded-sm bg-green-400/15 align-middle" />}>Buy zone</Key>}
-                {layers.includes('hardening') && <Key className="text-amber-300" glyph="▲">Hardening bull</Key>}
-                {layers.includes('hardening') && <Key className="text-rose-300" glyph="▼">Hardening bear</Key>}
-                {layers.includes('triple') && <Key className="text-suite-bull" glyph="◆">Triple bull (3)</Key>}
-                {layers.includes('triple') && <Key className="text-suite-bear" glyph="◆">Triple bear (3) · band through every pane</Key>}
-                {layers.includes('zone') && <Key glyph={<span className="inline-block w-3 h-2.5 rounded-sm bg-suite-bull/20 border border-suite-bull/50 align-middle" />}>Reclaim zone (Bravo basis ± ½ ATR)</Key>}
-                {layers.includes('bravoSignals') && <Key className="text-suite-bull" glyph="◆">Bravo bull</Key>}
-                {layers.includes('bravoSignals') && <Key className="text-suite-bear" glyph="◆">Bravo bear</Key>}
-                {layers.includes('exits') && <Key className="text-suite-bear" glyph="◇">Exit (E Echo · T Tango · B Bravo)</Key>}
-                {!periodMode && layers.includes('swings') && <Key className="text-confluence" glyph="●">Swing low (hindsight)</Key>}
+                {shownLayers.includes('hardening') && <Key className="text-amber-300" glyph="▲">Hardening bull</Key>}
+                {shownLayers.includes('hardening') && <Key className="text-rose-300" glyph="▼">Hardening bear</Key>}
+                {shownLayers.includes('triple') && <Key className="text-suite-bull" glyph="◆">Triple bull (3)</Key>}
+                {shownLayers.includes('triple') && <Key className="text-suite-bear" glyph="◆">Triple bear (3) · band through every pane</Key>}
+                {shownLayers.includes('zone') && <Key glyph={<span className="inline-block w-3 h-2.5 rounded-sm bg-suite-bull/20 border border-suite-bull/50 align-middle" />}>Reclaim zone (Bravo basis ± ½ ATR)</Key>}
+                {shownLayers.includes('bravoSignals') && <Key className="text-suite-bull" glyph="◆">Bravo bull</Key>}
+                {shownLayers.includes('bravoSignals') && <Key className="text-suite-bear" glyph="◆">Bravo bear</Key>}
+                {shownLayers.includes('exits') && <Key className="text-suite-bear" glyph="◇">Exit (E Echo · T Tango · B Bravo)</Key>}
+                {!periodMode && shownLayers.includes('swings') && <Key className="text-confluence" glyph="●">Swing low (hindsight)</Key>}
                 {(shownPanes.includes('echo') || shownPanes.includes('tango')) && <Key className="text-suite-bull" glyph="◆">Echo / Tango bull</Key>}
                 {(shownPanes.includes('echo') || shownPanes.includes('tango')) && <Key className="text-suite-bear" glyph="◆">Echo / Tango bear</Key>}
               </div>
@@ -1638,6 +1630,48 @@ function PinCell({ letter, label, date, price, onStep, canBack, canFwd }) {
         <button type="button" className={btn} onClick={() => onStep(-1)} disabled={!canBack} aria-label={`Move ${letter} one candle earlier`}><ChevronLeft size={15} /></button>
         <button type="button" className={btn} onClick={() => onStep(1)} disabled={!canFwd} aria-label={`Move ${letter} one candle later`}><ChevronRight size={15} /></button>
       </div>
+    </div>
+  )
+}
+
+// Scrolls a range row sideways (never the page) so the picked range shows.
+function keepInRow(el) {
+  const row = el?.parentElement
+  if (!row) return
+  const a = el.getBoundingClientRect(), b = row.getBoundingClientRect()
+  if (a.right > b.right) row.scrollLeft += a.right - b.right + 8
+  else if (a.left < b.left) row.scrollLeft -= b.left - a.left + 8
+}
+
+// TradingView-style interval picker: the short label, a menu of every size.
+function IntervalMenu({ value, onPick }) {
+  const [open, setOpen] = useState(false)
+  const box = useRef(null)
+  useEffect(() => {
+    if (!open) return
+    const off = (e) => { if (!box.current?.contains(e.target)) setOpen(false) }
+    document.addEventListener('pointerdown', off)
+    return () => document.removeEventListener('pointerdown', off)
+  }, [open])
+  const cur = CANDLES.find(([k]) => k === value)
+  return (
+    <div ref={box} className="relative shrink-0">
+      <button type="button" onClick={() => setOpen((v) => !v)} aria-haspopup="listbox" aria-expanded={open} aria-label={`Interval: ${cur?.[1]}`}
+        className="min-h-[36px] px-2 flex items-center gap-0.5 rounded-md text-xs font-semibold text-violet-300 hover:bg-bg-elev">
+        {INTERVAL_SHORT[value]}<ChevronDown size={13} />
+      </button>
+      {open && (
+        <ul role="listbox" aria-label="Interval" className="absolute right-0 bottom-full mb-1 z-30 w-32 py-1 rounded-xl bg-card border border-border shadow-lg">
+          {CANDLES.map(([k, label]) => (
+            <li key={k}>
+              <button type="button" role="option" aria-selected={k === value} onClick={() => { onPick(k); setOpen(false) }}
+                className={clsx('w-full min-h-[40px] px-3 flex items-center justify-between text-sm', k === value ? 'text-violet-300' : 'text-fg hover:bg-bg-elev')}>
+                {label}{k === value && <Check size={14} />}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }

@@ -1603,9 +1603,15 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   the Charts price chart). **Live price** — during US hours (Mon–Fri
   9:30–16:05 ET, holidays not modelled) today's 5-minute bars are refetched
   every minute and folded into today's daily candle; intraday candles
-  refresh every minute too; the header reads "Live · 10:42 AM ET". Yahoo
-  prices — near real-time for most US listings, not a broker feed; true
-  streaming still waits on the dxlink-worker deploy.
+  refresh every minute too; the header reads "Live · 10:42 AM ET" (no
+  data-source caveat — owner: the Fly worker / Massive feed replace Yahoo
+  later). **Controls under the chart** (owner, 2026-10-16: "how TradingView
+  has the date range and interval toggle a row below the chart"): one row
+  right under the chart — ranges 1D … Max (scrolls sideways, the picked one
+  kept in view), the interval menu (`IntervalMenu`: 5m · 15m · 1h · D · W ·
+  M, opens upward) and a candles / line icon; the drawing tools and Panels
+  chips sit under that row. The card opens with the price header, then the
+  chart.
 - **Signal suite sunset** (owner, 2026-10-16: "Do it, I guess we no longer
   need the signal suite card, triple record card, plan card"). The
   leader-timing study (`scripts/leader-timing.mjs`,
