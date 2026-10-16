@@ -37,7 +37,7 @@ import { blockers, buyVerdict, sellVerdict, tradeSpec, structureStop, momentum, 
 import { momentumToday, moveGroups, forwardOutcome, SWING_PLAN } from '../src/utils/momentumList.js'
 import { createHash } from 'node:crypto'
 import { replaySignals, trailingVol, OPTION_MODEL } from '../src/utils/replay.js'
-import { callHistory, callStats, exitHistory, exitStats, PLAYS, playModel, playSpan } from '../src/utils/callHistory.js'
+import { callHistory, callStats, exitHistory, exitStats, PLAYS, playModel, playSpan, playContract, SWING_EXIT } from '../src/utils/callHistory.js'
 import { leaderSeries, leaderMisses } from '../src/utils/leaders.js'
 import { THEMES, themeOf, returnsByDate } from '../src/utils/themes.js'
 
@@ -81,7 +81,12 @@ export function analyze(ticker, bars, spy = null) {
 function leaderToday(bars, spy) {
   const tr = leaderSeries(bars, spy ?? []).at(bars.length - 1)
   const r3 = (x) => (x == null ? null : Math.round(x * 1000) / 1000)
-  return { misses: leaderMisses(tr), traits: tr ? { mom12: r3(tr.mom12), vs200: r3(tr.vs200), slope200: r3(tr.slope200), volRank: r3(tr.volRank), spyUp: tr.spyUp } : null }
+  // How far the close sits under its 20-day high (the dip swing's entry).
+  const n = bars.length
+  let hi = 0
+  for (let j = Math.max(0, n - 20); j < n; j++) hi = Math.max(hi, bars[j].h)
+  const off20 = hi > 0 ? r3(1 - bars[n - 1].c / hi) : null
+  return { misses: leaderMisses(tr), traits: tr ? { mom12: r3(tr.mom12), vs200: r3(tr.vs200), slope200: r3(tr.slope200), volRank: r3(tr.volRank), spyUp: tr.spyUp, off20 } : null }
 }
 
 // The at-the-money plays (owner, 2026-10-15; leaders 2026-10-16): after
@@ -376,6 +381,8 @@ async function main() {
 // ticker and kind at a time; seal the day with a root hash; then walk every
 // open log forward on today's bars. setup_log / setup_log_days refuse
 // updates and deletes in the database; setup_outcomes is the grading.
+const DIP_SWING = Object.freeze({ dip: 0.03, target: SWING_EXIT.target, holdDays: 15, label: 'Dip swing: 1M ATM call, all out at +40% on the call, else after 3 weeks' })
+
 async function forwardRecord(db, { asOf, momRows, rows, byTicker }) {
   const { data: logs, error: e1 } = await db.from('setup_log').select('id, logged_on, kind, ticker, strike, expiry, cost, target, hold_days')
   if (e1) throw new Error(`setup_log read: ${e1.message}`)
@@ -386,12 +393,23 @@ async function forwardRecord(db, { asOf, momRows, rows, byTicker }) {
   const candidates = [
     ...momRows.filter((m) => m.trade).map((m) => ({ kind: 'momentum', ticker: m.ticker, rank: m.rank, close: m.close, trade: m.trade, payload: { score: m.score, vs200: m.vs200, peers: m.peers } })),
     ...rows.filter((r) => r.side === 'buy' && r.verdict === 'enter' && r.trade).map((r) => ({ kind: 'leader', ticker: r.ticker, rank: r.rank, close: r.close, trade: r.trade, payload: { combo: r.combo, score: r.score, momentum: r.momentum, stop: r.stop_price, leader: r.leader_traits } })),
+    // The dip swing (owner, 2026-10-16: "Ok" to paper-tracking it — the swing
+    // test's lead, never shown as a suggestion): a leader closing ≥ 3% under
+    // its 20-day high → the 1M at-the-money call, all out at +40% on the
+    // call or after 3 weeks (15 trading days).
+    ...rows.filter((r) => r.side === 'buy' && r.verdict === 'enter' && r.trade && (r.leader_traits?.off20 ?? 0) >= DIP_SWING.dip).map((r) => {
+      const t = playContract({ S: r.close, vol: r.trade.vol, asOf, play: PLAYS[0] })
+      return t && { kind: 'swing_dip', ticker: r.ticker, rank: r.rank, close: r.close, trade: t, plan: DIP_SWING, payload: { off20: r.leader_traits.off20, leader: r.leader_traits } }
+    }).filter(Boolean),
   ]
-  const fresh = candidates.filter((c) => !openKey.has(`${c.kind}:${c.ticker}`)).map((c) => ({
-    logged_on: asOf, kind: c.kind, ticker: c.ticker, rank: c.rank ?? null, close: c.close,
-    strike: c.trade.strike, expiry: c.trade.expiry, cost: c.trade.cost, target: SWING_PLAN.target, hold_days: SWING_PLAN.holdDays,
-    payload: { ...c.payload, delta: c.trade.delta, vol: c.trade.vol, plan: SWING_PLAN.label },
-  }))
+  const fresh = candidates.filter((c) => !openKey.has(`${c.kind}:${c.ticker}`)).map((c) => {
+    const plan = c.plan ?? SWING_PLAN
+    return {
+      logged_on: asOf, kind: c.kind, ticker: c.ticker, rank: c.rank ?? null, close: c.close,
+      strike: c.trade.strike, expiry: c.trade.expiry, cost: c.trade.cost, target: plan.target, hold_days: plan.holdDays,
+      payload: { ...c.payload, delta: c.trade.delta, vol: c.trade.vol, plan: plan.label },
+    }
+  })
   if (fresh.length) {
     const { error } = await db.from('setup_log').upsert(fresh, { onConflict: 'logged_on,kind,ticker', ignoreDuplicates: true })
     if (error) throw new Error(`setup_log insert: ${error.message}`)

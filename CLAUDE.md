@@ -1707,6 +1707,21 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   now "Price stop · None". Past results show the LEAPS row only (`PlayLab`
   `rows`). Swing exit stays +40% / 2 weeks in `callHistory.js` (owner) for
   the hidden swing plays.
+- **Swing test + the dip swing on the forward record** (owner, 2026-10-16:
+  "why can't we do options swings and sell on a 5% spot gain" → "Run it" →
+  "Ok"). `scripts/swing-test.mjs` (`.github/workflows/swing-test.yml`,
+  research only): 216 variants — entry any leader day / 3% / 5% under the
+  20-day high × 30 / 60 / 91 DTE ATM call × exit stock +3/5/7% or call +40%
+  × stop none / −3% / −5% × 10 / 15-day hold; picked on < 2024, judged on
+  2024+. Results: the +5% stock exit ≈ the +40% call exit (avg +8% vs +6%);
+  **stops hurt every variant**; a 3–5% dip entry + call +40% / 3 weeks lifts
+  profitable to 6 of 10, typical +43%, avg +14%, but 1 in 4 still ≤ −80%;
+  LEAPS stay far ahead (typical +72%, avg +48%). Not adopted. Instead the
+  forward record logs **`swing_dip`** nightly (full mode): a leader closing
+  ≥ 3% under its 20-day high (`leader_traits.off20`) → the 1M ATM call
+  (`playContract`), target +40% on the call, `hold_days` 15 (`DIP_SWING` in
+  `rank-confluence.mjs`); graded by `forwardOutcome` like the rest; Signal
+  record labels it "Dip swing (test)". Never shown as a suggestion.
 - **Same bet** (owner, 2026-10-16: the top 10 sat in chips and oil; "is
   cluster the best taxonomy you can come up with?" — replaced the CLUSTER
   tag). Each ticker is named after the **industry fund it tracks** most
