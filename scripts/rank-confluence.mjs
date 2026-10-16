@@ -37,7 +37,7 @@ import { blockers, buyVerdict, sellVerdict, tradeSpec, structureStop, momentum, 
 import { momentumToday, moveGroups, forwardOutcome, SWING_PLAN } from '../src/utils/momentumList.js'
 import { createHash } from 'node:crypto'
 import { replaySignals, trailingVol, OPTION_MODEL } from '../src/utils/replay.js'
-import { callHistory, callStats, PLAYS, playModel, playSpan } from '../src/utils/callHistory.js'
+import { callHistory, callStats, exitHistory, exitStats, PLAYS, playModel, playSpan } from '../src/utils/callHistory.js'
 import { leaderSeries, leaderMisses } from '../src/utils/leaders.js'
 
 const args = process.argv.slice(2)
@@ -93,7 +93,13 @@ function callPaths(bars, spy) {
   const ls = leaderSeries(bars, spy ?? [], { vol: vols })
   const leaderDays = bars.map((_, i) => leaderMisses(ls.at(i)).length === 0)
   const out = {}
-  for (const p of PLAYS) out[p.key] = { leader: callHistory(bars, leaderDays, { vols, opt: playModel(p), horizons: playSpan(p) }) }
+  for (const p of PLAYS) {
+    out[p.key] = {
+      leader: callHistory(bars, leaderDays, { vols, opt: playModel(p), horizons: playSpan(p) }),
+      // The same leader days graded on the exit plan (owner, 2026-10-16).
+      exit: exitHistory(bars, leaderDays, p, { vols }),
+    }
+  }
   return out
 }
 
@@ -102,7 +108,7 @@ export function callPool(results) {
   const out = { tickers: results.length }
   for (const p of PLAYS) {
     const all = (k) => results.flatMap((r) => r.calls?.[p.key]?.[k] ?? [])
-    out[p.key] = { leader: callStats(all('leader'), playSpan(p)) }
+    out[p.key] = { leader: callStats(all('leader'), playSpan(p)), exit: exitStats(all('exit')) }
   }
   return out
 }
@@ -145,8 +151,8 @@ export function rankAll(results, pools, calls = null) {
         spark: side === 'buy' ? r.closes.slice(-63).map((c) => Math.round(c * 100) / 100) : null,
         call_hist: side === 'buy' && r.calls ? {
           plays: Object.fromEntries(PLAYS.map((p) => [p.key, {
-            own: { leader: callStats(r.calls[p.key].leader, playSpan(p))[0] },
-            pool: { leader: calls[p.key].leader[0] },
+            own: { leader: callStats(r.calls[p.key].leader, playSpan(p))[0], exit: exitStats(r.calls[p.key].exit) },
+            pool: { leader: calls[p.key].leader[0], exit: calls[p.key].exit },
           }])),
         } : null,
       }

@@ -4,7 +4,7 @@ import clsx from 'clsx'
 import { ChevronDown, ChevronRight, Minus, Plus } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { CHART_TICKERS } from '../lib/chartTickers'
-import { simulateCall, breakevenMoves, playContract, PLAYS } from '../utils/callHistory'
+import { simulateCall, breakevenMoves, playContract, PLAYS, SWING_EXIT } from '../utils/callHistory'
 
 // Charts → Pullbacks tab, formerly "Confluence leaders" (renamed 2026-10-07) (owner, 2026-10-03; verdicts 2026-10-04: "it's
 // not telling me how to enter"; plain words 2026-10-04: "a novice user may
@@ -315,23 +315,37 @@ function expiryLabel(t, play) {
 }
 
 // "After past signals (all stocks), over 1M: stock +1% · this call +3%"
+// One line under the Buy card: the play graded on the exit plan, all leaders.
 function PastLine({ ph, play }) {
-  const s = ph?.pool?.leader ?? ph?.pool?.setup
-  if (!s?.n) return null
+  const e = ph?.pool?.exit
+  if (!e?.n) return null
   return (
     <span className="mt-1.5 block text-xs text-muted">
-      Past leaders, all stocks, over {play.span}: stock <span className={clsx('font-mono-tab font-semibold', tone(s.stock))}>{pctS(s.stock)}</span>
-      {' · '}{play.kind === 'leaps' ? 'LEAPS' : `${play.key} call`} to expiry <span className={clsx('font-mono-tab font-semibold', tone(s.avg))}>{pctS(s.avg)}</span>
+      Past leaders with your exit plan: typical trade <span className={clsx('font-mono-tab font-semibold', tone(e.median))}>{pctS(e.median)}</span>
+      {' · '}made money {oneIn10(e.win)}
     </span>
   )
 }
 
-function Cell({ avg, win }) {
-  if (avg == null) return <td className="px-1.5 py-2 text-center text-muted">—</td>
+// "7 of 10" — plain odds instead of "71% up" (owner, 2026-10-16).
+const oneIn10 = (w) => (w == null ? '—' : `${Math.round(w * 10)} of 10 times`)
+
+// A history cell (owner, 2026-10-16): the typical result (median) as the
+// headline, how often (higher / made money, out of 10), the bad case (the
+// worst quarter) and the average, smaller.
+function Cell({ s, kind }) {
+  if (!s?.n) return <td className="px-1.5 py-2 text-center text-muted align-top">—</td>
+  const stock = kind === 'stock'
+  const med = stock ? s.stockMedian : s.median
+  const win = stock ? s.stockWin : s.win
+  const bad = stock ? s.stockBadq : s.badq
+  const avg = stock ? s.stock : s.avg
   return (
-    <td className="px-1.5 py-2 text-center">
-      <span className={clsx('block font-semibold font-mono-tab', tone(avg))}>{pctS(avg)}</span>
-      <span className="block text-[11px] text-muted font-mono-tab whitespace-nowrap">{Math.round(win * 100)}% up</span>
+    <td className="px-1.5 py-2 text-center align-top">
+      <span className={clsx('block text-sm font-semibold font-mono-tab', tone(med))}>{pctS(med)}</span>
+      <span className="block text-[11px] text-subtle whitespace-nowrap">{stock ? 'higher' : 'made money'} {win == null ? '—' : `${Math.round(win * 10)} of 10`}</span>
+      {bad != null && <span className="block text-[11px] text-muted font-mono-tab whitespace-nowrap">1 in 4: {pctS(bad)} or worse</span>}
+      {avg != null && <span className="block text-[11px] text-muted font-mono-tab whitespace-nowrap">avg {pctS(avg)}</span>}
     </td>
   )
 }
@@ -350,6 +364,7 @@ function PlayLab({ r, play, setPlay, accountSize }) {
   const ownKey = plays?.['1M']?.own?.leader ? 'leader' : (plays?.['1M']?.own?.setup?.n ?? 0) >= 3 ? 'setup' : 'confluence'
   const [scopeH, setScopeH] = useState(() => ((plays?.['1M']?.own?.[ownKey]?.n ?? 0) >= 3 ? 'own' : 'pool'))
   const statOf = (p) => (scopeH === 'own' ? plays?.[p.key]?.own?.[ownKey] : plays?.[p.key]?.pool?.leader ?? plays?.[p.key]?.pool?.setup)
+  const exitOf = (p) => plays?.[p.key]?.[scopeH]?.exit
   const hk = play.holds.some((h) => h[0] === hold) ? hold : play.holds.at(-1)[0]
   const trade = useMemo(() => playContract({ S: r.close, vol: r.trade?.vol, asOf: r.as_of, play }), [r, play])
   const sim = useMemo(() => (open && trade ? simulateCall({ S: r.close, trade, asOf: r.as_of, moves: play.moves, horizons: play.holds }) : null), [open, r, trade, play])
@@ -379,23 +394,24 @@ function PlayLab({ r, play, setPlay, accountSize }) {
               <table className="w-full text-xs">
                 <thead><tr className="text-muted">
                   <th className="text-left font-normal px-1.5 pb-1">After buying</th>
-                  <th className="font-normal px-1.5 pb-1 text-center">Stock</th>
-                  <th className="font-normal px-1.5 pb-1 text-center">ATM call<span className="block text-[11px]">held to expiry</span></th>
+                  <th className="font-normal px-1.5 pb-1 text-center">Stock<span className="block text-[11px]">over the span</span></th>
+                  <th className="font-normal px-1.5 pb-1 text-center">Call<span className="block text-[11px]">with your exit plan</span></th>
                 </tr></thead>
                 <tbody className="divide-y divide-hairline">
                   {PLAYS.map((p) => {
                     const st = statOf(p)
+                    const ex = exitOf(p)
                     return (
                       <tr key={p.key} onClick={() => setPlay(p.key)} className={clsx('cursor-pointer', p.key === play.key && 'bg-violet-400/10')}>
                         <td className="px-1.5 py-2 text-subtle whitespace-nowrap">{p.span}<span className="block text-[11px] text-muted">{st?.n ?? 0} {st?.n === 1 ? 'signal' : 'signals'}</span></td>
-                        <Cell avg={st?.n ? st.stock : null} win={st?.stockWin} />
-                        <Cell avg={st?.n ? st.avg : null} win={st?.win} />
+                        <Cell s={st} kind="stock" />
+                        <Cell s={ex} kind="call" />
                       </tr>
                     )
                   })}
                 </tbody>
               </table>
-              <p className="mt-1.5 text-[11px] text-muted">Past days it was a leader (one a month), same span: the stock's gain vs the {PLAYS.map((p) => p.span).join(' / ')} at-the-money call bought the next open and held to expiry.{scopeH === 'own' && n1 < 5 ? ' Few cases on this stock.' : ''}</p>
+              <p className="mt-1.5 text-[11px] text-muted">Past days it was a leader (one a month). Big number = the typical trade (the middle one). Stock = its move over the span. Call = the at-the-money call bought the next open and sold on your exit plan: 1M–12M sell it all at +{Math.round(SWING_EXIT.target * 100)}%, else after 2 weeks; LEAPS sell 70% at +100%, 15% at +200%, trail the rest 30%.{scopeH === 'own' && n1 < 5 ? ' Few cases on this stock.' : ''}{!plays?.['1M']?.pool?.exit ? ' Exit-plan results arrive with the next nightly run.' : ''}</p>
             </div>
           ) : <p className="text-[11px] text-muted">Past results arrive with the next nightly run.</p>}
           {trade && rowsH && (

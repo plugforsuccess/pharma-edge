@@ -1662,6 +1662,21 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   signals, the history line, Past results & what-if and a gold "Open
   chart" button. Sparkline data = `confluence_ranks.spark` (last 63
   closes, nightly).
+- **Past results graded on the exit plan** (owner, 2026-10-16: "the exit
+  is how we make money"; "is the average the most useful metric? is 71% up
+  the right word choice?"). Each history cell leads with the **typical
+  trade** (median), then "higher / made money N of 10", the bad case ("1 in
+  4: −45% or worse", the 25th percentile) and the average, smaller (`Cell`
+  in `ConfluenceLeaders.jsx`). The call column is "Call · with your exit
+  plan", no longer held to expiry: **swing plays (1M–12M) sell it all at
+  +40%** (owner: "sell all at 40-50%" — the low end; the first close at or
+  above it), **else after 2 weeks** (10 trading days); **LEAPS** use the
+  playbook (70% at +100%, 15% at +200%, runner on a 30% trail, out with 6
+  months left). `SWING_EXIT` / `exitTrade` / `exitHistory` / `exitStats` in
+  `callHistory.js` (on `oneTrade`; open trades at their mark); nightly →
+  `call_hist.plays[key].own.exit` / `pool.exit`. The Buy card's one line
+  reads "Past leaders with your exit plan: typical trade +7% · made money 6
+  of 10 times". The stock column keeps the span (1M … 2Y).
 - **Leaders only** (owner, 2026-10-16: "We only want leaders"). The
   winner-traits study (`scripts/winner-traits.mjs`,
   `.github/workflows/winner-traits.yml`, research only, no DB writes:
