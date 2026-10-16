@@ -111,7 +111,7 @@ export default function ConfluenceLeaders({ mine = [], leadersOnly = false }) {
     let cancelled = false
     setRows(null)
     let q = supabase.from('confluence_ranks')
-      .select('ticker, side, as_of, close, score, rank, est_3m, est_6m, est_win_3m, est_win_6m, own_n, pool_n, verdict, hold_reason, blockers, trade, stop_price, momentum, call_hist, leader, leader_traits')
+      .select('ticker, side, as_of, close, score, rank, est_3m, est_6m, est_win_3m, est_win_6m, own_n, pool_n, verdict, hold_reason, blockers, trade, stop_price, momentum, call_hist, leader, leader_traits, spark')
       .eq('side', side)
     if (side === 'buy' && strict) q = q.gte('score', 3)
     q = scope === 'all'
@@ -125,7 +125,11 @@ export default function ConfluenceLeaders({ mine = [], leadersOnly = false }) {
   // Yours: ranked first, then by score.
   const list = useMemo(() => (scope === 'all' ? rows : rows && [...rows].sort((a, b) => (a.rank ?? 1e9) - (b.rank ?? 1e9) || b.score - a.score)), [rows, scope])
   const asOf = rows?.[0]?.as_of
-  
+
+  if (leadersOnly) {
+    return <LeadersView {...{ list, scope, setScope, strict, setStrict, play, playKey, setPlay, accountSize, asOf, mine }} />
+  }
+
   return (
     <section className="bg-card border border-border rounded-2xl mb-5 overflow-hidden">
       <div className="px-5 pt-5 pb-3">
@@ -431,5 +435,204 @@ function PlayLab({ r, play, setPlay, accountSize }) {
         </div>
       )}
     </div>
+  )
+}
+
+// ── Leaders, Robinhood-style (owner, 2026-10-16: "Can we make the UI state
+// of the art like Robinhood app?"). A quiet list — ticker and the play on
+// the left, a 3-month sparkline, a price pill coloured by the 3-month move —
+// and a tap opens the row in place: hero price, a large sparkline, the play,
+// four stat tiles, history, past results & what-if and the chart button.
+
+function Sparkline({ values, className, height = 32, fill = false }) {
+  const id = useMemo(() => `sp${Math.random().toString(36).slice(2, 8)}`, [])
+  if (!values || values.length < 2) return <span className={className} style={{ height }} />
+  const lo = Math.min(...values), hi = Math.max(...values)
+  const span = hi - lo || 1
+  const pts = values.map((v, i) => [(i / (values.length - 1)) * 100, 100 - ((v - lo) / span) * 100])
+  const d = pts.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(2)},${y.toFixed(2)}`).join(' ')
+  return (
+    <svg viewBox="0 -4 100 108" preserveAspectRatio="none" className={className} style={{ height }} aria-hidden>
+      {fill && (
+        <>
+          <defs>
+            <linearGradient id={id} x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stopColor="currentColor" stopOpacity="0.22" />
+              <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          <path d={`${d} L100,104 L0,104 Z`} fill={`url(#${id})`} stroke="none" />
+        </>
+      )}
+      <path d={d} fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+    </svg>
+  )
+}
+
+function Pill({ active, onClick, children, label }) {
+  return (
+    <button type="button" aria-pressed={active} aria-label={label} onClick={onClick}
+      className={clsx('shrink-0 min-h-[36px] px-3.5 rounded-full text-[13px] font-semibold transition whitespace-nowrap',
+        active ? 'bg-fg text-bg' : 'bg-card border border-border text-subtle hover:text-fg')}>
+      {children}
+    </button>
+  )
+}
+
+function Tile({ label, value, sub, tone = 'text-fg' }) {
+  return (
+    <div className="rounded-2xl bg-bg-elev px-3.5 py-3">
+      <div className="text-[11px] text-muted">{label}</div>
+      <div className={clsx('mt-0.5 text-base font-semibold font-mono-tab leading-6', tone)}>{value}</div>
+      {sub && <div className="text-[11px] text-muted">{sub}</div>}
+    </div>
+  )
+}
+
+function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, setPlay, accountSize, asOf, mine }) {
+  const [open, setOpen] = useState(null)
+  const leaders = list?.filter((r) => r.verdict === 'enter').length ?? 0
+  return (
+    <section className="mb-5">
+      <div className="mb-4">
+        <div className="text-[11px] text-muted">{asOf ? `As of ${day(asOf)} close` : 'Ranked after each close'}</div>
+        <h2 className="mt-0.5 text-[28px] leading-9 font-semibold tracking-tight">Leaders</h2>
+        <p className="text-sm text-subtle">
+          {list == null ? 'Loading…' : scope === 'all'
+            ? `${leaders} strong ${leaders === 1 ? 'stock' : 'stocks'} pulling back · tap one for the play`
+            : 'Your tickers · leaders first'}
+        </p>
+      </div>
+
+      <div className="-mx-4 px-4 flex gap-2 overflow-x-auto no-scrollbar pb-1">
+        <Pill active={scope === 'all'} onClick={() => setScope('all')}>Top 10</Pill>
+        <Pill active={scope === 'mine'} onClick={() => setScope('mine')}>Yours</Pill>
+        <Pill active={strict} onClick={() => setStrict(!strict)}>3+ signals</Pill>
+      </div>
+
+      <div className="mt-3 grid grid-cols-5 gap-1 p-1 rounded-full bg-card border border-border" role="tablist" aria-label="Call">
+        {PLAYS.map((x) => (
+          <button key={x.key} type="button" role="tab" aria-selected={playKey === x.key} onClick={() => setPlay(x.key)}
+            className={clsx('min-h-[36px] rounded-full text-xs font-semibold transition', playKey === x.key ? 'bg-bg-elev text-fg' : 'text-muted hover:text-subtle')}>{x.key}</button>
+        ))}
+      </div>
+      <p className="mt-1.5 px-1 text-[11px] text-muted">At-the-money call · {play.kind === 'swing' ? `${play.key} to expiry · hold 1–2 weeks` : 'about 2 years · hold 6–12 months'}</p>
+
+      {list === null ? (
+        <div className="mt-4 space-y-px" aria-busy="true">{[0, 1, 2, 3].map((i) => <div key={i} className="h-16 rounded-xl bg-card animate-pulse mb-2" />)}</div>
+      ) : list.length === 0 ? (
+        <div className="mt-6 rounded-2xl bg-card border border-border p-5 text-sm text-subtle">
+          {strict ? 'No leader has 3 or more signals today.'
+            : scope === 'mine' ? (mine.length ? 'None of your tickers have signals today.' : 'Add tickers to Tracking or Portfolio to see them here.')
+            : 'No leader has 2+ signals today. The list updates after each close.'}
+        </div>
+      ) : (
+        <ul className="mt-4 rounded-2xl bg-card border border-border overflow-hidden divide-y divide-hairline">
+          {list.map((r) => (
+            <LeaderRow key={r.ticker} r={r} play={play} setPlay={setPlay} accountSize={accountSize}
+              open={open === r.ticker} onToggle={() => setOpen(open === r.ticker ? null : r.ticker)} />
+          ))}
+        </ul>
+      )}
+
+      <Link to="/charts/record" className="mt-4 min-h-[44px] px-1 flex items-center gap-2 text-xs text-subtle hover:text-fg">
+        <span className="flex-1">Signal record: how these signals traded, every ticker</span>
+        <ChevronRight size={14} aria-hidden />
+      </Link>
+      <p className="px-1 text-[11px] text-muted">Option prices are estimates, not quotes. Past results, not advice.</p>
+    </section>
+  )
+}
+
+function LeaderRow({ r, play, setPlay, accountSize, open, onToggle }) {
+  const isLeader = r.verdict === 'enter'
+  const trade = useMemo(() => (isLeader && r.trade ? playContract({ S: r.close, vol: r.trade.vol, asOf: r.as_of, play }) : null), [isLeader, r, play])
+  const spark = r.spark?.length ? r.spark : null
+  const move = spark ? spark[spark.length - 1] / spark[0] - 1 : null
+  const up = move == null || move >= 0
+  const per = trade ? trade.cost * 100 : null
+  const t = r.leader_traits
+  const room = r.stop_price != null && r.close > 0 ? 1 - r.stop_price / r.close : null
+  const ph = r.call_hist?.plays?.[play.key]
+  const why = (t?.misses ?? []).map((m) => MISS[m] ?? m)
+  const sub = isLeader && trade ? `${expiryLabel(trade.expiry, play)} ${money(trade.strike, trade.strike < 25 ? 2 : 0)} call · ${about(per).replace('about ', '')}`
+    : r.verdict === 'notleader' ? `Not a leader${why[0] ? ` · ${why[0]}` : ''}`
+    : r.verdict === 'watch' ? 'Long-term trend falling' : 'Signals today'
+  return (
+    <li>
+      <button type="button" onClick={onToggle} aria-expanded={open}
+        className="w-full min-h-[68px] px-4 py-3 flex items-center gap-3 text-left hover:bg-card-hover/40 transition">
+        <span className="flex-1 min-w-0">
+          <span className="flex items-center gap-1.5">
+            <span className="text-[15px] font-semibold text-fg">{r.ticker}</span>
+            {isLeader && r.score >= 3 && <span className="text-[10px] font-semibold text-violet-300">{r.score} signals</span>}
+          </span>
+          <span className={clsx('block text-xs truncate', isLeader ? 'text-subtle' : 'text-muted')}>{sub}</span>
+        </span>
+        <Sparkline values={spark} className={clsx('w-[72px] shrink-0', up ? 'text-green-400' : 'text-red-400', !isLeader && 'opacity-50')} />
+        <span className={clsx('shrink-0 min-w-[78px] px-2.5 py-1.5 rounded-lg text-[13px] font-semibold font-mono-tab text-center',
+          !isLeader ? 'bg-bg-elev text-subtle' : up ? 'bg-green-400 text-bg' : 'bg-red-400 text-bg')}>
+          {money(r.close)}
+        </span>
+      </button>
+
+      {open && (
+        <div className="px-4 pb-4">
+          <div className="flex items-end gap-3">
+            <div className="flex-1">
+              <div className="text-[28px] leading-9 font-semibold font-mono-tab tracking-tight">{money(r.close)}</div>
+              {move != null && <div className={clsx('text-sm font-semibold font-mono-tab', up ? 'text-green-400' : 'text-red-400')}>{`${move >= 0 ? '+' : '−'}${Math.abs(move * 100).toFixed(1)}%`} <span className="font-normal text-muted">past 3 months</span></div>}
+            </div>
+            {isLeader
+              ? <span className="mb-1 px-2 py-1 rounded-full bg-green-400/10 text-green-400 text-[11px] font-semibold">Leader · Buy</span>
+              : <span className="mb-1 px-2 py-1 rounded-full bg-bg-elev text-subtle text-[11px] font-semibold">{r.verdict === 'watch' ? 'Not in an uptrend' : 'Not a leader'}</span>}
+          </div>
+          <Sparkline values={spark} fill height={96} className={clsx('mt-3 w-full', up ? 'text-green-400' : 'text-red-400')} />
+
+          {trade ? (
+            <div className="mt-4 rounded-2xl bg-bg-elev p-4">
+              <div className="flex items-start gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="text-[11px] text-muted">Buy · at the money</div>
+                  <div className="text-lg font-semibold leading-7 whitespace-nowrap">{expiryLabel(trade.expiry, play)} {money(trade.strike, trade.strike < 25 ? 2 : 0)} call</div>
+                  <div className="text-xs text-subtle">{play.kind === 'swing' ? 'Hold 1–2 weeks' : 'Hold 6–12 months'}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-2xl font-semibold font-mono-tab leading-8">{about(per).replace('about ', '≈')}</div>
+                  <div className="text-[11px] text-muted">per contract</div>
+                  {accountSize ? <div className="text-[11px] text-muted">{(per / accountSize * 100).toFixed(1)}% of account</div> : null}
+                </div>
+              </div>
+            </div>
+          ) : why.length > 0 && (
+            <div className="mt-4 rounded-2xl bg-bg-elev p-4">
+              <div className="text-[11px] text-muted">Missing to be a leader</div>
+              <div className="mt-0.5 text-sm text-subtle">{why.join(' · ')}</div>
+            </div>
+          )}
+
+          {isLeader && (
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <Tile label="Momentum" value={r.momentum === 'up' ? 'Rising' : 'Falling'} sub={r.momentum === 'up' ? 'confirmed' : 'early entry'} tone={r.momentum === 'up' ? 'text-green-400' : 'text-amber-400'} />
+              <Tile label="Exit below" value={r.stop_price != null ? money(r.stop_price) : '—'} sub={room != null ? `${(room * 100).toFixed(1)}% away` : null} />
+              {t && <Tile label="Past year" value={`${t.mom12 >= 0 ? '+' : '−'}${Math.round(Math.abs(t.mom12) * 100)}%`} sub={`${Math.round(t.vs200 * 100)}% above its 200-day`} tone="text-green-400" />}
+              {t && <Tile label="Option price" value={t.volRank != null ? `${Math.round(t.volRank * 100)}th pct` : '—'} sub="cheap for this stock" />}
+            </div>
+          )}
+
+          <div className="mt-3 flex items-center gap-3">
+            <SignalMeter score={r.score} side="buy" />
+          </div>
+          <PastLine ph={ph} play={play} />
+
+          <div className="mt-3 -mx-5"><PlayLab r={r} play={play} setPlay={setPlay} accountSize={accountSize} /></div>
+
+          <Link to={`/charts/entry/${encodeURIComponent(r.ticker)}`}
+            className="mt-1 min-h-[48px] w-full rounded-full bg-amber-400 text-bg text-sm font-semibold flex items-center justify-center gap-1.5">
+            Open {r.ticker} chart <ChevronRight size={16} aria-hidden />
+          </Link>
+        </div>
+      )}
+    </li>
   )
 }

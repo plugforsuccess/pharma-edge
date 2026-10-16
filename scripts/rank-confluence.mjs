@@ -141,6 +141,8 @@ export function rankAll(results, pools, calls = null) {
         own_record: side === 'buy' ? r.ownRecord : null,
         leader: side === 'buy' ? r.leader?.misses?.length === 0 : null,
         leader_traits: side === 'buy' && r.leader ? { ...r.leader.traits, misses: r.leader.misses } : null,
+        // The row's sparkline: the last 3 months of closes (owner, 2026-10-16: Robinhood-style list).
+        spark: side === 'buy' ? r.closes.slice(-63).map((c) => Math.round(c * 100) / 100) : null,
         call_hist: side === 'buy' && r.calls ? {
           plays: Object.fromEntries(PLAYS.map((p) => [p.key, {
             own: { setup: callStats(r.calls[p.key].setup, playSpan(p))[0], confluence: callStats(r.calls[p.key].confluence, playSpan(p))[0] },

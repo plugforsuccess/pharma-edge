@@ -1577,6 +1577,19 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   10 / Yours) — no tab bar, no Momentum list, no Ideas & holdings chart, no
   sell side; Search opens `/charts/entry/:ticker` for any ticker. The tabs
   and their code stay; flip the flag to bring them back.
+- **Leaders, Robinhood-style** (owner, 2026-10-16: "Can we make the UI
+  state of the art like Robinhood app?"). `LeadersView` / `LeaderRow` in
+  `ConfluenceLeaders.jsx` (the `leadersOnly` render): a page-level header
+  ("As of … close", big "Leaders", "N strong stocks pulling back · tap one
+  for the play"), round pill chips (Top 10 · Yours · 3+ signals), a round
+  1M–LEAPS segmented control, then one rounded list — ticker + the play
+  ("Nov 20 $90 call · $190") on the left, a 3-month sparkline, a price pill
+  green / red by the 3-month move (grey for non-leaders). Tapping a row
+  opens it in place: hero price + 3-month change, a large filled sparkline,
+  the Buy card, four tiles (Momentum, Exit below, Past year, Option price),
+  signals, the history line, Past results & what-if and a gold "Open
+  chart" button. Sparkline data = `confluence_ranks.spark` (last 63
+  closes, nightly).
 - **Leaders only** (owner, 2026-10-16: "We only want leaders"). The
   winner-traits study (`scripts/winner-traits.mjs`,
   `.github/workflows/winner-traits.yml`, research only, no DB writes:
