@@ -322,7 +322,7 @@ function PastLine({ ph, play }) {
   return (
     <span className="mt-1.5 block text-xs text-muted">
       Past leaders with your exit plan: typical trade <span className={clsx('font-mono-tab font-semibold', tone(e.median))}>{pctS(e.median)}</span>
-      {' · '}made money {oneIn10(e.win)}
+      {' · '}profitable {oneIn10(e.win)}
     </span>
   )
 }
@@ -331,7 +331,7 @@ function PastLine({ ph, play }) {
 const oneIn10 = (w) => (w == null ? '—' : `${Math.round(w * 10)} of 10 times`)
 
 // A history cell (owner, 2026-10-16): the typical result (median) as the
-// headline, how often (higher / made money, out of 10), the bad case (the
+// headline, how often (higher / profitable, out of 10), the bad case (the
 // worst quarter) and the average, smaller.
 function Cell({ s, kind }) {
   if (!s?.n) return <td className="px-1.5 py-2 text-center text-muted align-top">—</td>
@@ -343,7 +343,7 @@ function Cell({ s, kind }) {
   return (
     <td className="px-1.5 py-2 text-center align-top">
       <span className={clsx('block text-sm font-semibold font-mono-tab', tone(med))}>{pctS(med)}</span>
-      <span className="block text-[11px] text-subtle whitespace-nowrap">{stock ? 'higher' : 'made money'} {win == null ? '—' : `${Math.round(win * 10)} of 10`}</span>
+      <span className="block text-[11px] text-subtle whitespace-nowrap">{stock ? 'higher' : 'profitable'} {win == null ? '—' : `${Math.round(win * 10)} of 10`}</span>
       {bad != null && <span className="block text-[11px] text-muted font-mono-tab whitespace-nowrap">1 in 4: {pctS(bad)} or worse</span>}
       {avg != null && <span className="block text-[11px] text-muted font-mono-tab whitespace-nowrap">avg {pctS(avg)}</span>}
     </td>

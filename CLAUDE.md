@@ -1665,7 +1665,7 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
 - **Past results graded on the exit plan** (owner, 2026-10-16: "the exit
   is how we make money"; "is the average the most useful metric? is 71% up
   the right word choice?"). Each history cell leads with the **typical
-  trade** (median), then "higher / made money N of 10", the bad case ("1 in
+  trade** (median), then "higher / profitable N of 10 (owner chose "profitable")", the bad case ("1 in
   4: −45% or worse", the 25th percentile) and the average, smaller (`Cell`
   in `ConfluenceLeaders.jsx`). The call column is "Call · with your exit
   plan", no longer held to expiry: **swing plays (1M–12M) sell it all at
@@ -1675,7 +1675,7 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   months left). `SWING_EXIT` / `exitTrade` / `exitHistory` / `exitStats` in
   `callHistory.js` (on `oneTrade`; open trades at their mark); nightly →
   `call_hist.plays[key].own.exit` / `pool.exit`. The Buy card's one line
-  reads "Past leaders with your exit plan: typical trade +7% · made money 6
+  reads "Past leaders with your exit plan: typical trade +7% · profitable 6
   of 10 times". The stock column keeps the span (1M … 2Y).
 - **Leaders only** (owner, 2026-10-16: "We only want leaders"). The
   winner-traits study (`scripts/winner-traits.mjs`,
