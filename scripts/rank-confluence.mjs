@@ -182,6 +182,18 @@ export function rankAll(results, pools, calls = null) {
         || (side === 'buy' ? (b.est_6m ?? 0) - (a.est_6m ?? 0) : (a.est_3m ?? 0) - (b.est_3m ?? 0))
     })
     cands.forEach((row, k) => { row.rank = k + 1 })
+    // Cluster risk (owner, 2026-10-16): leaders whose last 120 days of
+    // returns correlate ≥ 0.7 move together — buying several is one bet.
+    // Peers listed in rank order on the row's leader_traits.moves_with.
+    if (side === 'buy' && cands.length > 1) {
+      const closesOf = new Map(results.map((r) => [r.ticker, r.closes]))
+      const groups = moveGroups(cands.map((c) => ({ ticker: c.ticker, closes: closesOf.get(c.ticker) ?? [] })))
+      const rankOf = new Map(cands.map((c) => [c.ticker, c.rank]))
+      for (const c of cands) {
+        const peers = groups.get(c.ticker)?.peers ?? []
+        if (c.leader_traits) c.leader_traits.moves_with = peers.sort((a, b) => rankOf.get(a) - rankOf.get(b))
+      }
+    }
   }
   return rows
 }
@@ -242,7 +254,7 @@ async function main() {
     const top = rows.filter((r) => r.side === side && r.rank != null).sort((a, b) => a.rank - b.rank).slice(0, TOP)
     console.log(`\nTop ${TOP} ${side}:`)
     for (const r of top) console.log(side === 'buy'
-      ? `  ${String(r.rank).padStart(2)}. ${r.ticker.padEnd(6)} 12-1 ${pct(r.leader_traits?.mom12)}  vs200 ${pct(r.leader_traits?.vs200)}  200d slope ${pct(r.leader_traits?.slope200)}  vol rank ${pct(r.leader_traits?.volRank)}`
+      ? `  ${String(r.rank).padStart(2)}. ${r.ticker.padEnd(6)} 12-1 ${pct(r.leader_traits?.mom12)}  vs200 ${pct(r.leader_traits?.vs200)}  200d slope ${pct(r.leader_traits?.slope200)}  vol rank ${pct(r.leader_traits?.volRank)}${r.leader_traits?.moves_with?.length ? `  moves with ${r.leader_traits.moves_with.join(', ')}` : ''}`
       : `  ${String(r.rank).padStart(2)}. ${r.ticker.padEnd(6)} ${r.score}/5 ${String(r.combo ?? '').padEnd(28)} 3M ${pct(r.est_3m)} 6M ${pct(r.est_6m)}  at turn ${pct(r.est_at_turn)}  (own ${r.own_n}, pool ${r.pool_n})`)
   }
   // Momentum list (owner, 2026-10-07): today's top decile on the 12-1 rule,

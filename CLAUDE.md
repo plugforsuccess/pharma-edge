@@ -1677,6 +1677,14 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   `call_hist.plays[key].own.exit` / `pool.exit`. The Buy card's one line
   reads "Past leaders with your exit plan: typical trade +7% · profitable 6
   of 10 times". The stock column keeps the span (1M … 2Y).
+- **Cluster risk** (owner, 2026-10-16: the top 10 sat in chips and oil).
+  The nightly ranking runs `moveGroups` (momentumList.js: 120-day return
+  correlation ≥ 0.7) over every ranked leader → `leader_traits.moves_with`
+  (peers in rank order; no migration). A leader with peers shows a small
+  amber **CLUSTER** chip beside its ticker in the list and, opened, an
+  amber "Cluster risk — Moves with MU, SNDK, WDC and 2 more. Buying more
+  than one of these is really one bet." card under the Buy card. Swing
+  plays (1M–12M) all hold 2 weeks at most (owner, same day — confirmed).
 - **Leaders only** (owner, 2026-10-16: "We only want leaders"). The
   winner-traits study (`scripts/winner-traits.mjs`,
   `.github/workflows/winner-traits.yml`, research only, no DB writes:

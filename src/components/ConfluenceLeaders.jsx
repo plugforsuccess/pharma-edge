@@ -586,6 +586,8 @@ function LeaderRow({ r, play, setPlay, accountSize, open, onToggle }) {
   const room = r.stop_price != null && r.close > 0 ? 1 - r.stop_price / r.close : null
   const ph = r.call_hist?.plays?.[play.key]
   const why = (t?.misses ?? []).map((m) => MISS[m] ?? m)
+  // Cluster risk (owner, 2026-10-16): other leaders that move with this one.
+  const peers = isLeader ? (t?.moves_with ?? []) : []
   const sub = isLeader && trade ? `${expiryLabel(trade.expiry, play)} ${money(trade.strike, trade.strike < 25 ? 2 : 0)} call · ${about(per).replace('about ', '')}`
     : r.verdict === 'notleader' ? `Not yet a leader${why[0] ? ` · ${why[0]}` : ''}`
     : r.verdict === 'watch' ? 'Long-term trend falling' : 'Signals today'
@@ -596,7 +598,10 @@ function LeaderRow({ r, play, setPlay, accountSize, open, onToggle }) {
         {/* Open (owner, 2026-10-16): no sparkline or price pill — the ticker
             and the call sit centered above the hero price and 3M chart. */}
         <span className={clsx('min-w-0', open ? 'flex-none' : 'flex-1')}>
-          <span className={clsx('block font-semibold text-fg', open ? 'text-[28px] leading-9 font-bold tracking-tight' : 'text-[15px]')}>{r.ticker}</span>
+          <span className={clsx('flex items-center gap-1.5', open && 'justify-center')}>
+            <span className={clsx('font-semibold text-fg', open ? 'text-[28px] leading-9 font-bold tracking-tight' : 'text-[15px]')}>{r.ticker}</span>
+            {!open && peers.length > 0 && <span className="px-1.5 py-px rounded-full bg-amber-400/15 text-amber-300 text-[10px] font-semibold uppercase tracking-wide">Cluster</span>}
+          </span>
           {open
             ? companyName(r.ticker) && <span className="mt-0.5 block truncate text-sm font-semibold text-amber-300">{companyName(r.ticker)}</span>
             : <span className={clsx('block text-xs truncate', isLeader ? 'text-subtle' : 'text-muted')}>{sub}</span>}
@@ -643,6 +648,15 @@ function LeaderRow({ r, play, setPlay, accountSize, open, onToggle }) {
             <div className="mt-4 rounded-2xl bg-bg-elev p-4">
               <div className="text-[11px] text-muted">What it still needs</div>
               <div className="mt-0.5 text-sm text-subtle">{why.join(' · ')}</div>
+            </div>
+          )}
+
+          {peers.length > 0 && (
+            <div className="mt-2 rounded-2xl border border-amber-400/30 bg-amber-400/5 px-4 py-3">
+              <div className="text-sm font-semibold text-amber-300">Cluster risk</div>
+              <div className="mt-0.5 text-sm text-subtle">
+                Moves with {peers.slice(0, 4).join(', ')}{peers.length > 4 ? ` and ${peers.length - 4} more` : ''}. Buying more than one of these is really one bet.
+              </div>
             </div>
           )}
 
