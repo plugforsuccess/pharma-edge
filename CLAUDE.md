@@ -1694,6 +1694,19 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   `call_hist.plays[key].own.exit` / `pool.exit`. The Buy card's one line
   reads "Past leaders with your exit plan: typical trade +7% · profitable 6
   of 10 times". The stock column keeps the span (1M … 2Y).
+- **Leaders = LEAPS only, exits confirmed** (owner, 2026-10-16: "the 1M ..
+  LEAPS is confusing … we need to confirm the exits … these stocks are in a
+  pull back?" — no: leaders are strong uptrends bought any day). The
+  1M–LEAPS selector is gone from Leaders (`play` forced to LEAPS when
+  `leadersOnly`; the selector stays on the hidden Pullbacks view). Under the
+  chips, one card states the play and the playbook exit (70% at +100%, 15%
+  at +200%, last 15% on a 30% trail, out or roll with 6 months left, **no
+  price stop** — owner confirmed). Each opened row's Buy card lists those
+  exits in dollars per contract ("Sell 70% ≈$2,600 · +100%") and the
+  out-or-roll date (`rollBy`, expiry − 6 months); the "Exit below" tile is
+  now "Price stop · None". Past results show the LEAPS row only (`PlayLab`
+  `rows`). Swing exit stays +40% / 2 weeks in `callHistory.js` (owner) for
+  the hidden swing plays.
 - **Same bet** (owner, 2026-10-16: the top 10 sat in chips and oil; "is
   cluster the best taxonomy you can come up with?" — replaced the CLUSTER
   tag). Each ticker is named after the **industry fund it tracks** most

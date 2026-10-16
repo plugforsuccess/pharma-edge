@@ -92,7 +92,9 @@ export default function ConfluenceLeaders({ mine = [], leadersOnly = false }) {
   // for a 1–2 week swing, or the ~2-year LEAPS held to compound.
   const [playKey, setPlayState] = useState(() => { try { const k = localStorage.getItem('cm:pullbacks-play'); return PLAYS.some((x) => x.key === k) ? k : '1M' } catch { return '1M' } })
   const setPlay = (k) => { setPlayState(k); try { localStorage.setItem('cm:pullbacks-play', k) } catch { /* storage off */ } }
-  const play = PLAYS.find((x) => x.key === playKey)
+  // Leaders = LEAPS only (owner, 2026-10-16: the 1M … LEAPS selector was
+  // confusing; LEAPS on leaders is the play the numbers support).
+  const play = leadersOnly ? PLAYS.find((x) => x.key === 'LEAPS') : PLAYS.find((x) => x.key === playKey)
   // "3+ signals" (owner, 2026-10-07): an opt-in stricter list on the buy
   // side — 2 stays the rule; this only filters. Remembered on the device.
   const [strict, setStrictState] = useState(() => { try { return localStorage.getItem('cm:pullbacks-3plus') === '1' } catch { return false } })
@@ -310,6 +312,13 @@ const usd0 = (x) => `${x < 0 ? '−' : '+'}$${Math.abs(Math.round(x)).toLocaleSt
 const tone = (x) => (x == null ? 'text-muted' : x >= 0 ? 'text-green-400' : 'text-rose-300')
 const holdWords = { '1W': '1 week', '2W': '2 weeks', '6M': '6 months', '12M': '12 months' }
 // Short expiries read as the date ("Nov 20"), LEAPS as the month ("Jan 2029").
+// Six months before expiry: the playbook's out-or-roll date.
+function rollBy(expiry) {
+  const d = new Date(`${expiry}T12:00:00Z`)
+  d.setUTCMonth(d.getUTCMonth() - 6)
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
+}
+
 function expiryLabel(t, play) {
   const d = new Date(`${t}T12:00:00Z`)
   return play.kind === 'leaps' ? monthYear(t) : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: d.getUTCFullYear() === new Date().getUTCFullYear() ? undefined : 'numeric', timeZone: 'UTC' })
@@ -353,7 +362,7 @@ function Cell({ s, kind }) {
 
 const BUDGETS = [1000, 5000, 10000, 40000]
 
-function PlayLab({ r, play, setPlay, accountSize }) {
+function PlayLab({ r, play, setPlay, accountSize, rows = PLAYS }) {
   const [open, setOpen] = useState(false)
   const [hold, setHold] = useState(null)
   const [budget, setBudgetState] = useState(() => { try { const b = Number(localStorage.getItem('cm:pullbacks-budget')); return BUDGETS.includes(b) ? b : 5000 } catch { return 5000 } })
@@ -399,7 +408,7 @@ function PlayLab({ r, play, setPlay, accountSize }) {
                   <th className="font-normal px-1.5 pb-1 text-center">Call<span className="block text-[11px]">with your exit plan</span></th>
                 </tr></thead>
                 <tbody className="divide-y divide-hairline">
-                  {PLAYS.map((p) => {
+                  {rows.map((p) => {
                     const st = statOf(p)
                     const ex = exitOf(p)
                     return (
@@ -412,7 +421,7 @@ function PlayLab({ r, play, setPlay, accountSize }) {
                   })}
                 </tbody>
               </table>
-              <p className="mt-1.5 text-[11px] text-muted">Past days it was a leader (one a month). Big number = the typical trade (the middle one). Stock = its move over the span. Call = the at-the-money call bought the next open and sold on your exit plan: 1M–12M sell it all at +{Math.round(SWING_EXIT.target * 100)}%, else after 2 weeks; LEAPS sell 70% at +100%, 15% at +200%, trail the rest 30%.{scopeH === 'own' && n1 < 5 ? ' Few cases on this stock.' : ''}{!plays?.['1M']?.pool?.exit ? ' Exit-plan results arrive with the next nightly run.' : ''}</p>
+              <p className="mt-1.5 text-[11px] text-muted">Past days it was a leader (one a month). Big number = the typical trade (the middle one). Stock = its move over the span. Call = the at-the-money call bought the next open and sold on your exit plan{rows.length === 1 && rows[0].kind === 'leaps' ? ' (70% at +100%, 15% at +200%, the rest on a 30% trail, out with 6 months left)' : `: 1M–12M sell it all at +${Math.round(SWING_EXIT.target * 100)}%, else after 2 weeks; LEAPS sell 70% at +100%, 15% at +200%, trail the rest 30%`}.{scopeH === 'own' && n1 < 5 ? ' Few cases on this stock.' : ''}{!plays?.['1M']?.pool?.exit ? ' Exit-plan results arrive with the next nightly run.' : ''}</p>
             </div>
           ) : <p className="text-[11px] text-muted">Past results arrive with the next nightly run.</p>}
           {trade && rowsH && (
@@ -549,13 +558,17 @@ function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, 
         <Pill active={scope === 'mine'} onClick={() => setScope('mine')}>Yours</Pill>
       </div>
 
-      <div className="mt-3 grid grid-cols-5 gap-1 p-1 rounded-full bg-card border border-border" role="tablist" aria-label="Call">
-        {PLAYS.map((x) => (
-          <button key={x.key} type="button" role="tab" aria-selected={playKey === x.key} onClick={() => setPlay(x.key)}
-            className={clsx('min-h-[36px] rounded-full text-xs font-semibold transition', playKey === x.key ? 'bg-bg-elev text-fg' : 'text-muted hover:text-subtle')}>{x.key}</button>
-        ))}
+      {/* The play and its exit, once for the whole list (owner, 2026-10-16:
+          LEAPS only; exits confirmed — the playbook, no price stop). */}
+      <div className="mt-3 rounded-2xl bg-card border border-border px-4 py-3">
+        <div className="text-sm font-semibold">The play: an at-the-money call about 2 years out</div>
+        <ol className="mt-1.5 space-y-0.5 text-xs text-subtle list-decimal pl-4">
+          <li>Sell 70% when the call is up 100% (your cost back plus profit)</li>
+          <li>Sell 15% more at +200%</li>
+          <li>Let the last 15% run; sell it after a 30% drop from its peak</li>
+          <li>Out or roll with 6 months left. No price stop.</li>
+        </ol>
       </div>
-      <p className="mt-1.5 px-1 text-[11px] text-muted">At-the-money call · {play.kind === 'swing' ? `${play.key} to expiry · hold 1–2 weeks` : 'about 2 years · hold 6–12 months'}</p>
 
       {list === null ? (
         <div className="mt-4 space-y-px" aria-busy="true">{[0, 1, 2, 3].map((i) => <div key={i} className="h-16 rounded-xl bg-card animate-pulse mb-2" />)}</div>
@@ -615,7 +628,6 @@ function LeaderRow({ r, bet, play, setPlay, accountSize, open, onToggle }) {
   const up = move == null || move >= 0
   const per = trade ? trade.cost * 100 : null
   const t = r.leader_traits
-  const room = r.stop_price != null && r.close > 0 ? 1 - r.stop_price / r.close : null
   const ph = r.call_hist?.plays?.[play.key]
   const why = (t?.misses ?? []).map((m) => MISS[m] ?? m)
   // Leaders this one moves with (120-day correlation ≥ 0.7) — the fallback
@@ -668,7 +680,7 @@ function LeaderRow({ r, bet, play, setPlay, accountSize, open, onToggle }) {
               <div className="flex items-start gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="text-lg font-semibold leading-7 whitespace-nowrap">{expiryLabel(trade.expiry, play)} {money(trade.strike, trade.strike < 25 ? 2 : 0)} call</div>
-                  <div className="text-xs text-subtle">{play.kind === 'swing' ? 'Hold 1–2 weeks' : 'Hold 6–12 months'}</div>
+                  <div className="text-xs text-subtle">{play.kind === 'swing' ? 'Hold 1–2 weeks' : 'About 2 years to expiry'}</div>
                 </div>
                 <div className="text-right">
                   <div className="text-2xl font-semibold font-mono-tab leading-8">{about(per).replace('about ', '≈')}</div>
@@ -676,6 +688,14 @@ function LeaderRow({ r, bet, play, setPlay, accountSize, open, onToggle }) {
                   {accountSize ? <div className="text-[11px] text-muted">{(per / accountSize * 100).toFixed(1)}% of account</div> : null}
                 </div>
               </div>
+              {play.kind === 'leaps' && (
+                <div className="mt-3 pt-3 border-t border-hairline grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+                  <span className="text-muted">Sell 70%</span><span className="text-right font-mono-tab"><span className="text-green-400 font-semibold">{about(per * 2).replace('about ', '≈')}</span> <span className="text-muted">per contract · +100%</span></span>
+                  <span className="text-muted">Sell 15%</span><span className="text-right font-mono-tab"><span className="text-green-400 font-semibold">{about(per * 3).replace('about ', '≈')}</span> <span className="text-muted">per contract · +200%</span></span>
+                  <span className="text-muted">Last 15%</span><span className="text-right text-subtle">after a 30% drop from its peak</span>
+                  <span className="text-muted">Out or roll by</span><span className="text-right font-mono-tab text-subtle">{rollBy(trade.expiry)}</span>
+                </div>
+              )}
             </div>
           ) : why.length > 0 && (
             <div className="mt-4 rounded-2xl bg-bg-elev p-4">
@@ -699,7 +719,7 @@ function LeaderRow({ r, bet, play, setPlay, accountSize, open, onToggle }) {
           {isLeader && (
             <div className="mt-2 grid grid-cols-2 gap-2">
               {t && <Tile label="200-day trend" value={`${t.slope200 >= 0 ? '+' : '−'}${Math.abs(t.slope200 * 100).toFixed(1)}%`} sub="rise over 20 days" tone="text-green-400" />}
-              <Tile label="Exit below" value={r.stop_price != null ? money(r.stop_price) : '—'} sub={room != null ? `${(room * 100).toFixed(1)}% away` : null} />
+              <Tile label="Price stop" value="None" sub="exit on the plan, not a price" />
               {t && <Tile label="Past year" value={`${t.mom12 >= 0 ? '+' : '−'}${Math.round(Math.abs(t.mom12) * 100)}%`} sub={`${Math.round(t.vs200 * 100)}% above its 200-day`} tone="text-green-400" />}
               {t && <Tile label="Option price" value={t.volRank != null ? `${Math.round(t.volRank * 100)}th pct` : '—'} sub="cheap for this stock" />}
             </div>
@@ -707,7 +727,7 @@ function LeaderRow({ r, bet, play, setPlay, accountSize, open, onToggle }) {
 
           <PastLine ph={ph} play={play} />
 
-          <div className="mt-3 -mx-5"><PlayLab r={r} play={play} setPlay={setPlay} accountSize={accountSize} /></div>
+          <div className="mt-3 -mx-5"><PlayLab r={r} play={play} setPlay={setPlay} accountSize={accountSize} rows={[play]} /></div>
 
           <Link to={`/charts/entry/${encodeURIComponent(r.ticker)}`}
             className="mt-1 min-h-[48px] w-full rounded-full bg-amber-400 text-bg text-sm font-semibold flex items-center justify-center gap-1.5">
