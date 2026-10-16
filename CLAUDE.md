@@ -1570,6 +1570,22 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   vs 62% higher, gone by 6M). A solid strip under the phone status bar
   (`Layout.jsx`, `env(safe-area-inset-top)`, z-40) keeps scrolled content
   out from behind the clock on every page.
+- **Entry chart, Robinhood-style** (owner, 2026-10-16: "the chart should
+  have the capabilities of Robinhood … bar lengths can be toggled and the
+  dates on the x axis are detailed"). **Candle size** Daily · Weekly ·
+  Monthly (labelled); **range buttons** 1M · 3M · 6M · YTD · 1Y · 2Y · 5Y ·
+  Max (`RANGES` / `rangeStart` in `EntryChart.jsx`, `range` prop,
+  `cm:entry-range`, default 1Y; pinch / drag still zoom); the header shows
+  the change over the range ("+1.53% past 3M", "since Jul 28, 2025" while
+  scrubbing) above the bar's date and day / week / month change; **volume
+  bars** along the bottom fifth of the price pane; **dates**: axis ticks
+  "2026" / "Oct" / "Oct 14" (`tickMarkFormatter`), the crosshair tag "Tue,
+  Oct 14, 2026" / "Week of Oct 13, 2026" / "October 2026"
+  (`localization.timeFormatter`), and the date rows under each pane add
+  each week's first day under ~5 months. Copy: a stock failing the Leaders
+  rule reads **"NOT YET"** / "Not yet a leader" — never "NOT A LEADER"
+  (owner). Not yet: intraday candles, a line-chart mode, real-time quotes,
+  the Measure / Fibonacci tools (they live on the hidden Charts price chart).
 - **Signal suite sunset** (owner, 2026-10-16: "Do it, I guess we no longer
   need the signal suite card, triple record card, plan card"). The
   leader-timing study (`scripts/leader-timing.mjs`,

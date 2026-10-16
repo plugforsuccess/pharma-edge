@@ -7,6 +7,7 @@ import { tripleEvents } from '../utils/signalSuite'
 import {
   createChart, createSeriesMarkers, BaselineSeries, CandlestickSeries, HistogramSeries, LineSeries,
   ColorType, CrosshairMode, LineStyle, LineType,
+  TickMarkType,
 } from 'lightweight-charts'
 
 // LEAPS entry chart for /charts/entry/:ticker, on TradingView Lightweight
@@ -119,6 +120,39 @@ function barLegend(bars, i) {
   ]
 }
 
+// Range buttons (owner, 2026-10-16: "the capabilities of Robinhood"): the
+// window shown, by calendar span from the latest bar; YTD from Jan 1; Max
+// = every bar loaded. Pinch / drag still zoom and pan freely after.
+export const RANGES = [['1M', 1], ['3M', 3], ['6M', 6], ['YTD', 'ytd'], ['1Y', 12], ['2Y', 24], ['5Y', 60], ['Max', 'max']]
+// First bar index of a range on these bars (at least 8 bars in view).
+export function rangeStart(bars, key) {
+  const n = bars?.length ?? 0
+  if (!n) return 0
+  const months = RANGES.find(([k]) => k === key)?.[1]
+  if (months == null || months === 'max') return 0
+  const last = new Date(`${bars[n - 1].t}T00:00:00Z`)
+  const start = months === 'ytd' ? Date.UTC(last.getUTCFullYear(), 0, 1) : Date.UTC(last.getUTCFullYear(), last.getUTCMonth() - months, last.getUTCDate())
+  let i = n - 1
+  while (i > 0 && Date.parse(`${bars[i - 1].t}T00:00:00Z`) >= start) i--
+  return Math.max(0, Math.min(i, n - 8))
+}
+const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+// A lightweight-charts business-day time ('YYYY-MM-DD' or { year, month, day }) → parts.
+function dayParts(t) {
+  if (t && typeof t === 'object') return { y: t.year, m: t.month, d: t.day }
+  const [y, m, d] = String(t).slice(0, 10).split('-').map(Number)
+  return { y, m, d }
+}
+// The crosshair's date tag: "Tue, Oct 14, 2026" / "Week of Oct 13, 2026" / "October 2026".
+function crosshairDate(t, tf) {
+  const { y, m, d } = dayParts(t)
+  if (!y) return ''
+  if (tf === '1mo') return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' })
+  const dow = DOW[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]
+  return tf === '1wk' ? `Week of ${MONTH_SHORT[m - 1]} ${d}, ${y}` : `${dow}, ${MONTH_SHORT[m - 1]} ${d}, ${y}`
+}
+
 // Bar intervals the chart can draw. Weekly / monthly (owner, 2026-10-03:
 // the candles follow the Signal suite's timeframe) run the same indicator
 // math on those bars — 50 / 200-week averages, weekly RSI and MACD — and
@@ -133,7 +167,7 @@ export const DAILY_ONLY_PANES = new Set(['ivr', 'ivhv', 'conf'])
 // A date row under every pane but the last (which has the chart's own axis).
 const DATE_ROW = 16
 
-export default function EntryChart({ bars, model, suite, conf = null, suiteLabel = null, panes, layers = [], onHover, onExpand, focus = null, fill = null, jump = null, tf = '1d', plain = false }) {
+export default function EntryChart({ bars, model, suite, conf = null, suiteLabel = null, panes, layers = [], onHover, onExpand, focus = null, fill = null, jump = null, tf = '1d', plain = false, range = null }) {
   const iv = INTERVALS[tf] ?? INTERVALS['1d']
   const daily = tf === '1d'
   const box = useRef(null)
@@ -173,7 +207,19 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
       },
       grid: { vertLines: { visible: false }, horzLines: { color: alpha(t.faint, 0.55) } },
       rightPriceScale: { borderVisible: false, minimumWidth: 56 },
-      timeScale: { borderVisible: false, rightOffset: 4, minBarSpacing: 0.5 },
+      // Dates in full (owner, 2026-10-16: "the dates on the x axis are
+      // detailed"): ticks read "2026" / "Oct" / "Oct 14"; the crosshair tag
+      // reads "Tue, Oct 14, 2026" (weekly: "Week of …", monthly: "October 2026").
+      timeScale: {
+        borderVisible: false, rightOffset: 4, minBarSpacing: 0.5,
+        tickMarkFormatter: (time, type) => {
+          const { y, m, d } = dayParts(time)
+          if (type === TickMarkType.Year) return String(y)
+          if (type === TickMarkType.Month) return MONTH_SHORT[m - 1]
+          return `${MONTH_SHORT[m - 1]} ${d}`
+        },
+      },
+      localization: { locale: 'en-US', timeFormatter: (time) => crosshairDate(time, tf) },
       crosshair: {
         mode: CrosshairMode.Magnet,
         vertLine: { color: t.subtle, width: 1, style: LineStyle.Dashed, labelBackgroundColor: t.border },
@@ -211,6 +257,12 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
       priceLineColor: t.subtle, priceLineStyle: LineStyle.Dotted,
     }, 0)
     candles.setData(bars.map((b) => ({ time: b.t, open: b.o, high: b.h, low: b.l, close: b.c })))
+    // Volume bars along the bottom fifth of the price pane, coloured by the bar's direction.
+    if (bars.some((b) => b.v > 0)) {
+      const volS = addS(HistogramSeries, { ...quiet, priceScaleId: 'vol', priceFormat: { type: 'volume' } }, 0)
+      chart.priceScale('vol', 0).applyOptions({ visible: false, scaleMargins: { top: 0.82, bottom: 0 } })
+      volS.setData(bars.map((b) => ({ time: b.t, value: b.v || 0, color: alpha(b.c >= b.o ? t.up : t.down, 0.35) })))
+    }
     chart.priceScale('right', 0).applyOptions({ scaleMargins: { top: 0.06, bottom: 0.08 } })
 
     // Reclaim zone: Bravo's basis ± ½ ATR, filled between its edges (blue
@@ -419,7 +471,7 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
     const n = bars.length
     // A new interval starts from its default window (bar indexes differ).
     if (rangeRef.current?.tf !== tf) rangeRef.current = null
-    chart.timeScale().setVisibleLogicalRange(rangeRef.current ?? { from: Math.max(0, n - iv.show), to: n - 1 + 4 })
+    chart.timeScale().setVisibleLogicalRange(rangeRef.current ?? { from: range ? rangeStart(bars, range.key) : Math.max(0, n - iv.show), to: n - 1 + 4 })
 
     // Date rows under the panes: month (or year) starts in view, at least
     // 64px apart — the same kind of labels as the chart's own axis.
@@ -436,6 +488,7 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
       // when the view is under two years.
       const years = []
       const months = []
+      const days = []
       for (let k = from; k <= to; k++) {
         const a = String(bars[k - 1].t)
         const b = String(bars[k].t)
@@ -443,11 +496,14 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
         if (x == null) continue
         if (a.slice(0, 4) !== b.slice(0, 4)) years.push({ x, label: b.slice(0, 4), strong: true })
         else if (span < 730 && a.slice(5, 7) !== b.slice(5, 7)) months.push({ x, label: MONTHS[+b.slice(5, 7) - 1] })
+        // Under ~5 months, each week's first bar gets its day ("Oct 14").
+        else if (span < 150 && new Date(`${b}T00:00:00Z`).getUTCDay() < new Date(`${a}T00:00:00Z`).getUTCDay()) days.push({ x, label: `${MONTHS[+b.slice(5, 7) - 1]} ${+b.slice(8, 10)}` })
       }
       const out = []
-      const fits = (x) => out.every((o) => Math.abs(o.x - x) >= 56)
+      const fits = (x, gap = 56) => out.every((o) => Math.abs(o.x - x) >= gap)
       for (const y of years) if (fits(y.x)) out.push(y)
       for (const m of months) if (fits(m.x)) out.push(m)
+      for (const d of days) if (fits(d.x, 46)) out.push(d)
       setTicks(out)
     }
     const keep = (r) => {
@@ -521,6 +577,15 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
     setHover(jump.i)
     hoverRef.current?.(jump.i)
   }, [jump, bars, tf, iv.jump])
+
+  // range = { key, n } (n changes per tap): show that window.
+  useEffect(() => {
+    const chart = chartRef.current
+    if (!chart || !range || !bars?.length) return
+    const r = { from: rangeStart(bars, range.key), to: bars.length - 1 + 4, tf }
+    rangeRef.current = r
+    chart.timeScale().setVisibleLogicalRange(r)
+  }, [range, bars, tf])
 
   // Legends follow the crosshair; off the chart they show the latest day.
   const i = hover ?? (bars?.length ? bars.length - 1 : null)

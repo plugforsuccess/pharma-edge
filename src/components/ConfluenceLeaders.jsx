@@ -16,7 +16,7 @@ import { simulateCall, breakevenMoves, playContract, PLAYS } from '../utils/call
 // on the entry chart, which every row opens.
 const VERDICT = {
   enter: ['LEADER · BUY', 'border-green-400/50 text-green-400'],
-  notleader: ['NOT A LEADER', 'border-border text-subtle'],
+  notleader: ['NOT YET', 'border-border text-subtle'],
   wait: ['NOT YET', 'border-amber-400/50 text-amber-400'],
   hold: ['NOT NOW', 'border-rose-300/50 text-rose-300'],
   watch: ['NOT IN AN UPTREND', 'border-border text-subtle'],
@@ -248,7 +248,7 @@ export default function ConfluenceLeaders({ mine = [], leadersOnly = false }) {
                     )}
                     {r.verdict === 'notleader' && (
                       <span className="mt-3 block rounded-xl bg-bg-elev px-3.5 py-3">
-                        <span className="block text-[11px] uppercase tracking-[0.12em] text-muted font-semibold">Signals, but not a leader</span>
+                        <span className="block text-[11px] uppercase tracking-[0.12em] text-muted font-semibold">Not yet a leader</span>
                         <span className="block text-sm text-subtle leading-5">{(r.leader_traits?.misses ?? []).map((m) => MISS[m] ?? m).join(' · ') || 'misses the Leaders rule'}</span>
                       </span>
                     )}
@@ -555,7 +555,7 @@ function LeaderRow({ r, play, setPlay, accountSize, open, onToggle }) {
   const ph = r.call_hist?.plays?.[play.key]
   const why = (t?.misses ?? []).map((m) => MISS[m] ?? m)
   const sub = isLeader && trade ? `${expiryLabel(trade.expiry, play)} ${money(trade.strike, trade.strike < 25 ? 2 : 0)} call · ${about(per).replace('about ', '')}`
-    : r.verdict === 'notleader' ? `Not a leader${why[0] ? ` · ${why[0]}` : ''}`
+    : r.verdict === 'notleader' ? `Not yet a leader${why[0] ? ` · ${why[0]}` : ''}`
     : r.verdict === 'watch' ? 'Long-term trend falling' : 'Signals today'
   return (
     <li>
@@ -583,7 +583,7 @@ function LeaderRow({ r, play, setPlay, accountSize, open, onToggle }) {
             </div>
             {isLeader
               ? <span className="mb-1 px-2 py-1 rounded-full bg-green-400/10 text-green-400 text-[11px] font-semibold">Leader · Buy</span>
-              : <span className="mb-1 px-2 py-1 rounded-full bg-bg-elev text-subtle text-[11px] font-semibold">{r.verdict === 'watch' ? 'Not in an uptrend' : 'Not a leader'}</span>}
+              : <span className="mb-1 px-2 py-1 rounded-full bg-bg-elev text-subtle text-[11px] font-semibold">{r.verdict === 'watch' ? 'Not in an uptrend' : 'Not yet'}</span>}
           </div>
           <Sparkline values={spark} fill height={96} className={clsx('mt-3 w-full', up ? 'text-green-400' : 'text-red-400')} />
 
@@ -604,7 +604,7 @@ function LeaderRow({ r, play, setPlay, accountSize, open, onToggle }) {
             </div>
           ) : why.length > 0 && (
             <div className="mt-4 rounded-2xl bg-bg-elev p-4">
-              <div className="text-[11px] text-muted">Missing to be a leader</div>
+              <div className="text-[11px] text-muted">What it still needs</div>
               <div className="mt-0.5 text-sm text-subtle">{why.join(' · ')}</div>
             </div>
           )}

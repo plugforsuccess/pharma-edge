@@ -6,7 +6,8 @@ import { LEADER, leaderMisses } from '../utils/leaders'
 // Triple record and plan cards are sunset): is this stock a leader today?
 // The five Leaders checks (src/utils/leaders.js) with today's values, and
 // the leader-timing study's record. Leaders are bought any day they
-// qualify — the study found a timing signal added nothing.
+// qualify — the study found a timing signal added nothing. Not-yet copy
+// reads "NOT YET", never "NOT A LEADER" (owner, 2026-10-16).
 
 const pct = (x, d = 1) => (x == null ? '—' : `${x >= 0 ? '+' : '−'}${Math.abs(x * 100).toFixed(d)}%`)
 const money = (x) => (x == null ? '—' : `$${Number(x).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)
@@ -30,8 +31,8 @@ export default function LeaderPanel({ traits, close, asOf, spyLoading }) {
         <div className="text-[11px] uppercase tracking-[0.14em] text-muted font-semibold">Leaders rule{asOf ? ` · ${dayLabel(asOf)}` : ''}</div>
         <div className="mt-2 flex items-end gap-3">
           <div className="flex-1">
-            <div className={clsx('text-[34px] leading-10 font-semibold tracking-tight', yes ? 'text-green-400' : 'text-fg')}>{yes ? 'LEADER' : 'NOT A LEADER'}</div>
-            <div className="text-sm text-subtle">{traits ? `${met} of 5 checks met` : 'Not enough price history yet'}</div>
+            <div className={clsx('text-[34px] leading-10 font-semibold tracking-tight', yes ? 'text-green-400' : 'text-fg')}>{yes ? 'LEADER' : 'NOT YET'}</div>
+            <div className="text-sm text-subtle">{traits ? `${met} of 5 leader checks met` : 'Not enough price history yet'}</div>
           </div>
           <div className="flex items-end gap-1 pb-1" aria-hidden>
             {[0, 1, 2, 3, 4].map((i) => <span key={i} className={clsx('w-2.5 rounded-sm', i < met ? (yes ? 'bg-green-400' : 'bg-amber-400') : 'bg-bg-elev')} style={{ height: 10 + i * 6 }} />)}

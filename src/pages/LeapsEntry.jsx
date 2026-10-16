@@ -6,7 +6,7 @@ import { ArrowDown, ArrowLeft, ArrowUp, Check, ChevronRight, Info, Maximize2, Pl
 import { supabase } from '../lib/supabase'
 import { CHART_TICKERS } from '../lib/chartTickers'
 import { entryModel, entryGaps, DEFAULT_PARAMS, HORIZONS } from '../utils/indicators'
-import EntryChart, { LAYERS, SUB_PANES, DAILY_ONLY_PANES, paneTitle } from '../components/EntryChart'
+import EntryChart, { LAYERS, SUB_PANES, DAILY_ONLY_PANES, paneTitle, RANGES, rangeStart } from '../components/EntryChart'
 import { suiteModel, forwardReturns, horizonStats, normalizePeriods, suiteOnDays, periodKey, SUITE_TIMEFRAMES } from '../utils/signalSuite'
 import TickerDrawer from '../components/TickerDrawer'
 import NumberInput from '../components/NumberInput'
@@ -39,6 +39,7 @@ const DEFAULT_LAYERS = ['triple', 'zone', 'bravoSignals', 'exits', 'swings']
 // from a buy-zone signal (either side) confirms it (Hardening is hidden:
 // FEATURES.hardening).
 const SUITE_TF_KEY = 'cm:suite-tf:v2'
+const RANGE_KEY = 'cm:entry-range'
 const CONFIRM_DAYS = { '1d': 10, '1wk': 10, '1mo': 21 }
 // [key, label, min, max, decimals, suffix]
 const FIELDS = [
@@ -198,6 +199,9 @@ export default function LeapsEntry() {
     return () => { cancelled = true }
   }, [ticker, suiteTf, weeklyData])
   const pickSuiteTf = (tf) => { setSuiteTf(tf); saveJson(SUITE_TF_KEY, tf) }
+  // Range buttons (1M … Max), remembered on the device; n re-applies a tap.
+  const [range, setRange] = useState(() => { const v = loadJson(RANGE_KEY); return { key: RANGES.some(([k]) => k === v) ? v : '1Y', n: 0 } })
+  const pickRange = (key) => { setRange({ key, n: Date.now() }); saveJson(RANGE_KEY, key) }
   const suitePack = useMemo(() => {
     if (!bars?.length) return null
     if (suiteTf === '1d') {
@@ -295,6 +299,11 @@ export default function LeapsEntry() {
   const shown = hover != null && cbars ? cbars[hover] : last
   const prev = hover != null && cbars ? cbars[hover - 1] : cbars?.[cbars.length - 2]
   const dayChange = shown && prev ? shown.c / prev.c - 1 : null
+  // Change over the selected range, to the bar under the finger (Robinhood's
+  // header): from the range's first bar's close.
+  const rangeBar = cbars?.length ? cbars[rangeStart(cbars, range.key)] : null
+  const rangeChange = shown && rangeBar?.c > 0 ? shown.c / rangeBar.c - 1 : null
+  const rangeLabel = range.key === 'Max' ? 'all time' : range.key === 'YTD' ? 'this year' : `past ${range.key}`
 
   return (
     <div className="px-4 py-4 pb-24 max-w-md md:max-w-3xl mx-auto">
@@ -341,6 +350,7 @@ export default function LeapsEntry() {
               {/* Candle interval — drives the candles, the averages and the
                   Signal suite together (one state, cm:suite-tf:v2). */}
               <div className="px-5 pt-4">
+                <div className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold mb-1.5">Candle size</div>
                 <div className="grid grid-cols-3 gap-0.5 p-0.5 rounded-lg bg-bg-elev" role="tablist" aria-label="Candle interval">
                   {Object.entries(SUITE_TIMEFRAMES).map(([k, v]) => (
                     <button key={k} type="button" role="tab" aria-selected={suiteTf === k} onClick={() => pickSuiteTf(k)}
@@ -361,10 +371,15 @@ export default function LeapsEntry() {
               <div className="px-5 pt-3 pb-2 flex items-end gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="text-2xl font-semibold font-mono-tab leading-none">{money(shown?.c)}</div>
-                  <div className="mt-1 text-[11px] text-muted font-mono-tab">
+                  {rangeChange != null && (
+                    <div className={clsx('mt-1 text-sm font-semibold font-mono-tab', rangeChange < 0 ? 'text-rose-300' : 'text-green-400')}>
+                      {signed(rangeChange * 100, 2)} <span className="font-normal text-muted">{hover != null ? `since ${day(rangeBar.t)}` : rangeLabel}</span>
+                    </div>
+                  )}
+                  <div className="mt-0.5 text-[11px] text-muted font-mono-tab">
                     {shown && day(shown.t)}
                     {dayChange != null && (
-                      <span className={clsx('ml-2', dayChange < 0 ? 'text-rose-300' : 'text-green-400')}>{signed(dayChange * 100, 2)}</span>
+                      <span className={clsx('ml-2', dayChange < 0 ? 'text-rose-300' : 'text-green-400')}>{signed(dayChange * 100, 2)} {periodMode ? (suiteTf === '1wk' ? 'week' : 'month') : 'day'}</span>
                     )}
                   </div>
                 </div>
@@ -377,12 +392,22 @@ export default function LeapsEntry() {
                   </div>
                 )}
               </div>
+              {/* Range (owner, 2026-10-16: Robinhood-style) — the window in view. */}
+              <div className="px-5 pb-3">
+                <div className="flex gap-1 overflow-x-auto no-scrollbar" role="tablist" aria-label="Range">
+                  {RANGES.map(([k]) => (
+                    <button key={k} type="button" role="tab" aria-selected={range.key === k} onClick={() => pickRange(k)}
+                      className={clsx('shrink-0 min-h-[36px] min-w-[44px] px-2.5 rounded-full text-xs font-semibold transition',
+                        range.key === k ? 'bg-fg text-bg' : 'text-muted hover:text-subtle')}>{k}</button>
+                  ))}
+                </div>
+              </div>
               {/* What's drawn: indicator panels, then layers on the price chart. */}
               <div className="px-5 pb-3 space-y-3">
                 <ToggleGroup label="Panels" items={paneItems} isOn={(k) => panes.includes(k)} onToggle={togglePane} />
                 {SUITE && <ToggleGroup label="On price" items={LAYERS} isOn={(k) => layers.includes(k)} onToggle={toggleLayer} />}
               </div>
-              <EntryChart bars={chart.bars} model={chart.model} suite={chart.suite} conf={periodMode || !SUITE ? null : conf} tf={chart.tf} suiteLabel={SUITE_TIMEFRAMES[suiteTf].label} panes={shownPanes} layers={shownLayers} plain={!SUITE} onHover={setHover} onExpand={setExpanded} jump={jump} />
+              <EntryChart bars={chart.bars} model={chart.model} suite={chart.suite} conf={periodMode || !SUITE ? null : conf} tf={chart.tf} suiteLabel={SUITE_TIMEFRAMES[suiteTf].label} panes={shownPanes} layers={shownLayers} plain={!SUITE} range={range} onHover={setHover} onExpand={setExpanded} jump={jump} />
               <div className="px-5 py-3 border-t border-hairline flex flex-wrap gap-x-4 gap-y-1.5 text-[11px] text-muted">
                 {SUITE && !periodMode && <Key className="text-green-400" glyph="▲">Buy signal</Key>}
                 {SUITE && !periodMode && <Key className="text-green-400/50" glyph="●">MACD confirms</Key>}
@@ -426,7 +451,7 @@ export default function LeapsEntry() {
 
       {expanded && chart && (
         <FullPane title={`${ticker} · ${paneTitle(expanded, chart.tf)}`} onClose={() => setExpanded(null)}>
-          {(h) => <EntryChart bars={chart.bars} model={chart.model} suite={chart.suite} conf={periodMode || !SUITE ? null : conf} tf={chart.tf} suiteLabel={SUITE_TIMEFRAMES[suiteTf].label} panes={shownPanes} layers={shownLayers} plain={!SUITE} focus={expanded} fill={h} />}
+          {(h) => <EntryChart bars={chart.bars} model={chart.model} suite={chart.suite} conf={periodMode || !SUITE ? null : conf} tf={chart.tf} suiteLabel={SUITE_TIMEFRAMES[suiteTf].label} panes={shownPanes} layers={shownLayers} plain={!SUITE} range={range} focus={expanded} fill={h} />}
         </FullPane>
       )}
 
