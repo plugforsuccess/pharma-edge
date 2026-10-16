@@ -1654,8 +1654,10 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   ("Nov 20 $90 call · $190") on the left, a 3-month sparkline, a price pill
   green / red by the 3-month move (grey for non-leaders). Tapping a row
   opens it in place (the row's sparkline and price pill hide; the ticker
-  and the call sit centered on a row above — ticker 28px bold, the call
-  in gold; owner, 2026-10-16): hero price + 3-month change, a large filled sparkline,
+  and the company name sit centered on a row above — ticker 28px bold,
+  name in gold (`companyName`: the ticker list's label, `FULL_NAMES` where
+  that label is the symbol); no "Buy · at the money" eyebrow on the Buy
+  card; owner, 2026-10-16): hero price + 3-month change, a large filled sparkline,
   the Buy card, four tiles (Momentum, Exit below, Past year, Option price),
   signals, the history line, Past results & what-if and a gold "Open
   chart" button. Sparkline data = `confluence_ranks.spark` (last 63

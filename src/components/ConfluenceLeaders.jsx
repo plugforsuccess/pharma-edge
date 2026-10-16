@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import clsx from 'clsx'
 import { ChevronDown, ChevronRight, Minus, Plus } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { CHART_TICKERS } from '../lib/chartTickers'
 import { simulateCall, breakevenMoves, playContract, PLAYS } from '../utils/callHistory'
 
 // Charts → Pullbacks tab, formerly "Confluence leaders" (renamed 2026-10-07) (owner, 2026-10-03; verdicts 2026-10-04: "it's
@@ -543,6 +544,21 @@ function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, 
   )
 }
 
+// Company names for the open row's header (owner, 2026-10-16). The ticker
+// list keeps terse labels; these fill the ones whose label is the symbol.
+const FULL_NAMES = {
+  ADP: 'Automatic Data Processing', AIG: 'American International Group', AMD: 'Advanced Micro Devices',
+  ASML: 'ASML Holding', CSX: 'CSX Corp.', EQT: 'EQT Corp.', FIS: 'Fidelity National Information Services',
+  IBM: 'International Business Machines', IFF: 'International Flavors & Fragrances', KKR: 'KKR & Co.',
+  MSCI: 'MSCI Inc.', NVR: 'NVR Inc.', PTC: 'PTC Inc.', RTX: 'RTX Corp.', SLB: 'SLB (Schlumberger)',
+  UDR: 'UDR Inc.', UPS: 'United Parcel Service',
+}
+const NAME_OF = new Map(CHART_TICKERS.map((t) => [t.symbol, t.label]))
+const companyName = (sym) => {
+  const n = FULL_NAMES[sym] ?? NAME_OF.get(sym)
+  return n && n !== sym ? n : null
+}
+
 function LeaderRow({ r, play, setPlay, accountSize, open, onToggle }) {
   const isLeader = r.verdict === 'enter'
   const trade = useMemo(() => (isLeader && r.trade ? playContract({ S: r.close, vol: r.trade.vol, asOf: r.as_of, play }) : null), [isLeader, r, play])
@@ -565,7 +581,9 @@ function LeaderRow({ r, play, setPlay, accountSize, open, onToggle }) {
             and the call sit centered above the hero price and 3M chart. */}
         <span className={clsx('min-w-0', open ? 'flex-none' : 'flex-1')}>
           <span className={clsx('block font-semibold text-fg', open ? 'text-[28px] leading-9 font-bold tracking-tight' : 'text-[15px]')}>{r.ticker}</span>
-          <span className={clsx('block truncate', open ? 'mt-0.5 text-sm font-semibold font-mono-tab' : 'text-xs', open && isLeader ? 'text-amber-300' : isLeader ? 'text-subtle' : 'text-muted')}>{sub}</span>
+          {open
+            ? companyName(r.ticker) && <span className="mt-0.5 block truncate text-sm font-semibold text-amber-300">{companyName(r.ticker)}</span>
+            : <span className={clsx('block text-xs truncate', isLeader ? 'text-subtle' : 'text-muted')}>{sub}</span>}
         </span>
         {!open && (
           <>
@@ -595,7 +613,6 @@ function LeaderRow({ r, play, setPlay, accountSize, open, onToggle }) {
             <div className="mt-4 rounded-2xl bg-bg-elev p-4">
               <div className="flex items-start gap-3">
                 <div className="flex-1 min-w-0">
-                  <div className="text-[11px] text-muted">Buy · at the money</div>
                   <div className="text-lg font-semibold leading-7 whitespace-nowrap">{expiryLabel(trade.expiry, play)} {money(trade.strike, trade.strike < 25 ? 2 : 0)} call</div>
                   <div className="text-xs text-subtle">{play.kind === 'swing' ? 'Hold 1–2 weeks' : 'Hold 6–12 months'}</div>
                 </div>
