@@ -1570,6 +1570,13 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   vs 62% higher, gone by 6M). A solid strip under the phone status bar
   (`Layout.jsx`, `env(safe-area-inset-top)`, z-40) keeps scrolled content
   out from behind the clock on every page.
+- **Charts = Leaders** (owner, 2026-10-16: "The charts tab should
+  essentially be only leaders"). With `FEATURES.chartsExtras` off (the
+  default) `/charts` is the Leaders list alone (`ConfluenceLeaders
+  leadersOnly`: title "Leaders", buy side only, 3+ signals chip beside Top
+  10 / Yours) — no tab bar, no Momentum list, no Ideas & holdings chart, no
+  sell side; Search opens `/charts/entry/:ticker` for any ticker. The tabs
+  and their code stay; flip the flag to bring them back.
 - **Leaders only** (owner, 2026-10-16: "We only want leaders"). The
   winner-traits study (`scripts/winner-traits.mjs`,
   `.github/workflows/winner-traits.yml`, research only, no DB writes:

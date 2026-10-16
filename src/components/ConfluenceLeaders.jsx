@@ -79,8 +79,10 @@ function Fact({ label, value, tone = 'text-fg' }) {
   )
 }
 
-export default function ConfluenceLeaders({ mine = [] }) {
-  const [side, setSide] = useState('buy')
+export default function ConfluenceLeaders({ mine = [], leadersOnly = false }) {
+  // leadersOnly (owner, 2026-10-16: Charts is "only leaders"): buy side only.
+  const [sideState, setSide] = useState('buy')
+  const side = leadersOnly ? 'buy' : sideState
   const [scope, setScope] = useState('all')
   const [rows, setRows] = useState(null)
   const [accountSize, setAccountSize] = useState(null)
@@ -128,17 +130,24 @@ export default function ConfluenceLeaders({ mine = [] }) {
     <section className="bg-card border border-border rounded-2xl mb-5 overflow-hidden">
       <div className="px-5 pt-5 pb-3">
         <div className="flex items-baseline gap-2">
-          <h2 className="flex-1 text-sm font-semibold">Pullbacks</h2>
+          <h2 className="flex-1 text-sm font-semibold">{leadersOnly ? 'Leaders' : 'Pullbacks'}</h2>
           {asOf && <span className="text-[11px] text-muted">as of {day(asOf)}</span>}
         </div>
         <div className="mt-3 flex items-center gap-2">
-          <div className="flex gap-0.5 p-0.5 rounded-lg bg-bg-elev" role="tablist" aria-label="Side">
+          {!leadersOnly && <div className="flex gap-0.5 p-0.5 rounded-lg bg-bg-elev" role="tablist" aria-label="Side">
             {[['buy', 'Buy · dips'], ['sell', 'Sell · stretched']].map(([key, label]) => (
               <button key={key} type="button" role="tab" aria-selected={side === key} onClick={() => setSide(key)}
                 className={clsx('min-h-[36px] px-2.5 rounded-md text-xs font-semibold transition whitespace-nowrap',
                   side === key ? (key === 'buy' ? 'bg-card text-confluence shadow-sm' : 'bg-card text-suite-bear shadow-sm') : 'text-muted hover:text-subtle')}>{label}</button>
             ))}
-          </div>
+          </div>}
+          {leadersOnly && (
+            <button type="button" aria-pressed={strict} onClick={() => setStrict(!strict)}
+              className={clsx('min-h-[36px] px-2.5 rounded-lg border text-xs font-semibold inline-flex items-center gap-1.5 transition',
+                strict ? 'border-violet-400/50 bg-violet-400/10 text-violet-300' : 'border-border text-muted hover:text-subtle')}>
+              {strict ? '✓' : '+'} 3+ signals
+            </button>
+          )}
           <span className="flex-1" />
           <div className="flex gap-0.5 p-0.5 rounded-lg bg-bg-elev" role="tablist" aria-label="Which tickers">
             {[['all', 'Top 10'], ['mine', 'Yours']].map(([key, label]) => (
@@ -147,7 +156,7 @@ export default function ConfluenceLeaders({ mine = [] }) {
             ))}
           </div>
         </div>
-        {side === 'buy' && (
+        {!leadersOnly && side === 'buy' && (
           <div className="mt-2.5 flex items-center gap-2">
             <button type="button" aria-pressed={strict} onClick={() => setStrict(!strict)}
               className={clsx('min-h-[32px] px-2.5 rounded-lg border text-[11px] font-semibold inline-flex items-center gap-1.5 transition',

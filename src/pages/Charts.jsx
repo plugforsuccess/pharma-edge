@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import clsx from 'clsx'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
@@ -13,6 +13,7 @@ import { CHART_TICKERS } from '../lib/chartTickers'
 import PriceChart from '../components/PriceChart'
 import ConfluenceLeaders from '../components/ConfluenceLeaders'
 import MomentumList from '../components/MomentumList'
+import { FEATURES } from '../lib/features'
 import { placePins, measure, fibLevels, autoSwing, stepPin } from '../utils/chartTools'
 
 // Charts — the stocks where the app suggests a LEAPS trade, with the trade
@@ -98,6 +99,7 @@ function Portalled({ when, children }) {
 const CHART_TABS = [['momentum', 'Momentum'], ['pullbacks', 'Pullbacks'], ['charts', 'Ideas & holdings']]
 
 export default function Charts() {
+  const navigate = useNavigate()
   const { user } = useAuth()
   const { federal, profile, positions, plan, ready, results } = useHoldings()
   const [botRows, setBotRows] = useState(null)
@@ -244,6 +246,8 @@ export default function Charts() {
     const sym = String(raw ?? '').trim().toUpperCase()
     if (!sym) return
     setSearchOpen(false)
+    // Leaders only: any ticker opens its entry chart.
+    if (!FEATURES.chartsExtras) { navigate(`/charts/entry/${encodeURIComponent(sym)}`); return }
     setHover(null)
     setTab('charts')
     const existing = items.find((x) => x.ticker === sym)
@@ -350,8 +354,10 @@ export default function Charts() {
         </button>
       </header>
 
+      {!FEATURES.chartsExtras && <ConfluenceLeaders mine={myTickers} leadersOnly />}
+
       {/* One list at a time: tabs pinned under the header. */}
-      <div className="sticky top-[env(safe-area-inset-top)] z-20 -mx-4 px-4 pt-1 pb-3 mb-1 bg-bg">
+      {FEATURES.chartsExtras && <div className="sticky top-[env(safe-area-inset-top)] z-20 -mx-4 px-4 pt-1 pb-3 mb-1 bg-bg">
         <div className="flex gap-0.5 p-0.5 rounded-xl bg-card border border-border" role="tablist" aria-label="Charts sections">
           {CHART_TABS.map(([k, label]) => (
             <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
@@ -361,12 +367,12 @@ export default function Charts() {
             </button>
           ))}
         </div>
-      </div>
+      </div>}
 
-      {tab === 'momentum' && <MomentumList />}
-      {tab === 'pullbacks' && <ConfluenceLeaders mine={myTickers} />}
+      {FEATURES.chartsExtras && tab === 'momentum' && <MomentumList />}
+      {FEATURES.chartsExtras && tab === 'pullbacks' && <ConfluenceLeaders mine={myTickers} />}
 
-      {tab !== 'charts' ? null : loading ? (
+      {!FEATURES.chartsExtras || tab !== 'charts' ? null : loading ? (
         <div className="text-xs text-muted py-8 text-center">Loading…</div>
       ) : allItems.length === 0 ? (
         <section className="bg-card border border-border rounded-2xl p-5">

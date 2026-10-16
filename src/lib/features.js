@@ -22,6 +22,10 @@
 //                  backtest tab) and its entry alert (owner, 2026-10-03:
 //                  "prevents trades and isn't helpful" — maybe rebuilt;
 //                  the alert has its own switch, HARDENING_ALERTS)
+//   chartsExtras — the Momentum and Ideas & holdings tabs on /charts and the
+//                  Pullbacks sell side (owner, 2026-10-16: "The charts tab
+//                  should essentially be only leaders"); off = Charts is the
+//                  Leaders list, Search opens the entry chart
 export const FEATURES = Object.freeze({
   wheel: false,
   logMove: false,
@@ -33,4 +37,5 @@ export const FEATURES = Object.freeze({
   tastytradeBroker: false,
   tape: false,
   hardening: false,
+  chartsExtras: false,
 })
