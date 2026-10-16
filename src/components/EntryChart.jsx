@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { FEATURES } from '../lib/features'
 import { Maximize2 } from 'lucide-react'
 import { DiamondMarkers, LANE_PX } from './chartDiamonds'
-import { VerticalBands, ZoneFill } from './chartBands'
+import { VerticalBands, ZoneFill, FibLevels } from './chartBands'
 import { tripleEvents } from '../utils/signalSuite'
 import { snapPin } from '../utils/chartTools'
 import {
@@ -390,7 +390,9 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
     }
     markers.sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0))
     createSeriesMarkers(candles, markers)
-    toolsRef.current = { candles, markers: createSeriesMarkers(candles, []), line: null, fibLines: [], t }
+    const fibPrim = new FibLevels()
+    candles.attachPrimitive(fibPrim)
+    toolsRef.current = { candles, markers: createSeriesMarkers(candles, []), line: null, fib: fibPrim, font: getComputedStyle(el).fontFamily, t }
     }
 
     // Sub-panes ----------------------------------------------------------
@@ -642,24 +644,22 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
     if (!chart || !tl) return
     const { candles, markers, t } = tl
     if (tl.line) { try { chart.removeSeries(tl.line) } catch { /* rebuilt */ } tl.line = null }
-    for (const pl of tl.fibLines) candles.removePriceLine(pl)
-    tl.fibLines = []
     const list = pins ?? []
     markers.setMarkers(list.map((pin, k) => ({ time: pin.t, position: 'atPriceMiddle', price: pin.p, shape: 'circle', color: t.gold, size: 1.8, text: k === 0 ? 'A' : 'B' })))
     if (list.length === 2) {
       tl.line = chart.addSeries(LineSeries, { color: t.gold, lineWidth: 2, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false, pointMarkersVisible: false }, 0)
       tl.line.setData(list.map((pin) => ({ time: pin.t, value: pin.p })))
     }
-    for (const l of fib ?? []) {
+    // Fibonacci, TradingView-style (owner, 2026-10-16): lines from A to the
+    // right edge, labels at their left end, faint bands, the 50–61.8% pocket
+    // in gold — no axis tags (they covered the candles and spilled over).
+    const levels = (fib ?? []).map((l) => {
       const strong = l.kind === 'retracement' && (l.ratio === 0.5 || l.ratio === 0.618)
-      const edge = l.kind === 'retracement' && (l.ratio === 0 || l.ratio === 1)
-      const color = l.kind === 'extension' ? (l.up ? t.up : t.down) : strong ? t.gold : edge ? t.muted : t.subtle
-      tl.fibLines.push(candles.createPriceLine({
-        price: l.price, title: l.kind === 'extension' ? `Ext ${l.label}` : `Fib ${l.label}${l.ratio === 0 ? ' · B' : l.ratio === 1 ? ' · A' : ''}`,
-        color, lineWidth: 1, lineStyle: l.kind === 'extension' ? LineStyle.SparseDotted : LineStyle.Dotted,
-        axisLabelVisible: true, axisLabelColor: alpha(color, 0.9), axisLabelTextColor: t.card ?? t.bg,
-      }))
-    }
+      const color = l.kind === 'extension' ? (l.up ? t.up : t.down) : strong ? t.gold : t.subtle
+      const end = l.kind === 'retracement' && l.ratio === 0 ? ' · B' : l.kind === 'retracement' && l.ratio === 1 ? ' · A' : ''
+      return { price: l.price, kind: l.kind, ratio: l.ratio, color, text: `${l.label}${end}  ${l.price.toFixed(2)}` }
+    })
+    tl.fib.setLevels(levels.length ? { from: list.length ? list.reduce((m, p) => (msOf(p.t) < msOf(m.t) ? p : m)).t : null, levels, font: tl.font, bandFill: alpha(t.subtle, 0.05), goldFill: alpha(t.gold, 0.14), labelBg: alpha(t.bg, 0.85) } : null)
   }, [pins, fib, toolsVersion])
 
   // jump = { i, n } (n changes per request): center the view on bar i,
