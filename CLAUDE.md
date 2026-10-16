@@ -1600,7 +1600,13 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   entry chart (`pins` / `fib` / `picking` / `onPick` props drawn on the live
   chart; tap to pin, ‹ › step, no drag; Auto finds the biggest swing in the
   selected range; saved per ticker in `cm:chart-tools:TICKER`, shared with
-  the Charts price chart). **Live price** — during US hours (Mon–Fri
+  the Charts price chart). **Fibonacci on the entry chart is drawn TradingView-style**
+  (owner, 2026-10-16: "the fib line needs to be restyled"; the axis tags
+  covered the candles and spilled into the header): `FibLevels` in
+  `components/chartBands.js` — thin lines from point A to the right edge
+  (extensions dashed), faint bands between retracements, the 50–61.8%
+  pocket in gold, labels "61.8%  144.76" at the right end on a dark backing
+  above the candles, all clipped to the price pane's plot area. **Live price** — during US hours (Mon–Fri
   9:30–16:05 ET, holidays not modelled) today's 5-minute bars are refetched
   every minute and folded into today's daily candle; intraday candles
   refresh every minute too; the header reads "Live · 10:42 AM ET" (no
