@@ -1584,8 +1584,28 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   (`localization.timeFormatter`), and the date rows under each pane add
   each week's first day under ~5 months. Copy: a stock failing the Leaders
   rule reads **"NOT YET"** / "Not yet a leader" — never "NOT A LEADER"
-  (owner). Not yet: intraday candles, a line-chart mode, real-time quotes,
-  the Measure / Fibonacci tools (they live on the hidden Charts price chart).
+  (owner). **Then all four gaps** (owner, 2026-10-16: "Yes all 4"):
+  **intraday candles** — Candle size 5 min · 15 min · 1 hour · Day · Week ·
+  Month (`CANDLES` in `LeapsEntry.jsx`, `cm:entry-candle`; intraday from
+  `price-history` with its new optional `interval` — 5m / 15m / 30m up to
+  `1mo`, 60m up to `2y`; each size opens on its range: 5 min → 1D, 15 min
+  → 1W, 1 hour → 1M, Day → 1Y, Week → 5Y, Month → Max). Intraday `t` is
+  unix seconds of ET wall clock read as UTC: `msOf` / `dayParts` /
+  `INTRADAY_TF` in `EntryChart.jsx` handle both kinds (axis "10:30 AM",
+  crosshair "Tue, Oct 14 · 10:35 AM", date rows label each day and hours
+  under ~2 days), `weekKey` in `indicators.js` accepts seconds (copies
+  synced); intraday drops the daily-only panes; "% vs 200-bar". **Line /
+  Candles** toggle (`style` prop, `cm:entry-style`; the line is green / red
+  by the move over the bars loaded). **Measure · Fibonacci · Auto** on the
+  entry chart (`pins` / `fib` / `picking` / `onPick` props drawn on the live
+  chart; tap to pin, ‹ › step, no drag; Auto finds the biggest swing in the
+  selected range; saved per ticker in `cm:chart-tools:TICKER`, shared with
+  the Charts price chart). **Live price** — during US hours (Mon–Fri
+  9:30–16:05 ET, holidays not modelled) today's 5-minute bars are refetched
+  every minute and folded into today's daily candle; intraday candles
+  refresh every minute too; the header reads "Live · 10:42 AM ET". Yahoo
+  prices — near real-time for most US listings, not a broker feed; true
+  streaming still waits on the dxlink-worker deploy.
 - **Signal suite sunset** (owner, 2026-10-16: "Do it, I guess we no longer
   need the signal suite card, triple record card, plan card"). The
   leader-timing study (`scripts/leader-timing.mjs`,

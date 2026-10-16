@@ -113,7 +113,8 @@ export function rank(values, n = 252, min = 120) {
 
 // ISO week key (Monday-based) for a 'YYYY-MM-DD' date.
 function weekKey(t) {
-  const d = new Date(`${t}T00:00:00Z`)
+  // Daily bars carry 'YYYY-MM-DD'; intraday bars unix seconds (ET wall clock read as UTC).
+  const d = typeof t === 'number' ? new Date(Math.floor(t / 86400) * 86400000) : new Date(`${t}T00:00:00Z`)
   const day = (d.getUTCDay() + 6) % 7
   d.setUTCDate(d.getUTCDate() - day)
   return d.toISOString().slice(0, 10)
