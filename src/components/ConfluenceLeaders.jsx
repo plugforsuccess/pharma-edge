@@ -564,8 +564,8 @@ function LeaderRow({ r, play, setPlay, accountSize, open, onToggle }) {
         {/* Open (owner, 2026-10-16): no sparkline or price pill — the ticker
             and the call sit centered above the hero price and 3M chart. */}
         <span className={clsx('min-w-0', open ? 'flex-none' : 'flex-1')}>
-          <span className="block text-[15px] font-semibold text-fg">{r.ticker}</span>
-          <span className={clsx('block text-xs truncate', isLeader ? 'text-subtle' : 'text-muted')}>{sub}</span>
+          <span className={clsx('block font-semibold text-fg', open ? 'text-[28px] leading-9 font-bold tracking-tight' : 'text-[15px]')}>{r.ticker}</span>
+          <span className={clsx('block truncate', open ? 'mt-0.5 text-sm font-semibold font-mono-tab' : 'text-xs', open && isLeader ? 'text-amber-300' : isLeader ? 'text-subtle' : 'text-muted')}>{sub}</span>
         </span>
         {!open && (
           <>
