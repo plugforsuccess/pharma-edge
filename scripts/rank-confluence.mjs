@@ -244,7 +244,7 @@ async function main() {
   })
   console.log(`Theme funds: ${fundReturns.size}/${THEMES.length}`)
   const results = (await mapLimit(universe, CONCURRENCY, async (ticker) => {
-    try { const bars = await dailyBars(ticker); return { ...analyze(ticker, bars, spy), theme: themeOf(ticker, bars, fundReturns) } } catch (e) { failed.push(`${ticker}: ${e.message}`); return null } finally {
+    try { const bars = await dailyBars(ticker); const a = analyze(ticker, bars, spy); return a && { ...a, theme: themeOf(ticker, bars, fundReturns) } } catch (e) { failed.push(`${ticker}: ${e.message}`); return null } finally {
       done++
       if (done % 50 === 0) console.log(`  ${done}/${universe.length} · ${failed.length} failed · ${((Date.now() - t0) / 1000).toFixed(0)}s`)
       // Yahoo blocking this runner: stop instead of retrying for hours.
