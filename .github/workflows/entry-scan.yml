@@ -8,9 +8,10 @@
 
 name: Entry alerts
 
+# Schedule off (owner, 2026-10-16): the buy-zone rule is sunset with the
+# signal suite; "became a leader" alerts come from confluence-rank.yml.
+# Manual runs still work.
 on:
-  schedule:
-    - cron: '20 21 * * 1-5'   # 21:20 UTC = 5:20pm ET (DST) / 4:20pm ET (standard) — after the close
   workflow_dispatch:
     inputs:
       dry_run:

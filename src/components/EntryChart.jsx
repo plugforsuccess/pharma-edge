@@ -133,7 +133,7 @@ export const DAILY_ONLY_PANES = new Set(['ivr', 'ivhv', 'conf'])
 // A date row under every pane but the last (which has the chart's own axis).
 const DATE_ROW = 16
 
-export default function EntryChart({ bars, model, suite, conf = null, suiteLabel = null, panes, layers = [], onHover, onExpand, focus = null, fill = null, jump = null, tf = '1d' }) {
+export default function EntryChart({ bars, model, suite, conf = null, suiteLabel = null, panes, layers = [], onHover, onExpand, focus = null, fill = null, jump = null, tf = '1d', plain = false }) {
   const iv = INTERVALS[tf] ?? INTERVALS['1d']
   const daily = tf === '1d'
   const box = useRef(null)
@@ -202,7 +202,7 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
     // Buy-zone shading: full-height columns on signal days, its own scale.
     const zone = addS(HistogramSeries, { ...quiet, priceScaleId: 'zone', base: 0 }, 0)
     chart.priceScale('zone', 0).applyOptions({ visible: false, scaleMargins: { top: 0, bottom: 0 } })
-    zone.setData(bars.map((b, i) => (daily && model.cond[i]?.all
+    zone.setData(bars.map((b, i) => (daily && !plain && model.cond[i]?.all
       ? { time: b.t, value: 1, color: alpha(t.up, 0.13) }
       : { time: b.t })))
 
@@ -284,8 +284,9 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
     }
     for (const i of model.golden) markers.push({ time: time[i], position: 'aboveBar', shape: 'circle', color: t.gold, text: 'Golden cross', size: 1 })
     for (const i of model.death) markers.push({ time: time[i], position: 'aboveBar', shape: 'circle', color: t.down, text: 'Death cross', size: 1 })
-    // Buy-zone arrows and MACD confirmations: daily only.
-    if (daily) {
+    // Buy-zone arrows and MACD confirmations: daily only (off when plain —
+    // the buy-zone rule is sunset with the signal suite).
+    if (daily && !plain) {
       for (const i of model.confirms) {
         if (!signalSet.has(i)) markers.push({ time: time[i], position: 'belowBar', shape: 'circle', color: alpha(t.up, 0.45), size: 0.6 })
       }

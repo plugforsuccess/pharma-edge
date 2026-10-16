@@ -1570,6 +1570,32 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   vs 62% higher, gone by 6M). A solid strip under the phone status bar
   (`Layout.jsx`, `env(safe-area-inset-top)`, z-40) keeps scrolled content
   out from behind the clock on every page.
+- **Signal suite sunset** (owner, 2026-10-16: "Do it, I guess we no longer
+  need the signal suite card, triple record card, plan card"). The
+  leader-timing study (`scripts/leader-timing.mjs`,
+  `.github/workflows/leader-timing.yml`, research only; ATM 2-year calls
+  with the exit plan, 2024+ entries) found a timing signal adds nothing:
+  leader + 2 signals 61% win / +54% median (n 1,510) vs **leader any day 60% / +50% (n 2,790)** vs leader on a 5% dip
+  60% / +48% vs any stock any day 52% / +7%. So: **Leaders are bought any
+  day they qualify.** The nightly ranking ranks every leader (no signal
+  requirement), strongest 12-1 return first (`buyVerdict({ leader })` →
+  `enter` / `notleader`); "Past results" history = days the stock was a
+  leader, one per 21 trading days (`call_hist.plays[key].own.leader` /
+  `pool.leader`); alerts = one of a user's tickers **became a leader**
+  (ranked today, not last night; sell-signal alerts retired);
+  `entry-scan.yml` (buy-zone alerts) runs on dispatch only. Leaders list:
+  no signal meter, no 3+ chip; a "200-day trend" tile replaces Momentum.
+  **Entry chart** with `FEATURES.signalSuite` off (default): the
+  **Leaders panel** (`components/LeaderPanel.jsx`: LEADER / NOT A LEADER,
+  the five checks with today's values, the study's record line; SPY daily
+  bars fetched from `leaps-entry` for the S&P check) replaces the buy-zone
+  status, Signal suite, Triple record and Plan cards; the chart drops Echo /
+  Tango / Confluence panes, every price layer (Triple ◆, reclaim zone,
+  Bravo ◆, exits, swing lows) and the buy-zone shading / arrows (`plain`
+  prop on `EntryChart`); thresholds, backtests and the Replay card hide.
+  Candles, 50 / 200-day, W50, crosses, the 200-day / RSI / MACD / IV panes
+  and the Daily · Weekly · Monthly switch stay. All suite code stays —
+  flip the flag to bring it back.
 - **Charts = Leaders** (owner, 2026-10-16: "The charts tab should
   essentially be only leaders"). With `FEATURES.chartsExtras` off (the
   default) `/charts` is the Leaders list alone (`ConfluenceLeaders

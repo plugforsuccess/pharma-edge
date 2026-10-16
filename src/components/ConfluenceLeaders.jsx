@@ -113,10 +113,10 @@ export default function ConfluenceLeaders({ mine = [], leadersOnly = false }) {
     let q = supabase.from('confluence_ranks')
       .select('ticker, side, as_of, close, score, rank, est_3m, est_6m, est_win_3m, est_win_6m, own_n, pool_n, verdict, hold_reason, blockers, trade, stop_price, momentum, call_hist, leader, leader_traits, spark')
       .eq('side', side)
-    if (side === 'buy' && strict) q = q.gte('score', 3)
+    if (side === 'buy' && strict && !leadersOnly) q = q.gte('score', 3)
     q = scope === 'all'
       ? q.not('rank', 'is', null).order('rank').limit(10)
-      : q.in('ticker', mine.length ? mine : ['—']).order('score', { ascending: false }).limit(40)
+      : q.in('ticker', mine.length ? mine : ['—']).order(leadersOnly ? 'rank' : 'score', leadersOnly ? { ascending: true, nullsFirst: false } : { ascending: false }).limit(40)
     q.then(({ data, error }) => { if (!cancelled) setRows(error ? [] : data ?? []) })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -315,11 +315,11 @@ function expiryLabel(t, play) {
 
 // "After past signals (all stocks), over 1M: stock +1% · this call +3%"
 function PastLine({ ph, play }) {
-  const s = ph?.pool?.setup
+  const s = ph?.pool?.leader ?? ph?.pool?.setup
   if (!s?.n) return null
   return (
     <span className="mt-1.5 block text-xs text-muted">
-      Past signals, all stocks, over {play.span}: stock <span className={clsx('font-mono-tab font-semibold', tone(s.stock))}>{pctS(s.stock)}</span>
+      Past leaders, all stocks, over {play.span}: stock <span className={clsx('font-mono-tab font-semibold', tone(s.stock))}>{pctS(s.stock)}</span>
       {' · '}{play.kind === 'leaps' ? 'LEAPS' : `${play.key} call`} to expiry <span className={clsx('font-mono-tab font-semibold', tone(s.avg))}>{pctS(s.avg)}</span>
     </span>
   )
@@ -344,10 +344,11 @@ function PlayLab({ r, play, setPlay, accountSize }) {
   const setBudget = (b) => { setBudgetState(b); try { localStorage.setItem('cm:pullbacks-budget', String(b)) } catch { /* storage off */ } }
   const plays = r.call_hist?.plays
   // This stock (BUY SETUP; the 2-signal version under 3 cases) or all stocks.
-  const ownSetupN = plays?.['1M']?.own?.setup?.n ?? 0
-  const ownKey = ownSetupN >= 3 ? 'setup' : 'confluence'
+  // History on leader days (one per 21 trading days); older rows carry the
+  // signal-based setup / 2-signal history until the nightly run refreshes.
+  const ownKey = plays?.['1M']?.own?.leader ? 'leader' : (plays?.['1M']?.own?.setup?.n ?? 0) >= 3 ? 'setup' : 'confluence'
   const [scopeH, setScopeH] = useState(() => ((plays?.['1M']?.own?.[ownKey]?.n ?? 0) >= 3 ? 'own' : 'pool'))
-  const statOf = (p) => (scopeH === 'own' ? plays?.[p.key]?.own?.[ownKey] : plays?.[p.key]?.pool?.setup)
+  const statOf = (p) => (scopeH === 'own' ? plays?.[p.key]?.own?.[ownKey] : plays?.[p.key]?.pool?.leader ?? plays?.[p.key]?.pool?.setup)
   const hk = play.holds.some((h) => h[0] === hold) ? hold : play.holds.at(-1)[0]
   const trade = useMemo(() => playContract({ S: r.close, vol: r.trade?.vol, asOf: r.as_of, play }), [r, play])
   const sim = useMemo(() => (open && trade ? simulateCall({ S: r.close, trade, asOf: r.as_of, moves: play.moves, horizons: play.holds }) : null), [open, r, trade, play])
@@ -369,14 +370,14 @@ function PlayLab({ r, play, setPlay, accountSize }) {
           {plays?.['1M']?.pool ? (
             <div>
               <div className="grid grid-cols-2 gap-0.5 p-0.5 rounded-lg bg-bg-elev mb-2" role="tablist" aria-label="Whose history">
-                {[['own', `${r.ticker}${ownKey === 'confluence' ? ' · 2+ signals' : ''}`], ['pool', 'All stocks']].map(([k, l]) => (
+                {[['own', r.ticker], ['pool', 'All leaders']].map(([k, l]) => (
                   <button key={k} type="button" role="tab" aria-selected={scopeH === k} onClick={() => setScopeH(k)}
                     className={clsx('min-h-[36px] rounded-md text-xs font-semibold', scopeH === k ? 'bg-card text-violet-300 shadow-sm' : 'text-muted')}>{l}</button>
                 ))}
               </div>
               <table className="w-full text-xs">
                 <thead><tr className="text-muted">
-                  <th className="text-left font-normal px-1.5 pb-1">After the signal</th>
+                  <th className="text-left font-normal px-1.5 pb-1">After buying</th>
                   <th className="font-normal px-1.5 pb-1 text-center">Stock</th>
                   <th className="font-normal px-1.5 pb-1 text-center">ATM call<span className="block text-[11px]">held to expiry</span></th>
                 </tr></thead>
@@ -393,7 +394,7 @@ function PlayLab({ r, play, setPlay, accountSize }) {
                   })}
                 </tbody>
               </table>
-              <p className="mt-1.5 text-[11px] text-muted">Same signals, same span: the stock's gain vs the {PLAYS.map((p) => p.span).join(' / ')} at-the-money call bought the next open and held to expiry.{scopeH === 'own' && n1 < 5 ? ' Few cases on this stock.' : ''}</p>
+              <p className="mt-1.5 text-[11px] text-muted">Past days it was a leader (one a month), same span: the stock's gain vs the {PLAYS.map((p) => p.span).join(' / ')} at-the-money call bought the next open and held to expiry.{scopeH === 'own' && n1 < 5 ? ' Few cases on this stock.' : ''}</p>
             </div>
           ) : <p className="text-[11px] text-muted">Past results arrive with the next nightly run.</p>}
           {trade && rowsH && (
@@ -499,7 +500,7 @@ function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, 
         <h2 className="mt-0.5 text-[28px] leading-9 font-semibold tracking-tight">Leaders</h2>
         <p className="text-sm text-subtle">
           {list == null ? 'Loading…' : scope === 'all'
-            ? `${leaders} strong ${leaders === 1 ? 'stock' : 'stocks'} pulling back · tap one for the play`
+            ? `${leaders} ${leaders === 1 ? 'stock meets' : 'stocks meet'} the Leaders rule · tap one for the play`
             : 'Your tickers · leaders first'}
         </p>
       </div>
@@ -507,7 +508,6 @@ function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, 
       <div className="-mx-4 px-4 flex gap-2 overflow-x-auto no-scrollbar pb-1">
         <Pill active={scope === 'all'} onClick={() => setScope('all')}>Top 10</Pill>
         <Pill active={scope === 'mine'} onClick={() => setScope('mine')}>Yours</Pill>
-        <Pill active={strict} onClick={() => setStrict(!strict)}>3+ signals</Pill>
       </div>
 
       <div className="mt-3 grid grid-cols-5 gap-1 p-1 rounded-full bg-card border border-border" role="tablist" aria-label="Call">
@@ -522,9 +522,8 @@ function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, 
         <div className="mt-4 space-y-px" aria-busy="true">{[0, 1, 2, 3].map((i) => <div key={i} className="h-16 rounded-xl bg-card animate-pulse mb-2" />)}</div>
       ) : list.length === 0 ? (
         <div className="mt-6 rounded-2xl bg-card border border-border p-5 text-sm text-subtle">
-          {strict ? 'No leader has 3 or more signals today.'
-            : scope === 'mine' ? (mine.length ? 'None of your tickers have signals today.' : 'Add tickers to Tracking or Portfolio to see them here.')
-            : 'No leader has 2+ signals today. The list updates after each close.'}
+          {scope === 'mine' ? (mine.length ? 'None of your tickers have signals today.' : 'Add tickers to Tracking or Portfolio to see them here.')
+            : 'No stock meets the Leaders rule today. The list updates after each close.'}
         </div>
       ) : (
         <ul className="mt-4 rounded-2xl bg-card border border-border overflow-hidden divide-y divide-hairline">
@@ -565,7 +564,6 @@ function LeaderRow({ r, play, setPlay, accountSize, open, onToggle }) {
         <span className="flex-1 min-w-0">
           <span className="flex items-center gap-1.5">
             <span className="text-[15px] font-semibold text-fg">{r.ticker}</span>
-            {isLeader && r.score >= 3 && <span className="text-[10px] font-semibold text-violet-300">{r.score} signals</span>}
           </span>
           <span className={clsx('block text-xs truncate', isLeader ? 'text-subtle' : 'text-muted')}>{sub}</span>
         </span>
@@ -613,16 +611,13 @@ function LeaderRow({ r, play, setPlay, accountSize, open, onToggle }) {
 
           {isLeader && (
             <div className="mt-2 grid grid-cols-2 gap-2">
-              <Tile label="Momentum" value={r.momentum === 'up' ? 'Rising' : 'Falling'} sub={r.momentum === 'up' ? 'confirmed' : 'early entry'} tone={r.momentum === 'up' ? 'text-green-400' : 'text-amber-400'} />
+              {t && <Tile label="200-day trend" value={`${t.slope200 >= 0 ? '+' : '−'}${Math.abs(t.slope200 * 100).toFixed(1)}%`} sub="rise over 20 days" tone="text-green-400" />}
               <Tile label="Exit below" value={r.stop_price != null ? money(r.stop_price) : '—'} sub={room != null ? `${(room * 100).toFixed(1)}% away` : null} />
               {t && <Tile label="Past year" value={`${t.mom12 >= 0 ? '+' : '−'}${Math.round(Math.abs(t.mom12) * 100)}%`} sub={`${Math.round(t.vs200 * 100)}% above its 200-day`} tone="text-green-400" />}
               {t && <Tile label="Option price" value={t.volRank != null ? `${Math.round(t.volRank * 100)}th pct` : '—'} sub="cheap for this stock" />}
             </div>
           )}
 
-          <div className="mt-3 flex items-center gap-3">
-            <SignalMeter score={r.score} side="buy" />
-          </div>
           <PastLine ph={ph} play={play} />
 
           <div className="mt-3 -mx-5"><PlayLab r={r} play={play} setPlay={setPlay} accountSize={accountSize} /></div>

@@ -14,6 +14,12 @@ import { FEATURES } from '../lib/features'
 import ReplayCard from '../components/ReplayCard'
 import { confluenceModel, COMPONENTS, MIN_MATCHES } from '../utils/confluence'
 import { trendQuality, tripleStatus, reclaimPlan } from '../utils/plan'
+import LeaderPanel from '../components/LeaderPanel'
+import { leaderSeries } from '../utils/leaders'
+
+const SUITE = FEATURES.signalSuite
+// Panes that only belong to the signal suite / buy-zone rule.
+const SUITE_PANES = new Set(['echo', 'tango', 'conf'])
 
 // /charts/entry/:ticker — the LEAPS entry chart. Price with 200 / 50 SMA and
 // the weekly 50 EMA, five indicator panes, the combined buy-zone signal
@@ -115,6 +121,17 @@ export default function LeapsEntry() {
   const model = useMemo(() => (bars?.length
     ? entryModel(bars, { ivPoints: data.iv_points ?? [], ivToday: data.iv_today ?? null, params })
     : null), [bars, data, params])
+
+  // The Leaders check needs the S&P 500's 200-day: SPY daily bars (cached
+  // by the edge function), fetched once.
+  const [spyBars, setSpyBars] = useState(null)
+  useEffect(() => {
+    if (SUITE) return undefined
+    let cancelled = false
+    supabase.functions.invoke('leaps-entry', { body: { ticker: 'SPY' } }).then(({ data: d }) => { if (!cancelled) setSpyBars(d?.bars ?? []) })
+    return () => { cancelled = true }
+  }, [])
+  const leaderNow = useMemo(() => (bars?.length && !SUITE ? leaderSeries(bars, spyBars ?? []).at(bars.length - 1) : null), [bars, spyBars])
 
   const setField = (k, v) => {
     const next = { ...draft, [k]: v }
@@ -268,6 +285,11 @@ export default function LeapsEntry() {
   // Jumps: a daily bar (buy-zone rows) or a suite period (tiles, suite rows).
   const jumpDay = (i) => jumpTo(chart?.periodOfDay ? chart.periodOfDay(i) : i)
   const jumpPeriod = (pi) => jumpTo(periodMode || suiteTf === '1d' ? pi : suite?.closeDays?.[pi] ?? -1)
+  // Sunset (FEATURES.signalSuite off): no Echo / Tango / Confluence panes,
+  // no price layers.
+  const paneItems = (periodMode ? SUB_PANES.filter(([k]) => !DAILY_ONLY_PANES.has(k)) : SUB_PANES).filter(([k]) => SUITE || !SUITE_PANES.has(k))
+  const shownPanes = SUITE ? panes : panes.filter((k) => !SUITE_PANES.has(k))
+  const shownLayers = SUITE ? layers : []
   const cbars = chart?.bars ?? bars
   const last = cbars ? cbars[cbars.length - 1] : null
   const shown = hover != null && cbars ? cbars[hover] : last
@@ -284,7 +306,7 @@ export default function LeapsEntry() {
         <div className="flex-1 min-w-0">
           <div className="text-[11px] uppercase tracking-[0.14em] text-muted font-semibold">LEAPS entry</div>
           <h1 className="text-lg font-semibold leading-tight">{ticker}</h1>
-          {bars?.length > 0 && <TripleChips daily={dailyTriple} weekly={weekly?.triple ?? (weeklyData?.error ? false : null)} />}
+          {SUITE && bars?.length > 0 && <TripleChips daily={dailyTriple} weekly={weekly?.triple ?? (weeklyData?.error ? false : null)} />}
         </div>
         <button type="button" onClick={() => setSearchOpen(true)} aria-label="Search tickers"
           className="min-h-[44px] px-3 inline-flex items-center gap-2 rounded-xl bg-card border border-border text-sm text-subtle hover:text-fg transition">
@@ -305,11 +327,12 @@ export default function LeapsEntry() {
       ) : (
         <div className="md:grid md:grid-cols-[1fr_280px] md:gap-x-5 md:items-start">
           <div className="min-w-0 md:order-1">
-            <StatusPanel s={s} model={model} params={params} suite={suite} dailySuite={dailySuite} confirmDays={confirmDays} tfLabel={SUITE_TIMEFRAMES[suiteTf].label.toLowerCase()} conf={conf} pool={pool} trend={trend} metrics={data?.metrics ?? null} />
-            {<SuitePanel pack={suitePack} failed={suiteData?.error && suiteData.tf === suiteTf} tf={suiteTf} holdings={holdings} onJump={jumpPeriod} onOpenPane={setExpanded}
+            {!SUITE && <LeaderPanel traits={leaderNow} close={bars[bars.length - 1]?.c} asOf={bars[bars.length - 1]?.t} spyLoading={spyBars === null} />}
+            {SUITE && <StatusPanel s={s} model={model} params={params} suite={suite} dailySuite={dailySuite} confirmDays={confirmDays} tfLabel={SUITE_TIMEFRAMES[suiteTf].label.toLowerCase()} conf={conf} pool={pool} trend={trend} metrics={data?.metrics ?? null} />}
+            {SUITE && <SuitePanel pack={suitePack} failed={suiteData?.error && suiteData.tf === suiteTf} tf={suiteTf} holdings={holdings} onJump={jumpPeriod} onOpenPane={setExpanded}
               buyZone={!!s?.cond?.all} />}
-            <PlanCard plan={plan} loading={weeklyData === null} failed={!!weeklyData?.error} trend={trend} />
-            <EventStatsCard ticker={ticker} daily={dailyTriple} onJumpDay={jumpDay} />
+            {SUITE && <PlanCard plan={plan} loading={weeklyData === null} failed={!!weeklyData?.error} trend={trend} />}
+            {SUITE && <EventStatsCard ticker={ticker} daily={dailyTriple} onJumpDay={jumpDay} />}
           </div>
 
           {/* Chart */}
@@ -345,7 +368,7 @@ export default function LeapsEntry() {
                     )}
                   </div>
                 </div>
-                {hover != null && !periodMode && model.cond[hover] && (
+                {SUITE && hover != null && !periodMode && model.cond[hover] && (
                   <div className="text-right text-[11px] font-mono-tab">
                     <div className="text-muted">Conditions</div>
                     <div className={model.cond[hover].all ? 'text-green-400 font-semibold' : 'text-subtle'}>
@@ -356,16 +379,16 @@ export default function LeapsEntry() {
               </div>
               {/* What's drawn: indicator panels, then layers on the price chart. */}
               <div className="px-5 pb-3 space-y-3">
-                <ToggleGroup label="Panels" items={periodMode ? SUB_PANES.filter(([k]) => !DAILY_ONLY_PANES.has(k)) : SUB_PANES} isOn={(k) => panes.includes(k)} onToggle={togglePane} />
-                <ToggleGroup label="On price" items={LAYERS} isOn={(k) => layers.includes(k)} onToggle={toggleLayer} />
+                <ToggleGroup label="Panels" items={paneItems} isOn={(k) => panes.includes(k)} onToggle={togglePane} />
+                {SUITE && <ToggleGroup label="On price" items={LAYERS} isOn={(k) => layers.includes(k)} onToggle={toggleLayer} />}
               </div>
-              <EntryChart bars={chart.bars} model={chart.model} suite={chart.suite} conf={periodMode ? null : conf} tf={chart.tf} suiteLabel={SUITE_TIMEFRAMES[suiteTf].label} panes={panes} layers={layers} onHover={setHover} onExpand={setExpanded} jump={jump} />
+              <EntryChart bars={chart.bars} model={chart.model} suite={chart.suite} conf={periodMode || !SUITE ? null : conf} tf={chart.tf} suiteLabel={SUITE_TIMEFRAMES[suiteTf].label} panes={shownPanes} layers={shownLayers} plain={!SUITE} onHover={setHover} onExpand={setExpanded} jump={jump} />
               <div className="px-5 py-3 border-t border-hairline flex flex-wrap gap-x-4 gap-y-1.5 text-[11px] text-muted">
-                {!periodMode && <Key className="text-green-400" glyph="▲">Buy signal</Key>}
-                {!periodMode && <Key className="text-green-400/50" glyph="●">MACD confirms</Key>}
+                {SUITE && !periodMode && <Key className="text-green-400" glyph="▲">Buy signal</Key>}
+                {SUITE && !periodMode && <Key className="text-green-400/50" glyph="●">MACD confirms</Key>}
                 <Key className="text-amber-300" glyph="●">Golden cross</Key>
                 <Key className="text-rose-300" glyph="●">Death cross</Key>
-                {!periodMode && <Key glyph={<span className="inline-block w-3 h-2.5 rounded-sm bg-green-400/15 align-middle" />}>Buy zone</Key>}
+                {SUITE && !periodMode && <Key glyph={<span className="inline-block w-3 h-2.5 rounded-sm bg-green-400/15 align-middle" />}>Buy zone</Key>}
                 {layers.includes('hardening') && <Key className="text-amber-300" glyph="▲">Hardening bull</Key>}
                 {layers.includes('hardening') && <Key className="text-rose-300" glyph="▼">Hardening bear</Key>}
                 {layers.includes('triple') && <Key className="text-suite-bull" glyph="◆">Triple bull (3)</Key>}
@@ -375,29 +398,35 @@ export default function LeapsEntry() {
                 {layers.includes('bravoSignals') && <Key className="text-suite-bear" glyph="◆">Bravo bear</Key>}
                 {layers.includes('exits') && <Key className="text-suite-bear" glyph="◇">Exit (E Echo · T Tango · B Bravo)</Key>}
                 {!periodMode && layers.includes('swings') && <Key className="text-confluence" glyph="●">Swing low (hindsight)</Key>}
-                {(panes.includes('echo') || panes.includes('tango')) && <Key className="text-suite-bull" glyph="◆">Echo / Tango bull</Key>}
-                {(panes.includes('echo') || panes.includes('tango')) && <Key className="text-suite-bear" glyph="◆">Echo / Tango bear</Key>}
+                {(shownPanes.includes('echo') || shownPanes.includes('tango')) && <Key className="text-suite-bull" glyph="◆">Echo / Tango bull</Key>}
+                {(shownPanes.includes('echo') || shownPanes.includes('tango')) && <Key className="text-suite-bear" glyph="◆">Echo / Tango bear</Key>}
               </div>
             </section>
           </div>
 
-          <div className="min-w-0 md:order-2">
-            <Thresholds draft={draft} setField={setField} reset={resetParams} isDefault={isDefault} />
-          </div>
+          {SUITE && (
+            <div className="min-w-0 md:order-2">
+              <Thresholds draft={draft} setField={setField} reset={resetParams} isDefault={isDefault} />
+            </div>
+          )}
 
-          <div className="min-w-0 md:order-4 md:col-span-2">
-            <Backtest model={model} suite={suite} pack={suitePack} conf={conf} confirmDays={confirmDays} onJumpDay={jumpDay} onJumpPeriod={jumpPeriod} />
-          </div>
+          {SUITE && (
+            <div className="min-w-0 md:order-4 md:col-span-2">
+              <Backtest model={model} suite={suite} pack={suitePack} conf={conf} confirmDays={confirmDays} onJumpDay={jumpDay} onJumpPeriod={jumpPeriod} />
+            </div>
+          )}
 
-          <div className="min-w-0 md:order-5 md:col-span-2">
-            <ReplayCard bars={bars} model={model} suite={dailySuite} onJumpDay={jumpDay} />
-          </div>
+          {SUITE && (
+            <div className="min-w-0 md:order-5 md:col-span-2">
+              <ReplayCard bars={bars} model={model} suite={dailySuite} onJumpDay={jumpDay} />
+            </div>
+          )}
         </div>
       )}
 
       {expanded && chart && (
         <FullPane title={`${ticker} · ${paneTitle(expanded, chart.tf)}`} onClose={() => setExpanded(null)}>
-          {(h) => <EntryChart bars={chart.bars} model={chart.model} suite={chart.suite} conf={periodMode ? null : conf} tf={chart.tf} suiteLabel={SUITE_TIMEFRAMES[suiteTf].label} panes={panes} layers={layers} focus={expanded} fill={h} />}
+          {(h) => <EntryChart bars={chart.bars} model={chart.model} suite={chart.suite} conf={periodMode || !SUITE ? null : conf} tf={chart.tf} suiteLabel={SUITE_TIMEFRAMES[suiteTf].label} panes={shownPanes} layers={shownLayers} plain={!SUITE} focus={expanded} fill={h} />}
         </FullPane>
       )}
 
