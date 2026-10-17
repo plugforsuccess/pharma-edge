@@ -1,0 +1,36 @@
+# One-off research (owner, 2026-10-17: "Think of CNC" — leaders far above
+# their averages vs AMD at its 50-day). See
+# scripts/leader-extension.mjs. Prints the report, uploads leader-extension.json,
+# writes nothing to the DB.
+
+name: Leader extension
+
+on:
+  workflow_dispatch:
+  push:
+    branches-ignore: [main]
+    paths:
+      - scripts/leader-extension.mjs
+      - .github/workflows/leader-extension.yml
+
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Study
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/leader-extension.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: leader-extension
+          path: leader-extension.json
+          retention-days: 30
