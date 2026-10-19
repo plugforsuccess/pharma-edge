@@ -285,7 +285,7 @@ const THINKING_STAGES = [
   'Checking today\'s flow against the walls…',
   'Identifying regime (A or B)…',
   'Drafting spread setups…',
-  'Sizing positions to the 2% rule…',
+  'Checking risk and reward per contract…',
   'Verifying R/R caps & DTE rules…',
   'Locking strikes to your matrix…',
 ]

@@ -27,7 +27,6 @@ import EarningsBadge from '../components/EarningsBadge'
 //
 // Replaces /leaderboard in the mobile bottom nav per owner.
 
-const CONCENTRATION_CAP_PCT = 0.20
 
 const TIER_LABEL = {
   1: 'T1 · highest conviction',
@@ -44,9 +43,7 @@ const TIER_TONE = {
 const UNIVERSE_BY_SYMBOL = new Map(TICKER_UNIVERSE.map((t) => [t.symbol, t]))
 
 export default function WheelWatchlist() {
-  const { user, profile } = useAuth()
-  const accountSize = Number(profile?.account_size) || 0
-  const maxPerTicker = accountSize * CONCENTRATION_CAP_PCT
+  const { user } = useAuth()
 
   const [picks, setPicks] = useState(null)         // null = loading; [] = empty; [{…}] = loaded
   const [quotes, setQuotes] = useState(new Map())
@@ -127,18 +124,13 @@ export default function WheelWatchlist() {
       const pct = price != null && prev != null && prev > 0
         ? ((price - prev) / prev) * 100
         : null
-      const maxContracts = price != null && maxPerTicker > 0
-        ? Math.floor(maxPerTicker / (price * 100))
-        : null
-      return { ...c, price, pct, maxContracts }
+      // No per-ticker cap from the account size (owner, 2026-10-19).
+      return { ...c, price, pct, maxContracts: null }
     })
-  }, [resolved, quotes, maxPerTicker])
+  }, [resolved, quotes])
 
-  const filtered = accountSize > 0 && !editing
-    ? decorated.filter((c) => c.maxContracts == null || c.maxContracts >= 1)
-    : decorated
+  const filtered = decorated
 
-  const hiddenCount = decorated.length - filtered.length
 
   const byTier = [1, 2, 3].map((tier) => ({
     tier,
@@ -245,43 +237,8 @@ export default function WheelWatchlist() {
         </p>
       </header>
 
-      {accountSize <= 0 && (
-        <div className="rounded-xl border border-amber-500/40 bg-amber-500/5 px-4 py-4 mb-4">
-          <div className="flex items-start gap-2">
-            <AlertTriangle size={16} className="text-amber-400 shrink-0 mt-0.5" />
-            <div className="min-w-0">
-              <div className="text-sm font-semibold text-amber-200 mb-1">
-                Set your account size
-              </div>
-              <p className="text-xs text-subtle leading-relaxed">
-                Contract sizing depends on the 20% per-ticker cap.{' '}
-                <Link to="/settings" className="text-amber-300 underline">
-                  Open Settings →
-                </Link>
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {accountSize > 0 && (
-        <div className="text-[10px] text-muted mb-4">
-          Account size <span className="text-fg font-mono-tab">${accountSize.toLocaleString()}</span>
-          {' · '}
-          per-ticker cap <span className="text-fg font-mono-tab">${maxPerTicker.toLocaleString()}</span>
-          {hiddenCount > 0 && !editing && (
-            <>
-              {' · '}
-              <span className="text-rose-300">{hiddenCount} hidden</span> (too expensive)
-            </>
-          )}
-          {usingFallback && (
-            <>
-              {' · '}
-              <span className="text-muted">showing default list — tap edit to customize</span>
-            </>
-          )}
-        </div>
+      {usingFallback && (
+        <div className="text-[10px] text-muted mb-4">showing default list — tap edit to customize</div>
       )}
 
       {editing && (
@@ -349,9 +306,7 @@ export default function WheelWatchlist() {
 
       <div className="mt-6 text-[10px] text-muted leading-relaxed border-t border-border pt-4">
         Live prices come from <code className="text-fg">dxlink_quotes</code>;
-        rows without a price haven't streamed recently. Max contracts
-        = floor((account × 20%) / (price × 100)) — change account size
-        in <Link to="/settings" className="text-amber-300 underline">Settings</Link>.
+        rows without a price haven't streamed recently.
       </div>
     </div>
   )

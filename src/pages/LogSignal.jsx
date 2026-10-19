@@ -14,7 +14,7 @@ const CHECKLIST_ITEMS = [
   { key: 'checklist_read_sources', label: 'I have read the source documents' },
   { key: 'checklist_thesis_defined', label: 'My thesis is clearly defined' },
   { key: 'checklist_invalidation_known', label: 'I know what would invalidate my thesis' },
-  { key: 'checklist_position_sized', label: 'Position size is under 2% of account' },
+  { key: 'checklist_position_sized', label: 'I can afford to lose the full amount at risk' },
   { key: 'checklist_spread_used', label: 'I am using a spread, not a naked option' },
   { key: 'checklist_dte_checked', label: 'DTE is 30–45+ days past the catalyst' },
   { key: 'checklist_two_signals', label: 'At least 2 signals confirmed' },
@@ -739,10 +739,8 @@ export default function LogSignal() {
             />
           )}
 
-          {/* Contracts input. The calculator computes a 2%-rule
-              recommendation but with small NLVs that can round to 0,
-              blocking the user from logging. Editable here so the
-              user can size the actual trade they intend to place. */}
+          {/* Contracts input — the user's own count (owner, 2026-10-19: no
+              sizing to the account). */}
           {form.direction !== 'watch' && (
             <div className="bg-card border border-border rounded-xl p-4">
               <div className="flex items-start justify-between gap-4">
@@ -751,10 +749,7 @@ export default function LogSignal() {
                     Contracts
                   </p>
                   <p className="text-muted text-[11px] leading-snug mt-1">
-                    Number of spreads to trade. Auto-filled by the
-                    calculator's 2%-rule sizing; edit if you want to
-                    size larger or smaller. PlaceOrderPanel will
-                    re-validate against your live broker NLV.
+                    Number of spreads to trade — your call.
                   </p>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">

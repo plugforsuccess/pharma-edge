@@ -848,10 +848,14 @@ instructions** (`src/lib/holdingChecks.jsx`): Home's card is "Your plan
 today"; "PLTR reached your 100% gain target · Your plan sells 7 contracts
 here · +$X after taxes if sold"; verdicts Target reached / Time stop / Roll
 window / Long-term soon / On plan (never Sell / Hold). Play detail shows max
-risk / profit per contract, no account sizing. Still on hidden pages:
-Position detail's account card, PlaceOrderPanel's % at risk, the calculator's
-% of account, Log a Move's "under 2% of account" checklist item, the Wheel
-20% cap. Counsel still has to confirm.
+risk / profit per contract, no account sizing. The hidden pages
+follow too (owner, 2026-10-19: "Remove the items"): Position detail has no
+account card, PlaceOrderPanel no "% of account at risk", the calculator no
+Account Size / max-trade field or "% of account" tag, the Wheel watchlist no
+20% per-ticker cap, and Log a Move's checklist item reads "I can afford to
+lose the full amount at risk" (still 10 items, same key). The 2% / 20% rules
+remain only as the owner's own bot limits in `risk_gate.ts` and in the Learn
+articles. Counsel still has to confirm.
 
 ## Product tiers & page plan (decided 2026-10-02)
 
