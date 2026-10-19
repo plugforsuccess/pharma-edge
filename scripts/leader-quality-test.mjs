@@ -122,10 +122,18 @@ console.log(`Smooth cut (train median share of up days): ${(SMOOTH_MIN * 100).to
 // SEC companyfacts for every company that was ever a leader (funds skipped).
 const SEC_UA = process.env.SEC_USER_AGENT || 'Cash Moves research admin@cashmoves.io'
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+// SEC throttles bursts (a second run in a row got 198 of 441): back off up to
+// ~1 min per company, and refuse to report a run with patchy coverage.
+const secStatus = {}
 async function secJson(url) {
-  for (let a = 0; a < 3; a++) {
-    try { const r = await fetch(url, { headers: { 'User-Agent': SEC_UA, Accept: 'application/json' } }); if (r.ok) return await r.json(); if (r.status === 404) return null } catch { /* retry */ }
-    await sleep(1000 * (a + 1))
+  for (let a = 0; a < 7; a++) {
+    try {
+      const r = await fetch(url, { headers: { 'User-Agent': SEC_UA, Accept: 'application/json' } })
+      if (r.ok) return await r.json()
+      secStatus[r.status] = (secStatus[r.status] ?? 0) + 1
+      if (r.status === 404) return null
+    } catch { secStatus.error = (secStatus.error ?? 0) + 1 }
+    await sleep(Math.min(30000, 2000 * 2 ** a))
   }
   return null
 }
@@ -134,12 +142,14 @@ const tickersJson = await secJson('https://www.sec.gov/files/company_tickers.jso
 for (const v of Object.values(tickersJson ?? {})) cikByTicker.set(String(v.ticker).toUpperCase().replace(/-/g, '.'), String(v.cik_str).padStart(10, '0'))
 const need = stocks.filter((s) => !s.fund && (s.info.some((x) => x?.leader) || s.lastLeader))
 let secOk = 0, secMissing = 0
-await mapLimit(need, 4, async (s) => {
+await mapLimit(need, 2, async (s) => {
   const cik = cikByTicker.get(s.tk)
   s.facts = cik ? await secJson(`https://data.sec.gov/api/xbrl/companyfacts/CIK${cik}.json`) : null
   if (s.facts) secOk++; else secMissing++
-}, 150)
-console.log(`SEC: ${cikByTicker.size} tickers mapped · company facts for ${secOk} of ${need.length} leader companies (${secMissing} without)`)
+}, 300)
+const noCik = need.filter((s) => !cikByTicker.has(s.tk)).length
+console.log(`SEC: ${cikByTicker.size} tickers mapped · company facts for ${secOk} of ${need.length} leader companies (${secMissing} without: ${noCik} not SEC filers) · non-200 replies ${JSON.stringify(secStatus)}`)
+if (secOk < 0.9 * (need.length - noCik)) { console.log('SEC coverage under 90% of filers — throttled run, not reporting.'); process.exit(1) }
 // Quality per leader-month (point in time) and today.
 let lm = 0, lmFund = 0, lmPass = 0, lmUnknown = 0
 for (const s of stocks) {
