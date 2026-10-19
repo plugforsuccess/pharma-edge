@@ -58,7 +58,7 @@ export default function LeaderRecord() {
       <p className="text-sm text-subtle">Each stock bought the day it became a leader and held to today.</p>
 
       <div className="mt-4 flex gap-2">
-        {[['recent', `Past 3 months${rows ? ` · ${recentN}` : ''}`], ['older', `3–12 months ago${rows ? ` · ${rows.length - recentN}` : ''}`]].map(([k, label]) => (
+        {[['recent', `Past 3 months${rows ? ` · ${recentN}` : ''}`], ['older', `3–12 months${rows ? ` · ${rows.length - recentN}` : ''}`]].map(([k, label]) => (
           <button key={k} type="button" aria-pressed={tab === k} onClick={() => setTab(k)}
             className={clsx('shrink-0 min-h-[36px] px-3.5 rounded-full text-[13px] font-semibold transition whitespace-nowrap',
               tab === k ? 'bg-fg text-bg' : 'bg-card border border-border text-subtle hover:text-fg')}>{label}</button>
