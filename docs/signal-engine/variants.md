@@ -58,3 +58,28 @@ period, but almost all of it is 2025; without 2025 it is roughly level with
 SPY, with about twice the worst drop. 47 months is too short to call it an
 edge. Caveats: today's ticker list (survivorship), groups from the last 120
 days (hindsight in the cap and group variants), no costs or dividends.
+
+## 2026-10-19 — Leaders portfolio test (owner: "tweak the leaders to beat the S&P")
+
+`scripts/leader-portfolio-test.mjs` (`.github/workflows/leader-portfolio-test.yml`,
+run 39336201843). Same rule and data as the fix test; only how the basket is
+held. Pass mark fixed before the run: beat SPY over 2024 →, win ≥ 3 of
+2023–2026, worst drop no deeper than 1.5× SPY's (−11.2%).
+
+| Version | 2024 → /yr | Worst drop | 2023 | 2024 | 2025 | 2026 (9 mo) | Won | Pass |
+|---|---|---|---|---|---|---|---|---|
+| Every leader (max 4/group) | +35.3% | −13.8% | +21.5% | +29.0% | +74.3% | +2.1% | 2/4 | fail |
+| Strongest 10 | +61.7% | −23.4% | +53.2% | +99.4% | +77.2% | +6.1% | 3/4 | fail (drop) |
+| Strongest 20 | +49.7% | −15.8% | +31.4% | +61.6% | +86.9% | +0.5% | 3/4 | fail (drop) |
+| 70% SPY + 30% leaders | +24.1% | −9.4% | +23.4% | +25.4% | +32.8% | +8.9% | 2/4 | fail |
+| 50% SPY + 50% leaders | +27.4% | −10.7% | +22.9% | +26.4% | +44.0% | +6.9% | 2/4 | fail |
+| Leaders while winning, else SPY | +24.3% | −13.3% | +21.4% | +20.8% | +40.0% | +7.5% | 1/4 | fail |
+| Any stock | +16.7% | −11.0% | +20.5% | +17.7% | +18.1% | +10.1% | 1/4 | — |
+| S&P 500 | +19.1% | −7.5% | +24.1% | +23.7% | +16.9% | +11.8% | — | — |
+
+**Result: nothing passed.** Concentration (strongest 10 / 20) won 3 of 4 years
+by wide margins but failed the drawdown limit (−23% / −16% vs −11%); the
+pass mark is not moved after the fact. Concentration is also where
+survivorship and the missing costs (monthly turnover in 10 names) flatter
+most. Next evidence: delisted-inclusive history, and a forward, append-only
+record of the strongest-10 basket from today on — no backfill.
