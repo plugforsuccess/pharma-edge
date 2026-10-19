@@ -1,8 +1,9 @@
 // The leader record (owner, 2026-10-19: "a live record of the price gain
-// since becoming a leader"). From the daily Leaders rule (leaders.js, past
-// data only on each day) → each stint on the list: the close the day it
-// joined, the close the first day it dropped off (or today's close while
-// it's still on), the change between, and the S&P 500 over the same days.
+// since becoming a leader" → "leaders should be buy and holds"). From the
+// daily Leaders rule (leaders.js, past data only on each day) → each time a
+// stock became a leader: the close that day, the latest close, the change
+// held to today (dropping off the list is not a sale), the S&P 500 over the
+// same days, and whether it's still on the list (left_on = the first day off).
 // Dips off the list of up to STINT.mergeGap trading days (about a month) that end with the
 // stock back on count as one stint (the rule's thresholds make stocks
 // flicker). Price only, no dividends. npm run leaderrecord:check.
@@ -32,16 +33,16 @@ export function leaderStints(bars, leaderDays, { spy = null, lookback = STINT.lo
   const from = n - lookback
   return merged.filter(([a, b]) => a >= from || b === last).map(([a, b]) => {
     const open = b === last
-    const end = open ? last : b + 1 // closed: out at the first day off the list
-    const j = bars[a], e = bars[end]
+    const off = open ? null : bars[b + 1] // the first day off the list (info only)
+    const j = bars[a], e = bars[last]
     const sj = spy?.get(j.t), se = spy?.get(e.t)
     return {
       joined_on: j.t, join_close: r4(j.c),
-      left_on: open ? null : e.t, left_close: open ? null : r4(e.c),
-      last_close: r4(bars[last].c),
-      gain: r4(e.c / j.c - 1),
+      left_on: off?.t ?? null, left_close: off ? r4(off.c) : null,
+      last_close: r4(e.c),
+      gain: r4(e.c / j.c - 1), // held to today
       spy_gain: sj && se ? r4(se / sj - 1) : null,
-      days: end - a, open,
+      days: last - a, open,
     }
   })
 }

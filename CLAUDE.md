@@ -1801,15 +1801,18 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   of the price gain since becoming a leader"). `src/utils/leaderRecord.js`
   (`leaderStints`, `stintSummary`; `npm run leaderrecord:check`) turns the
   daily Leaders rule into stints on the list: joined = the close the first
-  day it qualified, out = the close the first day off (dips of ≤ 21 trading
-  days — about a month, owner 2026-10-19 after testing 5 / 10 / 21 / 42 —
-  that end back on merge into one stay), change between (open stints:
-  to the latest close) and the S&P 500 over the same days. Price only.
+  day it qualified, `left_on` = the first day off, shown only (dips of ≤ 21
+  trading days — about a month, owner 2026-10-19 after testing 5 / 10 / 21 /
+  42 — that end back on merge into one stay), change = join → the latest
+  close and the S&P 500 over the same days. Price only.
+  **Buy and hold** (owner, 2026-10-19: "leaders should be buy and holds"):
+  each join is held to the latest close — dropping off the list is shown
+  ("Off the list since Sep 30"), never counted as a sale. Tabs: Past 3
+  months / 3–12 months ago.
   `rank-confluence.mjs` rebuilds **`leader_stints`** nightly (as_of × ticker
   × joined_on; past year + every open stint; authenticated SELECT) and puts
-  the open stint on `leader_traits.since`. Leaders rows read "Leader since
-  Aug 12 · +18%"; `/charts/leader-record` (link under the list) shows On the
-  list / Left the list with the typical change, higher N of 10, beat the S&P
+  the open stint on `leader_traits.since`. Leaders rows read "+18% since
+  Aug 12"; `/charts/leader-record` (link under the list) shows the typical change, higher N of 10, beat the S&P
   N of 10, one row per stint (tap → chart). The option-trade Signal record
   link shows only in Advanced.
 - **Stars + All leaders** (owner, 2026-10-19: "How can I favorite leaps?"; 38
