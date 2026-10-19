@@ -1,0 +1,49 @@
+# What's driving each leader theme (owner, 2026-10-19: "build option 2").
+# After the nightly ranking (confluence-rank.yml, 21:40 UTC), asks the
+# theme-notes edge function for one sourced news note per theme among the
+# ranked leaders → theme_notes. The function does nothing (and spends
+# nothing) until the THEME_NOTES_ENABLED Supabase secret is 'true'.
+#
+# Same curl-the-edge-function pattern as entry-scan.yml.
+
+name: Theme notes
+
+on:
+  schedule:
+    - cron: '7 22 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'List the themes only — no Claude calls'
+        type: boolean
+        default: true
+
+concurrency:
+  group: theme-notes
+  cancel-in-progress: false
+
+jobs:
+  notes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Invoke theme-notes edge function
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          DRY_RUN: ${{ inputs.dry_run == true }}
+        run: |
+          body='{}'
+          if [ "$DRY_RUN" = "true" ]; then body='{"dry_run":true}'; fi
+          resp=$(curl -sS --max-time 540 -w "\n%{http_code}" -X POST \
+            "${SUPABASE_URL}/functions/v1/theme-notes" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "$body")
+          http=$(echo "$resp" | tail -n1)
+          payload=$(echo "$resp" | head -n -1)
+          echo "theme-notes status=${http} body=${payload}"
+          if [ "$http" != "200" ]; then
+            echo "::error::theme-notes returned ${http}"
+            exit 1
+          fi
