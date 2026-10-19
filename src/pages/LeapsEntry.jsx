@@ -15,6 +15,8 @@ import ReplayCard from '../components/ReplayCard'
 import { confluenceModel, COMPONENTS, MIN_MATCHES } from '../utils/confluence'
 import { trendQuality, tripleStatus, reclaimPlan } from '../utils/plan'
 import LeaderPanel from '../components/LeaderPanel'
+import { StarButton } from '../components/ConfluenceLeaders'
+import { useTracking } from '../hooks/useTracking'
 import { placePins, measure as measurePins, fibLevels, autoSwing, stepPin } from '../utils/chartTools'
 import { leaderSeries } from '../utils/leaders'
 
@@ -401,6 +403,7 @@ export default function LeapsEntry() {
   const cbars = chart?.bars ?? bars
   // Drawing tools (owner, 2026-10-16), shared with the Charts price chart
   // per ticker on this device (cm:chart-tools:TICKER).
+  const { tracking, isTracked, toggle } = useTracking()
   const toolsKey = `cm:chart-tools:${ticker}`
   const [tools, setTools] = useState({ ticker: null, pins: [], fib: false })
   const [picking, setPicking] = useState(false)
@@ -455,6 +458,7 @@ export default function LeapsEntry() {
           <h1 className="text-lg font-semibold leading-tight">{ticker}</h1>
           {SUITE && bars?.length > 0 && <TripleChips daily={dailyTriple} weekly={weekly?.triple ?? (weeklyData?.error ? false : null)} />}
         </div>
+        <StarButton starred={isTracked(ticker)} onClick={() => toggle(ticker)} ticker={ticker} className="min-h-[44px] rounded-xl" />
         <button type="button" onClick={() => setSearchOpen(true)} aria-label="Search tickers"
           className="min-h-[44px] px-3 inline-flex items-center gap-2 rounded-xl bg-card border border-border text-sm text-subtle hover:text-fg transition">
           <Search size={15} aria-hidden /> Search
@@ -649,7 +653,7 @@ export default function LeapsEntry() {
         open={searchOpen}
         onClose={() => setSearchOpen(false)}
         curated={CHART_TICKERS}
-        watchlist={[]}
+        watchlist={tracking ?? []}
         gatedSet={NO_GATES}
         selected={ticker}
         onSelect={(sym) => { setSearchOpen(false); navigate(`/charts/entry/${encodeURIComponent(sym)}`) }}

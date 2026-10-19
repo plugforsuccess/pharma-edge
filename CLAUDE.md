@@ -1694,6 +1694,16 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   `call_hist.plays[key].own.exit` / `pool.exit`. The Buy card's one line
   reads "Past leaders with your exit plan: typical trade +7% · profitable 6
   of 10 times". The stock column keeps the span (1M … 2Y).
+- **Stars + All leaders** (owner, 2026-10-19: "How can I favorite leaps?"; 38
+  leaders ranked, the list showed 10 and said "10 stocks meet the rule"). A ☆
+  on every Leaders row (right edge, its own tap target) and in the entry chart
+  header adds / removes the ticker from Tracking (`watchlist`) —
+  `src/hooks/useTracking.js`, one shared list so a star anywhere updates
+  "Yours" at once; optimistic, rolled back on a failed write; removing deletes
+  every row for the ticker (no unique key). Starred tickers feed "Yours" and
+  the "became a leader" alert. The chips read **Top 10 · All N · Yours**
+  (`scope` 'all' / 'every' / 'mine'); the header counts every ranked leader
+  (head count on `confluence_ranks`), "· strongest 10 shown" on Top 10.
 - **Leaders = LEAPS only, exits confirmed** (owner, 2026-10-16: "the 1M ..
   LEAPS is confusing … we need to confirm the exits … these stocks are in a
   pull back?" — no: leaders are strong uptrends bought any day). The
