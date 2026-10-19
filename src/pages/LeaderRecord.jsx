@@ -12,7 +12,7 @@ import { stintSummary } from '../utils/leaderRecord'
 // same days. Rebuilt each night by the ranking (leader_stints).
 const pctS = (x) => (x == null ? '—' : Math.abs(x) < 0.0005 ? '0%' : `${x >= 0 ? '+' : '−'}${Math.abs(x * 100).toFixed(Math.abs(x) < 0.1 ? 1 : 0)}%`)
 const day = (t) => (t ? new Date(`${t}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }) : '')
-const span = (d) => (d < 10 ? `${d} ${d === 1 ? 'day' : 'days'}` : `${Math.round(d / 5)} weeks`)
+const span = (d) => (d === 0 ? 'today' : d < 10 ? `${d} ${d === 1 ? 'day' : 'days'}` : `${Math.round(d / 5)} weeks`)
 const of10 = (x) => (x == null ? '—' : `${Math.round(x * 10)} of 10`)
 
 function Stat({ label, value, sub, tone = 'text-fg' }) {
@@ -90,7 +90,7 @@ export default function LeaderRecord() {
                     </span>
                     <span className="text-right shrink-0">
                       <span className={clsx('inline-block min-w-[72px] px-2.5 py-1 rounded-lg text-sm font-semibold font-mono-tab text-center',
-                        g == null ? 'bg-bg-elev text-muted' : g >= 0 ? 'bg-green-400 text-bg' : 'bg-red-400 text-bg')}>{pctS(g)}</span>
+                        g == null || Math.abs(g) < 0.0005 ? 'bg-bg-elev text-muted' : g >= 0 ? 'bg-green-400 text-bg' : 'bg-red-400 text-bg')}>{pctS(g)}</span>
                       {r.spy_gain != null && <span className="block mt-0.5 text-[11px] text-muted font-mono-tab">S&P {pctS(Number(r.spy_gain))}</span>}
                     </span>
                     <ChevronRight size={14} aria-hidden className="shrink-0 text-muted" />

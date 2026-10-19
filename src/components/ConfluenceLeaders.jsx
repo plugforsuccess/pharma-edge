@@ -831,7 +831,8 @@ function LeaderRow({ r, bet, play, setPlay, open, onToggle, starred, onStar, sam
   const ph = r.call_hist?.plays?.[play.key]
   const why = (t?.misses ?? []).map((m) => MISS[m] ?? m)
   // Since joining the list (owner, 2026-10-19: the leader record).
-  const since = t?.since ? `Leader since ${new Date(`${t.since.on}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })} · ${pctS(t.since.gain)}` : null
+  // The change first, so a narrow row keeps it ("+12% since Sep 2").
+  const since = t?.since ? `${pctS(t.since.gain, Math.abs(t.since.gain) < 0.1 ? 1 : 0)} since ${new Date(`${t.since.on}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}` : null
   const sub = isLeader && !advanced && t ? `${since ?? `${pctS(t.mom12)} past year · ${Math.round(t.vs200 * 100)}% above its 200-day`}${flags.some((f) => f.tone === 'red') ? ' · ⚠' : ''}`
     : isLeader && trade ? `${expiryLabel(trade.expiry, play)} ${money(trade.strike, trade.strike < 25 ? 2 : 0)} call · ${about(per).replace('about ', '')}`
     : r.verdict === 'notleader' ? `Not yet a leader${why[0] ? ` · ${why[0]}` : ''}`
