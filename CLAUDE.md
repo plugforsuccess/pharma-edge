@@ -890,7 +890,12 @@ market and the risks**; option plays are an opt-in **Advanced** view.
   in `.github/workflows/econ-calendar.yml` (weekdays 20:17 UTC, before the
   ranking) fetches the Fed FOMC page and the BLS / BEA ICS schedules and
   parses them with `src/utils/econCalendar.js` (`npm run econcalendar:check`).
-  Each source independent; never typed in by hand.
+  Each source independent; never typed in by hand. BEA's ICS is UTC —
+  stored in ET. **bls.gov refuses GitHub runners (403)**: CPI / jobs / PPI /
+  JOLTS come from FRED's release dates when the free **`FRED_API_KEY`**
+  Actions secret is set (fred.stlouisfed.org/docs/api/api_key.html), else
+  they're missing. Fed meetings collapse to one row (the Wednesday); a
+  source that answers drops its upcoming rows it no longer lists.
 - **Earnings for every stock** — `bot-seed-earnings-finnhub` takes
   `{ all: true }` (one Finnhub calendar call for the whole market, batch
   upsert); `bot-seed-data.yml` sends `{ lookahead_days: 45, all: true }`.
