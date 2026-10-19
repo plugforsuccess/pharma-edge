@@ -34,6 +34,13 @@ const SOURCE = {
   bls: ['Bureau of Labor Statistics', 'https://www.bls.gov/schedule/news_release/'],
   bea: ['Bureau of Economic Analysis', 'https://www.bea.gov/news/schedule'],
 }
+// "Consumer Price Index for September 2026" → ["Consumer Price Index",
+// "for September 2026"]; "GDP (Advance Estimate), 3rd Quarter 2026" →
+// ["GDP (Advance Estimate)", "3rd Quarter 2026"]. The period gets its own line.
+export const splitTitle = (t) => {
+  const m = String(t).match(/^(.*)(?:,\s+|\s+(?=for\s))(.*\d{4}.*)$/)
+  return m ? [m[1], m[2]] : [String(t), null]
+}
 const isoDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 const when = (t) => {
   const today = new Date(); today.setHours(12, 0, 0, 0)
@@ -198,7 +205,12 @@ export default function MarketCard() {
                       </button>
                       {isOpen && (
                         <div className="mb-2 ml-[104px] text-xs text-subtle">
-                          <div className="text-fg">{e.title}</div>
+                          {(() => { const [name, period] = splitTitle(e.title); return (
+                            <>
+                              <div className="text-fg">{name}</div>
+                              {period && <div className="text-fg">{period}</div>}
+                            </>
+                          ) })()}
                           {KIND_WHAT[e.kind] && <p className="mt-0.5">{KIND_WHAT[e.kind]}</p>}
                           {src && (
                             <a href={src[1]} target="_blank" rel="noreferrer" className="mt-1 min-h-[32px] inline-flex items-center gap-1 text-amber-300 hover:text-amber-200">

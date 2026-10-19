@@ -721,18 +721,6 @@ function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, 
             ? `${total ?? leaders} ${(total ?? leaders) === 1 ? 'stock meets' : 'stocks meet'} the Leaders rule${scope === 'all' && total > 10 ? ' · strongest 10 shown' : ''} · tap one for ${advanced ? 'the play' : 'details'}`
             : 'Your tickers · leaders first · ☆ a leader to add it'}
         </p>
-        {!group && bets.length > 0 && bets.length < leaders && (
-          <p className="mt-1.5 text-sm text-subtle">
-            {scope === 'all' ? 'Top 10' : scope === 'every' ? `All ${leaders}` : 'Yours'} covers <span className="font-semibold text-fg">{bets.length} {bets.length === 1 ? 'group' : 'groups'}</span>:{' '}
-            {bets.map((b, k) => (
-              <span key={b.name}>
-                {k > 0 && <span className="text-muted"> · </span>}
-                {b.alone ? <span className="text-subtle">{b.name}</span>
-                  : <span className={clsx('font-semibold', betOf.get(b.tickers[0])?.tone.text)}>{b.name} {b.tickers.length}</span>}
-              </span>
-            ))}
-          </p>
-        )}
       </div>
 
       <div className="-mx-4 px-4 flex gap-2 overflow-x-auto no-scrollbar pb-1">

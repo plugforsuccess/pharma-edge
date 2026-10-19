@@ -885,7 +885,8 @@ market and the risks**; option plays are an opt-in **Advanced** view.
   `leaps-entry` and `price-history` accept `^`), Leaders → `?leaders=all`,
   group chips → `?group=Oil` (ConfluenceLeaders filters every ranked leader
   to that group, with a removable chip), Breadth → an inline trend + what it
-  means, release rows → what it is + the agency's official schedule. Trend
+  means, release rows → the release name and its period on two lines (`splitTitle`),
+  what it is, and the agency's official schedule. Trend
   lines: `market_pulse.spy_spark` / `vix_spark` (63 closes) and `spy_streak`
   (closes on this side of the 200-day), breadth / leader lines from stored
   rows. The headline: S&P 500
@@ -1810,8 +1811,9 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   leaders are listed clearly with links to them" / "build option 2"). The open
   row's **Moves together** card (title "Moves together: {theme}", line "When
   one falls, the others usually do too. Owning several is like owning one
-  bigger position."; owner chose it over "Same bet"; the summary reads "Top 10
-  covers N groups") lists every ranked leader in the same industry theme
+  bigger position."; owner chose it over "Same bet"; the "Top 10 covers N groups" summary
+  under the title was removed 2026-10-19 — the market card's group chips and
+  the row tags carry it) lists every ranked leader in the same industry theme
   (a light fetch of all ranked rows, not just those in view; `moves_with`
   fallback) — ticker, rank, company, past-year % — and a tap opens that leader
   in place (scrolls to `#leader-TICKER`) or, outside the list, its entry
