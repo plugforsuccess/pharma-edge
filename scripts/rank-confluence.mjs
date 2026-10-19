@@ -39,6 +39,7 @@ import { createHash } from 'node:crypto'
 import { replaySignals, trailingVol, OPTION_MODEL } from '../src/utils/replay.js'
 import { callHistory, callStats, exitHistory, exitStats, PLAYS, playModel, playSpan, playContract, SWING_EXIT } from '../src/utils/callHistory.js'
 import { leaderSeries, leaderMisses } from '../src/utils/leaders.js'
+import { leaderStints } from '../src/utils/leaderRecord.js'
 import { THEMES, themeOf, returnsByDate } from '../src/utils/themes.js'
 import { marketPulse } from '../src/utils/marketPulse.js'
 
@@ -72,7 +73,13 @@ export function analyze(ticker, bars, spy = null) {
     closes: bars.map((b) => b.c), market, ownRecord: ownRecord(bars, model, suite),
     buy: { today: conf.buy.today, setups: conf.buy.setups, lastSignal: lastSignal(conf.buy.flags) },
     sell: { today: conf.sell.today, setups: conf.sell.setups, lastSignal: lastSignal(conf.sell.flags) },
-    calls: callPaths(bars, spy),
+    ...(() => {
+      const { out, leaderDays } = callPaths(bars, spy)
+      // The leader record (owner, 2026-10-19): each stint on the list and
+      // the price change since joining (src/utils/leaderRecord.js).
+      const stints = leaderStints(bars, leaderDays, { spy: spy ? new Map(spy.map((b) => [b.t, b.c])) : null })
+      return { calls: out, stints }
+    })(),
     leader: leaderToday(bars, spy),
   }
 }
@@ -107,7 +114,7 @@ function callPaths(bars, spy) {
       exit: exitHistory(bars, leaderDays, p, { vols }),
     }
   }
-  return out
+  return { out, leaderDays }
 }
 
 // Universe-wide play history per rule (shared by every row).
@@ -153,7 +160,7 @@ export function rankAll(results, pools, calls = null) {
         stop_price: r.stop?.price ?? null, stop_date: r.stop?.date ?? null, momentum: r.momentum,
         own_record: side === 'buy' ? r.ownRecord : null,
         leader: side === 'buy' ? r.leader?.misses?.length === 0 : null,
-        leader_traits: side === 'buy' && r.leader ? { ...r.leader.traits, misses: r.leader.misses } : null,
+        leader_traits: side === 'buy' && r.leader ? { ...r.leader.traits, misses: r.leader.misses, since: (() => { const o = r.stints?.find((x) => x.open); return o ? { on: o.joined_on, close: o.join_close, gain: o.gain, spy_gain: o.spy_gain } : null })() } : null,
         // The row's sparkline: the last 3 months of closes (owner, 2026-10-16: Robinhood-style list).
         spark: side === 'buy' ? r.closes.slice(-63).map((c) => Math.round(c * 100) / 100) : null,
         call_hist: side === 'buy' && r.calls ? {
@@ -327,6 +334,22 @@ async function main() {
     const { error } = await db.from('momentum_picks').upsert(momRows.map((m) => ({ ...m, updated_at: now })), { onConflict: 'as_of,ticker' })
     if (error) throw new Error(`momentum_picks: ${error.message}`)
     console.log(`Wrote ${momRows.length} momentum picks for ${momRows[0].as_of}.`)
+  }
+  // The leader record (owner, 2026-10-19): every stint on the Leaders list
+  // in the past year (plus any still open), rebuilt each night.
+  {
+    const stintRows = results.flatMap((r) => (r.stints ?? []).map((x) => ({ as_of: asOf, ticker: r.ticker, theme: r.theme?.name ?? null, ...x })))
+    let bad = null
+    for (let i = 0; i < stintRows.length && !bad; i += batchSize) {
+      const { error } = await db.from('leader_stints').upsert(stintRows.slice(i, i + batchSize), { onConflict: 'as_of,ticker,joined_on' })
+      if (error) bad = error.message
+    }
+    if (bad) console.error(`leader_stints: ${bad}`)
+    else {
+      await db.from('leader_stints').delete().lt('as_of', asOf)
+      const open = stintRows.filter((x) => x.open).length
+      console.log(`Leader record: ${stintRows.length} stints (${open} open).`)
+    }
   }
   // The market on one screen (owner, 2026-10-19): S&P trend, breadth, the
   // leaders and their groups, VIX → market_pulse.

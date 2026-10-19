@@ -779,10 +779,17 @@ function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, 
         </ul>
       )}
 
-      <Link to="/charts/record" className="mt-4 min-h-[44px] px-1 flex items-center gap-2 text-xs text-subtle hover:text-fg">
-        <span className="flex-1">Signal record: how these signals traded, every ticker</span>
+      <Link to="/charts/leader-record" className="mt-4 min-h-[44px] px-1 flex items-center gap-2 text-sm text-subtle hover:text-fg">
+        <span className="flex-1">Leader record: how each stock has moved since joining</span>
         <ChevronRight size={14} aria-hidden />
       </Link>
+      {/* The option-trade research is the Advanced view (owner, 2026-10-19). */}
+      {advanced && (
+        <Link to="/charts/record" className="min-h-[44px] px-1 flex items-center gap-2 text-xs text-subtle hover:text-fg">
+          <span className="flex-1">Signal record: how these signals traded as options</span>
+          <ChevronRight size={14} aria-hidden />
+        </Link>
+      )}
       <p className="px-1 text-[11px] text-muted">General information, the same for every subscriber — not personalized investment advice.{advanced ? ' Option prices are estimates, not quotes.' : ''} Past results don't guarantee future results.</p>
     </section>
   )
@@ -823,7 +830,9 @@ function LeaderRow({ r, bet, play, setPlay, open, onToggle, starred, onStar, sam
   const t = r.leader_traits
   const ph = r.call_hist?.plays?.[play.key]
   const why = (t?.misses ?? []).map((m) => MISS[m] ?? m)
-  const sub = isLeader && !advanced && t ? `${pctS(t.mom12)} past year · ${Math.round(t.vs200 * 100)}% above its 200-day${flags.some((f) => f.tone === 'red') ? ' · ⚠' : ''}`
+  // Since joining the list (owner, 2026-10-19: the leader record).
+  const since = t?.since ? `Leader since ${new Date(`${t.since.on}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })} · ${pctS(t.since.gain)}` : null
+  const sub = isLeader && !advanced && t ? `${since ?? `${pctS(t.mom12)} past year · ${Math.round(t.vs200 * 100)}% above its 200-day`}${flags.some((f) => f.tone === 'red') ? ' · ⚠' : ''}`
     : isLeader && trade ? `${expiryLabel(trade.expiry, play)} ${money(trade.strike, trade.strike < 25 ? 2 : 0)} call · ${about(per).replace('about ', '')}`
     : r.verdict === 'notleader' ? `Not yet a leader${why[0] ? ` · ${why[0]}` : ''}`
     : r.verdict === 'watch' ? 'Long-term trend falling' : 'Signals today'

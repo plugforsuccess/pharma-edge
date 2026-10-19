@@ -1797,6 +1797,20 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   `call_hist.plays[key].own.exit` / `pool.exit`. The Buy card's one line
   reads "Past leaders with your exit plan: typical trade +7% · profitable 6
   of 10 times". The stock column keeps the span (1M … 2Y).
+- **Leader record** (owner, 2026-10-19: "the replay should be a live record
+  of the price gain since becoming a leader"). `src/utils/leaderRecord.js`
+  (`leaderStints`, `stintSummary`; `npm run leaderrecord:check`) turns the
+  daily Leaders rule into stints on the list: joined = the close the first
+  day it qualified, out = the close the first day off (dips of ≤ 5 trading
+  days that end back on merge into one stay), change between (open stints:
+  to the latest close) and the S&P 500 over the same days. Price only.
+  `rank-confluence.mjs` rebuilds **`leader_stints`** nightly (as_of × ticker
+  × joined_on; past year + every open stint; authenticated SELECT) and puts
+  the open stint on `leader_traits.since`. Leaders rows read "Leader since
+  Aug 12 · +18%"; `/charts/leader-record` (link under the list) shows On the
+  list / Left the list with the typical change, higher N of 10, beat the S&P
+  N of 10, one row per stint (tap → chart). The option-trade Signal record
+  link shows only in Advanced.
 - **Stars + All leaders** (owner, 2026-10-19: "How can I favorite leaps?"; 38
   leaders ranked, the list showed 10 and said "10 stocks meet the rule"). A ☆
   on every Leaders row (right edge, its own tap target) and in the entry chart
