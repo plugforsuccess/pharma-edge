@@ -32,14 +32,12 @@ const TAGS = {
 const DAY = 86400e3
 const isAnnualForm = (f) => /^10-K/.test(f ?? '')
 
-// Every fact for the first tag (in order) that has any, unit USD or shares.
+// Every fact across the tags, each marked with its tag's priority (0 = first).
+// Companies switch tags over the years (Revenues → RevenueFromContract…), so
+// taking only the first tag that has any facts can read a stale year.
 function factsFor(facts, tags, unit) {
   const g = facts?.facts?.['us-gaap'] ?? {}
-  for (const t of tags) {
-    const u = g[t]?.units?.[unit]
-    if (u?.length) return u
-  }
-  return []
+  return tags.flatMap((t, rank) => (g[t]?.units?.[unit] ?? []).map((f) => ({ ...f, rank })))
 }
 
 // Annual (≈ 1-year duration) values from 10-Ks filed by asOf, keyed by period end.
@@ -50,7 +48,7 @@ function annualSeries(facts, tags, unit, asOf) {
     const days = (Date.parse(f.end) - Date.parse(f.start)) / DAY
     if (days < 330 || days > 400) continue
     const prev = out.get(f.end)
-    if (!prev || f.filed > prev.filed) out.set(f.end, { end: f.end, val: f.val, filed: f.filed })
+    if (!prev || f.rank < prev.rank || (f.rank === prev.rank && f.filed > prev.filed)) out.set(f.end, { end: f.end, val: f.val, filed: f.filed, rank: f.rank })
   }
   return [...out.values()].sort((a, b) => a.end.localeCompare(b.end))
 }
@@ -59,7 +57,7 @@ function instantAt(facts, tags, unit, end, asOf) {
   let best = null
   for (const f of factsFor(facts, tags, unit)) {
     if (f.start || !f.end || f.filed > asOf || f.end > end) continue
-    if (!best || f.end > best.end || (f.end === best.end && f.filed > best.filed)) best = f
+    if (!best || f.end > best.end || (f.end === best.end && (f.rank < best.rank || (f.rank === best.rank && f.filed > best.filed)))) best = f
   }
   return best ? best.val : null
 }
@@ -72,8 +70,10 @@ export function qualityAt(facts, asOf, p = QUALITY) {
   if (!ocfS.length || !revS.length) return { known: false, pass: false, misses: ['no data'] }
   const ocf = ocfS[ocfS.length - 1]
   const end = ocf.end
-  const rev = revS.find((r) => r.end === end) ?? revS[revS.length - 1]
-  const capex = annualSeries(facts, TAGS.capex, 'USD', asOf).find((r) => r.end === end)?.val ?? 0
+  // Revenue for the same fiscal year (period ends within a week), never an older one.
+  const rev = revS.find((r) => Math.abs(Date.parse(r.end) - Date.parse(end)) <= 7 * DAY)
+  if (!rev) return { known: false, pass: false, misses: ['no data'] }
+  const capex = annualSeries(facts, TAGS.capex, 'USD', asOf).find((r) => Math.abs(Date.parse(r.end) - Date.parse(end)) <= 7 * DAY)?.val ?? 0
   const fcf = ocf.val - Math.abs(capex)
   // Total long-term debt when reported, else the non-current + current parts.
   const debt = instantAt(facts, TAGS.debtTotal, 'USD', end, asOf)

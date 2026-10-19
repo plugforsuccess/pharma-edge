@@ -12,6 +12,7 @@ on:
     paths:
       - scripts/leader-quality-test.mjs
       - .github/workflows/leader-quality-test.yml
+      - src/utils/quality.js
 
 jobs:
   study:

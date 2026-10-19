@@ -35,5 +35,17 @@ const diluter = co({
 })
 ok('20% more shares fails on dilution', qualityAt(diluter, '2025-06-01').misses.join() === 'dilution')
 ok('funds are exempt', isFund('USO') && isFund('XLE') && isFund('DRAM', 'Roundhill Memory ETF') && !isFund('XOM', 'Exxon Mobil'))
+const switcher = co({
+  NetCashProvidedByUsedInOperatingActivities: ['USD', [fy(2025, 100, '2025-02-20')]],
+  Revenues: ['USD', [fy(2018, 50, '2018-02-20')]],
+  RevenueFromContractWithCustomerExcludingAssessedTax: ['USD', [fy(2025, 1000, '2025-02-20')]],
+})
+const sq = qualityAt(switcher, '2025-06-01')
+ok('a company that switched revenue tags reads this year, not a stale one', sq.known && Math.abs(sq.fcfMargin - 0.1) < 1e-9)
+const stale = co({
+  NetCashProvidedByUsedInOperatingActivities: ['USD', [fy(2025, 100, '2025-02-20')]],
+  Revenues: ['USD', [fy(2020, 50, '2020-02-20')]],
+})
+ok('no revenue for the same year → unknown, never an old year', !qualityAt(stale, '2025-06-01').known)
 console.log(`${pass} passed, ${fail} failed`)
 if (fail) process.exit(1)
