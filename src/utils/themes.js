@@ -8,7 +8,7 @@
 // own. Leaders sharing a theme are one bet.
 
 export const THEMES = Object.freeze([
-  ['SMH', 'Chips & AI'], ['IGV', 'Software'], ['HACK', 'Cybersecurity'], ['SKYY', 'Cloud'], ['FDN', 'Internet'],
+  ['SMH', 'Chips • AI'], ['IGV', 'Software'], ['HACK', 'Cybersecurity'], ['SKYY', 'Cloud'], ['FDN', 'Internet'],
   ['XOP', 'Oil'], ['CRAK', 'Refiners'], ['OIH', 'Oil services'], ['AMLP', 'Pipelines'],
   ['KRE', 'Regional banks'], ['KBE', 'Banks'], ['IAI', 'Brokers'], ['KIE', 'Insurance'],
   ['XBI', 'Biotech'], ['XPH', 'Pharma'], ['IHI', 'Medical devices'], ['IHF', 'Health insurers'],

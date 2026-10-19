@@ -18,7 +18,7 @@ const funds = new Map([
 const chipStock = walk(chips.map((r) => r + R() * 0.01))
 const oilStock = walk(oil.map((r) => r * 1.2 + R() * 0.01))
 const loner = walk(Array.from({ length: n }, () => R() * 0.04))
-ok('a chip stock is Chips', themeOf('MU', chipStock, funds)?.name === 'Chips & AI')
+ok('a chip stock is Chips', themeOf('MU', chipStock, funds)?.name === 'Chips • AI')
 ok('an oil stock is Oil', themeOf('APA', oilStock, funds)?.name === 'Oil')
 ok('a stock moving on its own has no theme', themeOf('BE', loner, funds) === null)
 ok('a theme fund names itself', themeOf('XOP', oilStock, funds)?.name === 'Oil')

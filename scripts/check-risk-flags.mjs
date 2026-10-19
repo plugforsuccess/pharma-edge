@@ -14,7 +14,7 @@ ok('earnings tomorrow wording', /tomorrow/.test(leaderFlags({ traits: { vs200: 0
 ok('earnings past or far → none', leaderFlags({ traits: { vs200: 0.1 }, earnings: { date: '2026-12-01' }, asOf: '2026-10-19' }).length === 0
   && leaderFlags({ traits: { vs200: 0.1 }, earnings: { date: '2026-10-10' }, asOf: '2026-10-19' }).length === 0)
 ok('pullback flag at 10%+', keys(leaderFlags({ traits: { vs200: 0.2, off20: 0.12 }, asOf: '2026-10-19' })) === 'pullback')
-ok('crowded group at 3+', keys(leaderFlags({ traits: { vs200: 0.2, theme: { name: 'Chips & AI' } }, groupSize: 6 })) === 'crowded')
+ok('crowded group at 3+', keys(leaderFlags({ traits: { vs200: 0.2, theme: { name: 'Chips • AI' } }, groupSize: 6 })) === 'crowded')
 ok('no advice words', [...vlo, ...e].every((f) => !/\b(buy|sell|hold)\b/i.test(f.title + f.body)))
 console.log(`${pass} passed, ${fail} failed`)
 if (fail) process.exit(1)
