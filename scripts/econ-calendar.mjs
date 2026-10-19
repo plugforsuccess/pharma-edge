@@ -5,15 +5,23 @@
 //   node scripts/econ-calendar.mjs           fetch + write
 //   node scripts/econ-calendar.mjs --dry-run fetch + print only
 
-import { parseIcs, parseFomc } from '../src/utils/econCalendar.js'
+import { parseIcs, parseFomc, parseFredDates } from '../src/utils/econCalendar.js'
 
 const DRY = process.argv.includes('--dry-run')
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
 const SOURCES = [
   { name: 'fed', urls: ['https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm'], parse: (t) => parseFomc(t) },
-  { name: 'bls', urls: ['https://www.bls.gov/schedule/news_release/bls.ics'], parse: (t) => parseIcs(t, 'bls') },
+  // bls.gov refuses GitHub's runners (403); FRED's release dates are the
+  // fallback, when the free FRED_API_KEY secret is set.
+  { name: 'bls', urls: ['https://www.bls.gov/schedule/news_release/bls.ics', ...(process.env.FRED_API_KEY ? [fredUrl()] : [])],
+    parse: (t, url) => (url.includes('stlouisfed') ? parseFredDates(JSON.parse(t)) : parseIcs(t, 'bls')) },
   { name: 'bea', urls: ['https://www.bea.gov/news/schedule/ics/online-calendar-subscription.ics', 'https://apps.bea.gov/calendar/ics/bea-release-schedule.ics'], parse: (t) => parseIcs(t, 'bea') },
 ]
+
+function fredUrl() {
+  const start = new Date().toISOString().slice(0, 10)
+  return `https://api.stlouisfed.org/fred/releases/dates?file_type=json&realtime_start=${start}&realtime_end=9999-12-31&include_release_dates_with_no_data=true&sort_order=asc&limit=1000&api_key=${process.env.FRED_API_KEY}`
+}
 
 async function get(url) {
   const resp = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'text/html,text/calendar,*/*', 'Accept-Language': 'en-US,en;q=0.9' } })
@@ -28,12 +36,13 @@ for (const src of SOURCES) {
   let done = false
   for (const url of src.urls) {
     try {
-      const got = src.parse(await get(url)).filter((e) => e.event_date >= today && e.event_date <= horizon)
-      console.log(`${src.name}: ${got.length} upcoming events from ${url}`)
-      events.push(...got.map((e) => ({ ...e, url })))
+      const got = src.parse(await get(url), url).filter((e) => e.event_date >= today && e.event_date <= horizon)
+      const shown = url.replace(/api_key=[^&]+/, 'api_key=…')
+      console.log(`${src.name}: ${got.length} upcoming events from ${shown}`)
+      events.push(...got.map((e) => ({ ...e, url: shown })))
       done = true
       break
-    } catch (e) { console.log(`${src.name}: ${url} failed (${e.message})`) }
+    } catch (e) { console.log(`${src.name}: ${url.replace(/api_key=[^&]+/, 'api_key=…')} failed (${e.message})`) }
   }
   if (!done) console.log(`${src.name}: no calendar this run`)
 }
