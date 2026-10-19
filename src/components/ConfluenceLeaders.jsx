@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import clsx from 'clsx'
-import { ChevronDown, ChevronRight, Minus, Plus, Star } from 'lucide-react'
+import { ChevronDown, ChevronRight, ExternalLink, Minus, Plus, Star } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { CHART_TICKERS } from '../lib/chartTickers'
 import { betsOf } from '../utils/themes'
@@ -130,19 +130,37 @@ export default function ConfluenceLeaders({ mine = [], leadersOnly = false }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [side, scope, mineKey, strict])
 
+  // Every ranked leader, light: the true count and the "Moves together" peers
+  // across the whole list, not just the rows in view (owner, 2026-10-19).
+  const [ranked, setRanked] = useState([])
   useEffect(() => {
     let cancelled = false
-    supabase.from('confluence_ranks').select('ticker', { count: 'exact', head: true }).eq('side', side).not('rank', 'is', null)
-      .then(({ count }) => { if (!cancelled) setTotal(count ?? null) })
+    supabase.from('confluence_ranks').select('ticker, rank, close, leader_traits').eq('side', side).not('rank', 'is', null).order('rank').limit(200)
+      .then(({ data, error }) => { if (!cancelled && !error) { setRanked(data ?? []); setTotal((data ?? []).length) } })
     return () => { cancelled = true }
   }, [side])
+  // What's driving each theme (theme-notes, nightly; newest per theme, last 7 days).
+  const [notes, setNotes] = useState({})
+  useEffect(() => {
+    if (!leadersOnly) return
+    let cancelled = false
+    const since = new Date(Date.now() - 7 * 86400e3).toISOString().slice(0, 10)
+    supabase.from('theme_notes').select('theme, as_of, driver, driver_source, risks').gte('as_of', since).order('as_of', { ascending: false }).limit(100)
+      .then(({ data, error }) => {
+        if (cancelled || error) return
+        const m = {}
+        for (const n of data ?? []) if (!m[n.theme]) m[n.theme] = n
+        setNotes(m)
+      })
+    return () => { cancelled = true }
+  }, [leadersOnly])
 
   // Yours: ranked first, then by score.
   const list = useMemo(() => (scope !== 'mine' ? rows : rows && [...rows].sort((a, b) => (a.rank ?? 1e9) - (b.rank ?? 1e9) || b.score - a.score)), [rows, scope])
   const asOf = rows?.[0]?.as_of
 
   if (leadersOnly) {
-    return <LeadersView {...{ list, scope, setScope, strict, setStrict, play, playKey, setPlay, accountSize, asOf, mine, total }} />
+    return <LeadersView {...{ list, scope, setScope, strict, setStrict, play, playKey, setPlay, accountSize, asOf, mine, total, ranked, notes }} />
   }
 
   return (
@@ -508,6 +526,86 @@ function Sparkline({ values, className, height = 32, fill = false }) {
   )
 }
 
+// Moves together (owner, 2026-10-19: copy from "Same bet"; "the companies … listed clearly with links to
+// them"): every ranked leader in the same industry theme, one tappable row
+// each — a leader in view opens in place, any other opens its chart.
+function SameBet({ sameBet, tone, onJump }) {
+  const { theme, peers } = sameBet
+  const pct = (x) => `${x >= 0 ? '+' : '−'}${Math.round(Math.abs(x) * 100)}%`
+  return (
+    <div className={clsx('mt-2 rounded-2xl border overflow-hidden', tone ? tone.card : 'border-violet-400/30 bg-violet-400/5')}>
+      <div className="px-4 pt-3 pb-2">
+        <div className={clsx('text-sm font-semibold', tone ? tone.text : 'text-violet-300')}>
+          {theme ? `Moves together: ${theme}` : 'Moves together with:'}
+        </div>
+        <div className="mt-0.5 text-xs text-subtle">
+          When one falls, the others usually do too. Owning several is like owning one bigger position.
+        </div>
+      </div>
+      <ul className="divide-y divide-hairline border-t border-hairline">
+        {peers.slice(0, 6).map((p) => {
+          const tr = p.leader_traits
+          const name = companyName(p.ticker)
+          return (
+            <li key={p.ticker}>
+              <button type="button" onClick={() => onJump(p.ticker)}
+                className="w-full min-h-[52px] px-4 py-2 flex items-center gap-3 text-left hover:bg-card-hover/40 transition">
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-baseline gap-2">
+                    <span className="text-[15px] font-semibold text-fg">{p.ticker}</span>
+                    {p.rank != null && <span className="text-[11px] text-muted font-mono-tab">#{p.rank}</span>}
+                  </span>
+                  {name && <span className="block text-xs text-subtle truncate">{name}</span>}
+                </span>
+                {tr?.mom12 != null && (
+                  <span className="text-right">
+                    <span className="block text-sm font-semibold font-mono-tab text-green-400">{pct(tr.mom12)}</span>
+                    <span className="block text-[11px] text-muted">past year</span>
+                  </span>
+                )}
+                <ChevronRight size={16} className="text-muted shrink-0" aria-hidden />
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+      {peers.length > 6 && <div className="px-4 py-2 text-[11px] text-muted border-t border-hairline">and {peers.length - 6} more</div>}
+    </div>
+  )
+}
+
+// What's driving the theme (theme-notes, nightly news summary with sources).
+const KIND_LABEL = { geopolitical: 'Geopolitical', macro: 'Macro', company: 'Company', regulatory: 'Regulatory', commodity: 'Commodity', event: 'Event' }
+function Src({ s }) {
+  if (!s?.url) return null
+  return (
+    <a href={s.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5 text-[11px] text-muted hover:text-fg underline decoration-dotted underline-offset-2">
+      {s.name}{s.date ? `, ${day(s.date)}` : ''}<ExternalLink size={10} aria-hidden />
+    </a>
+  )
+}
+function ThemeNote({ note, theme }) {
+  return (
+    <div className="mt-2 rounded-2xl bg-bg-elev px-4 py-3">
+      <div className="text-sm font-semibold">What's driving {theme ?? 'it'}</div>
+      <p className="mt-1 text-sm text-subtle">{note.driver} <Src s={note.driver_source} /></p>
+      {note.risks?.length > 0 && (
+        <>
+          <div className="mt-2.5 text-[11px] uppercase tracking-[0.12em] text-muted font-semibold">What could reverse it</div>
+          <ul className="mt-1 space-y-1.5">
+            {note.risks.map((k, i) => (
+              <li key={i} className="text-sm text-subtle">
+                <span className="font-semibold text-amber-300">{KIND_LABEL[k.kind] ?? 'Risk'}:</span> {k.text} <Src s={k} />
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      <div className="mt-2 text-[11px] text-muted">News summary · {day(note.as_of)} · not advice</div>
+    </div>
+  )
+}
+
 // Tracking star (owner, 2026-10-19): starred tickers land in "Yours" and get
 // the "became a leader" alert.
 export function StarButton({ starred, onClick, ticker, className }) {
@@ -540,8 +638,23 @@ function Tile({ label, value, sub, tone = 'text-fg' }) {
   )
 }
 
-function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, setPlay, accountSize, asOf, mine, total }) {
+function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, setPlay, accountSize, asOf, mine, total, ranked, notes }) {
   const [open, setOpen] = useState(null)
+  const navigate = useNavigate()
+  // Ranked leaders by theme, for each row's "Moves together" list.
+  const byTheme = useMemo(() => {
+    const m = new Map()
+    for (const x of ranked ?? []) { const th = x.leader_traits?.theme?.name; if (th) { if (!m.has(th)) m.set(th, []); m.get(th).push(x) } }
+    return m
+  }, [ranked])
+  const rankedBy = useMemo(() => new Map((ranked ?? []).map((x) => [x.ticker, x])), [ranked])
+  // A peer in view opens in place; any other goes to its chart.
+  const jump = (sym) => {
+    if (list?.some((x) => x.ticker === sym)) {
+      setOpen(sym)
+      requestAnimationFrame(() => document.getElementById(`leader-${sym}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+    } else navigate(`/charts/entry/${encodeURIComponent(sym)}`)
+  }
   const { isTracked, toggle } = useTracking()
   const leaders = list?.filter((r) => r.verdict === 'enter').length ?? 0
   // What kind of bet each leader is (owner, 2026-10-16): leaders sharing an
@@ -565,7 +678,7 @@ function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, 
         </p>
         {bets.length > 0 && bets.length < leaders && (
           <p className="mt-1.5 text-sm text-subtle">
-            {scope === 'all' ? 'Top 10' : scope === 'every' ? `All ${leaders}` : 'Yours'} = <span className="font-semibold text-fg">{bets.length} {bets.length === 1 ? 'bet' : 'bets'}</span>:{' '}
+            {scope === 'all' ? 'Top 10' : scope === 'every' ? `All ${leaders}` : 'Yours'} covers <span className="font-semibold text-fg">{bets.length} {bets.length === 1 ? 'group' : 'groups'}</span>:{' '}
             {bets.map((b, k) => (
               <span key={b.name}>
                 {k > 0 && <span className="text-muted"> · </span>}
@@ -607,6 +720,14 @@ function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, 
           {list.map((r) => (
             <LeaderRow key={r.ticker} r={r} bet={betOf.get(r.ticker)} play={play} setPlay={setPlay} accountSize={accountSize}
               starred={isTracked(r.ticker)} onStar={() => toggle(r.ticker)}
+              sameBet={(() => {
+                const th = r.leader_traits?.theme?.name
+                const peers = th ? (byTheme.get(th) ?? []).filter((x) => x.ticker !== r.ticker) : []
+                if (peers.length) return { theme: th, peers }
+                const mw = (r.leader_traits?.moves_with ?? []).map((t) => rankedBy.get(t) ?? { ticker: t })
+                return mw.length ? { theme: null, peers: mw } : null
+              })()}
+              note={notes?.[r.leader_traits?.theme?.name]} onJump={jump}
               open={open === r.ticker} onToggle={() => setOpen(open === r.ticker ? null : r.ticker)} />
           ))}
         </ul>
@@ -646,7 +767,7 @@ const BET_TONES = [
   { chip: 'bg-pink-400/15 text-pink-300', text: 'text-pink-300', card: 'border-pink-400/30 bg-pink-400/5' },
 ]
 
-function LeaderRow({ r, bet, play, setPlay, accountSize, open, onToggle, starred, onStar }) {
+function LeaderRow({ r, bet, play, setPlay, accountSize, open, onToggle, starred, onStar, sameBet, note, onJump }) {
   const isLeader = r.verdict === 'enter'
   const trade = useMemo(() => (isLeader && r.trade ? playContract({ S: r.close, vol: r.trade.vol, asOf: r.as_of, play }) : null), [isLeader, r, play])
   const spark = r.spark?.length ? r.spark : null
@@ -656,14 +777,11 @@ function LeaderRow({ r, bet, play, setPlay, accountSize, open, onToggle, starred
   const t = r.leader_traits
   const ph = r.call_hist?.plays?.[play.key]
   const why = (t?.misses ?? []).map((m) => MISS[m] ?? m)
-  // Leaders this one moves with (120-day correlation ≥ 0.7) — the fallback
-  // when it shares no theme with another leader in view.
-  const peers = isLeader ? (t?.moves_with ?? []) : []
   const sub = isLeader && trade ? `${expiryLabel(trade.expiry, play)} ${money(trade.strike, trade.strike < 25 ? 2 : 0)} call · ${about(per).replace('about ', '')}`
     : r.verdict === 'notleader' ? `Not yet a leader${why[0] ? ` · ${why[0]}` : ''}`
     : r.verdict === 'watch' ? 'Long-term trend falling' : 'Signals today'
   return (
-    <li>
+    <li id={`leader-${r.ticker}`} className="scroll-mt-16">
       <div className="flex items-stretch">
       {/* A spacer the star's width keeps the open header centered. */}
       {open && <span className="w-11 shrink-0" aria-hidden />}
@@ -674,7 +792,7 @@ function LeaderRow({ r, bet, play, setPlay, accountSize, open, onToggle, starred
         <span className={clsx('min-w-0', open ? 'flex-none' : 'flex-1')}>
           <span className={clsx('flex items-center gap-1.5', open && 'justify-center')}>
             <span className={clsx('font-semibold text-fg', open ? 'text-[28px] leading-9 font-bold tracking-tight' : 'text-[15px]')}>{r.ticker}</span>
-            {!open && bet && <span className={clsx('px-1.5 py-px rounded-full text-[11px] font-semibold', bet.tone.chip)}>{bet.name}</span>}
+            {!open && bet && <span className={clsx('shrink-0 whitespace-nowrap px-1.5 py-px rounded-full text-[11px] font-semibold', bet.tone.chip)}>{bet.name}</span>}
           </span>
           {open
             ? companyName(r.ticker) && <span className="mt-0.5 block truncate text-sm font-semibold text-amber-300">{companyName(r.ticker)}</span>
@@ -735,17 +853,9 @@ function LeaderRow({ r, bet, play, setPlay, accountSize, open, onToggle, starred
             </div>
           )}
 
-          {(bet || peers.length > 0) && (() => {
-            const with_ = bet ? bet.peers : peers
-            return (
-              <div className={clsx('mt-2 rounded-2xl border px-4 py-3', bet ? bet.tone.card : 'border-amber-400/30 bg-amber-400/5')}>
-                <div className={clsx('text-sm font-semibold', bet ? bet.tone.text : 'text-amber-300')}>{bet ? `Same bet: ${bet.name}` : 'Moves with other leaders'}</div>
-                <div className="mt-0.5 text-sm text-subtle">
-                  Moves with {with_.slice(0, 4).join(', ')}{with_.length > 4 ? ` and ${with_.length - 4} more` : ''} — they rise and fall together. Pick one, or size them as one position.
-                </div>
-              </div>
-            )
-          })()}
+          {isLeader && note && <ThemeNote note={note} theme={t?.theme?.name} />}
+
+          {isLeader && sameBet && <SameBet sameBet={sameBet} tone={bet?.tone} onJump={onJump} />}
 
           {isLeader && (
             <div className="mt-2 grid grid-cols-2 gap-2">

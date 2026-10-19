@@ -1704,6 +1704,28 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   the "became a leader" alert. The chips read **Top 10 · All N · Yours**
   (`scope` 'all' / 'every' / 'mine'); the header counts every ranked leader
   (head count on `confluence_ranks`), "· strongest 10 shown" on Top 10.
+- **Same bet card + theme notes** (owner, 2026-10-19: "the companies similar
+  leaders are listed clearly with links to them" / "build option 2"). The open
+  row's **Moves together** card (title "Moves together: {theme}", line "When
+  one falls, the others usually do too. Owning several is like owning one
+  bigger position."; owner chose it over "Same bet"; the summary reads "Top 10
+  covers N groups") lists every ranked leader in the same industry theme
+  (a light fetch of all ranked rows, not just those in view; `moves_with`
+  fallback) — ticker, rank, company, past-year % — and a tap opens that leader
+  in place (scrolls to `#leader-TICKER`) or, outside the list, its entry
+  chart. **What's driving {theme}**: the nightly **`theme-notes`** edge
+  function (service-role only; `.github/workflows/theme-notes.yml`, 22:07 UTC
+  weekdays; dispatch defaults to a dry run) asks Claude Sonnet 4.6 with web
+  search (allow-listed news / government domains, ≤ 3 searches) for one driver
+  and up to 3 risks per theme among the ranked leaders (≤ 15 themes) →
+  **`theme_notes`** (theme × as_of; authenticated SELECT, service-role write).
+  Every claim must cite a URL the search returned on an allowed domain, or it
+  is dropped; no sourced driver = no note; buy / sell / hold wording is
+  rejected. Each call is logged to `claude_calls` (user_id null). **Off until
+  the `THEME_NOTES_ENABLED` Supabase secret is `true`** — without it (or
+  without credits) the job writes nothing and the card simply doesn't show;
+  out-of-credit errors stop the run after the first theme. Notes older than 7
+  days aren't shown. Label: "News summary · date · not advice".
 - **Leaders = LEAPS only, exits confirmed** (owner, 2026-10-16: "the 1M ..
   LEAPS is confusing … we need to confirm the exits … these stocks are in a
   pull back?" — no: leaders are strong uptrends bought any day). The
