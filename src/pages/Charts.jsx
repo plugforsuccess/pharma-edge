@@ -12,6 +12,7 @@ import TickerDrawer from '../components/TickerDrawer'
 import { CHART_TICKERS } from '../lib/chartTickers'
 import PriceChart from '../components/PriceChart'
 import ConfluenceLeaders from '../components/ConfluenceLeaders'
+import { useTracking } from '../hooks/useTracking'
 import MomentumList from '../components/MomentumList'
 import { FEATURES } from '../lib/features'
 import { placePins, measure, fibLevels, autoSwing, stepPin } from '../utils/chartTools'
@@ -223,16 +224,13 @@ export default function Charts() {
   // Search: any ticker gets a chart (and the drawing tools), even with no
   // suggested trade. Recent searches are kept on this device.
   const [searchOpen, setSearchOpen] = useState(false)
-  const [watchlist, setWatchlist] = useState([])
+  const { tracking } = useTracking()
+  const watchlist = useMemo(() => tracking ?? [], [tracking])
   // Tracking + holdings tickers, for the leaders' "Yours" view.
   const myTickers = useMemo(() => [...new Set([...watchlist, ...(positions ?? []).map((x) => x.ticker).filter(Boolean)])].sort(), [watchlist, positions])
   const [recent, setRecent] = useState(() => {
     try { const r = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]'); return Array.isArray(r) ? r.slice(0, RECENT_MAX) : [] } catch { return [] }
   })
-  useEffect(() => {
-    if (!user) return
-    supabase.from('watchlist').select('ticker').then(({ data }) => setWatchlist((data ?? []).map((r) => String(r.ticker).toUpperCase())))
-  }, [user])
   const saveRecent = (list) => {
     setRecent(list)
     try { localStorage.setItem(RECENT_KEY, JSON.stringify(list)) } catch { /* this visit only */ }

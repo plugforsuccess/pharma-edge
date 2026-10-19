@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import clsx from 'clsx'
-import { ChevronDown, ChevronRight, Minus, Plus } from 'lucide-react'
+import { ChevronDown, ChevronRight, Minus, Plus, Star } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { CHART_TICKERS } from '../lib/chartTickers'
 import { betsOf } from '../utils/themes'
+import { useTracking } from '../hooks/useTracking'
 import { simulateCall, breakevenMoves, playContract, PLAYS, SWING_EXIT } from '../utils/callHistory'
 
 // Charts → Pullbacks tab, formerly "Confluence leaders" (renamed 2026-10-07) (owner, 2026-10-03; verdicts 2026-10-04: "it's
@@ -87,6 +88,9 @@ export default function ConfluenceLeaders({ mine = [], leadersOnly = false }) {
   const side = leadersOnly ? 'buy' : sideState
   const [scope, setScope] = useState('all')
   const [rows, setRows] = useState(null)
+  // How many stocks are ranked today (owner, 2026-10-19: 38 leaders, the list
+  // showed 10 and said "10 stocks meet the rule").
+  const [total, setTotal] = useState(null)
   const [accountSize, setAccountSize] = useState(null)
   // The play (owner, 2026-10-15): at-the-money calls — 1M / 3M / 6M / 12M
   // for a 1–2 week swing, or the ~2-year LEAPS held to compound.
@@ -118,20 +122,27 @@ export default function ConfluenceLeaders({ mine = [], leadersOnly = false }) {
       .select('ticker, side, as_of, close, score, rank, est_3m, est_6m, est_win_3m, est_win_6m, own_n, pool_n, verdict, hold_reason, blockers, trade, stop_price, momentum, call_hist, leader, leader_traits, spark')
       .eq('side', side)
     if (side === 'buy' && strict && !leadersOnly) q = q.gte('score', 3)
-    q = scope === 'all'
-      ? q.not('rank', 'is', null).order('rank').limit(10)
+    q = scope === 'all' || scope === 'every'
+      ? q.not('rank', 'is', null).order('rank').limit(scope === 'all' ? 10 : 200)
       : q.in('ticker', mine.length ? mine : ['—']).order(leadersOnly ? 'rank' : 'score', leadersOnly ? { ascending: true, nullsFirst: false } : { ascending: false }).limit(40)
     q.then(({ data, error }) => { if (!cancelled) setRows(error ? [] : data ?? []) })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [side, scope, mineKey, strict])
 
+  useEffect(() => {
+    let cancelled = false
+    supabase.from('confluence_ranks').select('ticker', { count: 'exact', head: true }).eq('side', side).not('rank', 'is', null)
+      .then(({ count }) => { if (!cancelled) setTotal(count ?? null) })
+    return () => { cancelled = true }
+  }, [side])
+
   // Yours: ranked first, then by score.
-  const list = useMemo(() => (scope === 'all' ? rows : rows && [...rows].sort((a, b) => (a.rank ?? 1e9) - (b.rank ?? 1e9) || b.score - a.score)), [rows, scope])
+  const list = useMemo(() => (scope !== 'mine' ? rows : rows && [...rows].sort((a, b) => (a.rank ?? 1e9) - (b.rank ?? 1e9) || b.score - a.score)), [rows, scope])
   const asOf = rows?.[0]?.as_of
 
   if (leadersOnly) {
-    return <LeadersView {...{ list, scope, setScope, strict, setStrict, play, playKey, setPlay, accountSize, asOf, mine }} />
+    return <LeadersView {...{ list, scope, setScope, strict, setStrict, play, playKey, setPlay, accountSize, asOf, mine, total }} />
   }
 
   return (
@@ -497,6 +508,18 @@ function Sparkline({ values, className, height = 32, fill = false }) {
   )
 }
 
+// Tracking star (owner, 2026-10-19): starred tickers land in "Yours" and get
+// the "became a leader" alert.
+export function StarButton({ starred, onClick, ticker, className }) {
+  return (
+    <button type="button" onClick={onClick} aria-pressed={!!starred}
+      aria-label={starred ? `Remove ${ticker} from Tracking` : `Add ${ticker} to Tracking`}
+      className={clsx('w-11 shrink-0 flex items-center justify-center transition', starred ? 'text-amber-400' : 'text-muted hover:text-fg', className)}>
+      <Star size={18} className={starred ? 'fill-current' : ''} aria-hidden />
+    </button>
+  )
+}
+
 function Pill({ active, onClick, children, label }) {
   return (
     <button type="button" aria-pressed={active} aria-label={label} onClick={onClick}
@@ -517,8 +540,9 @@ function Tile({ label, value, sub, tone = 'text-fg' }) {
   )
 }
 
-function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, setPlay, accountSize, asOf, mine }) {
+function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, setPlay, accountSize, asOf, mine, total }) {
   const [open, setOpen] = useState(null)
+  const { isTracked, toggle } = useTracking()
   const leaders = list?.filter((r) => r.verdict === 'enter').length ?? 0
   // What kind of bet each leader is (owner, 2026-10-16): leaders sharing an
   // industry theme are one bet — "Top 10 = 5 bets: Chips 4 · Oil 2 …".
@@ -535,13 +559,13 @@ function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, 
         <div className="text-[11px] text-muted">{asOf ? `As of ${day(asOf)} close` : 'Ranked after each close'}</div>
         <h2 className="mt-0.5 text-[28px] leading-9 font-semibold tracking-tight">Leaders</h2>
         <p className="text-sm text-subtle">
-          {list == null ? 'Loading…' : scope === 'all'
-            ? `${leaders} ${leaders === 1 ? 'stock meets' : 'stocks meet'} the Leaders rule · tap one for the play`
-            : 'Your tickers · leaders first'}
+          {list == null ? 'Loading…' : scope !== 'mine'
+            ? `${total ?? leaders} ${(total ?? leaders) === 1 ? 'stock meets' : 'stocks meet'} the Leaders rule${scope === 'all' && total > 10 ? ' · strongest 10 shown' : ''} · tap one for the play`
+            : 'Your tickers · leaders first · ☆ a leader to add it'}
         </p>
         {bets.length > 0 && bets.length < leaders && (
           <p className="mt-1.5 text-sm text-subtle">
-            {scope === 'all' ? 'Top 10' : 'Yours'} = <span className="font-semibold text-fg">{bets.length} {bets.length === 1 ? 'bet' : 'bets'}</span>:{' '}
+            {scope === 'all' ? 'Top 10' : scope === 'every' ? `All ${leaders}` : 'Yours'} = <span className="font-semibold text-fg">{bets.length} {bets.length === 1 ? 'bet' : 'bets'}</span>:{' '}
             {bets.map((b, k) => (
               <span key={b.name}>
                 {k > 0 && <span className="text-muted"> · </span>}
@@ -555,6 +579,7 @@ function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, 
 
       <div className="-mx-4 px-4 flex gap-2 overflow-x-auto no-scrollbar pb-1">
         <Pill active={scope === 'all'} onClick={() => setScope('all')}>Top 10</Pill>
+        {total > 10 && <Pill active={scope === 'every'} onClick={() => setScope('every')}>All {total}</Pill>}
         <Pill active={scope === 'mine'} onClick={() => setScope('mine')}>Yours</Pill>
       </div>
 
@@ -574,13 +599,14 @@ function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, 
         <div className="mt-4 space-y-px" aria-busy="true">{[0, 1, 2, 3].map((i) => <div key={i} className="h-16 rounded-xl bg-card animate-pulse mb-2" />)}</div>
       ) : list.length === 0 ? (
         <div className="mt-6 rounded-2xl bg-card border border-border p-5 text-sm text-subtle">
-          {scope === 'mine' ? (mine.length ? 'None of your tickers have signals today.' : 'Add tickers to Tracking or Portfolio to see them here.')
+          {scope === 'mine' ? (mine.length ? 'None of your tickers have signals today.' : 'Tap ☆ on a leader or on any chart to track it here.')
             : 'No stock meets the Leaders rule today. The list updates after each close.'}
         </div>
       ) : (
         <ul className="mt-4 rounded-2xl bg-card border border-border overflow-hidden divide-y divide-hairline">
           {list.map((r) => (
             <LeaderRow key={r.ticker} r={r} bet={betOf.get(r.ticker)} play={play} setPlay={setPlay} accountSize={accountSize}
+              starred={isTracked(r.ticker)} onStar={() => toggle(r.ticker)}
               open={open === r.ticker} onToggle={() => setOpen(open === r.ticker ? null : r.ticker)} />
           ))}
         </ul>
@@ -620,7 +646,7 @@ const BET_TONES = [
   { chip: 'bg-pink-400/15 text-pink-300', text: 'text-pink-300', card: 'border-pink-400/30 bg-pink-400/5' },
 ]
 
-function LeaderRow({ r, bet, play, setPlay, accountSize, open, onToggle }) {
+function LeaderRow({ r, bet, play, setPlay, accountSize, open, onToggle, starred, onStar }) {
   const isLeader = r.verdict === 'enter'
   const trade = useMemo(() => (isLeader && r.trade ? playContract({ S: r.close, vol: r.trade.vol, asOf: r.as_of, play }) : null), [isLeader, r, play])
   const spark = r.spark?.length ? r.spark : null
@@ -638,8 +664,11 @@ function LeaderRow({ r, bet, play, setPlay, accountSize, open, onToggle }) {
     : r.verdict === 'watch' ? 'Long-term trend falling' : 'Signals today'
   return (
     <li>
+      <div className="flex items-stretch">
+      {/* A spacer the star's width keeps the open header centered. */}
+      {open && <span className="w-11 shrink-0" aria-hidden />}
       <button type="button" onClick={onToggle} aria-expanded={open}
-        className={clsx('w-full min-h-[68px] px-4 py-3 flex items-center gap-3 hover:bg-card-hover/40 transition', open ? 'justify-center text-center' : 'text-left')}>
+        className={clsx('flex-1 min-w-0 min-h-[68px] pl-4 py-3 flex items-center gap-3 hover:bg-card-hover/40 transition', open ? 'justify-center text-center pr-0' : 'text-left pr-1')}>
         {/* Open (owner, 2026-10-16): no sparkline or price pill — the ticker
             and the call sit centered above the hero price and 3M chart. */}
         <span className={clsx('min-w-0', open ? 'flex-none' : 'flex-1')}>
@@ -661,6 +690,8 @@ function LeaderRow({ r, bet, play, setPlay, accountSize, open, onToggle }) {
           </>
         )}
       </button>
+      <StarButton starred={starred} onClick={onStar} ticker={r.ticker} />
+      </div>
 
       {open && (
         <div className="px-4 pb-4">
