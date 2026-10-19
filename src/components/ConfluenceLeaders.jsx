@@ -699,7 +699,6 @@ function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, 
     } else navigate(`/charts/entry/${encodeURIComponent(sym)}`)
   }
   const { isTracked, toggle } = useTracking()
-  const leaders = list?.filter((r) => r.verdict === 'enter').length ?? 0
   // What kind of bet each leader is (owner, 2026-10-16): leaders sharing an
   // industry theme are one bet — "Top 10 = 5 bets: Chips 4 · Oil 2 …".
   const bets = useMemo(() => betsOf((list ?? []).filter((r) => r.verdict === 'enter')
@@ -715,11 +714,11 @@ function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, 
         <div className="text-[11px] text-muted">{asOf ? `As of ${day(asOf)} close` : 'Ranked after each close'}</div>
         <h2 className="mt-0.5 text-[28px] leading-9 font-semibold tracking-tight">Leaders</h2>
         <p className="text-sm text-subtle">
-          {list == null ? 'Loading…' : group
-            ? `${list.length} ${list.length === 1 ? 'leader' : 'leaders'} in ${group} · tap one for ${advanced ? 'the play' : 'details'}`
-            : scope !== 'mine'
-            ? `${total ?? leaders} ${(total ?? leaders) === 1 ? 'stock meets' : 'stocks meet'} the Leaders rule${scope === 'all' && total > 10 ? ' · strongest 10 shown' : ''} · tap one for ${advanced ? 'the play' : 'details'}`
-            : 'Your tickers · leaders first · ☆ a leader to add it'}
+          {/* Plain words for beginners (owner, 2026-10-19: "12 stocks meet the
+              Leaders rule" wasn't good copy) — the count lives on the chips. */}
+          {group ? `${group} stocks in strong uptrends`
+            : scope === 'mine' ? 'Stocks you’re following'
+            : 'Stocks in the strongest uptrends right now'}
         </p>
       </div>
 

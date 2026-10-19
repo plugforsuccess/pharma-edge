@@ -1805,8 +1805,10 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   "Yours" at once; optimistic, rolled back on a failed write; removing deletes
   every row for the ticker (no unique key). Starred tickers feed "Yours" and
   the "became a leader" alert. The chips read **Top 10 · All N · Yours**
-  (`scope` 'all' / 'every' / 'mine'); the header counts every ranked leader
-  (head count on `confluence_ranks`), "· strongest 10 shown" on Top 10.
+  (`scope` 'all' / 'every' / 'mine'; "All N" counts every ranked leader).
+  The subtitle is plain words for beginners (owner, 2026-10-19): "Stocks in
+  the strongest uptrends right now" / "Oil stocks in strong uptrends" /
+  "Stocks you're following" — no rule counts or "tap one for" hints.
 - **Same bet card + theme notes** (owner, 2026-10-19: "the companies similar
   leaders are listed clearly with links to them" / "build option 2"). The open
   row's **Moves together** card (title "Moves together: {theme}", line "When
