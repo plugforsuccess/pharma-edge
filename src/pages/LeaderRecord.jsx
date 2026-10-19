@@ -102,7 +102,7 @@ export default function LeaderRecord() {
         </>
       )}
       <p className="mt-4 px-1 text-[11px] text-muted">
-        Price change from the close the day a stock joined the list to the latest close, or to the close the day it left. A dip off the list of a week or less that ends back on counts as one stay. Dividends not included.
+        Price change from the close the day a stock joined the list to the latest close, or to the close the day it left. A dip off the list of up to a month that ends back on counts as one stay. Dividends not included.
         General information, the same for every subscriber — not personalized investment advice. Past results don’t guarantee future results.
       </p>
     </div>

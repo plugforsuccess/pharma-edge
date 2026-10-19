@@ -3,11 +3,11 @@
 // data only on each day) → each stint on the list: the close the day it
 // joined, the close the first day it dropped off (or today's close while
 // it's still on), the change between, and the S&P 500 over the same days.
-// Dips off the list of up to STINT.mergeGap trading days that end with the
+// Dips off the list of up to STINT.mergeGap trading days (about a month) that end with the
 // stock back on count as one stint (the rule's thresholds make stocks
 // flicker). Price only, no dividends. npm run leaderrecord:check.
 
-export const STINT = Object.freeze({ mergeGap: 5, lookback: 252 })
+export const STINT = Object.freeze({ mergeGap: 21, lookback: 252 }) // 21 trading days ≈ a month (owner, 2026-10-19)
 
 const r4 = (x) => (x == null || !Number.isFinite(x) ? null : Math.round(x * 10000) / 10000)
 

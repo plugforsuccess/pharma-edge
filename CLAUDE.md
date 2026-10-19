@@ -1801,8 +1801,9 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   of the price gain since becoming a leader"). `src/utils/leaderRecord.js`
   (`leaderStints`, `stintSummary`; `npm run leaderrecord:check`) turns the
   daily Leaders rule into stints on the list: joined = the close the first
-  day it qualified, out = the close the first day off (dips of ≤ 5 trading
-  days that end back on merge into one stay), change between (open stints:
+  day it qualified, out = the close the first day off (dips of ≤ 21 trading
+  days — about a month, owner 2026-10-19 after testing 5 / 10 / 21 / 42 —
+  that end back on merge into one stay), change between (open stints:
   to the latest close) and the S&P 500 over the same days. Price only.
   `rank-confluence.mjs` rebuilds **`leader_stints`** nightly (as_of × ticker
   × joined_on; past year + every open stint; authenticated SELECT) and puts
