@@ -130,7 +130,7 @@ export default function ConfluenceLeaders({ mine = [], leadersOnly = false }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [side, scope, mineKey, strict])
 
-  // Every ranked leader, light: the true count and the "Same bet" peers
+  // Every ranked leader, light: the true count and the "Moves together" peers
   // across the whole list, not just the rows in view (owner, 2026-10-19).
   const [ranked, setRanked] = useState([])
   useEffect(() => {
@@ -526,7 +526,7 @@ function Sparkline({ values, className, height = 32, fill = false }) {
   )
 }
 
-// Same bet (owner, 2026-10-19: "the companies … listed clearly with links to
+// Moves together (owner, 2026-10-19: copy from "Same bet"; "the companies … listed clearly with links to
 // them"): every ranked leader in the same industry theme, one tappable row
 // each — a leader in view opens in place, any other opens its chart.
 function SameBet({ sameBet, tone, onJump }) {
@@ -536,10 +536,10 @@ function SameBet({ sameBet, tone, onJump }) {
     <div className={clsx('mt-2 rounded-2xl border overflow-hidden', tone ? tone.card : 'border-violet-400/30 bg-violet-400/5')}>
       <div className="px-4 pt-3 pb-2">
         <div className={clsx('text-sm font-semibold', tone ? tone.text : 'text-violet-300')}>
-          {theme ? `Same bet: ${theme}` : 'Moves with other leaders'}
+          {theme ? `Moves together: ${theme}` : 'Moves together with:'}
         </div>
         <div className="mt-0.5 text-xs text-subtle">
-          {peers.length + 1} leaders that rise and fall together. Pick one, or size them as one position.
+          When one falls, the others usually do too. Owning several is like owning one bigger position.
         </div>
       </div>
       <ul className="divide-y divide-hairline border-t border-hairline">
@@ -641,7 +641,7 @@ function Tile({ label, value, sub, tone = 'text-fg' }) {
 function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, setPlay, accountSize, asOf, mine, total, ranked, notes }) {
   const [open, setOpen] = useState(null)
   const navigate = useNavigate()
-  // Ranked leaders by theme, for each row's "Same bet" list.
+  // Ranked leaders by theme, for each row's "Moves together" list.
   const byTheme = useMemo(() => {
     const m = new Map()
     for (const x of ranked ?? []) { const th = x.leader_traits?.theme?.name; if (th) { if (!m.has(th)) m.set(th, []); m.get(th).push(x) } }
@@ -678,7 +678,7 @@ function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, 
         </p>
         {bets.length > 0 && bets.length < leaders && (
           <p className="mt-1.5 text-sm text-subtle">
-            {scope === 'all' ? 'Top 10' : scope === 'every' ? `All ${leaders}` : 'Yours'} = <span className="font-semibold text-fg">{bets.length} {bets.length === 1 ? 'bet' : 'bets'}</span>:{' '}
+            {scope === 'all' ? 'Top 10' : scope === 'every' ? `All ${leaders}` : 'Yours'} covers <span className="font-semibold text-fg">{bets.length} {bets.length === 1 ? 'group' : 'groups'}</span>:{' '}
             {bets.map((b, k) => (
               <span key={b.name}>
                 {k > 0 && <span className="text-muted"> · </span>}

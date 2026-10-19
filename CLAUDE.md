@@ -1706,7 +1706,10 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   (head count on `confluence_ranks`), "· strongest 10 shown" on Top 10.
 - **Same bet card + theme notes** (owner, 2026-10-19: "the companies similar
   leaders are listed clearly with links to them" / "build option 2"). The open
-  row's **Same bet** card lists every ranked leader in the same industry theme
+  row's **Moves together** card (title "Moves together: {theme}", line "When
+  one falls, the others usually do too. Owning several is like owning one
+  bigger position."; owner chose it over "Same bet"; the summary reads "Top 10
+  covers N groups") lists every ranked leader in the same industry theme
   (a light fetch of all ranked rows, not just those in view; `moves_with`
   fallback) — ticker, rank, company, past-year % — and a tap opens that leader
   in place (scrolls to `#leader-TICKER`) or, outside the list, its entry
