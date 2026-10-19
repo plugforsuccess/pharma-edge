@@ -188,11 +188,16 @@ serve(async (req) => {
 
   const { data: profile, error: profErr } = await supabase
     .from('profiles')
-    .select('id, account_size, bot_config, bot_paused_until, bot_paused_reason')
+    .select('id, account_size, bot_config, bot_paused_until, bot_paused_reason, is_admin')
     .eq('id', alert.user_id)
     .maybeSingle()
   if (profErr || !profile) {
     return json({ success: false, error: 'profile lookup failed' }, 500)
+  }
+  // Owner only (owner, 2026-10-19): the bot trades the platform's own broker
+  // account and never runs for a subscriber.
+  if (profile.is_admin !== true) {
+    return json({ success: true, skipped: 'owner_only' })
   }
 
   const config: BotConfig = profile.bot_config ?? {}

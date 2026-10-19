@@ -40,8 +40,6 @@ export default function PlaceOrderPanel({ signal, calculation, onOrderPlaced }) 
   const perContractMaxGain = Number(calculation?.maxGainPerContract) || 0
   const effectiveTotalCost = effectiveContracts * perContractMaxLoss
   const effectiveTotalGain = effectiveContracts * perContractMaxGain
-  const acctSize = Number(calculation?.account_size_used) || 0
-  const pctOfAccount = acctSize > 0 ? (effectiveTotalCost / acctSize) * 100 : null
   const [liveConfirm, setLiveConfirm] = useState('')
 
   const existingOrderInFlight = useMemo(() => {
@@ -251,12 +249,8 @@ export default function PlaceOrderPanel({ signal, calculation, onOrderPlaced }) 
 
         {step === 'idle' && selectedAccount && !existingOrderInFlight && (
           <>
-            {/* Manual contract count input. The 2%-rule auto-fill +
-                "exceeds the 2% rule" gate were removed 2026-05-11 at
-                Cameron's request — sizing is user-driven. We still
-                surface "X% of account at risk" as informational so
-                the trader sees what fraction of NLV is on the line,
-                but no judgement and no auto-default beyond 1. */}
+            {/* Manual contract count input — sizing is the user's own;
+                no "% of account" (owner, 2026-10-19). */}
             <div className="bg-bg border border-border rounded-xl p-4">
               <label
                 htmlFor="po-contracts"
@@ -280,11 +274,7 @@ export default function PlaceOrderPanel({ signal, calculation, onOrderPlaced }) 
                 className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm font-mono-tab text-fg focus:outline-none focus:border-amber-400/40"
               />
               <p className="text-[10px] mt-2 leading-relaxed text-muted">
-                {effectiveContracts === 0
-                  ? 'Enter at least 1 contract to place this order.'
-                  : pctOfAccount != null
-                    ? `${pctOfAccount.toFixed(1)}% of account at risk`
-                    : null}
+                {effectiveContracts === 0 ? 'Enter at least 1 contract to place this order.' : null}
               </p>
             </div>
 

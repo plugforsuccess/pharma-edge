@@ -11,7 +11,7 @@ import { SWING_PLAN } from '../utils/momentumList'
 // 12-month return (skipping the last month), above their 200-day, top tenth
 // of the universe. Each row: the call the replay would price (0.75 delta,
 // ~2 years, Black-Scholes on 60-day vol — an estimate, not a quote), its cost
-// and share of the account, the plan (SWING_PLAN: sell the whole call at
+// per contract, the plan (SWING_PLAN: sell the whole call at
 // +75%, else after 18 months), and the other picks it moves with. The record
 // line is the tested result of exactly this plan (momentum_record()), with
 // its random-entry control, so the strength and the caveat sit together.
@@ -43,7 +43,6 @@ function RecordLine({ rec }) {
 export default function MomentumList() {
   const [rows, setRows] = useState(null)
   const [rec, setRec] = useState(null)
-  const [accountSize, setAccountSize] = useState(null)
   const [all, setAll] = useState(false)
 
   useEffect(() => {
@@ -55,11 +54,6 @@ export default function MomentumList() {
           .then(({ data: d, error }) => { if (!cancelled) setRows(error ? [] : d ?? []) })
       })
     supabase.rpc('momentum_record').then(({ data }) => { if (!cancelled) setRec(data ?? null) })
-    supabase.auth.getUser().then(({ data }) => {
-      if (!data?.user) return
-      return supabase.from('profiles').select('account_size').eq('id', data.user.id).maybeSingle()
-        .then(({ data: p }) => { if (!cancelled && p?.account_size > 0) setAccountSize(Number(p.account_size)) })
-    })
     return () => { cancelled = true }
   }, [])
 
@@ -106,7 +100,6 @@ export default function MomentumList() {
             {list.map((r) => {
               const t = r.trade
               const per = t ? t.cost * 100 : null
-              const share = per && accountSize ? per / accountSize : null
               const target = t ? t.cost * (1 + SWING_PLAN.target) * 100 : null
               return (
                 <li key={r.ticker}>
@@ -121,8 +114,7 @@ export default function MomentumList() {
                     </div>
                     {t && (
                       <p className="mt-1.5 text-sm leading-5">
-                        Buy the {monthYear(t.expiry)} ${t.strike} call — {about(per)} per contract
-                        {share != null && <span className={clsx(share > 0.05 ? 'text-amber-300' : 'text-subtle')}> · {(share * 100).toFixed(1)}% of your account</span>}
+                        The play: {monthYear(t.expiry)} ${t.strike} call — {about(per)} per contract
                       </p>
                     )}
                     {t && <p className="text-xs text-subtle leading-5">Sell at {about(target)} per contract (+{Math.round(SWING_PLAN.target * 100)}%), or after 18 months.</p>}

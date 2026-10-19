@@ -160,6 +160,13 @@ export async function evaluateRisk(
     if (until > Date.now()) return { ...blank, skipReason: `halted:${profile.bot_paused_reason ?? 'paused'}`, status: 'skipped_caps' }
   }
 
+  // Owner only (owner, 2026-10-19: no trading on a user's behalf — the
+  // investment-adviser question is removed, not answered). The bot trades the
+  // platform's own broker account, so it runs for the owner (is_admin) and
+  // never for a subscriber, in paper or live mode.
+  const { data: who } = await supabase.from('profiles').select('is_admin').eq('id', profile.id).maybeSingle()
+  if (who?.is_admin !== true) return { ...blank, skipReason: 'owner_only', status: 'skipped_caps' }
+
   if (!accountNumber) {
     return { ...blank, skipReason: `no_${cfg.mode ?? 'paper'}_account_configured`, status: 'skipped_caps' }
   }

@@ -24,8 +24,8 @@ import { LDP_DISCLOSURES_VERSION, DISCLOSURES, TOLERANCES, EXPERIENCE } from '..
 //   * risk answers, catalyst plays, Exit Target ladder → ldp-onboarding
 //     edge function (ldp_risk_profiles is service-role write only; the
 //     server recomputes the tier)
-// Managed vs self-directed is shown read-only — it follows a signed
-// managed-account agreement and is set by the owner, never here.
+// No managed accounts (owner, 2026-10-19): Cash Moves never trades on a
+// user's behalf, so the account row only says so.
 
 // Reserved slugs — must match the profiles_public_slug_not_reserved
 // CHECK constraint in migration 20260512100000_leaderboard_v1_schema.
@@ -619,24 +619,15 @@ function RiskSummary({ row }) {
   )
 }
 
-function AccountTypeRow({ row }) {
-  const managed = row?.account_tier === 'managed'
+function AccountTypeRow() {
   return (
     <div className="flex items-start gap-3 border-t border-border pt-3">
       <div className="flex-1">
-        <p className="text-fg text-sm font-medium">{managed ? 'Managed account' : 'Self-directed account'}</p>
+        <p className="text-fg text-sm font-medium">Self-directed</p>
         <p className="text-subtle text-xs leading-relaxed">
-          {managed
-            ? 'The bot places trades for you within your risk tier.'
-            : 'The bot suggests trades; you place them. Managed accounts require a signed agreement.'}
+          The bot shows what your exit plan says. It never places trades for you.
         </p>
       </div>
-      {!managed && (
-        <a href={`mailto:${CONTACT_EMAIL}?subject=Managed%20account%20request`}
-          className="shrink-0 min-h-[44px] inline-flex items-center px-3 rounded-lg border border-border text-xs text-subtle hover:text-fg hover:border-amber-400/40 transition">
-          Request managed
-        </a>
-      )}
     </div>
   )
 }

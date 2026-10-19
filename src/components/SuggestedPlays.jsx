@@ -285,7 +285,7 @@ const THINKING_STAGES = [
   'Checking today\'s flow against the walls…',
   'Identifying regime (A or B)…',
   'Drafting spread setups…',
-  'Sizing positions to the 2% rule…',
+  'Checking risk and reward per contract…',
   'Verifying R/R caps & DTE rules…',
   'Locking strikes to your matrix…',
 ]
@@ -458,7 +458,7 @@ function PlayCard({ play, onLogSignal }) {
         <Stat
           label="Risk/spread"
           value={`$${formatNum(play.max_loss_per_spread)}`}
-          tip="Max loss per contract if the trade goes fully against you. Sized × contracts to stay within the 2% account rule."
+          tip="Max loss per contract if the trade goes fully against you."
         />
         <Stat
           label="R/R"
@@ -466,9 +466,9 @@ function PlayCard({ play, onLogSignal }) {
           tip="Risk/reward ratio — max gain divided by max loss. Project rule requires ≥ 1:1.5."
         />
         <Stat
-          label="Size"
-          value={`${play.contracts}c`}
-          tip="Suggested contract count, sized to keep max loss within 2% of your account."
+          label="Max gain"
+          value={play.max_profit_per_spread != null ? `$${formatNum(play.max_profit_per_spread)}` : '—'}
+          tip="Max gain per contract if the trade works fully."
         />
       </div>
 

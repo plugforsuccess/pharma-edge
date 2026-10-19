@@ -22,7 +22,7 @@ import useLiveSpot from '../hooks/useLiveSpot'
 export default function PositionDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { user, profile } = useAuth()
+  const { user } = useAuth()
   const [searchParams] = useSearchParams()
   const [pos, setPos] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -745,7 +745,6 @@ export default function PositionDetail() {
 
       <ExitPlanReminderCard pos={pos} />
 
-      <AccountContextCard pos={pos} profile={profile} />
 
       <BracketOrderStatusCard
         pos={pos}
@@ -1818,147 +1817,8 @@ function tradingSessionsUntil(date) {
   return sessions
 }
 
-// Account-level context — shows risk and max-gain as a percentage of
-// the user's account size. Prefers LIVE broker NLV via get-account
-// (same pattern as StrikePriceCalculator). Falls back to the manual
-// profile.account_size value when:
-//   - get-account fails / returns no accounts
-//   - the connection is on the Tastytrade sandbox (the cert endpoint
-//     returns a fake $100K NLV that would silently mislead 2%-rule
-//     sizing)
-//
-// Without this, a Pro user whose profile.account_size is stale or a
-// placeholder (Cameron's was $1M) sees every position render as
-// trivially small ("0.04% · within 2% rule") regardless of what their
-// real broker NLV is. The 2%-rule badge was lying.
-function AccountContextCard({ pos, profile }) {
-  const [liveNlv, setLiveNlv] = useState(null)
-  const [liveSandbox, setLiveSandbox] = useState(false)
-  const [nlvError, setNlvError] = useState(null)
-  const [nlvLoading, setNlvLoading] = useState(true)
-  const [showDetail, setShowDetail] = useState(false)
-
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      try {
-        const { data, error } = await supabase.functions.invoke('get-account')
-        if (cancelled) return
-        if (error || !data?.success) {
-          setNlvError(error?.message || data?.error || 'broker fetch failed')
-          return
-        }
-        const accounts = (data.accounts || []).slice()
-        accounts.sort(
-          (a, b) =>
-            Number(b.net_liquidating_value ?? 0) - Number(a.net_liquidating_value ?? 0),
-        )
-        const primary = accounts.find((a) => !a.is_paper) || accounts[0]
-        if (!primary) {
-          setNlvError('no broker accounts on file')
-          return
-        }
-        const sandbox = Boolean(
-          data.is_sandbox ?? primary.is_sandbox ?? primary.is_paper,
-        )
-        const nlv = Number(primary.net_liquidating_value)
-        // Refuse the sandbox's fake $100K NLV — silently sizing
-        // positions against it is exactly the failure mode this card
-        // is meant to prevent.
-        setLiveNlv(sandbox || !Number.isFinite(nlv) ? null : nlv)
-        setLiveSandbox(sandbox)
-      } catch (e) {
-        if (!cancelled) setNlvError(e?.message || 'broker fetch failed')
-      } finally {
-        if (!cancelled) setNlvLoading(false)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  const manualSize = Number(profile?.account_size)
-  const accountSize = liveNlv ?? (Number.isFinite(manualSize) ? manualSize : null)
-  const source =
-    liveNlv != null ? 'broker' : Number.isFinite(manualSize) && manualSize > 0 ? 'manual' : null
-
-  if (!accountSize || accountSize <= 0) return null
-  const g = spreadGeometry(pos)
-  if (!g) return null
-
-  const totalRisk = g.maxLoss * pos.contracts * 100
-  const totalMaxGain = g.maxProfit * pos.contracts * 100
-  const riskPct = (totalRisk / accountSize) * 100
-  const gainPct = (totalMaxGain / accountSize) * 100
-  const overSized = riskPct > 2.1
-
-  return (
-    <div className="bg-card border border-border rounded-xl p-3 space-y-2.5">
-      <div className="flex items-center justify-between gap-2">
-        <div className="text-[10px] uppercase tracking-wider text-muted flex items-center gap-1.5">
-          Account context
-          {overSized && (
-            <InfoToggle open={showDetail} onToggle={() => setShowDetail((s) => !s)} label="Show sizing detail" />
-          )}
-        </div>
-        <div className="text-right">
-          <div className="text-[11px] text-muted font-mono-tab">
-            ${fmt(accountSize)} acct
-          </div>
-          <div className="text-[9px] uppercase tracking-wider text-muted">
-            {nlvLoading
-              ? 'syncing…'
-              : source === 'broker'
-              ? 'live · broker NLV'
-              : liveSandbox
-              ? 'sandbox NLV ignored · using manual'
-              : nlvError
-              ? 'broker unreachable · using manual'
-              : 'manual (Settings)'}
-          </div>
-        </div>
-      </div>
-      {overSized && (
-        <div className="text-xs font-medium text-crimson">
-          Position exceeds the 2% sizing rule
-        </div>
-      )}
-      <div className="bg-bg/50 border border-border/50 rounded-lg p-2.5 space-y-1.5">
-        <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 items-baseline text-[11px]">
-          <span className="text-muted uppercase tracking-wider text-[10px]">
-            Risk if max loss
-          </span>
-          <span className={`font-mono-tab text-right ${overSized ? 'text-crimson' : 'text-fg'}`}>
-            ${fmt(totalRisk)} · {riskPct.toFixed(2)}%
-          </span>
-          <span className="text-muted uppercase tracking-wider text-[10px]">
-            Gain if max profit
-          </span>
-          <span className="font-mono-tab text-right text-green-400">
-            ${fmt(totalMaxGain)} · {gainPct.toFixed(2)}%
-          </span>
-        </div>
-        <div className="flex justify-end pt-0.5">
-          <span
-            className={`text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border ${
-              overSized
-                ? 'text-crimson border-crimson/40 bg-crimson/10'
-                : 'text-green-400 border-green-400/30 bg-green-400/10'
-            }`}
-          >
-            {overSized ? 'oversized' : 'within 2% rule'}
-          </span>
-        </div>
-      </div>
-      {showDetail && overSized && (
-        <p className="text-[11px] text-subtle leading-relaxed">
-          Consider sizing down on future entries — see RISK_MANAGEMENT.md.
-        </p>
-      )}
-    </div>
-  )
-}
+// The account sizing card is gone (owner, 2026-10-19: no sizing to the
+// user's account).
 
 // Pin risk warning — fires when spot is within $2 (or 0.5%) of
 // the short strike on a debit spread. Closing exactly at the strike

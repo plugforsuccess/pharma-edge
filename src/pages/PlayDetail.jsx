@@ -2,7 +2,7 @@
 //
 // The decision-context page between Today's Plays feed and LogSignal.
 // Renders the full thesis Claude generated, the matrix at scan time,
-// personalized position sizing, what-invalidates-this list, and the
+// max risk / profit per contract, what-invalidates-this list, and the
 // other plays from the same scan (counterfactual context). The Log
 // CTA at the bottom is what actually commits to the signal flow —
 // with full provenance (claude_call_id + chosen + others).
@@ -14,7 +14,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { useAuth } from '../context/AuthContext'
 import { logAsSignal } from '../lib/logAsSignal'
 import ConvictionDots, { tierFor } from '../components/ConvictionDots'
 import MatrixSummaryCard from '../components/MatrixSummaryCard'
@@ -70,7 +69,6 @@ const TIER_TEXT = {
 export default function PlayDetail() {
   const { claude_call_id: claudeCallId } = useParams()
   const navigate = useNavigate()
-  const { profile } = useAuth()
   const [feedRow, setFeedRow] = useState(null)
   // matrix_at_call snapshot from the claude_calls row that produced
   // this play. Lets the compact MatrixSummaryCard show what dealer
@@ -168,13 +166,9 @@ export default function PlayDetail() {
 
   const tier = tierFor(play.ev_edge_bp)
   const matrix = matrixAtCall || play.matrix_snapshot || null
-  const accountSize = Number(profile?.account_size) || 25000
+  // Per contract only — no sizing to the user's account (owner, 2026-10-19).
   const maxLoss = Number(play.max_loss_per_spread) || 0
   const maxProfit = Number(play.max_profit_per_spread) || 0
-  const suggestedContracts =
-    maxLoss > 0 ? Math.max(1, Math.floor((accountSize * 0.02) / maxLoss)) : 1
-  const totalRisk = maxLoss * suggestedContracts
-  const totalProfit = maxProfit * suggestedContracts
 
   const minutesAgo = feedRow?.computed_at
     ? Math.max(0, Math.floor((Date.now() - new Date(feedRow.computed_at).getTime()) / 60_000))
@@ -286,28 +280,13 @@ export default function PlayDetail() {
           </section>
         )}
 
-        {/* ── Position sizing ──────────────────────────────────── */}
+        {/* ── Per contract (no sizing to the account — owner, 2026-10-19) ── */}
         <section className="bg-card border border-border rounded-xl p-4 space-y-2">
-          <div className="flex items-center justify-between">
-            <h3 className="text-zinc-300 text-[11px] font-semibold uppercase tracking-wider">
-              Position sizing
-            </h3>
-            <Link
-              to="/learn/rules"
-              className="text-[10px] text-zinc-500 hover:text-white"
-            >
-              for ${accountSize.toLocaleString()} acct →
-            </Link>
-          </div>
+          <h3 className="text-zinc-300 text-[11px] font-semibold uppercase tracking-wider">Per contract</h3>
           <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
-            <Row label="Suggested contracts" value={String(suggestedContracts)} />
-            <Row label="Max risk" value={fmtMoney(totalRisk)} valueClass="text-red-400" />
-            <Row label="Max profit" value={fmtMoney(totalProfit)} valueClass="text-emerald-400" />
-            <Row label="Per-spread debit" value={fmtMoney(maxLoss)} />
+            <Row label="Max risk" value={fmtMoney(maxLoss)} valueClass="text-red-400" />
+            <Row label="Max profit" value={fmtMoney(maxProfit)} valueClass="text-emerald-400" />
           </div>
-          <p className="text-[10px] text-zinc-500 pt-1 border-t border-border">
-            Sized to 2% rule. Adjust account size in <Link to="/learn/rules" className="text-zinc-400 hover:text-white underline">Rules</Link>.
-          </p>
         </section>
 
         {/* ── What invalidates ─────────────────────────────────── */}

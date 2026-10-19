@@ -860,89 +860,18 @@ export default function StrikePriceCalculator({
           </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3">
-            <CalcInput
-              label="Stock Price"
-              value={stockPrice}
-              onChange={(v) => {
-                setStockPrice(v)
-                setResult(null)
-              }}
-              prefix="$"
-              placeholder="4.00"
-            />
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="text-muted text-[10px] uppercase tracking-wider">
-                  Account Size
-                </label>
-                <button
-                  type="button"
-                  onClick={fetchBrokerAccount}
-                  disabled={nlvLoading}
-                  className={clsx(
-                    'inline-flex items-center gap-1 text-[10px] uppercase tracking-wider transition',
-                    nlvLoading
-                      ? 'text-muted cursor-wait'
-                      : liveNlv != null
-                        ? 'text-green-400 hover:text-green-300'
-                        : 'text-subtle hover:text-fg',
-                  )}
-                  title={
-                    liveNlv != null
-                      ? `Synced from Tastytrade${liveAcctNumber ? ` · ${liveAcctNumber}` : ''}`
-                      : 'Pull live NLV from Tastytrade'
-                  }
-                >
-                  <RefreshCw size={9} className={nlvLoading ? 'animate-spin' : ''} />
-                  {liveNlv != null ? 'Live' : 'Sync'}
-                </button>
-              </div>
-              <CalcInput
-                label=""
-                value={effectiveAccount != null ? String(effectiveAccount) : ''}
-                onChange={() => {}}
-                prefix="$"
-                placeholder="—"
-                readOnly
-                note={
-                  nlvSyncError
-                    ? `Sync failed: ${nlvSyncError}`
-                    : liveIsSandbox
-                      ? 'Sandbox — set TASTYTRADE_BASE_URL secret'
-                      : maxPositionDollars != null
-                        ? liveBp != null
-                          ? `Max trade: $${maxPositionDollars.toFixed(0)} · BP $${liveBp.toFixed(0)}`
-                          : `Max trade: $${maxPositionDollars.toFixed(0)}`
-                        : 'Set in Settings or sync broker'
-                }
-              />
-            </div>
-          </div>
-
-          {/* Sandbox warning — when get-account is hitting the
-              Tastytrade cert/sandbox URL, the returned $100K NLV is
-              fake demo data and would silently mislead the 2%-rule
-              sizing. Render a loud red banner so this can never be
-              missed; reject the live-NLV value upstream so sizing
-              falls back to the manual profile.account_size. */}
-          {liveIsSandbox && (
-            <div className="bg-red-950/30 border border-red-900/60 rounded-xl p-3 flex items-start gap-2">
-              <AlertTriangle size={12} className="text-red-400 mt-0.5 flex-shrink-0" />
-              <div className="text-[11px] text-red-300 leading-relaxed">
-                <p className="font-semibold text-red-400">Sandbox account — sizing disabled</p>
-                <p className="mt-1">
-                  Broker is returning a fake $100K balance from Tastytrade's
-                  sandbox. To pull your real NLV, set the{' '}
-                  <code className="font-mono-tab text-red-200">TASTYTRADE_BASE_URL</code>{' '}
-                  Supabase secret to{' '}
-                  <code className="font-mono-tab text-red-200">https://api.tastyworks.com</code>{' '}
-                  and redeploy <code className="font-mono-tab">get-account</code> +{' '}
-                  <code className="font-mono-tab">place-order</code>.
-                </p>
-              </div>
-            </div>
-          )}
+          {/* No account size / "max trade" here (owner, 2026-10-19: no sizing
+              to the user's account). */}
+          <CalcInput
+            label="Stock Price"
+            value={stockPrice}
+            onChange={(v) => {
+              setStockPrice(v)
+              setResult(null)
+            }}
+            prefix="$"
+            placeholder="4.00"
+          />
 
           {config.isCondor ? (
             <div className="space-y-2">
@@ -1379,36 +1308,15 @@ function ResultPanel({ result, config, expiry, sellStrike, buyStrike, premium })
   )
 }
 
-// Sizing panel — replaces the old 3-cell box. Splits behaviour by
-// whether the 2% rule lets the user size at all:
-//   - violatesRule: per-contract risk > 2% of account → show plain
-//     "Skip this trade" copy (no contracts can be entered safely)
-//   - contracts === 0: 2% allows nothing without violating, same UX
-//   - contracts >= 1: standard breakdown, with a "X% of account" tag
-//     so the user always sees how much sizing they're consuming
-// Position sizing summary. The 2% rule auto-fill + "Skip this trade"
-// hard gate were removed 2026-05-11 at Cameron's request — sizing
-// is now user-driven. The calculator defaults to 1 contract and the
-// user types whatever count they want on the contracts input above.
-// We still show "X% of account" as informational so the trader knows
-// what fraction of their NLV is on the line, but no judgement.
+// Position summary: contracts, total cost, max gain. No "% of account"
+// (owner, 2026-10-19: no sizing to the user's account).
 function SizingPanel({ result }) {
-  const acct = result.account_size_used
-  const pct = result.premium_per_contract_pct
   const contracts = result.contracts ?? 1
-  const totalPct = pct != null ? pct * contracts : null
   return (
     <div className="bg-bg border border-border rounded-xl p-4">
-      <div className="flex items-center justify-between mb-3">
-        <p className="text-muted text-[10px] uppercase tracking-wider">
-          Your position
-        </p>
-        {totalPct != null && acct != null && (
-          <span className="text-[10px] text-subtle">
-            {totalPct.toFixed(1)}% of ${Math.round(acct).toLocaleString()} account
-          </span>
-        )}
-      </div>
+      <p className="text-muted text-[10px] uppercase tracking-wider mb-3">
+        Your position
+      </p>
       <div className="grid grid-cols-3 gap-3 text-center">
         <div>
           <p className="text-white font-bold text-xl">{contracts}</p>

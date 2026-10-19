@@ -48,7 +48,6 @@ export default function Bot() {
 
   const decisions = useMemo(() => (ready ? dailyDecisions(results, plan, today) : []), [ready, results, plan, today])
   const acting = decisions.filter((d) => d.kind !== 'hold').length
-  const managed = risk?.account_tier === 'managed'
 
   return (
     <div className="px-4 py-4 pb-24 max-w-md mx-auto">
@@ -64,7 +63,7 @@ export default function Bot() {
         <div className="grid grid-cols-2 gap-4">
           <div className="min-w-0">
             <div className="text-xs text-muted mb-1">Mode</div>
-            <div className="text-sm font-semibold text-fg">{managed ? 'Places trades' : 'Suggests only'}</div>
+            <div className="text-sm font-semibold text-fg">Suggests only</div>
           </div>
           <div className="min-w-0">
             <div className="text-xs text-muted mb-1">Risk tier</div>
@@ -72,9 +71,7 @@ export default function Bot() {
           </div>
         </div>
         <p className="mt-4 text-sm text-subtle">
-          {managed
-            ? 'It checks every holding daily and sells by your exit plan.'
-            : 'It checks every holding daily against your exit plan and tells you what to do. You place the trades.'}
+          It checks every holding daily against your exit plan and shows what the plan says. It never places trades — you decide and trade in your own brokerage account.
           {' '}Until your broker is connected, checks use your last entered prices.
         </p>
         {risk === null && (
