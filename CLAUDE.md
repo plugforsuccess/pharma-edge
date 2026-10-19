@@ -16,7 +16,7 @@
 > Naming conventions to apply consistently:
 >   * Main dashboard → "The Tape"
 >   * Individual alert / signal → "A Move" (plural "Moves")
->   * Watchlist → "Tracking"
+>   * Watchlist → "Favorites" (★; was "Tracking" — owner, 2026-10-19)
 >   * Premium tier → "Pro" (formerly "Cash Moves Pro")
 >   * Top tier → "Elite" (formerly "Inner Circle")
 >   * GEX dashboard → "HeatPulse™"
@@ -877,7 +877,19 @@ market and the risks**; option plays are an opt-in **Advanced** view.
   ≥ 35% above the 200-day (red ≥ 60%), commodity-driven groups
   (`COMMODITY_GROUPS`: Oil, Refiners, Gold miners …), 10%+ off the 20-day
   high, 3+ leaders in one group. Facts only, no buy / sell / hold wording.
-- **The market card** (`components/MarketCard.jsx`, top of Charts): S&P 500
+- **The market card** (`components/MarketCard.jsx`, top of Charts; owner,
+  2026-10-19 "enhance it with links"): a one-line strip (verdict dot · S&P vs
+  200-day · leaders · VIX · next release) that opens into the card
+  (`cm:market-open`, closed by default). Every part links: S&P → the SPY
+  chart, VIX → the ^VIX chart (index charts show no star / Leaders panel;
+  `leaps-entry` and `price-history` accept `^`), Leaders → `?leaders=all`,
+  group chips → `?group=Oil` (ConfluenceLeaders filters every ranked leader
+  to that group, with a removable chip), Breadth → an inline trend + what it
+  means, release rows → the release name and its period on two lines (`splitTitle`),
+  what it is, and the agency's official schedule. Trend
+  lines: `market_pulse.spy_spark` / `vix_spark` (63 closes) and `spy_streak`
+  (closes on this side of the 200-day), breadth / leader lines from stored
+  rows. The headline: S&P 500
   vs its 200-day ("Uptrend" / "Above a flat 200-day" / "Downtrend"), breadth
   (share of the universe above its 200-day), leader count and weekly change,
   VIX and its 5-day change, where the leaders are (groups), and **Coming up**
@@ -900,8 +912,8 @@ market and the risks**; option plays are an opt-in **Advanced** view.
   `{ all: true }` (one Finnhub calendar call for the whole market, batch
   upsert); `bot-seed-data.yml` sends `{ lookahead_days: 45, all: true }`.
 - **Alerts** (`sendAlerts` in `rank-confluence.mjs`, full mode, users with
-  alerts on; one per user × kind × ticker × date): `confluence_top_buy` (a
-  tracked stock became a leader), **`leader_lost`** (dropped off),
+  alerts on; one per user × kind × ticker × date): `confluence_top_buy`
+  (**new leader** — "New leader: VLO (#2) — …", a favorite or holding), **`leader_lost`** (dropped off),
   **`market_trend`** (S&P crossed its 200-day — everyone), **`econ_tomorrow`**
   (a release or Fed decision on the next weekday — everyone),
   **`earnings_soon`** (a tracked stock reports within 3 days). Bell labels in
@@ -1785,6 +1797,24 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   `call_hist.plays[key].own.exit` / `pool.exit`. The Buy card's one line
   reads "Past leaders with your exit plan: typical trade +7% · profitable 6
   of 10 times". The stock column keeps the span (1M … 2Y).
+- **Leader record** (owner, 2026-10-19: "the replay should be a live record
+  of the price gain since becoming a leader"). `src/utils/leaderRecord.js`
+  (`leaderStints`, `stintSummary`; `npm run leaderrecord:check`) turns the
+  daily Leaders rule into stints on the list: joined = the close the first
+  day it qualified, `left_on` = the first day off, shown only (dips of ≤ 21
+  trading days — about a month, owner 2026-10-19 after testing 5 / 10 / 21 /
+  42 — that end back on merge into one stay), change = join → the latest
+  close and the S&P 500 over the same days. Price only.
+  **Buy and hold** (owner, 2026-10-19: "leaders should be buy and holds"):
+  each join is held to the latest close — dropping off the list is shown
+  ("Off the list since Sep 30"), never counted as a sale. Tabs: Past 3
+  months / 3–12 months ago.
+  `rank-confluence.mjs` rebuilds **`leader_stints`** nightly (as_of × ticker
+  × joined_on; past year + every open stint; authenticated SELECT) and puts
+  the open stint on `leader_traits.since`. Leaders rows read "+18% since
+  Aug 12"; `/charts/leader-record` (link under the list) shows the typical change, higher N of 10, beat the S&P
+  N of 10, one row per stint (tap → chart). The option-trade Signal record
+  link shows only in Advanced.
 - **Stars + All leaders** (owner, 2026-10-19: "How can I favorite leaps?"; 38
   leaders ranked, the list showed 10 and said "10 stocks meet the rule"). A ☆
   on every Leaders row (right edge, its own tap target) and in the entry chart
@@ -1792,15 +1822,20 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   `src/hooks/useTracking.js`, one shared list so a star anywhere updates
   "Yours" at once; optimistic, rolled back on a failed write; removing deletes
   every row for the ticker (no unique key). Starred tickers feed "Yours" and
-  the "became a leader" alert. The chips read **Top 10 · All N · Yours**
-  (`scope` 'all' / 'every' / 'mine'); the header counts every ranked leader
-  (head count on `confluence_ranks`), "· strongest 10 shown" on Top 10.
+  the "new leader" alert. The chips read **Top 10 · All N · ★ Favorites**
+  (owner, 2026-10-19: Favorites = starred tickers only, holdings live on
+  Portfolio; empty state "Tap ☆ on any stock to add it here"; the alerts
+  still cover favorites and holdings) (`scope` 'all' / 'every' / 'mine'; "All N" counts every ranked leader).
+  The subtitle is plain words for beginners (owner, 2026-10-19): "Stocks in
+  the strongest uptrends right now" / "Oil stocks in strong uptrends" /
+  "Stocks you've starred" — no rule counts or "tap one for" hints.
 - **Same bet card + theme notes** (owner, 2026-10-19: "the companies similar
   leaders are listed clearly with links to them" / "build option 2"). The open
   row's **Moves together** card (title "Moves together: {theme}", line "When
   one falls, the others usually do too. Owning several is like owning one
-  bigger position."; owner chose it over "Same bet"; the summary reads "Top 10
-  covers N groups") lists every ranked leader in the same industry theme
+  bigger position."; owner chose it over "Same bet"; the "Top 10 covers N groups" summary
+  under the title was removed 2026-10-19 — the market card's group chips and
+  the row tags carry it) lists every ranked leader in the same industry theme
   (a light fetch of all ranked rows, not just those in view; `moves_with`
   fallback) — ticker, rank, company, past-year % — and a tap opens that leader
   in place (scrolls to `#leader-TICKER`) or, outside the list, its entry
@@ -1848,7 +1883,7 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
 - **Same bet** (owner, 2026-10-16: the top 10 sat in chips and oil; "is
   cluster the best taxonomy you can come up with?" — replaced the CLUSTER
   tag). Each ticker is named after the **industry fund it tracks** most
-  closely over 120 trading days (`src/utils/themes.js`, `THEMES`: SMH "Chips & AI" (LITE, BE land there too),
+  closely over 120 trading days (`src/utils/themes.js`, `THEMES`: SMH "Chips • AI" (owner, 2026-10-19: not "Chips & AI") (LITE, BE land there too),
   XOP Oil, CRAK Refiners, OIH, KRE, XBI, IHF Health insurers, ITB … then the
   broad XL* funds as fallbacks (XLE named "Oil" so XOM / XLE join the producers), −0.05 so chips don't read as "Tech"; below
   0.6 correlation → no theme; `npm run themes:check`). The nightly ranking

@@ -15,5 +15,8 @@ ok('read: uptrend, green, broad', marketRead(up).trend === 'Uptrend' && marketRe
 const down = marketPulse({ asOf: 'x', spy: line(260, (i) => 700 - i) })
 ok('falling SPY below → downtrend', down.spy_above === false && marketRead(down).tone === 'red')
 ok('short history → no trend', marketPulse({ asOf: 'x', spy: line(50, () => 1) }).spy_above === undefined && marketRead(marketPulse({ asOf: 'x' })) === null)
+ok('streak: above every day since the 200-day exists', up.spy_streak === 61 && up.spy_spark.length === 63 && up.vix_spark.length === 10)
+const flip = marketPulse({ asOf: 'x', spy: line(260, (i) => (i < 255 ? 400 + i : 300)) })
+ok('streak: 5 closes below after a drop', flip.spy_above === false && flip.spy_streak === 5)
 console.log(`${pass} passed, ${fail} failed`)
 if (fail) process.exit(1)

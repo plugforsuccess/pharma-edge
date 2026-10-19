@@ -1008,7 +1008,7 @@ function EntryAlertsSection({ userId }) {
         <div className="flex-1">
           <p className="text-fg text-sm font-medium">{on ? 'On' : 'Off'}</p>
           <p className="text-subtle text-xs mt-0.5">
-            Each weekday after the close, your Tracking list and holdings are checked. You get an alert when one becomes a leader or drops off the list, the day before a major economic release, before earnings on a tracked stock, and when the market's trend turns.
+            Each weekday after the close, your Favorites and holdings are checked. You get an alert for new leaders among them, when one drops off the list, before their earnings, the day before a major economic release, and when the market's trend turns.
           </p>
         </div>
         <button type="button" role="switch" aria-checked={on} aria-label="Entry alerts" onClick={toggle} disabled={busy}

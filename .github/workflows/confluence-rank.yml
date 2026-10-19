@@ -27,6 +27,7 @@ on:
       - src/utils/confluence.js
       - src/utils/themes.js
       - src/utils/marketPulse.js
+      - src/utils/leaderRecord.js
       - .github/workflows/confluence-rank.yml
 
 concurrency:
