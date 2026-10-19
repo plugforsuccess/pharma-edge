@@ -37,7 +37,8 @@
     "riskflags:check": "node scripts/check-risk-flags.mjs",
     "marketpulse:check": "node scripts/check-market-pulse.mjs",
     "econcalendar:check": "node scripts/check-econ-calendar.mjs",
-    "leaderrecord:check": "node scripts/check-leader-record.mjs"
+    "leaderrecord:check": "node scripts/check-leader-record.mjs",
+    "quality:check": "node scripts/check-quality.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
