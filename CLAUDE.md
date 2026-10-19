@@ -819,6 +819,32 @@ on mobile, sidebar on desktop. All tap targets minimum 44px.
 
 ---
 
+## No investment-adviser activity (owner, 2026-10-19)
+
+"Investment adviser status needs to be removed." Cash Moves publishes the
+same information to every subscriber and is a calculator for each user's own
+rules; it **never trades on a user's behalf and never sizes a trade to a
+user's account**. Enforced, not just stated:
+- **No managed accounts:** CHECK `ldp_risk_profiles_no_managed`
+  (`account_tier = 'self_directed'`) and `ldp_audit_log_no_trades` (no
+  `trade` rows) — migration `20261019020000_no_trading_for_users.sql`. The
+  `ldp/` engine's auto path and its tests stay; it can never run.
+- **Bots and orders are owner-only:** `evaluateRisk` (`_shared/risk_gate.ts`,
+  the spread bot), `bot-execute-entry` and `place-order` refuse anyone whose
+  `profiles.is_admin` isn't true — they trade the platform's own broker
+  account (the owner's own trading is unaffected).
+- **No account-based sizing in the UI:** no "% of your account" on Leaders,
+  Momentum or Past results; Suggested Plays shows max loss / max gain per
+  contract instead of a contract count. Copy says "The play: …", not "Buy
+  the …"; Leaders' footer reads "General information, the same for every
+  subscriber — not personalized investment advice." The LEAPS bot page and
+  Settings say it suggests only and never places trades.
+- Hidden (feature-flagged) GEX pages — LogSignal, signal / position detail,
+  PlaceOrderPanel, StrikePriceCalculator — still show the 2% sizing rule;
+  revisit them before any flag turns back on.
+Exit targets on a user's own holdings stay: they are the playbook defaults or
+the user's own targets (a calculator). Counsel still has to confirm.
+
 ## Product tiers & page plan (decided 2026-10-02)
 
 LEAPS drives growth. Tiers:
@@ -826,10 +852,10 @@ LEAPS drives growth. Tiers:
 | Tier | Includes |
 |---|---|
 | **Pro** ($45/mo) | LEAPS dashboard (home), Positions + Exit Targets (manual entry, later Tradier sync), Simulator, Research bot, later government alerts, LEAPS bot |
-| **Elite** (price TBD) | Everything in Pro + HeatPulse + King Board + the bot placing **spread** trades |
+| **Elite** (price TBD) | Everything in Pro + HeatPulse + King Board (no bot trading for users — see above) |
 
-Other revenue: Tradier referral fees; managed accounts (auto-trading)
-only after the adviser-registration question is settled with counsel.
+Other revenue: Tradier referral fees. No managed accounts / auto-trading
+for users (owner, 2026-10-19).
 
 Nav (owner, 2026-10-03): **Home · Portfolio · Charts · Pulse · Taxes**
 — five equal tabs; Charts is the middle tab and looks like the others

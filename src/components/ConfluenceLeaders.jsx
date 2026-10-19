@@ -91,7 +91,6 @@ export default function ConfluenceLeaders({ mine = [], leadersOnly = false }) {
   // How many stocks are ranked today (owner, 2026-10-19: 38 leaders, the list
   // showed 10 and said "10 stocks meet the rule").
   const [total, setTotal] = useState(null)
-  const [accountSize, setAccountSize] = useState(null)
   // The play (owner, 2026-10-15): at-the-money calls — 1M / 3M / 6M / 12M
   // for a 1–2 week swing, or the ~2-year LEAPS held to compound.
   const [playKey, setPlayState] = useState(() => { try { const k = localStorage.getItem('cm:pullbacks-play'); return PLAYS.some((x) => x.key === k) ? k : '1M' } catch { return '1M' } })
@@ -105,15 +104,6 @@ export default function ConfluenceLeaders({ mine = [], leadersOnly = false }) {
   const setStrict = (v) => { setStrictState(v); try { localStorage.setItem('cm:pullbacks-3plus', v ? '1' : '0') } catch { /* storage off */ } }
   const mineKey = mine.join(',')
 
-  useEffect(() => {
-    let cancelled = false
-    supabase.auth.getUser().then(({ data }) => {
-      if (!data?.user) return
-      return supabase.from('profiles').select('account_size').eq('id', data.user.id).maybeSingle()
-        .then(({ data: p }) => { if (!cancelled && p?.account_size > 0) setAccountSize(Number(p.account_size)) })
-    })
-    return () => { cancelled = true }
-  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -160,7 +150,7 @@ export default function ConfluenceLeaders({ mine = [], leadersOnly = false }) {
   const asOf = rows?.[0]?.as_of
 
   if (leadersOnly) {
-    return <LeadersView {...{ list, scope, setScope, strict, setStrict, play, playKey, setPlay, accountSize, asOf, mine, total, ranked, notes }} />
+    return <LeadersView {...{ list, scope, setScope, strict, setStrict, play, playKey, setPlay, asOf, mine, total, ranked, notes }} />
   }
 
   return (
@@ -263,7 +253,7 @@ export default function ConfluenceLeaders({ mine = [], leadersOnly = false }) {
                         </span>
                         <span className="text-right">
                           <span className="block text-base font-semibold text-fg font-mono-tab leading-6">{about(perContract).replace('about ', '≈')}</span>
-                          <span className="block text-[11px] text-muted">per contract{accountSize && ` · ${(perContract / accountSize * 100).toFixed(1)}% of account`}</span>
+                          <span className="block text-[11px] text-muted">per contract</span>
                         </span>
                       </span>
                     )}
@@ -312,7 +302,7 @@ export default function ConfluenceLeaders({ mine = [], leadersOnly = false }) {
                     <span className="mt-3 block"><SignalMeter score={r.score} side={side} /></span>
                     {side === 'buy' && <PastLine ph={ph} play={play} />}
                   </Link>
-                  {side === 'buy' && r.trade && <PlayLab r={r} play={play} setPlay={setPlay} accountSize={accountSize} />}
+                  {side === 'buy' && r.trade && <PlayLab r={r} play={play} setPlay={setPlay} />}
                 </li>
               )
             })}
@@ -391,7 +381,7 @@ function Cell({ s, kind }) {
 
 const BUDGETS = [1000, 5000, 10000, 40000]
 
-function PlayLab({ r, play, setPlay, accountSize, rows = PLAYS }) {
+function PlayLab({ r, play, setPlay, rows = PLAYS }) {
   const [open, setOpen] = useState(false)
   const [hold, setHold] = useState(null)
   const [budget, setBudgetState] = useState(() => { try { const b = Number(localStorage.getItem('cm:pullbacks-budget')); return BUDGETS.includes(b) ? b : 5000 } catch { return 5000 } })
@@ -463,7 +453,7 @@ function PlayLab({ r, play, setPlay, accountSize, rows = PLAYS }) {
               </div>
               <div className="flex items-center gap-2 mb-2">
                 <span className="flex-1 text-xs text-subtle">
-                  <span className="font-mono-tab">{qty}</span> × {expiryLabel(trade.expiry, play)} {money(trade.strike, trade.strike < 25 ? 2 : 0)} call · <span className="font-mono-tab">{money(cost, 0)}</span>{accountSize ? ` · ${(cost / accountSize * 100).toFixed(1)}% of account` : ''}
+                  <span className="font-mono-tab">{qty}</span> × {expiryLabel(trade.expiry, play)} {money(trade.strike, trade.strike < 25 ? 2 : 0)} call · <span className="font-mono-tab">{money(cost, 0)}</span>
                 </span>
                 <span className="grid grid-cols-2 gap-0.5 p-0.5 rounded-lg bg-bg-elev" role="tablist" aria-label="Held for">
                   {play.holds.map(([l]) => (
@@ -638,7 +628,7 @@ function Tile({ label, value, sub, tone = 'text-fg' }) {
   )
 }
 
-function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, setPlay, accountSize, asOf, mine, total, ranked, notes }) {
+function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, setPlay, asOf, mine, total, ranked, notes }) {
   const [open, setOpen] = useState(null)
   const navigate = useNavigate()
   // Ranked leaders by theme, for each row's "Moves together" list.
@@ -718,7 +708,7 @@ function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, 
       ) : (
         <ul className="mt-4 rounded-2xl bg-card border border-border overflow-hidden divide-y divide-hairline">
           {list.map((r) => (
-            <LeaderRow key={r.ticker} r={r} bet={betOf.get(r.ticker)} play={play} setPlay={setPlay} accountSize={accountSize}
+            <LeaderRow key={r.ticker} r={r} bet={betOf.get(r.ticker)} play={play} setPlay={setPlay}
               starred={isTracked(r.ticker)} onStar={() => toggle(r.ticker)}
               sameBet={(() => {
                 const th = r.leader_traits?.theme?.name
@@ -737,7 +727,7 @@ function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, 
         <span className="flex-1">Signal record: how these signals traded, every ticker</span>
         <ChevronRight size={14} aria-hidden />
       </Link>
-      <p className="px-1 text-[11px] text-muted">Option prices are estimates, not quotes. Past results, not advice.</p>
+      <p className="px-1 text-[11px] text-muted">General information, the same for every subscriber — not personalized investment advice. Option prices are estimates, not quotes. Past results don't guarantee future results.</p>
     </section>
   )
 }
@@ -767,7 +757,7 @@ const BET_TONES = [
   { chip: 'bg-pink-400/15 text-pink-300', text: 'text-pink-300', card: 'border-pink-400/30 bg-pink-400/5' },
 ]
 
-function LeaderRow({ r, bet, play, setPlay, accountSize, open, onToggle, starred, onStar, sameBet, note, onJump }) {
+function LeaderRow({ r, bet, play, setPlay, open, onToggle, starred, onStar, sameBet, note, onJump }) {
   const isLeader = r.verdict === 'enter'
   const trade = useMemo(() => (isLeader && r.trade ? playContract({ S: r.close, vol: r.trade.vol, asOf: r.as_of, play }) : null), [isLeader, r, play])
   const spark = r.spark?.length ? r.spark : null
@@ -834,7 +824,6 @@ function LeaderRow({ r, bet, play, setPlay, accountSize, open, onToggle, starred
                 <div className="text-right">
                   <div className="text-2xl font-semibold font-mono-tab leading-8">{about(per).replace('about ', '≈')}</div>
                   <div className="text-[11px] text-muted">per contract</div>
-                  {accountSize ? <div className="text-[11px] text-muted">{(per / accountSize * 100).toFixed(1)}% of account</div> : null}
                 </div>
               </div>
               {play.kind === 'leaps' && (
@@ -868,7 +857,7 @@ function LeaderRow({ r, bet, play, setPlay, accountSize, open, onToggle, starred
 
           <PastLine ph={ph} play={play} />
 
-          <div className="mt-3 -mx-5"><PlayLab r={r} play={play} setPlay={setPlay} accountSize={accountSize} rows={[play]} /></div>
+          <div className="mt-3 -mx-5"><PlayLab r={r} play={play} setPlay={setPlay} rows={[play]} /></div>
 
           <Link to={`/charts/entry/${encodeURIComponent(r.ticker)}`}
             className="mt-1 min-h-[48px] w-full rounded-full bg-amber-400 text-bg text-sm font-semibold flex items-center justify-center gap-1.5">

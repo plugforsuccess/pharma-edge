@@ -53,6 +53,12 @@ serve(async (req) => {
   if (authError || !user) {
     return json({ success: false, error: 'unauthorized' }, 401)
   }
+  // Owner only (owner, 2026-10-19): orders go to the platform's own broker
+  // account, and Cash Moves never trades on a subscriber's behalf.
+  const { data: me } = await userClient.from('profiles').select('is_admin').eq('id', user.id).maybeSingle()
+  if (me?.is_admin !== true) {
+    return json({ success: false, error: 'Order placement is not available. Place trades in your own brokerage account.' }, 403)
+  }
 
   let body: Record<string, unknown>
   try {
