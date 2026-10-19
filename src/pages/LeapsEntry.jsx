@@ -405,6 +405,9 @@ export default function LeapsEntry() {
   // Drawing tools (owner, 2026-10-16), shared with the Charts price chart
   // per ticker on this device (cm:chart-tools:TICKER).
   const { tracking, isTracked, toggle } = useTracking()
+  // An index (^VIX from the market card) is a chart only: no star, no
+  // Leaders checks.
+  const isIndex = ticker.startsWith('^')
   const [advanced] = useAdvanced()
   const toolsKey = `cm:chart-tools:${ticker}`
   const [tools, setTools] = useState({ ticker: null, pins: [], fib: false })
@@ -460,7 +463,7 @@ export default function LeapsEntry() {
           <h1 className="text-lg font-semibold leading-tight">{ticker}</h1>
           {SUITE && bars?.length > 0 && <TripleChips daily={dailyTriple} weekly={weekly?.triple ?? (weeklyData?.error ? false : null)} />}
         </div>
-        <StarButton starred={isTracked(ticker)} onClick={() => toggle(ticker)} ticker={ticker} className="min-h-[44px] rounded-xl" />
+        {!isIndex && <StarButton starred={isTracked(ticker)} onClick={() => toggle(ticker)} ticker={ticker} className="min-h-[44px] rounded-xl" />}
         <button type="button" onClick={() => setSearchOpen(true)} aria-label="Search tickers"
           className="min-h-[44px] px-3 inline-flex items-center gap-2 rounded-xl bg-card border border-border text-sm text-subtle hover:text-fg transition">
           <Search size={15} aria-hidden /> Search
@@ -480,7 +483,7 @@ export default function LeapsEntry() {
       ) : (
         <div className="md:grid md:grid-cols-[1fr_280px] md:gap-x-5 md:items-start">
           <div className="min-w-0 md:order-1">
-            {!SUITE && <LeaderPanel traits={leaderNow} close={bars[bars.length - 1]?.c} asOf={bars[bars.length - 1]?.t} spyLoading={spyBars === null} advanced={advanced} />}
+            {!SUITE && !isIndex && <LeaderPanel traits={leaderNow} close={bars[bars.length - 1]?.c} asOf={bars[bars.length - 1]?.t} spyLoading={spyBars === null} advanced={advanced} />}
             {SUITE && <StatusPanel s={s} model={model} params={params} suite={suite} dailySuite={dailySuite} confirmDays={confirmDays} tfLabel={SUITE_TIMEFRAMES[suiteTf].label.toLowerCase()} conf={conf} pool={pool} trend={trend} metrics={data?.metrics ?? null} />}
             {SUITE && <SuitePanel pack={suitePack} failed={suiteData?.error && suiteData.tf === suiteTf} tf={suiteTf} holdings={holdings} onJump={jumpPeriod} onOpenPane={setExpanded}
               buyZone={!!s?.cond?.all} />}

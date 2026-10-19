@@ -41,7 +41,8 @@ const INTERVAL_RANGES: Record<string, Set<string>> = {
 }
 const CACHE_MS = 15 * 60 * 1000
 const INTRADAY_CACHE_MS = 2 * 60 * 1000
-const TICKER_RE = /^[A-Z][A-Z0-9.\-]{0,9}$/
+// A leading ^ allows indexes (^VIX from the market card).
+const TICKER_RE = /^\^?[A-Z][A-Z0-9.\-]{0,9}$/
 const cache = new Map<string, { at: number; bars: Bar[]; prevClose: number | null }>()
 
 serve(async (req) => {

@@ -877,7 +877,18 @@ market and the risks**; option plays are an opt-in **Advanced** view.
   ≥ 35% above the 200-day (red ≥ 60%), commodity-driven groups
   (`COMMODITY_GROUPS`: Oil, Refiners, Gold miners …), 10%+ off the 20-day
   high, 3+ leaders in one group. Facts only, no buy / sell / hold wording.
-- **The market card** (`components/MarketCard.jsx`, top of Charts): S&P 500
+- **The market card** (`components/MarketCard.jsx`, top of Charts; owner,
+  2026-10-19 "enhance it with links"): a one-line strip (verdict dot · S&P vs
+  200-day · leaders · VIX · next release) that opens into the card
+  (`cm:market-open`, closed by default). Every part links: S&P → the SPY
+  chart, VIX → the ^VIX chart (index charts show no star / Leaders panel;
+  `leaps-entry` and `price-history` accept `^`), Leaders → `?leaders=all`,
+  group chips → `?group=Oil` (ConfluenceLeaders filters every ranked leader
+  to that group, with a removable chip), Breadth → an inline trend + what it
+  means, release rows → what it is + the agency's official schedule. Trend
+  lines: `market_pulse.spy_spark` / `vix_spark` (63 closes) and `spy_streak`
+  (closes on this side of the 200-day), breadth / leader lines from stored
+  rows. The headline: S&P 500
   vs its 200-day ("Uptrend" / "Above a flat 200-day" / "Downtrend"), breadth
   (share of the universe above its 200-day), leader count and weekly change,
   VIX and its 5-day change, where the leaders are (groups), and **Coming up**

@@ -23,11 +23,18 @@ export function marketPulse({ asOf, spy = [], vix = [], stocks = [], leaders = [
     out.spy_slope200 = r4(m / m20 - 1)
     out.spy_above = c[i] > m
     out.spy_1m = c.length > 21 ? r4(c[i] / c[i - 21] - 1) : null
+    // How many closes in a row the S&P has been on this side of its 200-day
+    // ("above its 200-day for 112 days"), and the last 3 months of closes.
+    let k = i
+    while (k > 199 && (c[k - 1] > sma(c, 200, k - 1)) === out.spy_above) k--
+    out.spy_streak = i - k + 1
+    out.spy_spark = c.slice(-63).map((x) => r4(x))
   }
   if (vix.length >= 6) {
     const c = vix.map((b) => b.c), i = c.length - 1
     out.vix = r4(c[i])
     out.vix_5d = r4(c[i] - c[i - 5])
+    out.vix_spark = c.slice(-63).map((x) => r4(x))
   }
   const known = stocks.filter((s) => s.vs200 != null)
   out.universe = known.length

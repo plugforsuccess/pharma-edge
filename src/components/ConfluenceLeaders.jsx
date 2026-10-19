@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import clsx from 'clsx'
-import { ChevronDown, ChevronRight, ExternalLink, Minus, Plus, Star } from 'lucide-react'
+import { ChevronDown, ChevronRight, ExternalLink, Minus, Plus, Star, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { CHART_TICKERS } from '../lib/chartTickers'
 import { betsOf } from '../utils/themes'
@@ -105,7 +105,17 @@ export default function ConfluenceLeaders({ mine = [], leadersOnly = false }) {
   const [strict, setStrictState] = useState(() => { try { return localStorage.getItem('cm:pullbacks-3plus') === '1' } catch { return false } })
   const setStrict = (v) => { setStrictState(v); try { localStorage.setItem('cm:pullbacks-3plus', v ? '1' : '0') } catch { /* storage off */ } }
   const mineKey = mine.join(',')
-
+  // The market card links here (owner, 2026-10-19): ?leaders=all opens All N,
+  // ?group=Oil filters the list to one group (over every ranked leader).
+  const [params, setParams] = useSearchParams()
+  const group = leadersOnly ? params.get('group') : null
+  useEffect(() => {
+    if (!leadersOnly) return
+    if (params.get('leaders') === 'all' || params.get('group')) setScope('every')
+    if (params.get('leaders')) { const p = new URLSearchParams(params); p.delete('leaders'); setParams(p, { replace: true }) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params])
+  const clearGroup = () => { const p = new URLSearchParams(params); p.delete('group'); setParams(p, { replace: true }) }
 
   useEffect(() => {
     let cancelled = false
@@ -152,7 +162,9 @@ export default function ConfluenceLeaders({ mine = [], leadersOnly = false }) {
   const asOf = rows?.[0]?.as_of
 
   if (leadersOnly) {
-    return <LeadersView {...{ list, scope, setScope, strict, setStrict, play, playKey, setPlay, asOf, mine, total, ranked, notes }} />
+    const shown = group && list ? list.filter((r) => (r.leader_traits?.theme?.name ?? 'Other') === group) : list
+    const pickScope = (k) => { if (group) clearGroup(); setScope(k) }
+    return <LeadersView {...{ list: shown, scope, setScope: pickScope, strict, setStrict, play, playKey, setPlay, asOf, mine, total, ranked, notes, group, clearGroup }} />
   }
 
   return (
@@ -493,7 +505,7 @@ function PlayLab({ r, play, setPlay, rows = PLAYS }) {
 // and a tap opens the row in place: hero price, a large sparkline, the play,
 // four stat tiles, history, past results & what-if and the chart button.
 
-function Sparkline({ values, className, height = 32, fill = false }) {
+export function Sparkline({ values, className, height = 32, fill = false }) {
   const id = useMemo(() => `sp${Math.random().toString(36).slice(2, 8)}`, [])
   if (!values || values.length < 2) return <span className={className} style={{ height }} />
   const lo = Math.min(...values), hi = Math.max(...values)
@@ -649,7 +661,7 @@ function Tile({ label, value, sub, tone = 'text-fg' }) {
   )
 }
 
-function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, setPlay, asOf, mine, total, ranked, notes }) {
+function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, setPlay, asOf, mine, total, ranked, notes, group = null, clearGroup }) {
   const [open, setOpen] = useState(null)
   const navigate = useNavigate()
   // Stocks first (owner, 2026-10-19); the option play is the Advanced view.
@@ -698,16 +710,18 @@ function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, 
     return m
   }, [bets])
   return (
-    <section className="mb-5">
+    <section id="leaders" className="mb-5 scroll-mt-16">
       <div className="mb-4">
         <div className="text-[11px] text-muted">{asOf ? `As of ${day(asOf)} close` : 'Ranked after each close'}</div>
         <h2 className="mt-0.5 text-[28px] leading-9 font-semibold tracking-tight">Leaders</h2>
         <p className="text-sm text-subtle">
-          {list == null ? 'Loading…' : scope !== 'mine'
+          {list == null ? 'Loading…' : group
+            ? `${list.length} ${list.length === 1 ? 'leader' : 'leaders'} in ${group} · tap one for ${advanced ? 'the play' : 'details'}`
+            : scope !== 'mine'
             ? `${total ?? leaders} ${(total ?? leaders) === 1 ? 'stock meets' : 'stocks meet'} the Leaders rule${scope === 'all' && total > 10 ? ' · strongest 10 shown' : ''} · tap one for ${advanced ? 'the play' : 'details'}`
             : 'Your tickers · leaders first · ☆ a leader to add it'}
         </p>
-        {bets.length > 0 && bets.length < leaders && (
+        {!group && bets.length > 0 && bets.length < leaders && (
           <p className="mt-1.5 text-sm text-subtle">
             {scope === 'all' ? 'Top 10' : scope === 'every' ? `All ${leaders}` : 'Yours'} covers <span className="font-semibold text-fg">{bets.length} {bets.length === 1 ? 'group' : 'groups'}</span>:{' '}
             {bets.map((b, k) => (
@@ -722,9 +736,15 @@ function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, 
       </div>
 
       <div className="-mx-4 px-4 flex gap-2 overflow-x-auto no-scrollbar pb-1">
-        <Pill active={scope === 'all'} onClick={() => setScope('all')}>Top 10</Pill>
-        {total > 10 && <Pill active={scope === 'every'} onClick={() => setScope('every')}>All {total}</Pill>}
-        <Pill active={scope === 'mine'} onClick={() => setScope('mine')}>Yours</Pill>
+        {group && (
+          <button type="button" onClick={clearGroup} aria-label={`Show every group, not just ${group}`}
+            className="shrink-0 min-h-[36px] pl-3.5 pr-2.5 rounded-full text-[13px] font-semibold bg-amber-400/15 text-amber-300 border border-amber-400/30 inline-flex items-center gap-1.5">
+            {group} <X size={14} aria-hidden />
+          </button>
+        )}
+        <Pill active={!group && scope === 'all'} onClick={() => setScope('all')}>Top 10</Pill>
+        {total > 10 && <Pill active={!group && scope === 'every'} onClick={() => setScope('every')}>All {total}</Pill>}
+        <Pill active={!group && scope === 'mine'} onClick={() => setScope('mine')}>Yours</Pill>
       </div>
 
       {/* The play and its exit, once for the whole list (owner, 2026-10-16:

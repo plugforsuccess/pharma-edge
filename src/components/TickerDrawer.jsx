@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Search, X, Star, Lock } from 'lucide-react'
 import EarningsBadge from './EarningsBadge'
 
@@ -72,7 +73,9 @@ export default function TickerDrawer({
     [watchlist, q],
   )
 
-  return (
+  // Portalled to <body>: inside a transformed page container "fixed" became
+  // page-relative, and the closed sheet peeked in at the bottom of the page.
+  return createPortal(
     <div
       className={`fixed inset-0 z-[60] flex items-end justify-center transition ${
         open ? 'pointer-events-auto' : 'pointer-events-none'
@@ -242,7 +245,8 @@ export default function TickerDrawer({
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
