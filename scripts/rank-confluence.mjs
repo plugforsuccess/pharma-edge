@@ -352,7 +352,7 @@ async function main() {
 
 // Alerts (owner, 2026-10-16; widened 2026-10-19 to the market and its risks),
 // for users with entry alerts on — facts, never instructions:
-//   confluence_top_buy  a tracked ticker became a leader
+//   confluence_top_buy  new leader: a favorite or holding is ranked today
 //   leader_lost         a tracked ticker dropped off the Leaders list
 //   market_trend        the S&P 500 crossed its 200-day (everyone)
 //   econ_tomorrow       a major release or Fed decision on the next weekday (everyone)
@@ -385,7 +385,7 @@ async function sendAlerts(db, { asOf, rows, prevTop, pulse, prevPulse }) {
   for (const id of ids) {
     const mine = follows.get(id) ?? new Set()
     for (const r of entered) if (mine.has(r.ticker)) items.push({ user: id, kind: 'confluence_top_buy', ticker: r.ticker, date: asOf, url: chart(r.ticker),
-      message: `${r.ticker} is now a leader (#${r.rank}): ${pct(r.leader_traits?.mom12)} past year, ${pct(r.leader_traits?.vs200)} above a rising 200-day.` })
+      message: `New leader: ${r.ticker} (#${r.rank}) — ${pct(r.leader_traits?.mom12)} past year, ${pct(r.leader_traits?.vs200)} above a rising 200-day.` })
     for (const t of lost) if (mine.has(t)) items.push({ user: id, kind: 'leader_lost', ticker: t, date: asOf, url: chart(t),
       message: `${t} dropped off the Leaders list — it no longer meets every leader rule.` })
   }

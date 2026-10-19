@@ -84,7 +84,11 @@ function Fact({ label, value, tone = 'text-fg' }) {
   )
 }
 
-export default function ConfluenceLeaders({ mine = [], leadersOnly = false }) {
+export default function ConfluenceLeaders({ mine: mineProp = [], leadersOnly = false }) {
+  // ★ Favorites (owner, 2026-10-19) = the starred tickers only; holdings live
+  // on Portfolio. The shared list updates the moment a star is tapped.
+  const { tracking } = useTracking()
+  const mine = leadersOnly ? (tracking ?? []) : mineProp
   // leadersOnly (owner, 2026-10-16: Charts is "only leaders"): buy side only.
   const [sideState, setSide] = useState('buy')
   const side = leadersOnly ? 'buy' : sideState
@@ -630,11 +634,11 @@ function ThemeNote({ note, theme }) {
 }
 
 // Tracking star (owner, 2026-10-19): starred tickers land in "Yours" and get
-// the "became a leader" alert.
+// the "new leader" alert.
 export function StarButton({ starred, onClick, ticker, className }) {
   return (
     <button type="button" onClick={onClick} aria-pressed={!!starred}
-      aria-label={starred ? `Remove ${ticker} from Tracking` : `Add ${ticker} to Tracking`}
+      aria-label={starred ? `Remove ${ticker} from Favorites` : `Add ${ticker} to Favorites`}
       className={clsx('w-11 shrink-0 flex items-center justify-center transition', starred ? 'text-amber-400' : 'text-muted hover:text-fg', className)}>
       <Star size={18} className={starred ? 'fill-current' : ''} aria-hidden />
     </button>
@@ -717,7 +721,7 @@ function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, 
           {/* Plain words for beginners (owner, 2026-10-19: "12 stocks meet the
               Leaders rule" wasn't good copy) — the count lives on the chips. */}
           {group ? `${group} stocks in strong uptrends`
-            : scope === 'mine' ? 'Stocks you’re following'
+            : scope === 'mine' ? 'Stocks you’ve starred'
             : 'Stocks in the strongest uptrends right now'}
         </p>
       </div>
@@ -731,7 +735,9 @@ function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, 
         )}
         <Pill active={!group && scope === 'all'} onClick={() => setScope('all')}>Top 10</Pill>
         {total > 10 && <Pill active={!group && scope === 'every'} onClick={() => setScope('every')}>All {total}</Pill>}
-        <Pill active={!group && scope === 'mine'} onClick={() => setScope('mine')}>Yours</Pill>
+        <Pill active={!group && scope === 'mine'} onClick={() => setScope('mine')} label="Favorites">
+          <span className="inline-flex items-center gap-1.5"><Star size={14} aria-hidden className="fill-current text-amber-400" />Favorites</span>
+        </Pill>
       </div>
 
       {/* The play and its exit, once for the whole list (owner, 2026-10-16:
@@ -751,7 +757,7 @@ function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, 
         <div className="mt-4 space-y-px" aria-busy="true">{[0, 1, 2, 3].map((i) => <div key={i} className="h-16 rounded-xl bg-card animate-pulse mb-2" />)}</div>
       ) : list.length === 0 ? (
         <div className="mt-6 rounded-2xl bg-card border border-border p-5 text-sm text-subtle">
-          {scope === 'mine' ? (mine.length ? 'None of your tickers have signals today.' : 'Tap ☆ on a leader or on any chart to track it here.')
+          {scope === 'mine' ? (mine.length ? 'None of your favorites are in our stock list yet.' : 'Tap ☆ on any stock to add it here.')
             : 'No stock meets the Leaders rule today. The list updates after each close.'}
         </div>
       ) : (

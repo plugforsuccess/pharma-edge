@@ -16,7 +16,7 @@
 > Naming conventions to apply consistently:
 >   * Main dashboard → "The Tape"
 >   * Individual alert / signal → "A Move" (plural "Moves")
->   * Watchlist → "Tracking"
+>   * Watchlist → "Favorites" (★; was "Tracking" — owner, 2026-10-19)
 >   * Premium tier → "Pro" (formerly "Cash Moves Pro")
 >   * Top tier → "Elite" (formerly "Inner Circle")
 >   * GEX dashboard → "HeatPulse™"
@@ -912,8 +912,8 @@ market and the risks**; option plays are an opt-in **Advanced** view.
   `{ all: true }` (one Finnhub calendar call for the whole market, batch
   upsert); `bot-seed-data.yml` sends `{ lookahead_days: 45, all: true }`.
 - **Alerts** (`sendAlerts` in `rank-confluence.mjs`, full mode, users with
-  alerts on; one per user × kind × ticker × date): `confluence_top_buy` (a
-  tracked stock became a leader), **`leader_lost`** (dropped off),
+  alerts on; one per user × kind × ticker × date): `confluence_top_buy`
+  (**new leader** — "New leader: VLO (#2) — …", a favorite or holding), **`leader_lost`** (dropped off),
   **`market_trend`** (S&P crossed its 200-day — everyone), **`econ_tomorrow`**
   (a release or Fed decision on the next weekday — everyone),
   **`earnings_soon`** (a tracked stock reports within 3 days). Bell labels in
@@ -1804,11 +1804,13 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   `src/hooks/useTracking.js`, one shared list so a star anywhere updates
   "Yours" at once; optimistic, rolled back on a failed write; removing deletes
   every row for the ticker (no unique key). Starred tickers feed "Yours" and
-  the "became a leader" alert. The chips read **Top 10 · All N · Yours**
-  (`scope` 'all' / 'every' / 'mine'; "All N" counts every ranked leader).
+  the "new leader" alert. The chips read **Top 10 · All N · ★ Favorites**
+  (owner, 2026-10-19: Favorites = starred tickers only, holdings live on
+  Portfolio; empty state "Tap ☆ on any stock to add it here"; the alerts
+  still cover favorites and holdings) (`scope` 'all' / 'every' / 'mine'; "All N" counts every ranked leader).
   The subtitle is plain words for beginners (owner, 2026-10-19): "Stocks in
   the strongest uptrends right now" / "Oil stocks in strong uptrends" /
-  "Stocks you're following" — no rule counts or "tap one for" hints.
+  "Stocks you've starred" — no rule counts or "tap one for" hints.
 - **Same bet card + theme notes** (owner, 2026-10-19: "the companies similar
   leaders are listed clearly with links to them" / "build option 2"). The open
   row's **Moves together** card (title "Moves together: {theme}", line "When
