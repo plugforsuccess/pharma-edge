@@ -339,7 +339,10 @@ async function main() {
   // in the past year (plus any still open), rebuilt each night.
   {
     const stintRows = results.flatMap((r) => (r.stints ?? []).map((x) => ({ as_of: asOf, ticker: r.ticker, theme: r.theme?.name ?? null, ...x })))
-    let bad = null
+    // A rerun on the same close replaces that day's record (stints can merge
+    // differently, so old rows wouldn't be overwritten by key).
+    const { error: clearErr } = await db.from('leader_stints').delete().eq('as_of', asOf)
+    let bad = clearErr?.message ?? null
     for (let i = 0; i < stintRows.length && !bad; i += batchSize) {
       const { error } = await db.from('leader_stints').upsert(stintRows.slice(i, i + batchSize), { onConflict: 'as_of,ticker,joined_on' })
       if (error) bad = error.message
