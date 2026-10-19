@@ -58,3 +58,14 @@ const now = new Date().toISOString()
 const { error } = await db.from('econ_events').upsert(rows.map((e) => ({ ...e, updated_at: now })), { onConflict: 'kind,event_date' })
 if (error) throw new Error(`econ_events: ${error.message}`)
 console.log(`Wrote ${rows.length} econ events.`)
+// A source that answered is the truth for its upcoming dates: drop rows it no
+// longer lists (a rescheduled release, an earlier parse's duplicate).
+for (const src of [...new Set(rows.map((e) => e.source))]) {
+  const keep = rows.filter((e) => e.source === src)
+  const { data: old } = await db.from('econ_events').select('kind, event_date').eq('source', src).gte('event_date', today)
+  const stale = (old ?? []).filter((o) => !keep.some((e) => e.kind === o.kind && e.event_date === o.event_date))
+  for (const o of stale) {
+    const { error: delErr } = await db.from('econ_events').delete().eq('kind', o.kind).eq('event_date', o.event_date)
+    console.log(delErr ? `  could not drop ${o.kind} ${o.event_date}: ${delErr.message}` : `  dropped ${o.kind} ${o.event_date} (no longer listed)`)
+  }
+}
