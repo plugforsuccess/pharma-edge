@@ -87,7 +87,7 @@ async function fetchFinnhubEarnings(
   const url = new URL(`${FINNHUB_BASE}/calendar/earnings`)
   url.searchParams.set('from', fromDate)
   url.searchParams.set('to', toDate)
-  url.searchParams.set('symbol', ticker.toUpperCase())
+  if (ticker) url.searchParams.set('symbol', ticker.toUpperCase())
   url.searchParams.set('token', FINNHUB_API_KEY)
   try {
     const resp = await fetch(url.toString())
@@ -144,6 +144,29 @@ serve(async (req) => {
   const horizonStr = horizon.toISOString().slice(0, 10)
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+
+  // Whole market in one call (owner, 2026-10-19: earnings dates for every
+  // leader's risk flags, not just the bot's curated list). Finnhub's
+  // calendar without a symbol returns every company reporting in the range.
+  if (body.all === true) {
+    const events = await fetchFinnhubEarnings('', today, horizonStr)
+    const rows = events
+      .filter((e) => e.date && e.symbol && /^[A-Z][A-Z.]{0,6}$/.test(e.symbol))
+      .map((e) => ({
+        ticker: e.symbol!.toUpperCase(), earnings_date: e.date, announcement_time: mapAnnouncementTime(e.hour),
+        consensus_eps: e.epsEstimate ?? null, consensus_revenue: e.revenueEstimate ?? null, estimate_count: null, source: 'finnhub',
+      }))
+    const unique = [...new Map(rows.map((r) => [`${r.ticker}:${r.earnings_date}`, r])).values()]
+    let written = 0
+    const errs: string[] = []
+    for (let i = 0; i < unique.length; i += 500) {
+      const { error } = await supabase.from('earnings_calendar').upsert(unique.slice(i, i + 500), { onConflict: 'ticker,earnings_date' })
+      if (error) errs.push(error.message)
+      else written += Math.min(500, unique.length - i)
+    }
+    return json({ success: errs.length === 0, mode: 'all', fetched: events.length, rows_written: written, lookahead_days: lookahead, errors: errs.slice(0, 5) })
+  }
+
   let inserted = 0
   const errors: string[] = []
   const tickersWithoutEarnings: string[] = []

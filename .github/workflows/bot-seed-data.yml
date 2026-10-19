@@ -73,7 +73,7 @@ jobs:
             "${SUPABASE_URL}/functions/v1/bot-seed-earnings-finnhub" \
             -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
             -H "Content-Type: application/json" \
-            -d '{"lookahead_days": 90}')
+            -d '{"lookahead_days": 45, "all": true}')
           http=$(echo "$resp" | tail -n1)
           body=$(echo "$resp" | head -n -1)
           echo "earnings status=${http} body=${body}"

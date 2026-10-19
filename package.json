@@ -33,7 +33,10 @@
     "orderflow:backtest": "node scripts/orderflow-backtest.mjs",
     "callhistory:check": "node scripts/check-call-history.mjs",
     "themes:check": "node scripts/check-themes.mjs",
-    "leaders:check": "node scripts/check-leaders.mjs"
+    "leaders:check": "node scripts/check-leaders.mjs",
+    "riskflags:check": "node scripts/check-risk-flags.mjs",
+    "marketpulse:check": "node scripts/check-market-pulse.mjs",
+    "econcalendar:check": "node scripts/check-econ-calendar.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
