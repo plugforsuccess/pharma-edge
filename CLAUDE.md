@@ -843,7 +843,15 @@ user's account**. Enforced, not just stated:
   PlaceOrderPanel, StrikePriceCalculator — still show the 2% sizing rule;
   revisit them before any flag turns back on.
 Exit targets on a user's own holdings stay: they are the playbook defaults or
-the user's own targets (a calculator). Counsel still has to confirm.
+the user's own targets (a calculator). **Plan checks state facts, never
+instructions** (`src/lib/holdingChecks.jsx`): Home's card is "Your plan
+today"; "PLTR reached your 100% gain target · Your plan sells 7 contracts
+here · +$X after taxes if sold"; verdicts Target reached / Time stop / Roll
+window / Long-term soon / On plan (never Sell / Hold). Play detail shows max
+risk / profit per contract, no account sizing. Still on hidden pages:
+Position detail's account card, PlaceOrderPanel's % at risk, the calculator's
+% of account, Log a Move's "under 2% of account" checklist item, the Wheel
+20% cap. Counsel still has to confirm.
 
 ## Product tiers & page plan (decided 2026-10-02)
 

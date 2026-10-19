@@ -6,6 +6,9 @@ import { timeStop, longTermFitsPlan } from '../utils/afterTax'
 // one decision per holding. Same order as the engine's sell rules
 // (ldp/rules.py): time stop → targets → runner trail → roll window →
 // wait for long-term → hold. A broken thesis is the user's call.
+// Facts against the user's own plan, never instructions (owner, 2026-10-19:
+// no investment-adviser activity): "reached your +100% target", "your plan
+// sells 7 contracts here" — not "Sell 7 contracts".
 
 export const usd = (n) => (Number.isFinite(n) ? `${n < 0 ? '−' : ''}$${Math.round(Math.abs(n)).toLocaleString('en-US')}` : '—')
 export const pctSigned = (r) => (Number.isFinite(r) ? `${r > 0.00005 ? '+' : r < -0.00005 ? '−' : ''}${Math.abs(r * 100).toFixed(1)}%` : '—')
@@ -37,13 +40,13 @@ function checksFor(r, plan, today) {
   const rows = exitRows(r)
   const stop = isQuantity(pos.instrument_type) ? null : timeStop(pos.expiration, today, plan)
   if (stop?.level === 'act') {
-    out.push({ rank: 0, kind: 'exit', tone: 'red', pos, title: `${nameOf(pos)}: exit or roll now`,
-      body: `${stop.dte} days to expiry — past your 6-month time stop.` })
+    out.push({ rank: 0, kind: 'exit', tone: 'red', pos, title: `${nameOf(pos)}: past your time stop`,
+      body: `${stop.dte} days to expiry. Your plan exits or rolls with 6 months left.` })
   }
   for (const row of rows) {
     if (!row.hit || row.contracts === 0) continue
-    out.push({ rank: 1, kind: 'sell', tone: 'green', pos, title: `${nameOf(pos)} hit ${gainLabel(row)}`,
-      body: <>Sell <span className="text-amber-300">{sellCount(row, pos)}</span>{row.after_tax_gain > 0 && <> · <span className="font-mono-tab text-green-400">+{usd(row.after_tax_gain)}</span> after taxes</>}</> })
+    out.push({ rank: 1, kind: 'sell', tone: 'green', pos, title: `${nameOf(pos)} reached your ${gainLabel(row)} target`,
+      body: <>Your plan sells <span className="text-amber-300">{sellCount(row, pos)}</span> here{row.after_tax_gain > 0 && <> · <span className="font-mono-tab text-green-400">+{usd(row.after_tax_gain)}</span> after taxes if sold</>}</> })
   }
   // Runner trail — only once every target has hit.
   const runner = r.runner
@@ -51,18 +54,18 @@ function checksFor(r, plan, today) {
   const unitNow = units > 0 ? calc.current_value / units : null
   if (runner?.trail_unit_value != null && unitNow != null && rows.length > 0
     && rows.every((x) => x.hit) && unitNow <= runner.trail_unit_value) {
-    out.push({ rank: 1, kind: 'sell', tone: 'amber', pos, title: `${nameOf(pos)}: runner trail hit`,
-      body: `Down ${Math.round(runner.trail_pct * 100)}% from its peak — the plan sells the runner.` })
+    out.push({ rank: 1, kind: 'sell', tone: 'amber', pos, title: `${nameOf(pos)}: runner trail reached`,
+      body: `Down ${Math.round(runner.trail_pct * 100)}% from its peak — the level where your plan sells the runner.` })
   }
   if (stop?.level === 'warn') {
     const months = Math.max(1, Math.round(stop.dte / 30.44))
     out.push({ rank: 2, kind: 'roll', tone: 'amber', pos, title: `${nameOf(pos)}: roll window open`,
-      body: `${months} months to expiry. Exit or roll before 6 months are left.` })
+      body: `${months} months to expiry. Your plan exits or rolls with 6 months left.` })
   }
   if (calc.is_long_term === false && calc.tax_saved_by_waiting > 0 && calc.days_until_long_term <= 60
     && longTermFitsPlan(calc.long_term_date, isQuantity(pos.instrument_type) ? null : pos.expiration, plan)) {
     out.push({ rank: 3, kind: 'wait', tone: 'green', pos, title: `${nameOf(pos)} goes long-term in ${calc.days_until_long_term} days`,
-      body: <>Waiting saves about <span className="font-mono-tab text-green-400">{usd(calc.tax_saved_by_waiting)}</span> in tax.</> })
+      body: <>Selling after that date would cost about <span className="font-mono-tab text-green-400">{usd(calc.tax_saved_by_waiting)}</span> less in tax.</> })
   }
   return out
 }
@@ -85,17 +88,17 @@ export function dailyDecisions(results, plan, today) {
   return results.filter((r) => r.calc).map((r) => {
     const { pos, calc } = r
     if (isRoc(pos)) {
-      return { pos, kind: 'hold', tone: 'neutral', verdict: 'Hold', title: nameOf(pos),
-        body: 'Income holding — no exit plan. Payouts keep coming.' }
+      return { pos, kind: 'hold', tone: 'neutral', verdict: 'No plan', title: nameOf(pos),
+        body: 'Income holding — no exit plan.' }
     }
     const [first] = checksFor(r, plan, today).sort((a, b) => a.rank - b.rank)
     if (first) {
-      const verdict = { exit: 'Exit or roll', sell: 'Sell', roll: 'Roll window', wait: 'Wait' }[first.kind]
+      const verdict = { exit: 'Time stop', sell: 'Target reached', roll: 'Roll window', wait: 'Long-term soon' }[first.kind]
       return { ...first, verdict }
     }
     const next = exitRows(r).find((x) => !x.hit && x.contracts !== 0)
     const needs = next && calc.current_value > 0 ? next.exit_value / calc.current_value - 1 : null
-    return { pos, kind: 'hold', tone: 'neutral', verdict: 'Hold', title: nameOf(pos),
+    return { pos, kind: 'hold', tone: 'neutral', verdict: 'On plan', title: nameOf(pos),
       body: next
         ? <>Next: {gainLabel(next)} at <span className="font-mono-tab text-fg">{usd(next.exit_value)}</span> · needs <span className="font-mono-tab text-fg">{pctSigned(needs)}</span></>
         : 'No target left — the runner rides its trail.' }

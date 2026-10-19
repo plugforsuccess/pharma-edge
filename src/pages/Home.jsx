@@ -121,7 +121,7 @@ export default function Home() {
               {!(actions.length === 0 && clearClosed) && (
               <section className="bg-card border border-border rounded-2xl pl-5 pr-2 pt-2 pb-5 mb-5">
                 <div className="flex items-start gap-2">
-                  <h2 className="flex-1 pt-3 text-sm font-semibold mb-3">Needs action</h2>
+                  <h2 className="flex-1 pt-3 text-sm font-semibold mb-3">Your plan today</h2>
                   {actions.length === 0 && (
                     <button type="button" onClick={closeClear} aria-label="Close"
                       className="shrink-0 min-h-[44px] min-w-[44px] flex items-start justify-end pt-3.5 pr-3 rounded-lg text-muted hover:text-fg transition">
