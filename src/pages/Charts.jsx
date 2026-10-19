@@ -12,6 +12,7 @@ import TickerDrawer from '../components/TickerDrawer'
 import { CHART_TICKERS } from '../lib/chartTickers'
 import PriceChart from '../components/PriceChart'
 import ConfluenceLeaders from '../components/ConfluenceLeaders'
+import MarketCard from '../components/MarketCard'
 import { useTracking } from '../hooks/useTracking'
 import MomentumList from '../components/MomentumList'
 import { FEATURES } from '../lib/features'
@@ -352,7 +353,7 @@ export default function Charts() {
         </button>
       </header>
 
-      {!FEATURES.chartsExtras && <ConfluenceLeaders mine={myTickers} leadersOnly />}
+      {!FEATURES.chartsExtras && <><MarketCard /><ConfluenceLeaders mine={myTickers} leadersOnly /></>}
 
       {/* One list at a time: tabs pinned under the header. */}
       {FEATURES.chartsExtras && <div className="sticky top-[env(safe-area-inset-top)] z-20 -mx-4 px-4 pt-1 pb-3 mb-1 bg-bg">

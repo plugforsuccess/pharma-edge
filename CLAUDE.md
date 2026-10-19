@@ -857,9 +857,62 @@ lose the full amount at risk" (still 10 items, same key). The 2% / 20% rules
 remain only as the owner's own bot limits in `risk_gate.ts` and in the Learn
 articles. Counsel still has to confirm.
 
+## Market intelligence first (owner, 2026-10-19)
+
+"LEAPS are advanced and I don't want to shill risky trades — it should be
+more about the leaders, their momentum, the market and risks signaled by
+government, geopolitical and economic news and alerts." → "LEAPS can be the
+advanced section, ship all of it." The product leads with **the stocks, the
+market and the risks**; option plays are an opt-in **Advanced** view.
+- **Advanced toggle** — Settings → Advanced ("Options (LEAPS) shown /
+  hidden", off by default, saved on the device: `src/hooks/useAdvanced.js`,
+  `cm:advanced`). Off: Leaders rows read "+88% past year · 28% above its
+  200-day" (⚠ when a red flag), the open row shows **Risks to watch**, tiles
+  Past year / 200-day trend / Off its high / Volatility, no option card,
+  exits card, Past results or what-if; the badge reads "Leader" (never
+  "Buy"); the entry chart's eyebrow reads "Chart" and the Leaders panel drops
+  its option record line. On: everything as before.
+- **Risk flags** (`src/utils/riskFlags.js`, `npm run riskflags:check`):
+  earnings within 14 days (red ≤ 3 days, from `earnings_calendar`), stretched
+  ≥ 35% above the 200-day (red ≥ 60%), commodity-driven groups
+  (`COMMODITY_GROUPS`: Oil, Refiners, Gold miners …), 10%+ off the 20-day
+  high, 3+ leaders in one group. Facts only, no buy / sell / hold wording.
+- **The market card** (`components/MarketCard.jsx`, top of Charts): S&P 500
+  vs its 200-day ("Uptrend" / "Above a flat 200-day" / "Downtrend"), breadth
+  (share of the universe above its 200-day), leader count and weekly change,
+  VIX and its 5-day change, where the leaders are (groups), and **Coming up**
+  (next 10 days of `econ_events`). Data: **`market_pulse`** (one row per
+  close, written by `rank-confluence.mjs` via `marketPulse()` in
+  `src/utils/marketPulse.js`, `npm run marketpulse:check`; authenticated
+  SELECT, service-role write).
+- **Economic calendar** — **`econ_events`** (kind fomc / cpi / jobs / ppi /
+  jolts / gdp / pce × date, time ET, title, source): `scripts/econ-calendar.mjs`
+  in `.github/workflows/econ-calendar.yml` (weekdays 20:17 UTC, before the
+  ranking) fetches the Fed FOMC page and the BLS / BEA ICS schedules and
+  parses them with `src/utils/econCalendar.js` (`npm run econcalendar:check`).
+  Each source independent; never typed in by hand. BEA's ICS is UTC —
+  stored in ET. **bls.gov refuses GitHub runners (403)**: CPI / jobs / PPI /
+  JOLTS come from FRED's release dates when the free **`FRED_API_KEY`**
+  Actions secret is set (fred.stlouisfed.org/docs/api/api_key.html), else
+  they're missing. Fed meetings collapse to one row (the Wednesday); a
+  source that answers drops its upcoming rows it no longer lists.
+- **Earnings for every stock** — `bot-seed-earnings-finnhub` takes
+  `{ all: true }` (one Finnhub calendar call for the whole market, batch
+  upsert); `bot-seed-data.yml` sends `{ lookahead_days: 45, all: true }`.
+- **Alerts** (`sendAlerts` in `rank-confluence.mjs`, full mode, users with
+  alerts on; one per user × kind × ticker × date): `confluence_top_buy` (a
+  tracked stock became a leader), **`leader_lost`** (dropped off),
+  **`market_trend`** (S&P crossed its 200-day — everyone), **`econ_tomorrow`**
+  (a release or Fed decision on the next weekday — everyone),
+  **`earnings_soon`** (a tracked stock reports within 3 days). Bell labels in
+  `NotificationCenter` (market / economy alerts open Charts). Email copy:
+  "General information … not personalized investment advice."
+- **News** (geopolitical / policy) is the theme notes (`theme-notes`, Claude
+  + allow-listed web search), off until `THEME_NOTES_ENABLED` is set.
+
 ## Product tiers & page plan (decided 2026-10-02)
 
-LEAPS drives growth. Tiers:
+Market intelligence leads (2026-10-19, above); LEAPS is the Advanced view. Tiers:
 
 | Tier | Includes |
 |---|---|

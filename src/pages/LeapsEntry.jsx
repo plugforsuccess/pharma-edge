@@ -17,6 +17,7 @@ import { trendQuality, tripleStatus, reclaimPlan } from '../utils/plan'
 import LeaderPanel from '../components/LeaderPanel'
 import { StarButton } from '../components/ConfluenceLeaders'
 import { useTracking } from '../hooks/useTracking'
+import { useAdvanced } from '../hooks/useAdvanced'
 import { placePins, measure as measurePins, fibLevels, autoSwing, stepPin } from '../utils/chartTools'
 import { leaderSeries } from '../utils/leaders'
 
@@ -404,6 +405,7 @@ export default function LeapsEntry() {
   // Drawing tools (owner, 2026-10-16), shared with the Charts price chart
   // per ticker on this device (cm:chart-tools:TICKER).
   const { tracking, isTracked, toggle } = useTracking()
+  const [advanced] = useAdvanced()
   const toolsKey = `cm:chart-tools:${ticker}`
   const [tools, setTools] = useState({ ticker: null, pins: [], fib: false })
   const [picking, setPicking] = useState(false)
@@ -454,7 +456,7 @@ export default function LeapsEntry() {
           <ArrowLeft size={18} />
         </Link>
         <div className="flex-1 min-w-0">
-          <div className="text-[11px] uppercase tracking-[0.14em] text-muted font-semibold">LEAPS entry</div>
+          <div className="text-[11px] uppercase tracking-[0.14em] text-muted font-semibold">{advanced ? 'LEAPS entry' : 'Chart'}</div>
           <h1 className="text-lg font-semibold leading-tight">{ticker}</h1>
           {SUITE && bars?.length > 0 && <TripleChips daily={dailyTriple} weekly={weekly?.triple ?? (weeklyData?.error ? false : null)} />}
         </div>
@@ -478,7 +480,7 @@ export default function LeapsEntry() {
       ) : (
         <div className="md:grid md:grid-cols-[1fr_280px] md:gap-x-5 md:items-start">
           <div className="min-w-0 md:order-1">
-            {!SUITE && <LeaderPanel traits={leaderNow} close={bars[bars.length - 1]?.c} asOf={bars[bars.length - 1]?.t} spyLoading={spyBars === null} />}
+            {!SUITE && <LeaderPanel traits={leaderNow} close={bars[bars.length - 1]?.c} asOf={bars[bars.length - 1]?.t} spyLoading={spyBars === null} advanced={advanced} />}
             {SUITE && <StatusPanel s={s} model={model} params={params} suite={suite} dailySuite={dailySuite} confirmDays={confirmDays} tfLabel={SUITE_TIMEFRAMES[suiteTf].label.toLowerCase()} conf={conf} pool={pool} trend={trend} metrics={data?.metrics ?? null} />}
             {SUITE && <SuitePanel pack={suitePack} failed={suiteData?.error && suiteData.tf === suiteTf} tf={suiteTf} holdings={holdings} onJump={jumpPeriod} onOpenPane={setExpanded}
               buyZone={!!s?.cond?.all} />}

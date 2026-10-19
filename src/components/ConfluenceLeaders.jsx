@@ -6,6 +6,8 @@ import { supabase } from '../lib/supabase'
 import { CHART_TICKERS } from '../lib/chartTickers'
 import { betsOf } from '../utils/themes'
 import { useTracking } from '../hooks/useTracking'
+import { useAdvanced } from '../hooks/useAdvanced'
+import { leaderFlags } from '../utils/riskFlags'
 import { simulateCall, breakevenMoves, playContract, PLAYS, SWING_EXIT } from '../utils/callHistory'
 
 // Charts → Pullbacks tab, formerly "Confluence leaders" (renamed 2026-10-07) (owner, 2026-10-03; verdicts 2026-10-04: "it's
@@ -516,6 +518,25 @@ function Sparkline({ values, className, height = 32, fill = false }) {
   )
 }
 
+// Risk flags on an opened leader (owner, 2026-10-19: risks over plays).
+const FLAG_TONE = { red: 'border-red-400/30 bg-red-400/5 text-red-300', amber: 'border-amber-400/30 bg-amber-400/5 text-amber-300', neutral: 'border-border bg-bg-elev text-fg' }
+function RiskFlags({ flags }) {
+  if (!flags.length) {
+    return <div className="mt-4 rounded-2xl bg-bg-elev px-4 py-3 text-sm text-subtle">No risk flags today — no earnings in the next two weeks, not stretched, not commodity-driven.</div>
+  }
+  return (
+    <div className="mt-4 space-y-2">
+      <div className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold">Risks to watch</div>
+      {flags.map((f) => (
+        <div key={f.key} className={clsx('rounded-2xl border px-4 py-3', FLAG_TONE[f.tone])}>
+          <div className="text-sm font-semibold">{f.title}</div>
+          <div className="mt-0.5 text-sm text-subtle">{f.body}</div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // Moves together (owner, 2026-10-19: copy from "Same bet"; "the companies … listed clearly with links to
 // them"): every ranked leader in the same industry theme, one tappable row
 // each — a leader in view opens in place, any other opens its chart.
@@ -631,6 +652,26 @@ function Tile({ label, value, sub, tone = 'text-fg' }) {
 function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, setPlay, asOf, mine, total, ranked, notes }) {
   const [open, setOpen] = useState(null)
   const navigate = useNavigate()
+  // Stocks first (owner, 2026-10-19); the option play is the Advanced view.
+  const [advanced] = useAdvanced()
+  // Earnings in the next two weeks, for the risk flags.
+  const [earnings, setEarnings] = useState({})
+  const tickersKey = (ranked ?? []).map((x) => x.ticker).join(',')
+  useEffect(() => {
+    if (!tickersKey) return
+    let cancelled = false
+    const today = new Date().toISOString().slice(0, 10)
+    const until = new Date(Date.now() + 15 * 86400e3).toISOString().slice(0, 10)
+    supabase.from('earnings_calendar').select('ticker, earnings_date, announcement_time')
+      .in('ticker', tickersKey.split(',')).gte('earnings_date', today).lte('earnings_date', until).order('earnings_date')
+      .then(({ data, error }) => {
+        if (cancelled || error) return
+        const m = {}
+        for (const e of data ?? []) if (!m[e.ticker]) m[e.ticker] = { date: e.earnings_date, time: e.announcement_time }
+        setEarnings(m)
+      })
+    return () => { cancelled = true }
+  }, [tickersKey])
   // Ranked leaders by theme, for each row's "Moves together" list.
   const byTheme = useMemo(() => {
     const m = new Map()
@@ -663,7 +704,7 @@ function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, 
         <h2 className="mt-0.5 text-[28px] leading-9 font-semibold tracking-tight">Leaders</h2>
         <p className="text-sm text-subtle">
           {list == null ? 'Loading…' : scope !== 'mine'
-            ? `${total ?? leaders} ${(total ?? leaders) === 1 ? 'stock meets' : 'stocks meet'} the Leaders rule${scope === 'all' && total > 10 ? ' · strongest 10 shown' : ''} · tap one for the play`
+            ? `${total ?? leaders} ${(total ?? leaders) === 1 ? 'stock meets' : 'stocks meet'} the Leaders rule${scope === 'all' && total > 10 ? ' · strongest 10 shown' : ''} · tap one for ${advanced ? 'the play' : 'details'}`
             : 'Your tickers · leaders first · ☆ a leader to add it'}
         </p>
         {bets.length > 0 && bets.length < leaders && (
@@ -687,8 +728,9 @@ function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, 
       </div>
 
       {/* The play and its exit, once for the whole list (owner, 2026-10-16:
-          LEAPS only; exits confirmed — the playbook, no price stop). */}
-      <div className="mt-3 rounded-2xl bg-card border border-border px-4 py-3">
+          LEAPS only; exits confirmed — the playbook, no price stop). Advanced
+          view only (owner, 2026-10-19). */}
+      {advanced && <div className="mt-3 rounded-2xl bg-card border border-border px-4 py-3">
         <div className="text-sm font-semibold">The play: an at-the-money call about 2 years out</div>
         <ol className="mt-1.5 space-y-0.5 text-xs text-subtle list-decimal pl-4">
           <li>Sell 70% when the call is up 100% (your cost back plus profit)</li>
@@ -696,7 +738,7 @@ function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, 
           <li>Let the last 15% run; sell it after a 30% drop from its peak</li>
           <li>Out or roll with 6 months left. No price stop.</li>
         </ol>
-      </div>
+      </div>}
 
       {list === null ? (
         <div className="mt-4 space-y-px" aria-busy="true">{[0, 1, 2, 3].map((i) => <div key={i} className="h-16 rounded-xl bg-card animate-pulse mb-2" />)}</div>
@@ -717,7 +759,8 @@ function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, 
                 const mw = (r.leader_traits?.moves_with ?? []).map((t) => rankedBy.get(t) ?? { ticker: t })
                 return mw.length ? { theme: null, peers: mw } : null
               })()}
-              note={notes?.[r.leader_traits?.theme?.name]} onJump={jump}
+              note={notes?.[r.leader_traits?.theme?.name]} onJump={jump} advanced={advanced}
+              flags={leaderFlags({ traits: r.leader_traits, earnings: earnings[r.ticker], asOf: r.as_of, groupSize: (byTheme.get(r.leader_traits?.theme?.name)?.length ?? 1) })}
               open={open === r.ticker} onToggle={() => setOpen(open === r.ticker ? null : r.ticker)} />
           ))}
         </ul>
@@ -727,7 +770,7 @@ function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, 
         <span className="flex-1">Signal record: how these signals traded, every ticker</span>
         <ChevronRight size={14} aria-hidden />
       </Link>
-      <p className="px-1 text-[11px] text-muted">General information, the same for every subscriber — not personalized investment advice. Option prices are estimates, not quotes. Past results don't guarantee future results.</p>
+      <p className="px-1 text-[11px] text-muted">General information, the same for every subscriber — not personalized investment advice.{advanced ? ' Option prices are estimates, not quotes.' : ''} Past results don't guarantee future results.</p>
     </section>
   )
 }
@@ -757,7 +800,7 @@ const BET_TONES = [
   { chip: 'bg-pink-400/15 text-pink-300', text: 'text-pink-300', card: 'border-pink-400/30 bg-pink-400/5' },
 ]
 
-function LeaderRow({ r, bet, play, setPlay, open, onToggle, starred, onStar, sameBet, note, onJump }) {
+function LeaderRow({ r, bet, play, setPlay, open, onToggle, starred, onStar, sameBet, note, onJump, advanced, flags = [] }) {
   const isLeader = r.verdict === 'enter'
   const trade = useMemo(() => (isLeader && r.trade ? playContract({ S: r.close, vol: r.trade.vol, asOf: r.as_of, play }) : null), [isLeader, r, play])
   const spark = r.spark?.length ? r.spark : null
@@ -767,7 +810,8 @@ function LeaderRow({ r, bet, play, setPlay, open, onToggle, starred, onStar, sam
   const t = r.leader_traits
   const ph = r.call_hist?.plays?.[play.key]
   const why = (t?.misses ?? []).map((m) => MISS[m] ?? m)
-  const sub = isLeader && trade ? `${expiryLabel(trade.expiry, play)} ${money(trade.strike, trade.strike < 25 ? 2 : 0)} call · ${about(per).replace('about ', '')}`
+  const sub = isLeader && !advanced && t ? `${pctS(t.mom12)} past year · ${Math.round(t.vs200 * 100)}% above its 200-day${flags.some((f) => f.tone === 'red') ? ' · ⚠' : ''}`
+    : isLeader && trade ? `${expiryLabel(trade.expiry, play)} ${money(trade.strike, trade.strike < 25 ? 2 : 0)} call · ${about(per).replace('about ', '')}`
     : r.verdict === 'notleader' ? `Not yet a leader${why[0] ? ` · ${why[0]}` : ''}`
     : r.verdict === 'watch' ? 'Long-term trend falling' : 'Signals today'
   return (
@@ -809,12 +853,14 @@ function LeaderRow({ r, bet, play, setPlay, open, onToggle, starred, onStar, sam
               {move != null && <div className={clsx('text-sm font-semibold font-mono-tab', up ? 'text-green-400' : 'text-red-400')}>{`${move >= 0 ? '+' : '−'}${Math.abs(move * 100).toFixed(1)}%`} <span className="font-normal text-muted">past 3 months</span></div>}
             </div>
             {isLeader
-              ? <span className="mb-1 px-2 py-1 rounded-full bg-green-400/10 text-green-400 text-[11px] font-semibold">Leader · Buy</span>
+              ? <span className="mb-1 px-2 py-1 rounded-full bg-green-400/10 text-green-400 text-[11px] font-semibold">Leader</span>
               : <span className="mb-1 px-2 py-1 rounded-full bg-bg-elev text-subtle text-[11px] font-semibold">{r.verdict === 'watch' ? 'Not in an uptrend' : 'Not yet'}</span>}
           </div>
           <Sparkline values={spark} fill height={96} className={clsx('mt-3 w-full', up ? 'text-green-400' : 'text-red-400')} />
 
-          {trade ? (
+          {isLeader && !advanced && <RiskFlags flags={flags} />}
+
+          {advanced && trade ? (
             <div className="mt-4 rounded-2xl bg-bg-elev p-4">
               <div className="flex items-start gap-3">
                 <div className="flex-1 min-w-0">
@@ -835,7 +881,7 @@ function LeaderRow({ r, bet, play, setPlay, open, onToggle, starred, onStar, sam
                 </div>
               )}
             </div>
-          ) : why.length > 0 && (
+          ) : !isLeader && why.length > 0 && (
             <div className="mt-4 rounded-2xl bg-bg-elev p-4">
               <div className="text-[11px] text-muted">What it still needs</div>
               <div className="mt-0.5 text-sm text-subtle">{why.join(' · ')}</div>
@@ -849,15 +895,19 @@ function LeaderRow({ r, bet, play, setPlay, open, onToggle, starred, onStar, sam
           {isLeader && (
             <div className="mt-2 grid grid-cols-2 gap-2">
               {t && <Tile label="200-day trend" value={`${t.slope200 >= 0 ? '+' : '−'}${Math.abs(t.slope200 * 100).toFixed(1)}%`} sub="rise over 20 days" tone="text-green-400" />}
-              <Tile label="Price stop" value="None" sub="exit on the plan, not a price" />
+              {advanced
+                ? <Tile label="Price stop" value="None" sub="exit on the plan, not a price" />
+                : <Tile label="Off its high" value={t?.off20 != null ? `${Math.round(t.off20 * 100)}%` : '—'} sub="under its 20-day high" />}
               {t && <Tile label="Past year" value={`${t.mom12 >= 0 ? '+' : '−'}${Math.round(Math.abs(t.mom12) * 100)}%`} sub={`${Math.round(t.vs200 * 100)}% above its 200-day`} tone="text-green-400" />}
-              {t && <Tile label="Option price" value={t.volRank != null ? `${Math.round(t.volRank * 100)}th pct` : '—'} sub="cheap for this stock" />}
+              {t && (advanced
+                ? <Tile label="Option price" value={t.volRank != null ? `${Math.round(t.volRank * 100)}th pct` : '—'} sub="cheap for this stock" />
+                : <Tile label="Volatility" value={t.volRank != null ? `${Math.round(t.volRank * 100)}th pct` : '—'} sub="calm vs its past year" />)}
             </div>
           )}
 
-          <PastLine ph={ph} play={play} />
+          {advanced && <PastLine ph={ph} play={play} />}
 
-          <div className="mt-3 -mx-5"><PlayLab r={r} play={play} setPlay={setPlay} rows={[play]} /></div>
+          {advanced && <div className="mt-3 -mx-5"><PlayLab r={r} play={play} setPlay={setPlay} rows={[play]} /></div>}
 
           <Link to={`/charts/entry/${encodeURIComponent(r.ticker)}`}
             className="mt-1 min-h-[48px] w-full rounded-full bg-amber-400 text-bg text-sm font-semibold flex items-center justify-center gap-1.5">

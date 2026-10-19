@@ -13,7 +13,7 @@ const pct = (x, d = 1) => (x == null ? '—' : `${x >= 0 ? '+' : '−'}${Math.ab
 const money = (x) => (x == null ? '—' : `$${Number(x).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)
 const dayLabel = (t) => (t ? new Date(`${t}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }) : '')
 
-export default function LeaderPanel({ traits, close, asOf, spyLoading }) {
+export default function LeaderPanel({ traits, close, asOf, spyLoading, advanced = false }) {
   const misses = leaderMisses(traits)
   const yes = traits && misses.length === 0
   const sma200 = traits?.vs200 != null && close ? close / (1 + traits.vs200) : null
@@ -57,9 +57,11 @@ export default function LeaderPanel({ traits, close, asOf, spyLoading }) {
           )
         })}
       </ul>
-      <p className="px-5 py-3 border-t border-hairline text-[11px] text-muted">
-        Leaders bought any day, 2024–26: 60% made money, the typical trade +50% (at-the-money 2-year call with the exit plan). Any stock, any day: 52%, +7%. Estimates from past prices, not a forecast.
-      </p>
+      {advanced && (
+        <p className="px-5 py-3 border-t border-hairline text-[11px] text-muted">
+          Leaders bought any day, 2024–26: 60% made money, the typical trade +50% (at-the-money 2-year call with the exit plan). Any stock, any day: 52%, +7%. Estimates from past prices, not a forecast.
+        </p>
+      )}
     </section>
   )
 }

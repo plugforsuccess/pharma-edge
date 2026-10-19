@@ -36,7 +36,8 @@ function json(body: unknown, status = 200): Response {
 }
 
 const CACHE_MS = 15 * 60 * 1000
-const TICKER_RE = /^[A-Z][A-Z0-9.\-]{0,9}$/
+// A leading ^ allows indexes (^VIX for the nightly market pulse).
+const TICKER_RE = /^\^?[A-Z][A-Z0-9.\-]{0,9}$/
 const cache = new Map<string, { at: number; body: Record<string, unknown> }>()
 const marketCache = new Map<string, { at: number; closes: Array<{ t: string; c: number }> }>()
 

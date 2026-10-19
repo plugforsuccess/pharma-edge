@@ -40,6 +40,7 @@ import { replaySignals, trailingVol, OPTION_MODEL } from '../src/utils/replay.js
 import { callHistory, callStats, exitHistory, exitStats, PLAYS, playModel, playSpan, playContract, SWING_EXIT } from '../src/utils/callHistory.js'
 import { leaderSeries, leaderMisses } from '../src/utils/leaders.js'
 import { THEMES, themeOf, returnsByDate } from '../src/utils/themes.js'
+import { marketPulse } from '../src/utils/marketPulse.js'
 
 const args = process.argv.slice(2)
 const MODE = (args[args.indexOf('--mode') + 1] && args.includes('--mode')) ? args[args.indexOf('--mode') + 1] : 'dry-run'
@@ -327,49 +328,105 @@ async function main() {
     if (error) throw new Error(`momentum_picks: ${error.message}`)
     console.log(`Wrote ${momRows.length} momentum picks for ${momRows[0].as_of}.`)
   }
+  // The market on one screen (owner, 2026-10-19): S&P trend, breadth, the
+  // leaders and their groups, VIX → market_pulse.
+  let vix = []
+  try { vix = await dailyBars('^VIX') } catch (e) { console.log(`VIX unavailable (${e.message})`) }
+  const { data: prevPulse } = await db.from('market_pulse').select('as_of, spy_above').lt('as_of', asOf).order('as_of', { ascending: false }).limit(1).maybeSingle()
+  const pulse = marketPulse({
+    asOf, spy: spy ?? [], vix,
+    stocks: results.map((r) => ({ ticker: r.ticker, vs200: r.leader?.traits?.vs200 ?? null })),
+    leaders: rows.filter((r) => r.side === 'buy' && r.rank != null).sort((a, b) => a.rank - b.rank).map((r) => ({ ticker: r.ticker, theme: r.leader_traits?.theme?.name ?? null })),
+  })
+  {
+    const { error } = await db.from('market_pulse').upsert({ ...pulse, updated_at: now }, { onConflict: 'as_of' })
+    if (error) console.error(`market_pulse: ${error.message}`)
+    else console.log(`Market: S&P ${pulse.spy_above ? 'above' : 'below'} its 200-day (${pct(pulse.spy_vs200)}), breadth ${pct(pulse.breadth)}, ${pulse.leaders} leaders, VIX ${pulse.vix ?? '—'}.`)
+  }
   if (MODE !== 'full') return
 
   try { await forwardRecord(db, { asOf, momRows, rows, byTicker }) } catch (e) { console.error(`Forward record failed: ${e.message}`) }
 
-  // Alerts (owner, 2026-10-16): one of a user's tickers became a leader
-  // (ranked today, not ranked last night). Sell-signal alerts retired with
-  // the signal suite.
-  const entered = rows.filter((r) => r.side === 'buy' && r.rank != null && !prevTop.has(`${r.side}:${r.ticker}`))
-  if (!entered.length) { console.log('No new leaders.'); return }
+  await sendAlerts(db, { asOf, rows, prevTop, pulse, prevPulse })
+}
+
+// Alerts (owner, 2026-10-16; widened 2026-10-19 to the market and its risks),
+// for users with entry alerts on — facts, never instructions:
+//   confluence_top_buy  a tracked ticker became a leader
+//   leader_lost         a tracked ticker dropped off the Leaders list
+//   market_trend        the S&P 500 crossed its 200-day (everyone)
+//   econ_tomorrow       a major release or Fed decision on the next weekday (everyone)
+//   earnings_soon       a tracked ticker reports within 3 days
+// One row per (user, kind, ticker, date) — re-runs are no-ops.
+const nextWeekday = (d) => { const t = new Date(`${d}T12:00:00Z`); do t.setUTCDate(t.getUTCDate() + 1); while ([0, 6].includes(t.getUTCDay())); return t.toISOString().slice(0, 10) }
+const addDays = (d, n) => { const t = new Date(`${d}T12:00:00Z`); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10) }
+
+async function sendAlerts(db, { asOf, rows, prevTop, pulse, prevPulse }) {
   const { data: users } = await db.from('profiles').select('id').eq('entry_alerts', true)
   const ids = (users ?? []).map((u) => u.id)
-  if (!ids.length) return
+  if (!ids.length) { console.log('No users with alerts on.'); return }
   const [{ data: wl }, { data: pos }] = await Promise.all([
     db.from('watchlist').select('user_id, ticker').in('user_id', ids),
     db.from('leaps_positions').select('user_id, ticker').in('user_id', ids).is('closed_at', null).not('ticker', 'is', null),
   ])
   const follows = new Map()
-  const holds = new Map()
-  const add = (m, u, t) => { const s = String(t ?? '').toUpperCase(); if (!m.has(u)) m.set(u, new Set()); m.get(u).add(s) }
-  for (const r of wl ?? []) add(follows, r.user_id, r.ticker)
-  for (const r of pos ?? []) { add(follows, r.user_id, r.ticker); add(holds, r.user_id, r.ticker) }
+  const add = (u, t) => { const s = String(t ?? '').toUpperCase(); if (!follows.has(u)) follows.set(u, new Set()); follows.get(u).add(s) }
+  for (const r of wl ?? []) add(r.user_id, r.ticker)
+  for (const r of pos ?? []) add(r.user_id, r.ticker)
 
+  const ranked = rows.filter((r) => r.side === 'buy' && r.rank != null)
+  const rankedNow = new Set(ranked.map((r) => r.ticker))
+  const entered = ranked.filter((r) => !prevTop.has(`buy:${r.ticker}`))
+  const lost = [...prevTop].map((k) => k.split(':')[1]).filter((t) => !rankedNow.has(t))
   const app = process.env.APP_URL || 'https://cashmoves.io'
-  let written = 0
-  const mail = new Map()
+  const chart = (t) => `${app}/charts/entry/${encodeURIComponent(t)}`
+
+  const items = [] // { user, kind, ticker, date, message, url }
   for (const id of ids) {
-    for (const r of entered) {
-      const mine = r.side === 'buy' ? follows.get(id)?.has(r.ticker) : holds.get(id)?.has(r.ticker)
-      if (!mine) continue
-      const kind = r.side === 'buy' ? 'confluence_top_buy' : 'confluence_top_sell'
-      const message = r.side === 'buy'
-        ? `${r.ticker} is now a leader (#${r.rank}): ${pct(r.leader_traits?.mom12)} past year, ${pct(r.leader_traits?.vs200)} above a rising 200-day.`
-        : `${r.ticker} is #${r.rank} for extended highs (exit) — ${r.score} of 5 sell signals agree; after this setup the stock averaged ${pct(r.est_3m)} over 3 months.`
-      const { data, error } = await db.from('alerts').upsert({ user_id: id, alert_type: kind, ticker: r.ticker, event_date: r.as_of, message, sent_via: 'email' },
-        { onConflict: 'user_id,alert_type,ticker,event_date', ignoreDuplicates: true }).select('id')
-      if (error) { console.warn('alert insert failed', error.message); continue }
-      if (!data?.length) continue
-      written++
-      if (!mail.has(id)) mail.set(id, [])
-      mail.get(id).push({ message, url: `${app}/charts/entry/${encodeURIComponent(r.ticker)}` })
+    const mine = follows.get(id) ?? new Set()
+    for (const r of entered) if (mine.has(r.ticker)) items.push({ user: id, kind: 'confluence_top_buy', ticker: r.ticker, date: asOf, url: chart(r.ticker),
+      message: `${r.ticker} is now a leader (#${r.rank}): ${pct(r.leader_traits?.mom12)} past year, ${pct(r.leader_traits?.vs200)} above a rising 200-day.` })
+    for (const t of lost) if (mine.has(t)) items.push({ user: id, kind: 'leader_lost', ticker: t, date: asOf, url: chart(t),
+      message: `${t} dropped off the Leaders list — it no longer meets every leader rule.` })
+  }
+  // The market's trend turned (S&P vs its 200-day).
+  if (prevPulse && pulse.spy_above != null && prevPulse.spy_above != null && prevPulse.spy_above !== pulse.spy_above) {
+    const message = pulse.spy_above
+      ? `The S&P 500 closed back above its 200-day average (${pct(pulse.spy_vs200)}). New leaders can qualify again.`
+      : `The S&P 500 closed below its 200-day average (${pct(pulse.spy_vs200)}). No stock qualifies as a leader while it stays below.`
+    for (const id of ids) items.push({ user: id, kind: 'market_trend', ticker: 'SPY', date: asOf, url: `${app}/charts`, message })
+  }
+  // Major releases and Fed decisions on the next weekday.
+  const tomorrow = nextWeekday(asOf)
+  const { data: ev } = await db.from('econ_events').select('kind, event_date, event_time, title').eq('event_date', tomorrow)
+  for (const e of ev ?? []) {
+    const message = `Tomorrow${e.event_time ? ` at ${e.event_time} ET` : ''}: ${e.title}. Markets often move most around these releases.`
+    for (const id of ids) items.push({ user: id, kind: 'econ_tomorrow', ticker: e.kind.toUpperCase(), date: e.event_date, url: `${app}/charts`, message })
+  }
+  // Earnings within 3 days on a tracked ticker.
+  const followed = [...new Set([...follows.values()].flatMap((s) => [...s]))]
+  if (followed.length) {
+    const { data: er } = await db.from('earnings_calendar').select('ticker, earnings_date, announcement_time')
+      .in('ticker', followed).gt('earnings_date', asOf).lte('earnings_date', addDays(asOf, 3))
+    for (const e of er ?? []) {
+      const when = e.announcement_time === 'BMO' ? ' before the open' : e.announcement_time === 'AMC' ? ' after the close' : ''
+      for (const id of ids) if (follows.get(id)?.has(e.ticker)) items.push({ user: id, kind: 'earnings_soon', ticker: e.ticker, date: e.earnings_date, url: chart(e.ticker),
+        message: `${e.ticker} reports earnings ${e.earnings_date}${when}. The price can gap either way on the results.` })
     }
   }
-  console.log(`Alerts written: ${written} for ${mail.size} user(s).`)
+
+  let written = 0
+  const mail = new Map()
+  for (const it of items) {
+    const { data, error } = await db.from('alerts').upsert({ user_id: it.user, alert_type: it.kind, ticker: it.ticker, event_date: it.date, message: it.message, sent_via: 'email' },
+      { onConflict: 'user_id,alert_type,ticker,event_date', ignoreDuplicates: true }).select('id')
+    if (error) { console.warn(`alert ${it.kind} insert failed`, error.message); continue }
+    if (!data?.length) continue
+    written++
+    if (!mail.has(it.user)) mail.set(it.user, [])
+    mail.get(it.user).push({ message: it.message, url: it.url })
+  }
+  console.log(`Alerts: ${entered.length} new leaders, ${lost.length} dropped, ${ev?.length ?? 0} releases tomorrow; ${written} written for ${mail.size} user(s).`)
   await sendEmails(db, mail)
 }
 
@@ -448,10 +505,10 @@ async function sendEmails(db, mail) {
     const { data } = await db.auth.admin.getUserById(id)
     const to = data?.user?.email
     if (!to) continue
-    const html = `<p>New confluence calls on your tickers:</p><ul>${items.map((x) => `<li>${x.message} <a href="${x.url}">Open the chart</a></li>`).join('')}</ul><p style="color:#888">Suggestions, not advice. Stock returns, not option returns.</p>`
+    const html = `<p>Today on Cash Moves:</p><ul>${items.map((x) => `<li>${x.message} <a href="${x.url}">Open</a></li>`).join('')}</ul><p style="color:#888">General information, the same for every subscriber — not personalized investment advice.</p>`
     const resp = await fetch('https://api.resend.com/emails', {
       method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from, to, subject: `Cash Moves: ${items.length} new confluence call${items.length === 1 ? '' : 's'}`, html }),
+      body: JSON.stringify({ from, to, subject: `Cash Moves: ${items.length} alert${items.length === 1 ? '' : 's'}`, html }),
     })
     if (!resp.ok) console.warn('resend failed', resp.status)
   }

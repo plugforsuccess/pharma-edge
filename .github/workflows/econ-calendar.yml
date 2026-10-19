@@ -1,0 +1,35 @@
+# Economic calendar (owner, 2026-10-19: "risks signaled by government …
+# economic news and alerts"). Fetches the Fed FOMC calendar and the BLS / BEA
+# release schedules → econ_events (scripts/econ-calendar.mjs). Runs before
+# the nightly ranking so its "tomorrow" alerts see fresh dates.
+
+name: Economic calendar
+
+on:
+  schedule:
+    - cron: '17 20 * * 1-5'
+  workflow_dispatch:
+  push:
+    branches-ignore: [main]
+    paths:
+      - scripts/econ-calendar.mjs
+      - src/utils/econCalendar.js
+      - .github/workflows/econ-calendar.yml
+
+jobs:
+  calendar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Fetch + write
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+        run: node scripts/econ-calendar.mjs

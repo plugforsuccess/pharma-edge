@@ -26,6 +26,7 @@ on:
       - scripts/lib/marketData.mjs
       - src/utils/confluence.js
       - src/utils/themes.js
+      - src/utils/marketPulse.js
       - .github/workflows/confluence-rank.yml
 
 concurrency:

@@ -12,6 +12,7 @@ import clsx from 'clsx'
 import NumberInput from '../components/NumberInput'
 import BotSettingsSection from '../components/BotSettingsSection'
 import { FEATURES } from '../lib/features'
+import { useAdvanced } from '../hooks/useAdvanced'
 import { FILING_STATUSES, DEFAULT_TARGET_PCTS, EXIT_PLAYBOOK, isValidTaxRate, todayYmd } from '../utils/afterTax'
 import { SEX_OPTIONS, RACE_OPTIONS, EDUCATION_OPTIONS } from '../utils/peers'
 import { LDP_DISCLOSURES_VERSION, DISCLOSURES, TOLERANCES, EXPERIENCE } from '../lib/ldpDisclosures'
@@ -522,6 +523,7 @@ export default function Settings() {
 
       <PushSection userId={user?.id} />
       <EntryAlertsSection userId={user?.id} />
+      <AdvancedSection />
 
       <Section title="Broker">
         <div className="flex items-start gap-3">
@@ -1006,11 +1008,34 @@ function EntryAlertsSection({ userId }) {
         <div className="flex-1">
           <p className="text-fg text-sm font-medium">{on ? 'On' : 'Off'}</p>
           <p className="text-subtle text-xs mt-0.5">
-            Each weekday after the close, your Tracking list and holdings are checked. You get an alert when one enters the LEAPS buy zone or a weekly Hardening bull fires.
+            Each weekday after the close, your Tracking list and holdings are checked. You get an alert when one becomes a leader or drops off the list, the day before a major economic release, before earnings on a tracked stock, and when the market's trend turns.
           </p>
         </div>
         <button type="button" role="switch" aria-checked={on} aria-label="Entry alerts" onClick={toggle} disabled={busy}
           className={`relative shrink-0 h-7 w-12 rounded-full transition-colors disabled:opacity-60 ${on ? 'bg-amber-400' : 'bg-faint'}`}>
+          <span className={`absolute top-0.5 h-6 w-6 rounded-full bg-fg transition-all ${on ? 'left-[22px]' : 'left-0.5'}`} />
+        </button>
+      </div>
+    </Section>
+  )
+}
+
+// Advanced view (owner, 2026-10-19: "LEAPS can be the advanced section"):
+// off = Leaders show the stock and its risks; on = the option play, its
+// exits and option past results. Saved on this device.
+function AdvancedSection() {
+  const [on, setOn] = useAdvanced()
+  return (
+    <Section title="Advanced">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1">
+          <p className="text-fg text-sm font-medium">Options (LEAPS) {on ? 'shown' : 'hidden'}</p>
+          <p className="text-subtle text-xs mt-0.5">
+            Shows a long-dated call for each leader, its exit plan and how past calls did. Options can lose their full cost — for experienced traders only.
+          </p>
+        </div>
+        <button type="button" role="switch" aria-checked={on} aria-label="Show options (advanced)" onClick={() => setOn(!on)}
+          className={`relative shrink-0 h-7 w-12 rounded-full transition-colors ${on ? 'bg-amber-400' : 'bg-faint'}`}>
           <span className={`absolute top-0.5 h-6 w-6 rounded-full bg-fg transition-all ${on ? 'left-[22px]' : 'left-0.5'}`} />
         </button>
       </div>

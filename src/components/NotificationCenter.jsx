@@ -33,8 +33,13 @@ const TYPE_META = {
   // Entry alerts (entry-scan): tap opens that ticker's entry chart.
   entry_buy_zone: { Icon: Crosshair, tone: 'green', label: 'Buy zone' },
   entry_hardening_bull: { Icon: TrendingUp, tone: 'amber', label: 'Hardening' },
-  confluence_top_buy: { Icon: TrendingUp, tone: 'green', label: 'Top 10 · lows' },
+  confluence_top_buy: { Icon: TrendingUp, tone: 'green', label: 'New leader' },
   confluence_top_sell: { Icon: TrendingUp, tone: 'red', label: 'Top 10 · highs' },
+  // Market and risk alerts (owner, 2026-10-19).
+  leader_lost: { Icon: AlertTriangle, tone: 'amber', label: 'Left leaders' },
+  market_trend: { Icon: TrendingUp, tone: 'red', label: 'Market trend' },
+  econ_tomorrow: { Icon: Clock, tone: 'amber', label: 'Economy' },
+  earnings_soon: { Icon: Clock, tone: 'amber', label: 'Earnings' },
 }
 
 const TONE_BG = {
@@ -158,7 +163,12 @@ export default function NotificationCenter() {
 
   function handleRowClick(alert) {
     markRead(alert.id)
-    if (alert.ticker && (alert.alert_type?.startsWith('entry_') || alert.alert_type?.startsWith('confluence_'))) {
+    if (alert.alert_type === 'market_trend' || alert.alert_type === 'econ_tomorrow') {
+      setOpen(false)
+      navigate('/charts')
+      return
+    }
+    if (alert.ticker && (alert.alert_type?.startsWith('entry_') || alert.alert_type?.startsWith('confluence_') || alert.alert_type === 'leader_lost' || alert.alert_type === 'earnings_soon')) {
       setOpen(false)
       navigate(`/charts/entry/${encodeURIComponent(alert.ticker)}`)
       return
