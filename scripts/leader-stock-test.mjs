@@ -9,7 +9,8 @@
 // can be told apart from a rule that doesn't beat the market.
 //   join      the day a stock becomes a leader (after 21+ days off) — the record
 //   anyday    a leader, any day (the list)
-//   nospy     the rule without the S&P-above-its-200-day check
+//   withspy   the rule with the S&P-above-its-200-day check (the rule until
+//             2026-10-19; the live rule no longer has it)
 //   novol     the rule without the cheap-volatility check
 //   momentum  only "up 17%+ over 12-1 months and above the 200-day"
 //   baseline  any stock, every 21st trading day — the universe itself
@@ -25,12 +26,12 @@ import { dailyBars, mapLimit, sources } from './lib/marketData.mjs'
 const GAP = 21
 const H = [['1M', 21], ['3M', 63], ['6M', 126], ['12M', 252]]
 const { volRankMax: _v, ...NO_VOL } = LEADER
-const NO_SPY = { ...LEADER, spyUp: false }
+const WITH_SPY = { ...LEADER, spyUp: true }
 const MOM = { mom12: LEADER.mom12, vs200: 0 }
 const RULES = [
   ['join', 'Becomes a leader (the record)'],
   ['anyday', 'Leader, any day (the list)'],
-  ['nospy', 'Leader rule without the S&P check'],
+  ['withspy', 'Leader rule with the S&P check (old)'],
   ['novol', 'Leader rule without the volatility check'],
   ['momentum', 'Momentum only (12-1 > +17%, above 200-day)'],
   ['baseline', 'Any stock, any day'],
@@ -47,7 +48,7 @@ function entriesFor(ticker, bars, spyAt) {
   const tr = Array.from({ length: n }, (_, i) => ls.at(i))
   const ok = (rule) => tr.map((t) => leaderMisses(t, rule).length === 0)
   const lead = ok(LEADER)
-  const flags = { anyday: lead, nospy: ok(NO_SPY), novol: ok(NO_VOL), momentum: ok(MOM), baseline: tr.map((t) => t != null) }
+  const flags = { anyday: lead, withspy: ok(WITH_SPY), novol: ok(NO_VOL), momentum: ok(MOM), baseline: tr.map((t) => t != null) }
   // join: first leader day after 21+ days off the list
   let lastOn = -Infinity
   flags.join = lead.map((on, i) => { const j = on && i - lastOn > GAP; if (on) lastOn = i; return j })

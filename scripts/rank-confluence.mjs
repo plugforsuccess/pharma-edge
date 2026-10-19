@@ -338,7 +338,20 @@ async function main() {
   // The leader record (owner, 2026-10-19): every stint on the Leaders list
   // in the past year (plus any still open), rebuilt each night.
   {
-    const stintRows = results.flatMap((r) => (r.stints ?? []).map((x) => ({ as_of: asOf, ticker: r.ticker, theme: r.theme?.name ?? null, ...x })))
+    // "Any stock" over each stay's own days: every ticker's change from the
+    // join date to its latest close (median and mean), one pass per join date.
+    const closeAt = results.map((r) => ({ at: new Map(r.bars.map((b) => [b.t, b.c])), last: r.bars[r.bars.length - 1] }))
+      .filter((x) => x.last?.t === asOf)
+    const univ = new Map()
+    const univFor = (t) => {
+      if (!univ.has(t)) {
+        const g = closeAt.map((x) => { const c0 = x.at.get(t); return c0 ? x.last.c / c0 - 1 : null }).filter((v) => v != null && Number.isFinite(v)).sort((p, q) => p - q)
+        const r4 = (v) => (v == null ? null : Math.round(v * 10000) / 10000)
+        univ.set(t, g.length ? { univ_med: r4(g.length % 2 ? g[(g.length - 1) / 2] : (g[g.length / 2 - 1] + g[g.length / 2]) / 2), univ_avg: r4(g.reduce((s0, v) => s0 + v, 0) / g.length) } : { univ_med: null, univ_avg: null })
+      }
+      return univ.get(t)
+    }
+    const stintRows = results.flatMap((r) => (r.stints ?? []).map((x) => ({ as_of: asOf, ticker: r.ticker, theme: r.theme?.name ?? null, ...x, ...univFor(x.joined_on) })))
     // A rerun on the same close replaces that day's record (stints can merge
     // differently, so old rows wouldn't be overwritten by key).
     const { error: clearErr } = await db.from('leader_stints').delete().eq('as_of', asOf)
@@ -418,8 +431,8 @@ async function sendAlerts(db, { asOf, rows, prevTop, pulse, prevPulse }) {
   // The market's trend turned (S&P vs its 200-day).
   if (prevPulse && pulse.spy_above != null && prevPulse.spy_above != null && prevPulse.spy_above !== pulse.spy_above) {
     const message = pulse.spy_above
-      ? `The S&P 500 closed back above its 200-day average (${pct(pulse.spy_vs200)}). New leaders can qualify again.`
-      : `The S&P 500 closed below its 200-day average (${pct(pulse.spy_vs200)}). No stock qualifies as a leader while it stays below.`
+      ? `The S&P 500 closed back above its 200-day average (${pct(pulse.spy_vs200)}).`
+      : `The S&P 500 closed below its 200-day average (${pct(pulse.spy_vs200)}).`
     for (const id of ids) items.push({ user: id, kind: 'market_trend', ticker: 'SPY', date: asOf, url: `${app}/charts`, message })
   }
   // Major releases and Fed decisions on the next weekday.

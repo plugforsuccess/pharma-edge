@@ -43,7 +43,8 @@ export default function LeaderRecord() {
     return () => { cancelled = true }
   }, [])
   const list = useMemo(() => (rows ?? []).filter((r) => (tab === 'recent' ? r.days <= RECENT : r.days > RECENT)), [rows, tab])
-  const sum = useMemo(() => stintSummary(list.map((r) => ({ gain: r.gain == null ? null : Number(r.gain), spy_gain: r.spy_gain == null ? null : Number(r.spy_gain) }))), [list])
+  const num = (x) => (x == null ? null : Number(x))
+  const sum = useMemo(() => stintSummary(list.map((r) => ({ gain: num(r.gain), spy_gain: num(r.spy_gain), univ_med: num(r.univ_med), univ_avg: num(r.univ_avg) }))), [list])
   const asOf = rows?.[0]?.as_of
   const recentN = (rows ?? []).filter((r) => r.days <= RECENT).length
   const stillN = list.filter((r) => r.open).length
@@ -71,9 +72,21 @@ export default function LeaderRecord() {
         <div className="mt-4 rounded-2xl bg-card border border-border p-5 text-sm text-subtle">The record fills in after the next nightly update.</div>
       ) : (
         <>
+          {sum.n > 0 && sum.avg != null && (
+            /* The group view (owner, 2026-10-19): every leader together, beside
+               the S&P 500 and any stock over the same days. Facts only. */
+            <div className="mt-4 rounded-2xl bg-card border border-border px-4 py-3.5">
+              <div className="text-[11px] text-muted">All {sum.n} leaders together · average change</div>
+              <div className={clsx('mt-0.5 text-[28px] leading-9 font-semibold font-mono-tab', sum.avg >= 0 ? 'text-green-400' : 'text-red-400')}>{pctS(sum.avg)}</div>
+              <div className="mt-0.5 text-sm text-subtle font-mono-tab">
+                S&P 500 {pctS(sum.spyAvg)}{sum.univAvg != null && <> · any stock {pctS(sum.univAvg)}</>} <span className="text-muted">over the same days</span>
+              </div>
+              <p className="mt-2 text-xs text-muted">Over 5 years of past prices, leaders did better as a group than one at a time: a few large winners carried the average.</p>
+            </div>
+          )}
           {sum.n > 0 && (
-            <div className="mt-4 grid grid-cols-2 gap-2">
-              <Stat label="Typical change since joining" value={pctS(sum.median)} tone={sum.median == null ? 'text-fg' : sum.median >= 0 ? 'text-green-400' : 'text-red-400'} sub={`${sum.n} ${sum.n === 1 ? 'stock' : 'stocks'}`} />
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <Stat label="Typical leader since joining" value={pctS(sum.median)} tone={sum.median == null ? 'text-fg' : sum.median >= 0 ? 'text-green-400' : 'text-red-400'} sub={sum.univMedian != null ? `any stock typical ${pctS(sum.univMedian)}` : `${sum.n} ${sum.n === 1 ? 'stock' : 'stocks'}`} />
               <Stat label="Higher than when it joined" value={of10(sum.higher)} sub={`S&P 500 typical ${pctS(sum.spyMedian)}`} />
               <Stat label="Beat the S&P 500" value={of10(sum.beat)} sub="over the same days" />
               <Stat label="Still leaders today" value={`${stillN} of ${sum.n}`} sub="the rest are held anyway" />

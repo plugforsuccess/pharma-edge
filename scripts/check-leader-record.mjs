@@ -20,6 +20,8 @@ ok('open stint kept even when it joined before the lookback', old.length === 1 &
 const s = stintSummary(a)
 ok('summary', s.n === 2 && s.higher === 1 && s.beat === 1 && s.median > 0)
 ok('no bars', leaderStints([], []).length === 0)
+const gs = stintSummary([{ gain: 1, spy_gain: 0.1, univ_med: 0.05, univ_avg: 0.2 }, { gain: -0.4, spy_gain: 0.1, univ_med: 0.07, univ_avg: 0.1 }, { gain: -0.2, spy_gain: 0.1, univ_med: 0.06, univ_avg: 0.3 }])
+ok('group view: one big winner lifts the average above the S&P while the typical one lags', Math.abs(gs.avg - 0.1333) < 1e-3 && gs.avg > gs.spyAvg && gs.median < gs.spyMedian && Math.abs(gs.univAvg - 0.2) < 1e-9 && gs.univMedian === 0.06)
 ok('default: a 3-week dip merges', leaderStints(bars, days([[2, 8], [24, 30]]), { lookback: 40 }).length === 1)
 console.log(`${pass} passed, ${fail} failed`)
 if (fail) process.exit(1)

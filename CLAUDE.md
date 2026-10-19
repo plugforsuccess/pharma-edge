@@ -1814,7 +1814,13 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   the open stint on `leader_traits.since`. Leaders rows read "+18% since
   Aug 12"; `/charts/leader-record` (link under the list) shows the typical change, higher N of 10, beat the S&P
   N of 10, one row per stint (tap → chart). The option-trade Signal record
-  link shows only in Advanced.
+  link shows only in Advanced. **Group view** (owner, 2026-10-19): a card
+  "All N leaders together · average change" beside the S&P 500 and any stock
+  over the same days (`leader_stints.univ_med` / `univ_avg`: every ticker's
+  change from the join date, nightly) and "Typical leader … any stock
+  typical"; the Leaders list adds one factual line, "Over the past 5 years,
+  leaders have done better as a group than one at a time" (not advice to
+  diversify — general information).
 - **Stars + All leaders** (owner, 2026-10-19: "How can I favorite leaps?"; 38
   leaders ranked, the list showed 10 and said "10 stocks meet the rule"). A ☆
   on every Leaders row (right edge, its own tap target) and in the entry chart
@@ -1906,7 +1912,12 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   `src/utils/leaders.js`, `npm run leaders:check`; thresholds = the train
   medians): 12-1 return > +17%, close ≥ 9% above the 200-day, the 200-day
   up ≥ 1.4% over 20 days, 60-day vol in the cheaper 45% of its past year,
-  S&P 500 above its 200-day. Out of sample: leaders win 61%, median +54%,
+  S&P 500 above its 200-day (**dropped 2026-10-19**, owner: the 5-year
+  stock test, `scripts/leader-stock-test.mjs`, found no measurable benefit
+  and it emptied the list whenever the S&P dipped — `LEADER.spyUp = false`;
+  the trait is still computed, the entry chart's Leaders panel shows it as
+  market context and the market card keeps the S&P-vs-200-day signal).
+  Out of sample: leaders win 61%, median +54%,
   lost half 24% (n 1,024) vs non-leaders 50% / +0% / 27%; the old BUY SETUP
   (dip to the 200-day) did +1%. The nightly ranking ranks **only leaders**
   with 2+ signals on a rising 200-day (`buyVerdict`: `enter` = LEADER · BUY,
