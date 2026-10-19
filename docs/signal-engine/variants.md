@@ -83,3 +83,35 @@ pass mark is not moved after the fact. Concentration is also where
 survivorship and the missing costs (monthly turnover in 10 names) flatter
 most. Next evidence: delisted-inclusive history, and a forward, append-only
 record of the strongest-10 basket from today on — no backfill.
+
+## 2026-10-19 — Leaders + cash-flow quality (funds exempt), as baskets vs SPY
+
+Owner: "they should be strong cash flowing companies or gaining due to
+politics" → "We need ETFs and oil too". `src/utils/quality.js` (thresholds
+fixed before any run: FCF > 0, FCF ≥ 5% of revenue, net debt ≤ 3 years of FCF,
+diluted shares up ≤ 5% in a year; latest 10-K filed by each month start, SEC
+XBRL; funds exempt). `scripts/leader-quality-test.mjs`, same baskets and pass
+mark as the portfolio test (beat SPY 2024 →, ≥ 3 of 4 years, worst drop no
+deeper than −11.2%).
+
+Runs: #1 had a data bug (first revenue tag ever filed → stale revenue: DXCM
+673% FCF margin, MU 194%); #2 was throttled by SEC (198 of 441 companies) —
+both discarded. #3 (clean, 441 of 441, thresholds unchanged):
+
+| version | 2024 → /yr | worst drop | 2023 | 2024 | 2025 | 2026 (9 mo) | years won | pass |
+|---|---|---|---|---|---|---|---|---|
+| Every leader (max 4/group) | +35.3% | −13.8% | +21.5% | +29.0% | +74.3% | +2.1% | 2 | fail |
+| Every quality leader | +36.8% | −9.4% | +11.6% | +30.4% | +65.2% | +9.9% | 2 | fail |
+| Strongest 10 | +61.7% | −23.4% | +53.2% | +99.4% | +77.2% | +6.1% | 3 | fail |
+| **Strongest 10 quality leaders** | **+46.0%** | **−10.6%** | +21.9% | +57.6% | +57.9% | +13.7% | 3 | **PASS** |
+| Strongest 20 | +49.7% | −15.8% | +31.4% | +61.6% | +86.9% | +0.5% | 3 | fail |
+| Strongest 20 quality leaders | +41.3% | −7.8% | +14.0% | +43.6% | +62.7% | +10.8% | 2 | fail |
+| S&P 500 (SPY) | +19.1% | −7.5% | +24.1% | +23.7% | +16.9% | +11.8% | | |
+
+First version to clear the mark — narrowly (drop −10.6% vs −11.2%; lost 2023
+to SPY). Quality cuts the drawdown roughly in half and gives up return.
+Today: 16 of 38 leaders pass; oil mostly fails (COP dilution — the Marathon
+deal, OXY debt, PSX / VLO thin refining margins; XOM / APA no data) — only
+USO, a fund, stays. Caveats: today's ticker list (survivorship), ~4 years,
+one bull market, monthly close to close, no costs. Not adopted; no live rule
+changed.
