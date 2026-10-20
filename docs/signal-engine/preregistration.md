@@ -366,3 +366,36 @@ presented as predictive of size or direction; no direction-agnostic
 trade is built on them. What the data does support is stock selection
 by momentum (the names that move) with the exit doing the work, and the
 index call.
+
+## Added 2026-10-20 — the weakness test (owner: "find stocks that also indicate weakness and thus likely will go down … Go, run the weakness test")
+
+Fixed before the code runs. A screen for strength (Leaders) is not an
+indicator; this tests whether a small set of facts flags stocks **before**
+a large fall. Nothing here changes a live rule; a result that clears the
+mark earns a warning label on the stock, never a trade.
+
+**Signals** (facts at a month's first close; SEC data as filed by that day):
+price — close below the 200-day; the 200-day down ≥ 1.4% over 20 days; close
+within 5% of its 52-week low; close ≥ 20% under its 20-day high; close ≥ 35%
+above the 200-day (stretched). Business — free cash flow negative; free cash
+flow down two years running; diluted shares up > 10% in a year; net debt up
+while free cash flow fell. Funds skip the business signals. Score = number
+of signals lit (0–9), with price (0–5) and business (0–4) sub-scores.
+
+**Outcome:** a fall of ≥ 30% from that close to the lowest low within the
+next 126 trading days ("drop"); also the 6-month return.
+
+**Reading rule:** train = month starts before 2024-01-01, test = 2024 →.
+The threshold (score ≥ k, k = 1…5) is chosen on train by the highest
+lift × recall; it is then reported on test. Per signal alone too.
+**Pass** on test, all three: flagged stock-months have ≥ 2× the base rate
+of drops (precision ≥ 2 × base); they catch ≥ 30% of all drops (recall);
+their median 6-month return sits ≥ 5 points under the universe median.
+**No edge:** any of the three fails. A leaders-only cut (business
+sub-score ≥ 1 among leader months vs 0) is reported for context.
+
+**Caveats, stated now:** today's ticker list omits delisted names, which
+*hides failures* and biases the test against finding them; ~4.5 years, one
+bull market; no options, insider or short-interest data (no history for
+them); monthly sampling. The consequences: pass → a "Weak" / "At risk"
+label with its tested record, shown as facts; fail → research only.

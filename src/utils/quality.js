@@ -116,3 +116,20 @@ export function qualityOn(steps, date) {
   for (const s of steps ?? []) { if (s.from <= date) hit = s; else break }
   return hit
 }
+
+// Every annual period known by asOf, oldest first — the spine for trend
+// signals (weakness.js): { end, filed, fcf, revenue, netDebt, shares }.
+export function annualFinancials(facts, asOf) {
+  const ocfS = annualSeries(facts, TAGS.ocf, 'USD', asOf)
+  const revS = annualSeries(facts, TAGS.revenue, 'USD', asOf)
+  const capS = annualSeries(facts, TAGS.capex, 'USD', asOf)
+  const shS = annualSeries(facts, TAGS.shares, 'shares', asOf)
+  const near = (rows, end) => rows.find((r) => Math.abs(Date.parse(r.end) - Date.parse(end)) <= 7 * DAY)
+  return ocfS.map((o) => {
+    const end = o.end
+    const debt = instantAt(facts, TAGS.debtTotal, 'USD', end, asOf)
+      ?? ((instantAt(facts, TAGS.debtNoncurrent, 'USD', end, asOf) ?? 0) + (instantAt(facts, TAGS.debtCurrent, 'USD', end, asOf) ?? 0))
+    const cash = instantAt(facts, TAGS.cash, 'USD', end, asOf) ?? 0
+    return { end, filed: o.filed, fcf: o.val - Math.abs(near(capS, end)?.val ?? 0), revenue: near(revS, end)?.val ?? null, netDebt: debt - cash, shares: near(shS, end)?.val ?? null }
+  })
+}
