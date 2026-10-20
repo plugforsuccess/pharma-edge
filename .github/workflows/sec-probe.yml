@@ -8,7 +8,7 @@ on:
     inputs:
       tickers:
         description: 'Comma-separated tickers'
-        default: 'XOM,APA'
+        default: 'XOM,APA,KO'
   push:
     branches-ignore: [main]
     paths:
@@ -30,4 +30,4 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          TICKERS: ${{ inputs.tickers || 'XOM,APA' }}
+          TICKERS: ${{ inputs.tickers || 'XOM,APA,KO' }}

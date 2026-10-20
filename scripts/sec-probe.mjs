@@ -3,12 +3,12 @@
 // verdict, and which SEC cash-flow / revenue tags the company actually files
 // (latest annual period of each) — to find why XOM / APA read "no data".
 import { dailyBars } from './lib/marketData.mjs'
-import { cikMap, secJson } from './lib/sec.mjs'
+import { cikMap, companyFacts } from './lib/sec.mjs'
 import { leaderSeries, leaderMisses } from '../src/utils/leaders.js'
 import { qualityAt, qualityParams } from '../src/utils/quality.js'
 import { trailingVol, OPTION_MODEL } from '../src/utils/replay.js'
 
-const tickers = (process.env.TICKERS || 'XOM,APA').split(',').map((s) => s.trim().toUpperCase())
+const tickers = (process.env.TICKERS || 'XOM,APA,KO').split(',').map((s) => s.trim().toUpperCase())
 const oil = new Set(['XOM', 'APA', 'CVX', 'COP', 'OXY'])
 const spy = await dailyBars('SPY')
 const ciks = await cikMap()
@@ -23,7 +23,7 @@ for (const tk of tickers) {
   } catch (e) { console.log(`  bars: ${e.message}`) }
   const cik = ciks.get(tk)
   if (!cik) { console.log('  no SEC CIK'); continue }
-  const facts = await secJson(`https://data.sec.gov/api/xbrl/companyfacts/CIK${cik}.json`)
+  const facts = (await companyFacts([tk], ciks)).facts.get(tk)
   if (!facts) { console.log(`  CIK ${cik}: no companyfacts`); continue }
   const g = facts.facts?.['us-gaap'] ?? {}
   const ocf = g.NetCashProvidedByUsedInOperatingActivities?.units?.USD ?? []
