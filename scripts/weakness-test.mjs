@@ -63,7 +63,7 @@ for (const s of stocks) {
     if (!m.out) continue
     const business = s.fund ? null : facts ? businessWeakness(annualFinancials(facts, m.t)) : null
     const sc = weaknessScore(m.price, business)
-    rows.push({ tk: s.tk, t: m.t, fund: s.fund, hasBiz: business != null, leader: m.leader, price: m.price, business, ...sc, dropped: m.out.dropped, maxFall: m.out.maxFall, ret: m.out.ret })
+    rows.push({ tk: s.tk, t: m.t, fund: s.fund, hasBiz: business != null, leader: m.leader, priceFlags: m.price, bizFlags: business, ...sc, dropped: m.out.dropped, maxFall: m.out.maxFall, ret: m.out.ret })
   }
 }
 const train = rows.filter((r) => r.t < SPLIT), test = rows.filter((r) => r.t >= SPLIT)
@@ -97,19 +97,19 @@ console.log(line(`CHOSEN score ≥ ${bestK}`, chosen) + `   → ${verdict.toUppe
 for (let k = 1; k <= 5; k++) { const s = stats(test, (r) => r.score >= k); report.thresholds[`test_${k}`] = s; console.log(line(`score ≥ ${k}`, s)) }
 for (const k of ['price', 'business']) for (let n = 1; n <= 3; n++) { const s = stats(test, (r) => r[k] >= n); report.thresholds[`test_${k}_${n}`] = s; console.log(line(`${k} ≥ ${n}`, s)) }
 for (const sig of [...PRICE_SIGNALS, ...BUSINESS_SIGNALS]) {
-  const s = stats(test, (r) => (r.price?.[sig] || r.business?.[sig]) === true)
+  const s = stats(test, (r) => (r.priceFlags?.[sig] || r.bizFlags?.[sig]) === true)
   report.signals[sig] = s
   console.log(line(sig, s))
 }
 console.log('\nSame, train (for stability):')
 console.log(header)
-for (const sig of [...PRICE_SIGNALS, ...BUSINESS_SIGNALS]) console.log(line(sig, stats(train, (r) => (r.price?.[sig] || r.business?.[sig]) === true)))
+for (const sig of [...PRICE_SIGNALS, ...BUSINESS_SIGNALS]) console.log(line(sig, stats(train, (r) => (r.priceFlags?.[sig] || r.bizFlags?.[sig]) === true)))
 
 // Leaders at risk: among leader months, does a business flag change the outcome?
 console.log('\n=== Leaders only (test): business sub-score ≥ 1 vs 0')
 console.log(header)
 const lt = test.filter((r) => r.leader && r.hasBiz)
-report.leaders = { withFlag: stats(lt, (r) => r.business >= 1), stretched: stats(lt, (r) => r.price.stretched), n: lt.length }
+report.leaders = { withFlag: stats(lt, (r) => r.business >= 1), stretched: stats(lt, (r) => r.priceFlags.stretched), n: lt.length }
 console.log(line('leader + business flag', report.leaders.withFlag))
 console.log(line('leader + stretched', report.leaders.stretched))
 console.log(`  (${lt.length} leader-months; drops among all leader-months ${pct(report.leaders.withFlag.base)}, universe ${pct(chosen.base)})`)
