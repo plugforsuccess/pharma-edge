@@ -1,6 +1,7 @@
 import clsx from 'clsx'
 import { Check, X } from 'lucide-react'
 import { LEADER, leaderMisses } from '../utils/leaders'
+import { QUALITY, QUALITY_OIL } from '../utils/quality'
 
 // The entry chart's status card (owner, 2026-10-16: the signal suite,
 // Triple record and plan cards are sunset): is this stock a leader today?
@@ -20,11 +21,19 @@ function qualityRow(q) {
   if (q === null) return ['quality', 'Strong cash flow', '—', null, false]
   if (q.rule === 'fund') return ['quality', 'Strong cash flow', 'Fund', null, true]
   const m = q.misses ?? []
+  const p = q.rule === 'oil' ? QUALITY_OIL : QUALITY
   // Plain words (owner, 2026-10-20: "7% of sales" read as analyst shorthand):
-  // cents kept as cash from each $1 of sales; no explanation line (owner).
+  // cents kept as cash from each $1 of sales. The line under the label names
+  // the failing check — debt, dilution, missing data — never an explainer.
   const cents = q.fcf_margin == null ? null : Math.round(q.fcf_margin * 100)
   const value = cents == null ? '—' : `${cents < 0 ? '−' : ''}${Math.abs(cents)}¢ per $1`
-  return ['quality', q.rule === 'oil' ? 'Strong cash flow (oil)' : 'Strong cash flow', m.includes('no data') ? '—' : value, null, q.pass === true]
+  const why = m.includes('no data') ? 'No US annual report on file'
+    : m.includes('fcf') ? 'Spends more cash than it makes'
+    : m.includes('margin') ? `Needs ${Math.round(p.fcfMarginMin * 100)}¢ per $1`
+    : m.includes('debt') ? `Debt would take ${q.net_debt_years?.toFixed(1)} years of cash to pay off · max ${p.netDebtYearsMax}`
+    : m.includes('dilution') ? `Shares up ${Math.round((q.share_growth ?? 0) * 100)}% in a year · max ${Math.round(p.shareGrowthMax * 100)}%`
+    : null
+  return ['quality', q.rule === 'oil' ? 'Strong cash flow (oil)' : 'Strong cash flow', m.includes('no data') ? '—' : value, why, q.pass === true]
 }
 
 export default function LeaderPanel({ traits, close, asOf, spyLoading, advanced = false, quality }) {
@@ -68,10 +77,11 @@ export default function LeaderPanel({ traits, close, asOf, spyLoading, advanced 
               </span>
               <span className="flex-1 min-w-0 text-sm text-fg">
                 {label}
+                {k === 'quality' && sub && <span className="block mt-0.5 text-[11px] leading-4 text-red-400">{sub}</span>}
               </span>
               <span className="text-right shrink-0">
                 <span className="block text-sm font-mono-tab text-fg whitespace-nowrap">{value}</span>
-                {sub && <span className="block text-[11px] text-muted">{sub}</span>}
+                {k !== 'quality' && sub && <span className="block text-[11px] text-muted">{sub}</span>}
               </span>
             </li>
           )
