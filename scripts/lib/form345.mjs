@@ -31,13 +31,25 @@ export function quartersSince(from = '2021q1', now = new Date()) {
   return out
 }
 
-async function download(url, to) {
-  for (let a = 0; a < 4; a++) {
-    const r = await fetch(url, { headers: { 'User-Agent': UA } })
-    if (r.status === 404) return false
-    if (r.ok) { writeFileSync(to, Buffer.from(await r.arrayBuffer())); return true }
-    await new Promise((res) => setTimeout(res, 3000 * (a + 1)))
+// SEC has served these files from two paths over the years; try both and
+// say which status each gave, so a missing quarter is never silent.
+const URLS = (q) => [
+  `https://www.sec.gov/files/structureddata/data/insider-transactions-data-sets/${q}_form345.zip`,
+  `https://www.sec.gov/files/dera/data/form-345/${q}_form345.zip`,
+]
+async function download(q, to, log) {
+  const seen = []
+  for (const url of URLS(q)) {
+    for (let a = 0; a < 3; a++) {
+      let r
+      try { r = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/zip,*/*' } }) } catch (e) { seen.push(`error ${e.message}`); await new Promise((res) => setTimeout(res, 3000 * (a + 1))); continue }
+      if (r.ok) { writeFileSync(to, Buffer.from(await r.arrayBuffer())); return true }
+      seen.push(String(r.status))
+      if (r.status === 404 || r.status === 403) break
+      await new Promise((res) => setTimeout(res, 3000 * (a + 1)))
+    }
   }
+  log(`  ${q}: not downloaded (${seen.join(', ')})`)
   return false
 }
 
@@ -60,7 +72,7 @@ export async function loadForm345(wanted, { dir = '.form345', from = '2021q1', l
   for (const q of quartersSince(from)) {
     const zip = join(dir, `${q}.zip`)
     if (!existsSync(zip)) {
-      const okDl = await download(`https://www.sec.gov/files/dera/data/form-345/${q}_form345.zip`, zip)
+      const okDl = await download(q, zip, log)
       if (!okDl) { missing.push(q); continue }
     }
     const out = join(dir, q)
