@@ -31,11 +31,11 @@ function qualityRow(q) {
   // short, no limit shown): years of cash flow the debt equals; a missed
   // check other than debt replaces it.
   const yrs = q.net_debt_years
-  const debtLine = yrs == null ? null : yrs > 0 ? `Debt: ${yrs.toFixed(1)} yrs of cash flow` : 'No net debt'
-  const why = m.includes('no data') ? 'No US annual report on file'
-    : m.includes('fcf') ? 'Spends more cash than it makes'
-    : m.includes('margin') ? `Needs ${Math.round(p.fcfMarginMin * 100)}¢ per $1`
-    : m.includes('dilution') ? `Share count up ${Math.round((q.share_growth ?? 0) * 100)}%`
+  const debtLine = yrs == null ? null : yrs > 0 ? `debt: ${yrs.toFixed(1)} yrs of cash flow` : 'no net debt'
+  const why = m.includes('no data') ? 'no US annual report on file'
+    : m.includes('fcf') ? 'spends more cash than it makes'
+    : m.includes('margin') ? `needs ${Math.round(p.fcfMarginMin * 100)}¢ per $1`
+    : m.includes('dilution') ? `share count up ${Math.round((q.share_growth ?? 0) * 100)}%`
     : debtLine
   return ['quality', q.rule === 'oil' ? 'Strong cash flow (oil)' : 'Strong cash flow', m.includes('no data') ? '—' : value, why, q.pass === true]
 }
