@@ -399,3 +399,40 @@ sub-score ≥ 1 among leader months vs 0) is reported for context.
 bull market; no options, insider or short-interest data (no history for
 them); monthly sampling. The consequences: pass → a "Weak" / "At risk"
 label with its tested record, shown as facts; fail → research only.
+
+## Added 2026-10-20 — the insider / short-interest test (owner: "Run it")
+
+After the weakness test failed (price and annual-report facts flag
+volatility, not direction), this tests the two sources the published
+research finds something in, both free with real history: **SEC Form 4**
+(insider trades, the DERA quarterly bulk files) and **FINRA consolidated
+short interest** (twice-monthly). Options skew has no history available and
+is not tested. Fixed before the code runs.
+
+**Signals** at each month's first close, using only filings made by that
+day: I1 **sell cluster** — ≥ 3 distinct insiders with open-market sales
+(code S) in the prior 90 days and no open-market buy (code P); I2 **net
+selling** — $ sold ≥ 10× $ bought over the prior 180 days and ≥ $1M sold;
+I3 **buy cluster** — ≥ 2 distinct insiders with open-market buys in the
+prior 90 days (the mirror, and a check that the data works at all: insider
+*buying* is the better-documented effect); S1 **short interest rising** —
+shares short up ≥ 50% vs 3 months earlier; S2 **heavily shorted** — shares
+short ≥ 10% of shares outstanding (SEC dei cover-page count, latest filed).
+Combined with the weakness score (score ≥ 3) as a further cut.
+
+**Outcome:** as the weakness test — a ≥ 30% fall from the close to a later
+low within 126 trading days; the 6-month return.
+
+**Reading rule:** train < 2024, test 2024 →, each flag reported alone and
+in combination. These flags are rare, so recall is **reported, not
+required** (a rare warning that is right is still a fact worth showing).
+**Pass** on test, all three: lift ≥ 2× the base rate of drops; 6-month
+median ≥ 5 points under the universe median; ≥ 200 flagged stock-months
+(enough to mean something). For I3 the mirror reading: 6-month median ≥ 5
+points *over* the universe. **No edge:** any fails.
+
+**Caveats:** survivorship (delisted names missing — hides failures); ~4.5
+years; Form 4 symbols as filed (a few issuers file without one); FINRA
+history depth as served by its API (skipped, and said, if it refuses the
+runner). Consequence: pass → an "Insiders selling" / "Heavily shorted" fact
+on the row with its record, never a trade; fail → research only.
