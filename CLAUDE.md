@@ -933,7 +933,7 @@ market and the risks**; option plays are an opt-in **Advanced** view.
   backoff on throttling) → **`company_quality`** (one row per ticker, with a
   step per 10-K so the leader record only counts days whose report on file
   passed; a failed fetch reuses the stored row). The entry chart's Leaders
-  panel shows it as a fifth check ("Strong cash flow · 19% of sales"). Test:
+  panel shows it as a fifth check ("Strong cash flow · 19¢ per $1", kept as cash from each $1 of sales). Test:
   `scripts/leader-quality-test.mjs` — strongest 10 quality leaders, oil rule:
   +47.9%/yr 2024 → vs SPY +19.1%, worst drop −10.6%, 3 of 4 years (variants.md).
   **Forward record:** **`basket_record`** (append-only, `row_hash` by trigger)

@@ -22,13 +22,18 @@ function qualityRow(q) {
   if (q.rule === 'fund') return ['quality', 'Strong cash flow', 'Fund', 'no company to check', true]
   const p = q.rule === 'oil' ? QUALITY_OIL : QUALITY
   const m = q.misses ?? []
-  const value = q.fcf_margin == null ? '—' : `${Math.round(q.fcf_margin * 100)}% of sales`
+  // Plain words (owner, 2026-10-20: "7% of sales" read as analyst shorthand):
+  // cents kept as cash from each $1 of sales, and debt in years of that cash.
+  const cents = q.fcf_margin == null ? null : Math.round(q.fcf_margin * 100)
+  const value = cents == null ? '—' : `${cents < 0 ? '−' : ''}${Math.abs(cents)}¢ per $1`
+  const kept = 'kept as cash from each $1 of sales'
+  const debt = q.net_debt_years != null && q.net_debt_years > 0 ? `debt: ${q.net_debt_years.toFixed(1)} years of cash` : 'more cash than debt'
   const sub = m.includes('no data') ? 'no US annual report on file'
     : m.includes('fcf') ? 'spends more cash than it makes'
-    : m.includes('margin') ? `needs ${Math.round(p.fcfMarginMin * 100)}% of sales kept as cash`
-    : m.includes('debt') ? `debt ${q.net_debt_years?.toFixed(1)} years of cash flow · max ${p.netDebtYearsMax}`
+    : m.includes('margin') ? `${kept} · needs ${Math.round(p.fcfMarginMin * 100)}¢`
+    : m.includes('debt') ? `debt would take ${q.net_debt_years?.toFixed(1)} years of cash to pay off · max ${p.netDebtYearsMax}`
     : m.includes('dilution') ? `shares up ${Math.round((q.share_growth ?? 0) * 100)}% in a year · max ${Math.round(p.shareGrowthMax * 100)}%`
-    : q.net_debt_years != null && q.net_debt_years > 0 ? `debt ${q.net_debt_years.toFixed(1)} years of cash flow` : 'more cash than debt'
+    : `${kept} · ${debt}`
   return ['quality', q.rule === 'oil' ? 'Strong cash flow (oil)' : 'Strong cash flow', m.includes('no data') ? '—' : value, sub, q.pass === true]
 }
 
@@ -71,10 +76,14 @@ export default function LeaderPanel({ traits, close, asOf, spyLoading, advanced 
               <span className={clsx('shrink-0 h-7 w-7 rounded-full flex items-center justify-center', ok ? 'bg-green-400/15 text-green-400' : 'bg-red-400/15 text-red-400')}>
                 {ok ? <Check size={15} aria-label="met" /> : <X size={15} aria-label="not met" />}
               </span>
-              <span className="flex-1 min-w-0 text-sm text-fg">{label}</span>
-              <span className="text-right">
-                <span className="block text-sm font-mono-tab text-fg">{value}</span>
-                {sub && <span className="block text-[11px] text-muted">{sub}</span>}
+              {/* The cash-flow line is a sentence: it runs under the label, full width. */}
+              <span className="flex-1 min-w-0 text-sm text-fg">
+                {label}
+                {k === 'quality' && sub && <span className="block mt-0.5 text-[11px] leading-4 text-muted">{sub}</span>}
+              </span>
+              <span className="text-right shrink-0">
+                <span className="block text-sm font-mono-tab text-fg whitespace-nowrap">{value}</span>
+                {k !== 'quality' && sub && <span className="block text-[11px] text-muted">{sub}</span>}
               </span>
             </li>
           )
