@@ -8,7 +8,7 @@ import { leaderSeries, leaderMisses } from '../src/utils/leaders.js'
 import { qualityAt, qualityParams } from '../src/utils/quality.js'
 import { trailingVol, OPTION_MODEL } from '../src/utils/replay.js'
 
-const tickers = (process.env.TICKERS || 'KO,XOM,APA,CVX,PEP').split(',').map((s) => s.trim().toUpperCase())
+const tickers = (process.env.TICKERS || 'XOM,APA').split(',').map((s) => s.trim().toUpperCase())
 const oil = new Set(['XOM', 'APA', 'CVX', 'COP', 'OXY'])
 const spy = await dailyBars('SPY')
 const ciks = await cikMap()
@@ -25,6 +25,10 @@ for (const tk of tickers) {
   if (!cik) { console.log('  no SEC CIK'); continue }
   const facts = await secJson(`https://data.sec.gov/api/xbrl/companyfacts/CIK${cik}.json`)
   if (!facts) { console.log(`  CIK ${cik}: no companyfacts`); continue }
+  const g = facts.facts?.['us-gaap'] ?? {}
+  const ocf = g.NetCashProvidedByUsedInOperatingActivities?.units?.USD ?? []
+  console.log(`  CIK ${cik} · ${facts.entityName} · us-gaap tags ${Object.keys(g).length} · namespaces ${Object.keys(facts.facts ?? {}).join(', ')}`)
+  console.log(`  operating cash flow rows ${ocf.length}; latest: ${ocf.slice(-4).map((f) => `${f.form} ${f.start ?? '?'}→${f.end} filed ${f.filed}`).join(' | ')}`)
   const q = qualityAt(facts, today, qualityParams(oil.has(tk) ? 'Oil' : null))
   console.log(`  cash flow (${oil.has(tk) ? 'oil' : 'standard'} rule): ${q.pass ? 'PASS' : `fail ${q.misses.join(', ')}`}${q.why ? ` — ${q.why}` : ''} · FCF margin ${q.fcfMargin == null ? '—' : (q.fcfMargin * 100).toFixed(1) + '%'} · net debt ${q.netDebtYears == null ? '—' : q.netDebtYears.toFixed(1) + ' yrs FCF'} · shares ${q.shareGrowth == null ? '—' : (q.shareGrowth * 100).toFixed(1) + '%'} · FY end ${q.end ?? '—'}`)
   for (const ns of Object.keys(facts.facts ?? {})) {
