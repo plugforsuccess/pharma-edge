@@ -134,3 +134,35 @@ under the known tags) and APA (no revenue under the known tags) still read
 "no data". **Adopted 2026-10-20 (owner):** Leaders lists only cash-flow
 passers (standard rule, oil rule for oil groups, funds exempt), and the
 strongest-10 basket is logged forward in `basket_record`.
+
+## 2026-10-20 — the weakness test (price + annual-report facts vs a 30% fall)
+
+Owner: "find stocks that also indicate weakness and thus likely will go
+down". Pre-registered (preregistration.md, "the weakness test"): nine facts
+at each month start, outcome = a ≥ 30% fall to a later low within 126
+trading days; pass = lift ≥ 2×, caught ≥ 30%, 6M median ≥ 5 points under
+the universe. 544 tickers, 523 with SEC data, 22,455 stock-months (train
+7,415 / test 15,040); base rate 6.8% train, 10.8% test. **FAIL.**
+
+Test (2024 →), the chosen threshold and the rest:
+
+| flag | months | fell 30% | lift | caught | 6M median (universe +4.6%) |
+|---|---|---|---|---|---|
+| score ≥ 1 (chosen on train) | 9,250 | 13.5% | 1.24× | 76% | +4.7% |
+| score ≥ 3 | 2,408 | 20.1% | 1.85× | 30% | +4.5% |
+| score ≥ 5 | 296 | 32.4% | 3.00× | 6% | +8.6% |
+| crash (20%+ off the 20-day high) | 523 | 41.5% | 3.83× | 13% | +10.0% |
+| stretched (35%+ above the 200-day) | 640 | 29.4% | 2.71× | 12% | +16.5% |
+| negative free cash flow | 1,648 | 20.5% | 1.89× | 21% | +8.2% |
+| dilution > 10% | 666 | 22.5% | 2.08× | 9% | +7.6% |
+| leader + stretched (of 1,508 leader-months, base 11.1%) | 175 | 29.1% | 2.62× | 30% | +4.8% |
+
+Reading: every strong flag raises the chance of a 30% fall **and** leaves
+the median 6-month return at or above the universe — these facts find
+volatile stocks, not falling ones (the same shape the upside signals had).
+No price / business fact clears the mark on direction. One fact worth
+stating on a row: a leader sitting 35%+ above its 200-day saw a 30%
+drawdown in 29% of the following 6 months, 2.6× other leaders (the
+existing "stretched" risk flag). Caveats: delisted names missing (hides
+failures), ~4.5 years, one bull market. Consequence: research only; no
+"Weak" label.
