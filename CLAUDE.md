@@ -933,7 +933,7 @@ market and the risks**; option plays are an opt-in **Advanced** view.
   backoff on throttling) → **`company_quality`** (one row per ticker, with a
   step per 10-K so the leader record only counts days whose report on file
   passed; a failed fetch reuses the stored row). The entry chart's Leaders
-  panel shows it as a fifth check ("Strong cash flow · 19¢ per $1"; a failing row names the check it misses under the label, e.g. "Debt would take 4.7 years of cash to pay off · max 3" — owner, 2026-10-20). Test:
+  panel shows it as a fifth check ("Strong cash flow · 19¢ per $1"; under the label, every company shows "Debt would take 4.7 years of cash to pay off · max 3" (or "More cash than debt"), red when failing; a missed check other than debt replaces that line — owner, 2026-10-20). Test:
   `scripts/leader-quality-test.mjs` — strongest 10 quality leaders, oil rule:
   +47.9%/yr 2024 → vs SPY +19.1%, worst drop −10.6%, 3 of 4 years (variants.md).
   **Forward record:** **`basket_record`** (append-only, `row_hash` by trigger)
