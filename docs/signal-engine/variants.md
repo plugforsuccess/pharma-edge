@@ -166,3 +166,34 @@ drawdown in 29% of the following 6 months, 2.6× other leaders (the
 existing "stretched" risk flag). Caveats: delisted names missing (hides
 failures), ~4.5 years, one bull market. Consequence: research only; no
 "Weak" label.
+
+## 2026-10-20 — the insider / short-interest test (SEC Form 4 bulk + FINRA)
+
+Owner: "Run it". Pre-registered (preregistration.md, "the insider /
+short-interest test"). Form 4: 21 quarters (2021q1 → 2026q1; 2026q2+ not
+yet published), 510 issuers with open-market trades; FINRA short interest
+for 523 symbols (history to 2017). 21,573 stock-months (train 7,121 / test
+14,452), base rate 10.8% test. **FAIL on every flag.**
+
+Test (2024 →):
+
+| flag | months | fell 30% | lift | 6M median (universe +4.4%) |
+|---|---|---|---|---|
+| I1 insider sell cluster (≥ 3 sellers, no buyer, 90 d) | 4,543 | 10.7% | 0.96× | +4.7% |
+| I2 insider net selling (≥ 10× bought, ≥ $1M, 180 d) | 9,094 | 10.7% | 0.95× | +4.3% |
+| I3 insider buy cluster (mirror, ≥ 2 buyers) | 539 | 12.6% | 1.12× | +4.3% |
+| S1 short interest up ≥ 50% in 3 months | 1,297 | 15.1% | 1.35× | +4.8% |
+| S2 shares short ≥ 10% of shares out | 576 | 29.2% | 2.60× | +14.8% |
+| S2 + weakness ≥ 3 | 300 | 35.7% | 3.18× | +17.5% |
+| I1 + weakness ≥ 3 | 416 | 25.0% | 2.23× | +4.7% |
+| leader + I1 or I2 | 1,212 | 11.3% | 1.01× | +5.8% |
+
+Reading: insider selling carries **no** information on this universe — a
+sell cluster's drop rate and 6-month return equal the universe (sales are
+mostly compensation / diversification); insider buying (the
+better-documented effect) gives +4.3% vs +4.4%, nothing, on 539 months.
+Heavy short interest raises the chance of a 30% fall 2.6× **and** triples
+the typical 6-month return (+14.8%): squeezes — volatility, not direction,
+the fourth test with that shape. Consequence: research only; no
+"insiders selling" / "heavily shorted" label. Data loaders
+(`scripts/lib/form345.mjs`, `scripts/lib/finra.mjs`) stay for later tests.
