@@ -1,0 +1,36 @@
+# Research (owner, 2026-10-19: "Leader records needs further investigation"):
+# leaders as plain stock picks vs the S&P and any stock, 5 years. See
+# scripts/leader-stock-test.mjs. Prints the report, uploads leader-stock-test.json,
+# writes nothing to the DB.
+
+name: Leader stock test
+
+on:
+  workflow_dispatch:
+  push:
+    branches-ignore: [main]
+    paths:
+      - scripts/leader-stock-test.mjs
+      - .github/workflows/leader-stock-test.yml
+
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Study
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/leader-stock-test.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: leader-stock-test
+          path: leader-stock-test.json
+          retention-days: 30

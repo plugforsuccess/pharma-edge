@@ -1,0 +1,33 @@
+# Research probe: Leaders + cash-flow verdict and SEC tags for a few tickers
+# (scripts/sec-probe.mjs). Prints only; writes nothing.
+
+name: SEC probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      tickers:
+        description: 'Comma-separated tickers'
+        default: 'XOM,APA,KO'
+  push:
+    branches-ignore: [main]
+    paths:
+      - scripts/sec-probe.mjs
+      - .github/workflows/sec-probe.yml
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: node scripts/sec-probe.mjs
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          TICKERS: ${{ inputs.tickers || 'XOM,APA,KO' }}

@@ -24,6 +24,9 @@ on:
     paths:
       - scripts/rank-confluence.mjs
       - scripts/lib/marketData.mjs
+      - scripts/lib/sec.mjs
+      - scripts/lib/leaderQuality.mjs
+      - src/utils/quality.js
       - src/utils/confluence.js
       - src/utils/themes.js
       - src/utils/marketPulse.js

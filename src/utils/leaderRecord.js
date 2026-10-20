@@ -48,9 +48,12 @@ export function leaderStints(bars, leaderDays, { spy = null, lookback = STINT.lo
 }
 
 // Summary for the record page: count, median change, share higher, median
-// S&P change over the same stints.
+// S&P change over the same stints, and the group view (owner, 2026-10-19):
+// the mean change of every leader together beside the S&P's and any stock's
+// mean over the same days (univ_med / univ_avg per stint, from the ranking).
 export function stintSummary(stints) {
   const med = (xs) => { const v = xs.filter((x) => x != null).sort((p, q) => p - q); return v.length ? (v.length % 2 ? v[(v.length - 1) / 2] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2) : null }
+  const mean = (xs) => { const v = xs.filter((x) => x != null); return v.length ? v.reduce((a, x) => a + x, 0) / v.length : null }
   const g = stints.map((x) => x.gain).filter((x) => x != null)
   return {
     n: stints.length,
@@ -58,5 +61,9 @@ export function stintSummary(stints) {
     higher: g.length ? g.filter((x) => x > 0).length / g.length : null,
     spyMedian: med(stints.map((x) => x.spy_gain)),
     beat: (() => { const k = stints.filter((x) => x.gain != null && x.spy_gain != null); return k.length ? k.filter((x) => x.gain > x.spy_gain).length / k.length : null })(),
+    avg: mean(g),
+    spyAvg: mean(stints.map((x) => x.spy_gain)),
+    univMedian: med(stints.map((x) => x.univ_med)),
+    univAvg: mean(stints.map((x) => x.univ_avg)),
   }
 }

@@ -1,0 +1,37 @@
+# Research (owner, 2026-10-19: "strong cash flowing companies" + "ETFs and oil too"): leaders
+# with an SEC cash-flow quality check (funds exempt) as baskets vs SPY, fixed pass mark. See
+# scripts/leader-quality-test.mjs. Prints the report, uploads leader-quality-test.json,
+# writes nothing to the DB.
+
+name: Leader quality test
+
+on:
+  workflow_dispatch:
+  push:
+    branches-ignore: [main]
+    paths:
+      - scripts/leader-quality-test.mjs
+      - .github/workflows/leader-quality-test.yml
+      - src/utils/quality.js
+
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Study
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/leader-quality-test.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: leader-quality-test
+          path: leader-quality-test.json
+          retention-days: 30

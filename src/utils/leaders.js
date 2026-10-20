@@ -4,7 +4,8 @@
 // and checked on 2024 →) found no entry-day trait that separates winners
 // from losers, but five that tilt the odds in both periods: a stock that is
 // already strong, well above a steeply rising 200-day, with options cheap
-// against their past year, while the S&P 500 is above its 200-day. A leader
+// against their past year (the S&P-above-its-200-day check is off since
+// 2026-10-19 — see LEADER). A leader
 // meets every rule in LEADER on the signal day (nothing after it).
 //
 // Thresholds are the study's train-period medians (the cut between the
@@ -18,7 +19,12 @@ export const LEADER = Object.freeze({
   vs200: 0.09,       // close at least 9% above the 200-day
   slope200: 0.014,   // 200-day up at least 1.4% over 20 trading days
   volRankMax: 0.45,  // 60-day volatility in the cheaper 45% of its past year
-  spyUp: true,       // S&P 500 above its own 200-day
+  // The S&P-above-its-200-day check is off (owner, 2026-10-19): the 5-year
+  // stock test (scripts/leader-stock-test.mjs) found no measurable benefit,
+  // and it emptied the list whenever the S&P dipped. The trait is still
+  // computed (spyUp) for the market card and research; pass a rule with
+  // spyUp: true to apply it.
+  spyUp: false,
 })
 
 const sma = (xs, n) => { const out = Array(xs.length).fill(null); let s = 0; xs.forEach((x, i) => { s += x; if (i >= n) s -= xs[i - n]; if (i >= n - 1) out[i] = s / n }); return out }

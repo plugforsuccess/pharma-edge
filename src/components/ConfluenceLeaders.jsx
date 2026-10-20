@@ -211,7 +211,7 @@ export default function ConfluenceLeaders({ mine: mineProp = [], leadersOnly = f
             {strict && <span className="text-[11px] text-muted">Stricter: slightly better 3-month record, fewer names.</span>}
           </div>
         )}
-        {side === 'buy' && <p className="mt-2 text-xs text-muted">Leaders only: stocks up strongly over the past year, well above a rising 200-day, with options cheap for them, while the S&P 500 is above its 200-day.</p>}
+        {side === 'buy' && <p className="mt-2 text-xs text-muted">Leaders only: stocks up strongly over the past year, well above a rising 200-day, with options cheap for them.</p>}
         {side === 'buy' && (
           <div className="mt-3">
             <div className="grid grid-cols-5 gap-0.5 p-0.5 rounded-lg bg-bg-elev" role="tablist" aria-label="Call">
@@ -779,7 +779,10 @@ function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, 
         </ul>
       )}
 
-      <Link to="/charts/leader-record" className="mt-4 min-h-[44px] px-1 flex items-center gap-2 text-sm text-subtle hover:text-fg">
+      {/* Factual, the same for everyone (owner, 2026-10-19: "leaders have done
+          better as a group than one at a time" — the 5-year stock test). */}
+      <p className="mt-4 px-1 text-sm text-subtle">Over the past 5 years, leaders have done better as a group than one at a time.</p>
+      <Link to="/charts/leader-record" className="mt-1 min-h-[44px] px-1 flex items-center gap-2 text-sm text-subtle hover:text-fg">
         <span className="flex-1">Leader record: how each stock has moved since joining</span>
         <ChevronRight size={14} aria-hidden />
       </Link>

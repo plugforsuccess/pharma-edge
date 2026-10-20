@@ -42,6 +42,8 @@ import { leaderSeries, leaderMisses } from '../src/utils/leaders.js'
 import { leaderStints } from '../src/utils/leaderRecord.js'
 import { THEMES, themeOf, returnsByDate } from '../src/utils/themes.js'
 import { marketPulse } from '../src/utils/marketPulse.js'
+import { cikMap, companyFacts, secStatus } from './lib/sec.mjs'
+import { qualityTickers, qualityRows, applyQuality, basketToday, BASKET } from './lib/leaderQuality.mjs'
 
 const args = process.argv.slice(2)
 const MODE = (args[args.indexOf('--mode') + 1] && args.includes('--mode')) ? args[args.indexOf('--mode') + 1] : 'dry-run'
@@ -78,7 +80,7 @@ export function analyze(ticker, bars, spy = null) {
       // The leader record (owner, 2026-10-19): each stint on the list and
       // the price change since joining (src/utils/leaderRecord.js).
       const stints = leaderStints(bars, leaderDays, { spy: spy ? new Map(spy.map((b) => [b.t, b.c])) : null })
-      return { calls: out, stints }
+      return { calls: out, stints, leaderDays }
     })(),
     leader: leaderToday(bars, spy),
   }
@@ -154,13 +156,13 @@ export function rankAll(results, pools, calls = null) {
         est_badq_3m: hz(est, '3M', 'badq'), est_badq_6m: hz(est, '6M', 'badq'),
         est_beat_3m: hz(est, '3M', 'beat'), est_beat_6m: hz(est, '6M', 'beat'),
         last_signal: r[side].lastSignal, etb_convergence: side === 'buy' ? r.etbConvergence : false, rank: null,
-        verdict: side === 'buy' ? buyVerdict({ leader: r.leader?.misses?.length === 0 }) : sellVerdict({ score: now?.score ?? 0, lit: now?.lit ?? [] }),
+        verdict: side === 'buy' ? buyVerdict({ leader: r.leader?.misses?.length === 0 && r.quality?.pass === true }) : sellVerdict({ score: now?.score ?? 0, lit: now?.lit ?? [] }),
         hold_reason: hold,
         blockers: side === 'buy' ? r.blockers : null, trade: side === 'buy' ? r.trade : null,
         stop_price: r.stop?.price ?? null, stop_date: r.stop?.date ?? null, momentum: r.momentum,
         own_record: side === 'buy' ? r.ownRecord : null,
         leader: side === 'buy' ? r.leader?.misses?.length === 0 : null,
-        leader_traits: side === 'buy' && r.leader ? { ...r.leader.traits, misses: r.leader.misses, since: (() => { const o = r.stints?.find((x) => x.open); return o ? { on: o.joined_on, close: o.join_close, gain: o.gain, spy_gain: o.spy_gain } : null })() } : null,
+        leader_traits: side === 'buy' && r.leader ? { ...r.leader.traits, misses: r.leader.misses, quality: r.quality ?? null, since: (() => { const o = r.stints?.find((x) => x.open); return o ? { on: o.joined_on, close: o.join_close, gain: o.gain, spy_gain: o.spy_gain } : null })() } : null,
         // The row's sparkline: the last 3 months of closes (owner, 2026-10-16: Robinhood-style list).
         spark: side === 'buy' ? r.closes.slice(-63).map((c) => Math.round(c * 100) / 100) : null,
         call_hist: side === 'buy' && r.calls ? {
@@ -175,7 +177,10 @@ export function rankAll(results, pools, calls = null) {
       // the leader-timing study found leaders bought any day did as well as
       // leaders with 2+ signals — 60% / +50% vs 61% / +54% on 2024+ — so the
       // signals no longer gate). Sell: 2+ sell signals (not shown in the app).
-      const eligible = side === 'buy' ? row.leader : row.score >= MIN_SCORE
+      // Cash-flow quality (owner, 2026-10-20: "Filter: only passers listed"):
+      // a leader is ranked only when its latest annual report passes
+      // (src/utils/quality.js; funds exempt; scripts/lib/leaderQuality.mjs).
+      const eligible = side === 'buy' ? row.leader && r.quality?.pass === true : row.score >= MIN_SCORE
       if (eligible) cands.push(row)
     }
     // Tier 1: E+T+B convergence (buy side only), then Tier 2: other 3+ signals
@@ -269,6 +274,26 @@ async function main() {
   const pools = Object.fromEntries(SIDES.map((side) => [side, poolStats(results.map((r) => r[side].setups), HORIZONS, side)]))
   const baselines = Object.fromEntries(SIDES.map((side) => [side, baselineStats(results.map((r) => ({ closes: r.closes, market: r.market })), HORIZONS, side)]))
   const calls = callPool(results)
+  // Cash-flow quality (owner, 2026-10-20): SEC annual reports for every
+  // leader today or in the past year; the last stored verdict when SEC
+  // can't be reached for a ticker.
+  const qNeed = qualityTickers(results)
+  let qStored = new Map()
+  if (MODE !== 'dry-run' && process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    try {
+      const { createClient } = await import('@supabase/supabase-js')
+      const dbq = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } })
+      const { data } = await dbq.from('company_quality').select('*').in('ticker', qNeed)
+      qStored = new Map((data ?? []).map((x) => [x.ticker, x]))
+    } catch (e) { console.log(`company_quality unavailable (${e.message}) — no stored fallback this run.`) }
+  }
+  let ciks = new Map()
+  try { ciks = await cikMap() } catch (e) { console.log(`SEC ticker map unavailable (${e.message})`) }
+  const sec = await companyFacts(qNeed, ciks)
+  const qRows = qualityRows(results, sec.facts, qStored, asOf)
+  applyQuality(results, qRows, spy)
+  const qVals = [...qRows.values()]
+  console.log(`Quality: ${qNeed.length} checked · SEC facts ${sec.ok} · not SEC filers ${sec.notFiler} · fetch failed ${sec.missing} (stored verdict reused ${qVals.filter((x) => x.stale).length}) · non-200 ${JSON.stringify(secStatus)} · pass ${qVals.filter((x) => x.pass).length}`)
   const rows = rankAll(results, pools, calls)
   for (const p of PLAYS) for (const k of ['leader']) { const x = calls[p.key][k][0]; console.log(`Play ${p.span.padEnd(3)} ${k.padEnd(10)} n ${x.n} · stock avg ${pct(x.stock)} med ${pct(x.stockMedian)} up ${Math.round((x.stockWin ?? 0) * 100)}% · ATM call to expiry avg ${pct(x.avg)} med ${pct(x.median)} up ${Math.round((x.win ?? 0) * 100)}%`) }
   const pool = poolRows(pools, results, asOf, baselines)
@@ -335,10 +360,32 @@ async function main() {
     if (error) throw new Error(`momentum_picks: ${error.message}`)
     console.log(`Wrote ${momRows.length} momentum picks for ${momRows[0].as_of}.`)
   }
+  // Cash-flow verdicts, kept for the entry chart and as tomorrow's fallback.
+  {
+    const fresh = [...qRows.values()].filter((x) => !x.stale).map(({ stale, ...x }) => ({ ...x, updated_at: now }))
+    for (let i = 0; i < fresh.length; i += batchSize) {
+      const { error } = await db.from('company_quality').upsert(fresh.slice(i, i + batchSize), { onConflict: 'ticker' })
+      if (error) { console.error(`company_quality: ${error.message}`); break }
+    }
+    console.log(`Wrote ${fresh.length} company_quality rows.`)
+  }
   // The leader record (owner, 2026-10-19): every stint on the Leaders list
   // in the past year (plus any still open), rebuilt each night.
   {
-    const stintRows = results.flatMap((r) => (r.stints ?? []).map((x) => ({ as_of: asOf, ticker: r.ticker, theme: r.theme?.name ?? null, ...x })))
+    // "Any stock" over each stay's own days: every ticker's change from the
+    // join date to its latest close (median and mean), one pass per join date.
+    const closeAt = results.map((r) => ({ at: new Map(r.bars.map((b) => [b.t, b.c])), last: r.bars[r.bars.length - 1] }))
+      .filter((x) => x.last?.t === asOf)
+    const univ = new Map()
+    const univFor = (t) => {
+      if (!univ.has(t)) {
+        const g = closeAt.map((x) => { const c0 = x.at.get(t); return c0 ? x.last.c / c0 - 1 : null }).filter((v) => v != null && Number.isFinite(v)).sort((p, q) => p - q)
+        const r4 = (v) => (v == null ? null : Math.round(v * 10000) / 10000)
+        univ.set(t, g.length ? { univ_med: r4(g.length % 2 ? g[(g.length - 1) / 2] : (g[g.length / 2 - 1] + g[g.length / 2]) / 2), univ_avg: r4(g.reduce((s0, v) => s0 + v, 0) / g.length) } : { univ_med: null, univ_avg: null })
+      }
+      return univ.get(t)
+    }
+    const stintRows = results.flatMap((r) => (r.stints ?? []).map((x) => ({ as_of: asOf, ticker: r.ticker, theme: r.theme?.name ?? null, ...x, ...univFor(x.joined_on) })))
     // A rerun on the same close replaces that day's record (stints can merge
     // differently, so old rows wouldn't be overwritten by key).
     const { error: clearErr } = await db.from('leader_stints').delete().eq('as_of', asOf)
@@ -372,6 +419,17 @@ async function main() {
   if (MODE !== 'full') return
 
   try { await forwardRecord(db, { asOf, momRows, rows, byTicker }) } catch (e) { console.error(`Forward record failed: ${e.message}`) }
+  // The strongest-10 quality basket, forward only (owner, 2026-10-20).
+  try {
+    const { data: prev } = await db.from('basket_record').select('as_of, tickers').eq('basket', BASKET.name).lt('as_of', asOf).order('as_of', { ascending: false }).limit(1).maybeSingle()
+    const ranked = rows.filter((r) => r.side === 'buy' && r.rank != null).sort((a, b) => a.rank - b.rank).map((r) => ({ ticker: r.ticker, rank: r.rank, group: r.leader_traits?.theme?.name ?? null }))
+    const closeOf = (t) => { const b = byTicker.get(t)?.bars; return b?.length ? b[b.length - 1].c : null }
+    const row = basketToday({ asOf, prev, ranked, closeOf, spyClose: spy?.length ? spy[spy.length - 1].c : null })
+    if (row) {
+      const { error } = await db.from('basket_record').upsert(row, { onConflict: 'basket,as_of', ignoreDuplicates: true })
+      console.log(error ? `basket_record: ${error.message}` : `Basket ${row.basket}${row.rebalanced ? ' (new month: re-picked)' : ''}: ${row.tickers.join(', ')}`)
+    } else console.log('Basket: nothing to log today.')
+  } catch (e) { console.error(`Basket record failed: ${e.message}`) }
 
   await sendAlerts(db, { asOf, rows, prevTop, pulse, prevPulse })
 }
@@ -418,8 +476,8 @@ async function sendAlerts(db, { asOf, rows, prevTop, pulse, prevPulse }) {
   // The market's trend turned (S&P vs its 200-day).
   if (prevPulse && pulse.spy_above != null && prevPulse.spy_above != null && prevPulse.spy_above !== pulse.spy_above) {
     const message = pulse.spy_above
-      ? `The S&P 500 closed back above its 200-day average (${pct(pulse.spy_vs200)}). New leaders can qualify again.`
-      : `The S&P 500 closed below its 200-day average (${pct(pulse.spy_vs200)}). No stock qualifies as a leader while it stays below.`
+      ? `The S&P 500 closed back above its 200-day average (${pct(pulse.spy_vs200)}).`
+      : `The S&P 500 closed below its 200-day average (${pct(pulse.spy_vs200)}).`
     for (const id of ids) items.push({ user: id, kind: 'market_trend', ticker: 'SPY', date: asOf, url: `${app}/charts`, message })
   }
   // Major releases and Fed decisions on the next weekday.

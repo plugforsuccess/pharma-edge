@@ -1,0 +1,42 @@
+# Research (owner, 2026-10-20: "Run it"): insider sell clusters / net selling
+# (SEC Form 4 bulk files) and FINRA short interest at each month start vs a
+# 30% fall within 6 months, train < 2024 / test 2024 →, pre-registered pass
+# mark. See scripts/insider-test.mjs. Prints the report, uploads
+# insider-test.json, writes nothing to the DB.
+
+name: Insider / short-interest test
+
+on:
+  workflow_dispatch:
+  push:
+    branches-ignore: [main]
+    paths:
+      - scripts/insider-test.mjs
+      - scripts/lib/form345.mjs
+      - scripts/lib/finra.mjs
+      - src/utils/insiders.js
+      - .github/workflows/insider-test.yml
+
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Study
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SEC_USER_AGENT: ${{ vars.SEC_USER_AGENT }}
+        run: node scripts/insider-test.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: insider-test
+          path: insider-test.json
+          retention-days: 30
