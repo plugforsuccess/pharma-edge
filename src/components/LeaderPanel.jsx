@@ -27,15 +27,15 @@ function qualityRow(q) {
   // the failing check — debt, dilution, missing data — never an explainer.
   const cents = q.fcf_margin == null ? null : Math.round(q.fcf_margin * 100)
   const value = cents == null ? '—' : `${cents < 0 ? '−' : ''}${Math.abs(cents)}¢ per $1`
-  // The debt line sits under every company (owner, 2026-10-20; short, no
-  // jargon): years of cash flow it equals, with the limit; a missed check
-  // other than debt replaces it.
+  // The debt line sits under every company's figure (owner, 2026-10-20;
+  // short, no limit shown): years of cash flow the debt equals; a missed
+  // check other than debt replaces it.
   const yrs = q.net_debt_years
-  const debtLine = yrs == null ? null : yrs > 0 ? `Debt: ${yrs.toFixed(1)} yrs of cash flow (max ${p.netDebtYearsMax})` : 'No net debt'
+  const debtLine = yrs == null ? null : yrs > 0 ? `Debt: ${yrs.toFixed(1)} yrs of cash flow` : 'No net debt'
   const why = m.includes('no data') ? 'No US annual report on file'
     : m.includes('fcf') ? 'Spends more cash than it makes'
-    : m.includes('margin') ? `Needs ${Math.round(p.fcfMarginMin * 100)}¢ per $1 of sales`
-    : m.includes('dilution') ? `Share count up ${Math.round((q.share_growth ?? 0) * 100)}% · limit ${Math.round(p.shareGrowthMax * 100)}%`
+    : m.includes('margin') ? `Needs ${Math.round(p.fcfMarginMin * 100)}¢ per $1`
+    : m.includes('dilution') ? `Share count up ${Math.round((q.share_growth ?? 0) * 100)}%`
     : debtLine
   return ['quality', q.rule === 'oil' ? 'Strong cash flow (oil)' : 'Strong cash flow', m.includes('no data') ? '—' : value, why, q.pass === true]
 }
@@ -81,11 +81,10 @@ export default function LeaderPanel({ traits, close, asOf, spyLoading, advanced 
               </span>
               <span className="flex-1 min-w-0 text-sm text-fg">
                 {label}
-                {k === 'quality' && sub && <span className={clsx('block mt-0.5 text-[11px] leading-4', q[4] === true ? 'text-muted' : 'text-red-400')}>{sub}</span>}
               </span>
               <span className="text-right shrink-0">
                 <span className="block text-sm font-mono-tab text-fg whitespace-nowrap">{value}</span>
-                {k !== 'quality' && sub && <span className="block text-[11px] text-muted">{sub}</span>}
+                {sub && <span className={clsx('block text-[11px]', k === 'quality' && q[4] === false ? 'text-red-400' : 'text-muted')}>{sub}</span>}
               </span>
             </li>
           )
