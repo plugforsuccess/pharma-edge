@@ -187,6 +187,16 @@ export default function LeapsEntry() {
     supabase.functions.invoke('leaps-entry', { body: { ticker: 'SPY' } }).then(({ data: d }) => { if (!cancelled) setSpyBars(d?.bars ?? []) })
     return () => { cancelled = true }
   }, [])
+  // The nightly cash-flow verdict (company_quality; owner, 2026-10-20).
+  const [quality, setQuality] = useState(undefined)
+  useEffect(() => {
+    let cancelled = false
+    setQuality(undefined)
+    if (SUITE || ticker.startsWith('^')) return undefined
+    supabase.from('company_quality').select('rule, known, pass, misses, fcf_margin, net_debt_years, share_growth, period_end').eq('ticker', ticker).maybeSingle()
+      .then(({ data, error }) => { if (!cancelled) setQuality(error ? null : data ?? null) })
+    return () => { cancelled = true }
+  }, [ticker])
   const leaderNow = useMemo(() => (bars?.length && !SUITE ? leaderSeries(bars, spyBars ?? []).at(bars.length - 1) : null), [bars, spyBars])
 
   const setField = (k, v) => {
@@ -483,7 +493,7 @@ export default function LeapsEntry() {
       ) : (
         <div className="md:grid md:grid-cols-[1fr_280px] md:gap-x-5 md:items-start">
           <div className="min-w-0 md:order-1">
-            {!SUITE && !isIndex && <LeaderPanel traits={leaderNow} close={bars[bars.length - 1]?.c} asOf={bars[bars.length - 1]?.t} spyLoading={spyBars === null} advanced={advanced} />}
+            {!SUITE && !isIndex && <LeaderPanel traits={leaderNow} close={bars[bars.length - 1]?.c} asOf={bars[bars.length - 1]?.t} spyLoading={spyBars === null} advanced={advanced} quality={quality} />}
             {SUITE && <StatusPanel s={s} model={model} params={params} suite={suite} dailySuite={dailySuite} confirmDays={confirmDays} tfLabel={SUITE_TIMEFRAMES[suiteTf].label.toLowerCase()} conf={conf} pool={pool} trend={trend} metrics={data?.metrics ?? null} />}
             {SUITE && <SuitePanel pack={suitePack} failed={suiteData?.error && suiteData.tf === suiteTf} tf={suiteTf} holdings={holdings} onJump={jumpPeriod} onOpenPane={setExpanded}
               buyZone={!!s?.cond?.all} />}

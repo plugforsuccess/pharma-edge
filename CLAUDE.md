@@ -514,6 +514,8 @@ leaps_tax_profiles  ← per-user after-tax inputs (portfolio, allocation, filing
 leaps_positions     ← per-user LEAPS positions (basis, current value, purchase date) — manual today
 ldp_risk_profiles   ← LDP engine risk tier + capping rule per user (service-role write only)
 ldp_audit_log       ← LDP append-only audit of every trade / suggestion / skip / hold
+company_quality     ← nightly SEC cash-flow verdict per leader ticker (+ steps per 10-K)
+basket_record       ← append-only forward record of the strongest-10 quality basket
 leaps_position_marks ← one value per holding per day (trigger-written on every price save) — feeds /charts
 ```
 
@@ -919,6 +921,24 @@ market and the risks**; option plays are an opt-in **Advanced** view.
   **`earnings_soon`** (a tracked stock reports within 3 days). Bell labels in
   `NotificationCenter` (market / economy alerts open Charts). Email copy:
   "General information … not personalized investment advice."
+- **Cash-flow quality on Leaders** (owner, 2026-10-19: "strong cash flowing
+  companies … ETFs and oil too" → 2026-10-20 "Filter: only passers listed",
+  oil "test first"). A leader is ranked only when its latest 10-K (SEC XBRL
+  companyfacts, point in time) shows FCF > 0, FCF ≥ 5% of revenue, net debt ≤ 3
+  years of FCF, diluted shares up ≤ 5% a year; oil groups (Oil, Refiners, Oil
+  services, Pipelines) use `QUALITY_OIL` (2% / 5 years / 15%); funds (USO, SPY,
+  sector ETFs — `FUNDS`, `isFund`) are exempt; no SEC data = not listed. Math in
+  `src/utils/quality.js` (`npm run quality:check`); the nightly ranking fetches
+  SEC for every leader today or in the past year (`scripts/lib/sec.mjs`,
+  backoff on throttling) → **`company_quality`** (one row per ticker, with a
+  step per 10-K so the leader record only counts days whose report on file
+  passed; a failed fetch reuses the stored row). The entry chart's Leaders
+  panel shows it as a fifth check ("Strong cash flow · 19% of sales"). Test:
+  `scripts/leader-quality-test.mjs` — strongest 10 quality leaders, oil rule:
+  +47.9%/yr 2024 → vs SPY +19.1%, worst drop −10.6%, 3 of 4 years (variants.md).
+  **Forward record:** **`basket_record`** (append-only, `row_hash` by trigger)
+  logs the strongest 10 ranked leaders (≤ 4 per group) every close in full
+  mode, re-picked on a month's first close (`basketToday`); no backfill.
 - **News** (geopolitical / policy) is the theme notes (`theme-notes`, Claude
   + allow-listed web search), off until `THEME_NOTES_ENABLED` is set.
 

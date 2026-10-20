@@ -101,3 +101,18 @@ export function qualityAt(facts, asOf, p = QUALITY) {
   if (shareGrowth != null && shareGrowth > p.shareGrowthMax) misses.push('dilution')
   return { known: true, pass: misses.length === 0, end, fcf, revenue: rev?.val ?? null, fcfMargin, netDebt, netDebtYears: fcf > 0 ? netDebt / fcf : null, shareGrowth, misses }
 }
+
+// Quality only changes when a new 10-K lands, so the nightly job computes it
+// once per filing date → [{ from, ...qualityAt }] oldest first (the leader
+// record judges each join on the report on file that day).
+export function qualitySteps(facts, p = QUALITY) {
+  const filed = new Set()
+  for (const f of factsFor(facts, TAGS.ocf, 'USD')) if (isAnnualForm(f.form) && f.filed) filed.add(f.filed)
+  return [...filed].sort().map((d) => ({ from: d, ...qualityAt(facts, d, p) }))
+}
+// The step in force on a date (null before the first annual report).
+export function qualityOn(steps, date) {
+  let hit = null
+  for (const s of steps ?? []) { if (s.from <= date) hit = s; else break }
+  return hit
+}

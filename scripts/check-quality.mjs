@@ -1,5 +1,5 @@
 // npm run quality:check — src/utils/quality.js
-import { qualityAt, isFund, qualityParams, QUALITY, QUALITY_OIL } from '../src/utils/quality.js'
+import { qualityAt, isFund, qualityParams, qualitySteps, qualityOn, QUALITY, QUALITY_OIL } from '../src/utils/quality.js'
 let pass = 0, fail = 0
 const ok = (name, cond) => { if (cond) pass++; else { fail++; console.log('FAIL', name) } }
 const fy = (y, val, filed, form = '10-K') => ({ start: `${y - 1}-01-01`, end: `${y - 1}-12-31`, val, form, fp: 'FY', filed })
@@ -55,5 +55,18 @@ const refiner = co({
 ok('a thin-margin, more-indebted refiner fails the standard bar, passes the oil rule',
   !qualityAt(refiner, '2025-06-01', QUALITY).pass && qualityAt(refiner, '2025-06-01', QUALITY_OIL).pass)
 ok('oil groups get the oil rule, others the standard', qualityParams('Refiners') === QUALITY_OIL && qualityParams('Chips • AI') === QUALITY && qualityParams(null) === QUALITY)
+const steps = qualitySteps(good)
+ok('one step per 10-K filing date', steps.length === 2 && steps[0].from === '2024-02-20' && steps[1].fcf === 120)
+ok('the step in force on a date matches qualityAt that day', qualityOn(steps, '2024-06-01').fcf === qualityAt(good, '2024-06-01').fcf && qualityOn(steps, '2023-01-01') === null)
+const { basketToday } = await import('./lib/leaderQuality.mjs')
+const ranked = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'].map((t, i) => ({ ticker: t, rank: i + 1, group: i < 6 ? 'Chips' : null }))
+const closeOf = () => 10
+const first = basketToday({ asOf: '2026-10-20', prev: null, ranked, closeOf })
+ok('first night: strongest 10, at most 4 per group', first.rebalanced && first.tickers.join('') === 'ABCDGHIJKL')
+const mid = basketToday({ asOf: '2026-10-21', prev: first, ranked: ranked.slice().reverse(), closeOf })
+ok('same month: members held, not re-picked', !mid.rebalanced && mid.tickers.join('') === first.tickers.join(''))
+ok('new month: re-picked', basketToday({ asOf: '2026-11-02', prev: mid, ranked: ranked.slice(6), closeOf }).tickers.join('') === 'GHIJKL')
+ok('already logged today → nothing', basketToday({ asOf: '2026-10-21', prev: mid, ranked, closeOf }) === null)
+ok('a missing close → nothing logged', basketToday({ asOf: '2026-11-02', prev: mid, ranked, closeOf: (t) => (t === 'A' ? null : 10) }) === null)
 console.log(`${pass} passed, ${fail} failed`)
 if (fail) process.exit(1)

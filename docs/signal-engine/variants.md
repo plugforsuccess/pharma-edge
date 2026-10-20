@@ -115,3 +115,22 @@ deal, OXY debt, PSX / VLO thin refining margins; XOM / APA no data) — only
 USO, a fund, stays. Caveats: today's ticker list (survivorship), ~4 years,
 one bull market, monthly close to close, no costs. Not adopted; no live rule
 changed.
+
+### 2026-10-20 — the looser oil rule (owner: "Looser oil rule, test first")
+
+Fixed before the run (`QUALITY_OIL`, groups Oil / Refiners / Oil services /
+Pipelines): FCF > 0, FCF ≥ 2% of revenue, net debt ≤ 5 years of FCF, shares
+up ≤ 15% a year. Clean run (441 of 441):
+
+| version | 2024 → /yr | worst drop | 2023 | 2024 | 2025 | 2026 (9 mo) | years won | pass |
+|---|---|---|---|---|---|---|---|---|
+| Strongest 10 quality leaders | +46.0% | −10.6% | +21.9% | +57.6% | +57.9% | +13.7% | 3 | PASS |
+| **Strongest 10 quality, oil rule** | **+47.9%** | **−10.6%** | +21.5% | +57.6% | +57.9% | +17.8% | 3 | **PASS** |
+| Strongest 20 quality, oil rule | +41.6% | −8.0% | +14.2% | +43.6% | +62.5% | +11.6% | 2 | fail |
+
+Oil companies in the strongest-10 basket: 0.6 a month on average. Today COP,
+OXY, PSX and VLO pass under the oil rule; XOM (no annual operating cash flow
+under the known tags) and APA (no revenue under the known tags) still read
+"no data". **Adopted 2026-10-20 (owner):** Leaders lists only cash-flow
+passers (standard rule, oil rule for oil groups, funds exempt), and the
+strongest-10 basket is logged forward in `basket_record`.
