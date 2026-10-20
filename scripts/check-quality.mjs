@@ -1,5 +1,5 @@
 // npm run quality:check — src/utils/quality.js
-import { qualityAt, isFund } from '../src/utils/quality.js'
+import { qualityAt, isFund, qualityParams, QUALITY, QUALITY_OIL } from '../src/utils/quality.js'
 let pass = 0, fail = 0
 const ok = (name, cond) => { if (cond) pass++; else { fail++; console.log('FAIL', name) } }
 const fy = (y, val, filed, form = '10-K') => ({ start: `${y - 1}-01-01`, end: `${y - 1}-12-31`, val, form, fp: 'FY', filed })
@@ -47,5 +47,13 @@ const stale = co({
   Revenues: ['USD', [fy(2020, 50, '2020-02-20')]],
 })
 ok('no revenue for the same year → unknown, never an old year', !qualityAt(stale, '2025-06-01').known)
+const refiner = co({
+  NetCashProvidedByUsedInOperatingActivities: ['USD', [fy(2025, 40, '2025-02-20')]],
+  Revenues: ['USD', [fy(2025, 1000, '2025-02-20')]],
+  LongTermDebt: ['USD', [inst(2025, 160, '2025-02-20')]],
+})
+ok('a thin-margin, more-indebted refiner fails the standard bar, passes the oil rule',
+  !qualityAt(refiner, '2025-06-01', QUALITY).pass && qualityAt(refiner, '2025-06-01', QUALITY_OIL).pass)
+ok('oil groups get the oil rule, others the standard', qualityParams('Refiners') === QUALITY_OIL && qualityParams('Chips • AI') === QUALITY && qualityParams(null) === QUALITY)
 console.log(`${pass} passed, ${fail} failed`)
 if (fail) process.exit(1)

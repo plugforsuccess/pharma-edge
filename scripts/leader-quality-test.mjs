@@ -46,7 +46,7 @@ import { trailingVol, OPTION_MODEL } from '../src/utils/replay.js'
 import { leaderSeries, leaderMisses, LEADER } from '../src/utils/leaders.js'
 import { THEMES, returnsByDate, themeOf } from '../src/utils/themes.js'
 import { dailyBars, mapLimit, sources } from './lib/marketData.mjs'
-import { qualityAt, isFund } from '../src/utils/quality.js'
+import { qualityAt, isFund, qualityParams, OIL_GROUPS, QUALITY_OIL } from '../src/utils/quality.js'
 
 const SPLIT = '2024-01-01'
 const CAP_PER_GROUP = 4
@@ -156,9 +156,10 @@ for (const s of stocks) {
   s.info.forEach((x, m) => {
     if (!x?.leader) return
     lm++
-    if (s.fund) { x.quality = true; lmFund++; return }
+    if (s.fund) { x.quality = true; x.qualityOil = true; lmFund++; return }
     const q = s.facts ? qualityAt(s.facts, dates[monthStarts[m]]) : { known: false, pass: false }
     x.quality = q.pass
+    x.qualityOil = OIL_GROUPS.has(s.group) ? qualityAt(s.facts, dates[monthStarts[m]], QUALITY_OIL).pass : q.pass
     if (q.pass) lmPass++
     if (!q.known) lmUnknown++
   })
@@ -167,8 +168,9 @@ console.log(`Leader-months: ${lm} · funds ${lmFund} · companies passing qualit
 const today = dates[dates.length - 1]
 const nowRows = stocks.filter((s) => s.lastLeader).map((s) => {
   if (s.fund) return { tk: s.tk, verdict: 'fund (exempt)' }
-  const q = s.facts ? qualityAt(s.facts, today) : { known: false, pass: false, misses: ['no data'] }
-  return { tk: s.tk, verdict: q.pass ? 'PASS' : `fail: ${(q.misses ?? []).join(', ')}`, margin: q.fcfMargin, ndy: q.netDebtYears }
+  const q = s.facts ? qualityAt(s.facts, today, qualityParams(s.group)) : { known: false, pass: false, misses: ['no data'], why: 'no SEC company facts' }
+  const oil = OIL_GROUPS.has(s.group) ? ` [${s.group}, oil rule]` : ''
+  return { tk: s.tk, verdict: (q.pass ? 'PASS' : `fail: ${(q.misses ?? []).join(', ')}`) + oil + (q.why ? ` — ${q.why}` : ''), margin: q.fcfMargin, ndy: q.netDebtYears }
 }).sort((a, b) => a.verdict.localeCompare(b.verdict) || a.tk.localeCompare(b.tk))
 console.log(`\nToday's leaders (${today}) under the quality check:`)
 for (const r of nowRows) console.log(`  ${r.tk.padEnd(6)} ${r.verdict}${r.margin != null ? ` · FCF margin ${(r.margin * 100).toFixed(1)}%` : ''}${r.ndy != null ? ` · net debt ${r.ndy.toFixed(1)} yrs of FCF` : ''}`)
@@ -181,6 +183,7 @@ for (let m = 0; m < monthStarts.length - 1; m++) {
   const capped = (list) => { const byGroup = new Map(); return list.sort((a, b) => b.info[m].mom12 - a.info[m].mom12)
     .filter((s) => { const g = s.group ?? `solo:${s.tk}`, n = byGroup.get(g) ?? 0; if (n >= CAP_PER_GROUP) return false; byGroup.set(g, n + 1); return true }) }
   const picks = capped(stocks.filter((s) => s.info[m]?.leader && ret(s) != null))
+  const opicks = capped(stocks.filter((s) => s.info[m]?.leader && s.info[m].qualityOil && ret(s) != null))
   const qpicks = capped(stocks.filter((s) => s.info[m]?.leader && s.info[m].quality && ret(s) != null))
   const avg = (xs) => (xs.length ? xs.reduce((a, s) => a + ret(s), 0) / xs.length : 0)
   const all = stocks.map(ret).filter((v) => v != null)
@@ -191,6 +194,10 @@ for (let m = 0; m < monthStarts.length - 1; m++) {
   row.quality = avg(qpicks); row.quality_n = qpicks.length
   row.qtop10 = avg(qpicks.slice(0, 10)); row.qtop10_n = Math.min(10, qpicks.length)
   row.qtop20 = avg(qpicks.slice(0, 20)); row.qtop20_n = Math.min(20, qpicks.length)
+  row.oil = avg(opicks); row.oil_n = opicks.length
+  row.otop10 = avg(opicks.slice(0, 10)); row.otop10_n = Math.min(10, opicks.length)
+  row.otop20 = avg(opicks.slice(0, 20)); row.otop20_n = Math.min(20, opicks.length)
+  row.oilShare = opicks.slice(0, 10).filter((s) => OIL_GROUPS.has(s.group)).length
   months.push(row)
 }
 
@@ -202,7 +209,7 @@ function perf(rows, k) {
   return { total: eq - 1, cagr: Math.pow(eq, 12 / rows.length) - 1, maxDD: dd, beatMonths: rows.filter((r) => r[k] > r.spy).length / rows.length, avgNames: names.length ? names.reduce((a, v) => a + v, 0) / names.length : null }
 }
 const P = (x) => (x == null ? '   —' : `${x >= 0 ? '+' : '−'}${Math.abs(x * 100).toFixed(1)}%`)
-const LABEL = { base: 'Every leader (max 4/group)', quality: 'Every quality leader', top10: 'Strongest 10', qtop10: 'Strongest 10 quality leaders', top20: 'Strongest 20', qtop20: 'Strongest 20 quality leaders', any: 'Any stock (equal weight)', spy: 'S&P 500 (SPY)' }
+const LABEL = { base: 'Every leader (max 4/group)', quality: 'Every quality leader', top10: 'Strongest 10', qtop10: 'Strongest 10 quality leaders', top20: 'Strongest 20', qtop20: 'Strongest 20 quality leaders', oil: 'Every quality leader, oil rule', otop10: 'Strongest 10 quality, oil rule', otop20: 'Strongest 20 quality, oil rule', any: 'Any stock (equal weight)', spy: 'S&P 500 (SPY)' }
 const keys = Object.keys(LABEL)
 const test = months.filter((r) => r.t >= SPLIT)
 const YEARS = ['2023', '2024', '2025', '2026']
@@ -218,6 +225,7 @@ for (const k of keys) {
   report.versions[k] = { test: t, all: a, byYear, won, pass }
   console.log(`  ${LABEL[k].padEnd(34)} ${P(t.cagr).padStart(10)} ${P(a.cagr).padStart(9)} ${P(a.maxDD).padStart(10)} ${byYear.map((x) => P(x.v).padStart(8)).join('')}  ${(k === 'spy' ? '' : `${won} of 4`).padStart(9)}  ${k === 'spy' || k === 'any' ? '' : pass ? 'PASS' : 'fail'}`)
 }
+console.log(`Oil companies in the strongest-10 quality basket (oil rule), average per month: ${(months.reduce((a, r) => a + r.oilShare, 0) / months.length).toFixed(1)}`)
 console.log(`\nPass mark: beats SPY's ${P(spyTest.cagr)}/yr over 2024 →, wins ≥ 3 of ${YEARS.join(' / ')}, worst drop no deeper than ${P(1.5 * spyAll.maxDD)} (1.5× SPY's ${P(spyAll.maxDD)}). 2026 = 9 months.`)
 console.log("Quality = latest annual 10-K filed by each month start (SEC XBRL); funds exempt; companies without SEC data excluded from the quality lines.")
 console.log("Caveats: today's ticker list (survivorship flatters every line); groups from the last 120 days (hindsight in the cap); monthly close to close, no costs, no dividends; ~4 years of history.")

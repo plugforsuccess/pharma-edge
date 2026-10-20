@@ -12,6 +12,15 @@ export const QUALITY = Object.freeze({
   shareGrowthMax: 0.05, // diluted shares up no more than 5% in a year
 })
 
+// Oil producers, refiners, services and pipelines (owner, 2026-10-20: "Looser
+// oil rule, test first"; fixed before the test): refiners run thin margins,
+// producers carry more debt through the cycle, and oil deals are often paid in
+// shares (COP–Marathon) — so a lower margin bar, more debt room and a dilution
+// cap that only catches real share printing.
+export const QUALITY_OIL = Object.freeze({ fcfMarginMin: 0.02, netDebtYearsMax: 5, shareGrowthMax: 0.15 })
+export const OIL_GROUPS = new Set(['Oil', 'Refiners', 'Oil services', 'Pipelines'])
+export const qualityParams = (group) => (OIL_GROUPS.has(group) ? QUALITY_OIL : QUALITY)
+
 // Index, sector, commodity and thematic funds in the app's ticker list.
 export const FUNDS = new Set([
   'SPY', 'QQQ', 'IWM', 'DIA', 'GLD', 'SLV', 'TLT', 'USO', 'SMH', 'DRAM',
@@ -67,12 +76,12 @@ function instantAt(facts, tags, unit, end, asOf) {
 export function qualityAt(facts, asOf, p = QUALITY) {
   const ocfS = annualSeries(facts, TAGS.ocf, 'USD', asOf)
   const revS = annualSeries(facts, TAGS.revenue, 'USD', asOf)
-  if (!ocfS.length || !revS.length) return { known: false, pass: false, misses: ['no data'] }
+  if (!ocfS.length || !revS.length) return { known: false, pass: false, misses: ['no data'], why: !ocfS.length ? 'no annual operating cash flow' : 'no annual revenue under the known tags' }
   const ocf = ocfS[ocfS.length - 1]
   const end = ocf.end
   // Revenue for the same fiscal year (period ends within a week), never an older one.
   const rev = revS.find((r) => Math.abs(Date.parse(r.end) - Date.parse(end)) <= 7 * DAY)
-  if (!rev) return { known: false, pass: false, misses: ['no data'] }
+  if (!rev) return { known: false, pass: false, misses: ['no data'], why: `no revenue for the year ending ${end} (latest revenue ${revS[revS.length - 1].end})` }
   const capex = annualSeries(facts, TAGS.capex, 'USD', asOf).find((r) => Math.abs(Date.parse(r.end) - Date.parse(end)) <= 7 * DAY)?.val ?? 0
   const fcf = ocf.val - Math.abs(capex)
   // Total long-term debt when reported, else the non-current + current parts.
