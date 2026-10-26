@@ -56,7 +56,7 @@ for (const [tk, b] of bars) {
   const row = riskRow({ bars: b, shorts: shorts.get(tk) ?? [], fin: f, sharesOut: f ? sharesOutAt(f, asOf) : null, asOf })
   rows.push({ ticker: tk, ...row })
   const facts = holdingRiskFacts(row)
-  const jvTag = f?.jv?.length ? [...new Set(f.jv.map((x) => x.tag))].join(',') : null
+  const jvTag = f?.jv?.length ? [...new Set(f.jv.map((x) => x.tag))].join(',') : f?.jvGeneric?.length ? 'PaymentsToAcquireInvestments (equity-method filer)' : null
   console.log(`  ${tk.padEnd(6)} ${cashLine(row) ?? 'no cash / burn'}${jvTag ? ` · JV tag ${jvTag}` : ''}${facts.length ? ` · ${facts.map((x) => x.text).join(' · ')}` : ''}`)
 }
 console.log(`${rows.length} rows · ${rows.filter((r) => holdingRiskFacts(r).length).length} with at least one fact`)

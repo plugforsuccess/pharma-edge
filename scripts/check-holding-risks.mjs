@@ -43,6 +43,21 @@ ok('JV spend from a company-extension tag, differenced to the quarter', Math.abs
 ok('runway counts ops + JV', Math.abs(rowJv.runway.quarters - 41.4 / 3.9) < 1e-6)
 ok('cash line shows both', cashLine(rowJv) === 'Cash $41M at Jun 30 · $1M ops + $3M to JV last qtr')
 ok('fact-test runway factor is untouched', typeof runwayRow === 'function')
+// AIRJ's real shape: the generic PaymentsToAcquireInvestments, plus equity-method income → counted.
+const finGen = compactFacts({ facts: { 'us-gaap': {
+  NetCashProvidedByUsedInOperatingActivities: { units: { USD: [{ start: '2026-01-01', end: '2026-03-31', val: -2.3e6, form: '10-Q', filed: '2026-05-10' }, { start: '2026-01-01', end: '2026-06-30', val: -3.8e6, form: '10-Q', filed: '2026-08-10' }] } },
+  CashAndCashEquivalentsAtCarryingValue: { units: { USD: [{ end: '2026-06-30', val: 41.4e6, form: '10-Q', filed: '2026-08-10' }] } },
+  PaymentsToAcquireInvestments: { units: { USD: [{ start: '2026-01-01', end: '2026-03-31', val: 10e6, form: '10-Q', filed: '2026-05-10' }, { start: '2026-01-01', end: '2026-06-30', val: 12.5e6, form: '10-Q', filed: '2026-08-10' }] } },
+  IncomeLossFromEquityMethodInvestments: { units: { USD: [{ start: '2026-04-01', end: '2026-06-30', val: -2.5e6, form: '10-Q', filed: '2026-08-10' }] } },
+}, dei: {} } })
+const rowGen = riskRow({ bars, fin: finGen, asOf: day(329) })
+ok('generic investments tag counts for an equity-method filer', Math.abs(rowGen.runway.jv - 2.5e6) < 1 && Math.abs(rowGen.runway.quarters - 41.4 / 4.0) < 1e-6)
+const finNoEq = compactFacts({ facts: { 'us-gaap': {
+  NetCashProvidedByUsedInOperatingActivities: { units: { USD: [{ start: '2026-01-01', end: '2026-03-31', val: 5e8, form: '10-Q', filed: '2026-05-10' }] } },
+  CashAndCashEquivalentsAtCarryingValue: { units: { USD: [{ end: '2026-03-31', val: 2e9, form: '10-Q', filed: '2026-05-10' }] } },
+  PaymentsToAcquireInvestments: { units: { USD: [{ start: '2026-01-01', end: '2026-03-31', val: 1e9, form: '10-Q', filed: '2026-05-10' }] } },
+}, dei: {} } })
+ok('…but not for a company buying securities with no equity-method stake', riskRow({ bars, fin: finNoEq, asOf: day(329) }).runway.jv === null)
 ok('no cash row → no line', cashLine({ runway: null }) === null)
 ok('no verdict words', [...facts.map((f) => f.text), bothLitLine(facts), cashLine(row)].every((t) => !/\b(sell|buy|hold|exit|should)\b/i.test(t)))
 ok('empty row → nothing', holdingRiskFacts(null).length === 0)

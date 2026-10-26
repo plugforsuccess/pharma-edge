@@ -51,9 +51,16 @@ export function compactFacts(facts) {
   const cash = rowsOf(facts, TAGS.cash, 'USD').filter((f) => !f.start && f.end && f.filed).map((f) => ({ end: f.end, filed: f.filed, val: f.val }))
   const jvRaw = rowsOf(facts, TAGS.jv, 'USD').map((f) => ({ ...f, tag: 'us-gaap' })).concat(jvExtensionRows(facts))
   const jv = jvRaw.filter((f) => f.start && f.end && f.filed && f.val != null).map((f) => ({ start: f.start, end: f.end, filed: f.filed, val: Math.abs(f.val), tag: f.tag }))
+  // AIRJ files "Investment in AirJoule, LLC" under the generic
+  // PaymentsToAcquireInvestments; it counts as JV spend only for a company
+  // that also reports equity-method income / an equity-method investment —
+  // otherwise it is a cash-rich company buying securities.
+  const eq = facts?.facts?.['us-gaap'] ?? {}
+  const hasEquityMethod = ['IncomeLossFromEquityMethodInvestments', 'EquityMethodInvestments', 'EquityMethodInvestmentOwnershipPercentage'].some((t) => (eq[t]?.units && Object.values(eq[t].units).some((u) => u?.length)))
+  const jvGeneric = hasEquityMethod ? rowsOf(facts, ['PaymentsToAcquireInvestments'], 'USD').filter((f) => f.start && f.end && f.filed && f.val != null).map((f) => ({ start: f.start, end: f.end, filed: f.filed, val: Math.abs(f.val), tag: 'us-gaap:PaymentsToAcquireInvestments' })) : []
   const sharesOut = (facts?.facts?.dei?.EntityCommonStockSharesOutstanding?.units?.shares ?? []).filter((f) => f.end && f.filed && f.val > 0).map((f) => ({ end: f.end, filed: f.filed, val: f.val }))
   const hasRevenueTag = TAGS.revenue.some((t) => facts?.facts?.['us-gaap']?.[t])
-  return { revenue, ocf, cash, sharesOut, hasRevenueTag, jv }
+  return { revenue, ocf, cash, sharesOut, hasRevenueTag, jv, jvGeneric, hasEquityMethod }
 }
 const latestFiled = (rows, asOf, pick = (r) => true) => { let b = null; for (const r of rows ?? []) if (r.filed <= asOf && pick(r) && (!b || r.end > b.end || (r.end === b.end && r.filed > b.filed))) b = r; return b }
 
@@ -67,7 +74,7 @@ export const sharesOutAt = (fin, asOf) => latestFiled(fin.sharesOut, asOf)?.val 
 // the same start.
 export const quarterlyOcfAt = (fin, asOf) => quarterlyAt(fin.ocf, asOf)
 // Capital put into equity-method investees in the latest quarter (≥ 0, null when the company reports none).
-export const quarterlyJvAt = (fin, asOf) => quarterlyAt(fin.jv, asOf)
+export const quarterlyJvAt = (fin, asOf) => quarterlyAt(fin.jv, asOf) ?? (fin.jvGeneric?.length ? quarterlyAt(fin.jvGeneric, asOf) : null)
 export function quarterlyAt(series, asOf) {
   const rows = (series ?? []).filter((r) => r.filed <= asOf)
   const quarters = []
