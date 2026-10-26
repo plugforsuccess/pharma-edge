@@ -10,6 +10,8 @@
 import { writeFileSync } from 'node:fs'
 import { FADE, FADE_PASS, fadeScore, shortsCovering, catalystHeld, forwardFade, fadeStats, fadeVerdict, revenueAt, sharesOutAt, raiseAfter, outcomeRates, financingEvents } from '../src/utils/fade.js'
 import { filingsMap } from './lib/secFilings.mjs'
+import { straddleTrade, straddleStats, straddleVerdict, STRADDLE } from '../src/utils/straddle.js'
+import { catalystRow, shortsRow, HOLDING_RISK } from '../src/utils/holdingRisks.js'
 import { dailyBars, mapLimit, sources } from './lib/marketData.mjs'
 import { publicFloatCiks, tickersFor, compactFactsFor } from './lib/secUniverse.mjs'
 import { loadForm345 } from './lib/form345.mjs'
@@ -87,7 +89,9 @@ for (const s of stocks) {
     const so = sharesOutAt(s.fin, b.t)
     const siPct = so && sc.factors.shorts.known ? (sh.filter((x) => x.date <= b.t).pop()?.shares ?? 0) / so : null
     const inv = { cover: shortsCovering(sh, s.bars, i).on, held: catalystHeld(s.bars, i).on }
-    const row = { tk: s.tk, t: b.t, score: sc.score, tier: sc.tier, inv, score2: score2(Object.fromEntries(Object.entries(sc.factors).map(([k, v]) => [k, v.points]))), binary: binaryProne(s.tk), sic: sics.get(s.tk) ?? null, f: Object.fromEntries(Object.entries(sc.factors).map(([k, v]) => [k, v.points])), known: { shorts: !!sc.factors.shorts.known, runway: !!sc.factors.runway.known, redirect: !!fl }, siPct, raised: !!raiseAfter(fl, b.t, RAISE_DAYS), out: forwardFade(s.bars, i) }
+    const row = { tk: s.tk, t: b.t, i, scanLit: false, score: sc.score, tier: sc.tier, inv, score2: score2(Object.fromEntries(Object.entries(sc.factors).map(([k, v]) => [k, v.points]))), binary: binaryProne(s.tk), sic: sics.get(s.tk) ?? null, f: Object.fromEntries(Object.entries(sc.factors).map(([k, v]) => [k, v.points])), known: { shorts: !!sc.factors.shorts.known, runway: !!sc.factors.runway.known, redirect: !!fl }, siPct, raised: !!raiseAfter(fl, b.t, RAISE_DAYS), out: forwardFade(s.bars, i) }
+    const cr = catalystRow(s.bars, i), shr = shortsRow(sh, s.bars, i, so)
+    row.scanLit = !!(cr && cr.sessionsBelow >= HOLDING_RISK.belowSessions && shr && shr.siChange >= HOLDING_RISK.siRise && shr.priceChange != null && shr.priceChange <= -HOLDING_RISK.priceDrop)
     if (last) todayRows.push(row)
     if (monthStarts.has(b.t) && row.out) rows.push({ ...row, fell: row.out.fell, doubled: row.out.doubled, ret: row.out.ret })
   })
@@ -183,6 +187,31 @@ for (const [label, set, flag] of [
   const top = [...bySic].sort((a, b) => b[1].n - a[1].n).slice(0, 10)
   console.log('  actionable months by SIC (n · doubled · fell): ' + top.map(([k, o]) => `${k}${BINARY_SIC.has(k) ? '*' : ''} ${o.n}·${o.d}·${o.f}`).join(' | ') + '  (* binary-prone)')
   report.actBySic = Object.fromEntries(bySic)
+}
+// The straddle test (pre-registered 2026-10-26): long volatility on both-lit months vs the universe.
+{
+  const barsOf = new Map(stocks.map((s) => [s.tk, s.bars]))
+  const both = (r) => r.f.catalyst > 0 && r.f.shorts === 25
+  const sets = [['universe (control)', (r) => true], ["B' both facts lit (test def.)", both], ['scan definition (as shipped)', (r) => r.scanLit]]
+  console.log(`\n=== Straddle test — ATM call + put, ${STRADDLE.horizon} sessions, σ = premium × RV60, ${STRADDLE.slip * 100}% slip per fill`)
+  console.log(`  ${'set'.padEnd(30)} ${'prem'.padStart(5)} ${'exit'.padEnd(8)} ${'n'.padStart(5)} ${'avg'.padStart(7)} ${'median'.padStart(7)} ${'win'.padStart(6)} ${'lost½'.padStart(6)} ${'hit'.padStart(5)} ${'days'.padStart(5)}`)
+  report.straddle = {}
+  for (const period of [['test', test], ['train', train]]) {
+    console.log(`  — ${period[0]}`)
+    const cache = new Map()
+    const tradeFor = (r, prem, target) => { const k = `${r.tk}|${r.i}|${prem}|${target}`; if (!cache.has(k)) cache.set(k, straddleTrade(barsOf.get(r.tk), r.i, { premium: prem, target })); return cache.get(k) }
+    for (const prem of STRADDLE.premiums) for (const [exitName, target] of [['expiry', null], ['2× target', STRADDLE.target]]) {
+      const uni = straddleStats(period[1].map((r) => tradeFor(r, prem, target)))
+      for (const [name, flag] of sets) {
+        const st = name.startsWith('universe') ? uni : straddleStats(period[1].filter(flag).map((r) => tradeFor(r, prem, target)))
+        const primary = period[0] === 'test' && prem === STRADDLE.premium && target == null && name.startsWith("B'")
+        const v = primary ? straddleVerdict(st, uni) : ''
+        report.straddle[`${period[0]}|${name}|${prem}|${exitName}`] = { ...st, verdict: v || undefined }
+        if (st.n) console.log(`  ${name.padEnd(30)} ${String(prem).padStart(5)} ${exitName.padEnd(8)} ${String(st.n).padStart(5)} ${pct(st.avg).padStart(7)} ${pct(st.median).padStart(7)} ${pct(st.win, 0).padStart(6)} ${pct(st.lostHalf, 0).padStart(6)} ${pct(st.hitRate, 0).padStart(5)} ${String(st.medDays).padStart(5)}${v ? `  → ${v.toUpperCase()} (primary)` : ''}`)
+      }
+    }
+  }
+  console.log(`  Pass (test, premium ${STRADDLE.premium}, hold to expiry, B'): avg > 0, avg ≥ universe + 10 pts, median > universe median, ≥ 100 trades. Premium 1.0 is optimistic for these names.`)
 }
 // Dilution: did a raise (8-K 3.02 or 424B5) follow within 6 months?
 console.log('\n=== Raised within 6 months (test, 2024 →) — pre-set reading: runway < 5 q ≥ 2× base, runway + shelf ≥ 3×')
