@@ -61,7 +61,8 @@ export function runwayRow(fin, asOf) {
   if (!fin) return null
   const cash = cashAt(fin, asOf), burn = quarterlyOcfAt(fin, asOf)
   if (cash == null || burn == null) return null
-  const jv = quarterlyJvAt(fin, asOf) ?? 0
+  // Differenced YTD rows can go negative on a restatement; contributions are never negative.
+  const jv = Math.max(0, quarterlyJvAt(fin, asOf) ?? 0)
   const spend = Math.max(0, -burn) + jv
   const cashRow = (fin.cash ?? []).filter((x) => x.filed <= asOf).sort((a, b) => a.end.localeCompare(b.end)).pop()
   return { quarters: spend > 0 ? cash / spend : null, cash, burn, jv: jv || null, periodEnd: cashRow?.end ?? null }
@@ -116,5 +117,5 @@ export function cashLine(row) {
   if (!r || r.cash == null || r.burn == null) return null
   const when = r.periodEnd ? ` at ${fmtDay(r.periodEnd)}` : ''
   const ops = r.burn < 0 ? `${money(r.burn)} ops` : `${money(r.burn)} generated`
-  return r.jv ? `Cash ${money(r.cash)}${when} · ${ops} + ${money(r.jv)} to JV last qtr` : `Cash ${money(r.cash)}${when} · ${r.burn < 0 ? `${money(r.burn)} used` : ops} last qtr`
+  return r.jv > 0 ? `Cash ${money(r.cash)}${when} · ${ops} + ${money(r.jv)} to JV last qtr` : `Cash ${money(r.cash)}${when} · ${r.burn < 0 ? `${money(r.burn)} used` : ops} last qtr`
 }
