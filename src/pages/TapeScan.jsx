@@ -7,9 +7,9 @@
 // reading of months with both facts (variants.md, 2026-10-26).
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowLeft, ChevronRight } from 'lucide-react'
+import { ArrowLeft } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { holdingRiskFacts, riskRows, cashLine, BOTH_LIT } from '../utils/holdingRisks'
+import { holdingRiskFacts, BOTH_LIT } from '../utils/holdingRisks'
 
 const day = (t) => (t ? new Date(`${t}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }) : '')
 
@@ -76,23 +76,27 @@ export default function TapeScan() {
   )
 }
 
+const money = (x) => { const a = Math.abs(x); return a >= 1e9 ? `$${(a / 1e9).toFixed(1)}B` : a >= 1e6 ? `$${Math.round(a / 1e6)}M` : `$${Math.round(a / 1e3)}K` }
+const price = (x) => `$${x >= 100 ? x.toFixed(0) : x.toFixed(2)}`
+const signed = (x) => `${x >= 0 ? '+' : '−'}${Math.abs(x * 100).toFixed(0)}%`
+
+// One row: the ticker and cash on the first line, then one sentence per fact.
 function Row({ r }) {
-  const facts = riskRows(r)
-  const cash = cashLine(r)
+  const c = r.catalyst, s = r.shorts, rw = r.runway
+  const facts = holdingRiskFacts(r).map((f) => f.key.split(':')[0])
   return (
     <li>
-      <Link to={`/charts/entry/${encodeURIComponent(r.ticker)}`} className="flex items-start gap-3 px-4 py-3 min-h-[44px]">
-        <div className="w-14 shrink-0 text-base font-semibold text-fg">{r.ticker}</div>
-        <div className="flex-1 min-w-0">
-          {facts.map((f) => (
-            <div key={f.key} className="flex items-baseline justify-between gap-3">
-              <span className="text-sm text-fg truncate">{f.label}</span>
-              <span className="shrink-0 text-sm font-semibold font-mono-tab text-fg">{f.value}</span>
-            </div>
-          ))}
-          {cash && <div className="mt-0.5 text-xs text-subtle truncate">{cash}</div>}
+      <Link to={`/charts/entry/${encodeURIComponent(r.ticker)}`} className="block px-4 py-3 min-h-[44px]">
+        <div className="flex items-baseline justify-between gap-3">
+          <span className="text-base font-semibold text-fg">{r.ticker}</span>
+          {rw?.cash != null && <span className="text-xs text-subtle font-mono-tab truncate">{money(rw.cash)} cash{rw.burn < 0 ? ` · ${money(rw.burn)}${rw.jv > 0 ? ` + ${money(rw.jv)} JV` : ''} a qtr` : ''}</span>}
         </div>
-        <ChevronRight size={14} className="mt-1.5 text-muted shrink-0" aria-hidden />
+        {facts.includes('catalyst') && c && (
+          <div className="mt-1 text-sm text-fg"><span className="font-semibold font-mono-tab">{c.sessionsBelow} sessions</span> below its {day(c.event)} close <span className="text-subtle">({price(c.level)} → {price(c.last)})</span></div>
+        )}
+        {facts.includes('shorts') && s && (
+          <div className="mt-0.5 text-sm text-fg">Shorts <span className="font-semibold font-mono-tab">{signed(s.siChange)}</span> · price <span className="font-semibold font-mono-tab">{signed(s.priceChange)}</span> <span className="text-subtle">· {s.spanDays} days{s.siPct != null ? ` · ${(s.siPct * 100).toFixed(0)}% of shares out` : ''}</span></div>
+        )}
       </Link>
     </li>
   )
