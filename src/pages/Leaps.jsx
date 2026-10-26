@@ -1679,7 +1679,7 @@ function RiskNotices({ row }) {
   if (!holdingRiskFacts(row).length) return null
   return (
     <div className="mb-4">
-      <div className="text-xs text-muted mb-1">Risk facts</div>
+      <div className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold mb-2">Tape</div>
       <RiskSentences row={row} />
     </div>
   )

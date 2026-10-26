@@ -88,10 +88,21 @@ export function holdingRiskFacts(row, p = HOLDING_RISK) {
   return out
 }
 
+// The same two facts as compact rows: { key, label, value, detail }.
+export function riskRows(row, p = HOLDING_RISK) {
+  const out = []
+  if (!row) return out
+  const c = row.catalyst
+  if (c && c.sessionsBelow >= p.belowSessions) out.push({ key: `catalyst:${c.event}`, label: `Below its ${fmtDay(c.event)} close`, value: `${c.sessionsBelow} sessions`, detail: `That close ${price(c.level)} · now ${price(c.last)}` })
+  const s = row.shorts
+  if (s && s.siChange >= p.siRise && s.priceChange != null && s.priceChange <= -p.priceDrop) out.push({ key: `shorts:${s.to}`, label: `Shorts ${signed(s.siChange)} · ${s.spanDays} days`, value: `price ${signed(s.priceChange)}`, detail: `${s.siPct != null ? `${(s.siPct * 100).toFixed(1)}% of shares out · ` : ''}same window` })
+  return out
+}
+
 // Shown only when both facts are lit — the test's own reading, both halves.
 export function bothLitLine(facts, b = BOTH_LIT) {
   if (!facts || facts.length < 2) return null
-  return `In the test behind these two facts, a stock with both was ${Math.round(Math.abs(b.median) * 100)}% lower six months later at the median, and doubled about one time in ${Math.round(1 / b.doubled)}.`
+  return `Both lit: in the test, ${Math.round(Math.abs(b.median) * 100)}% lower six months later at the median, and doubled one time in ${Math.round(1 / b.doubled)}.`
 }
 
 // The ledger header's plain numbers: cash and last-quarter burn, no framing.
@@ -99,5 +110,5 @@ export function cashLine(row) {
   const r = row?.runway
   if (!r || r.cash == null || r.burn == null) return null
   const when = r.periodEnd ? ` at ${fmtDay(r.periodEnd)}` : ''
-  return r.burn < 0 ? `Cash ${money(r.cash)}${when} · ${money(r.burn)} used in the latest quarter` : `Cash ${money(r.cash)}${when} · ${money(r.burn)} generated in the latest quarter`
+  return r.burn < 0 ? `Cash ${money(r.cash)}${when} · ${money(r.burn)} used last qtr` : `Cash ${money(r.cash)}${when} · ${money(r.burn)} generated last qtr`
 }

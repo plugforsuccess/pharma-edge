@@ -1,5 +1,5 @@
 // npm run holdingrisks:check — src/utils/holdingRisks.js
-import { riskRow, holdingRiskFacts, shortsRow, catalystRow, cashLine, bothLitLine } from '../src/utils/holdingRisks.js'
+import { riskRow, holdingRiskFacts, shortsRow, catalystRow, cashLine, bothLitLine, riskRows } from '../src/utils/holdingRisks.js'
 import { compactFacts } from '../src/utils/fade.js'
 let pass = 0, fail = 0
 const ok = (name, cond) => { if (cond) pass++; else { fail++; console.log('FAIL', name) } }
@@ -31,10 +31,11 @@ const facts = holdingRiskFacts(row)
 ok('two facts, catalyst first', facts.length === 2 && facts[0].key.startsWith('catalyst:') && facts[1].key.startsWith('shorts:'))
 ok('catalyst sentence', /^Has not held its Oct 28 close \(\$120\) for 24 sessions; now \$7\d\.\d\d\.$/.test(facts[0].text))
 ok('shorts sentence', /^Short interest \+30% in 35 days to 13\.0% of shares out; price −\d+% over the same window\.$/.test(facts[1].text))
-ok('both lit → the test line, both halves', /18% lower six months later at the median, and doubled about one time in 3\./.test(bothLitLine(facts)) && bothLitLine(facts.slice(0, 1)) === null)
-ok('cash line: plain numbers', cashLine(row) === 'Cash $24M at Mar 31 · $6M used in the latest quarter')
+ok('both lit → the test line, both halves', /18% lower six months later at the median, and doubled one time in 3\./.test(bothLitLine(facts)) && bothLitLine(facts.slice(0, 1)) === null)
+ok('cash line: plain numbers', cashLine(row) === 'Cash $24M at Mar 31 · $6M used last qtr')
 ok('no cash row → no line', cashLine({ runway: null }) === null)
 ok('no verdict words', [...facts.map((f) => f.text), bothLitLine(facts), cashLine(row)].every((t) => !/\b(sell|buy|hold|exit|should)\b/i.test(t)))
 ok('empty row → nothing', holdingRiskFacts(null).length === 0)
+ok('compact rows mirror the facts', riskRows(row).length === 2 && riskRows(row)[0].value === '24 sessions' && /^price −\d+%$/.test(riskRows(row)[1].value))
 console.log(`${pass} passed, ${fail} failed`)
 if (fail) process.exit(1)

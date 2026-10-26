@@ -5,7 +5,7 @@
 // the same facts inline (RiskNotices in Leaps.jsx).
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { holdingRiskFacts, bothLitLine } from '../utils/holdingRisks'
+import { holdingRiskFacts, bothLitLine, riskRows } from '../utils/holdingRisks'
 
 // tickers: string[] → { TICKER: row } (undefined while loading, {} when none).
 export function useTickerRisks(tickers) {
@@ -21,14 +21,26 @@ export function useTickerRisks(tickers) {
   return rows
 }
 
+// Compact rows (owner, 2026-10-26: the sentences read as a wall of text):
+// label on the left, the number as the hero on the right, one detail line.
 export function RiskSentences({ row }) {
   const facts = holdingRiskFacts(row)
   if (!facts.length) return null
   const both = bothLitLine(facts)
   return (
-    <div className="space-y-1.5">
-      {facts.map((f) => <p key={f.key} className="text-sm text-fg">{f.text}</p>)}
-      {both && <p className="text-sm text-subtle">{both}</p>}
+    <div>
+      <div className="divide-y divide-border border border-border rounded-xl overflow-hidden">
+        {riskRows(row).map((r) => (
+          <div key={r.key} className="flex items-center justify-between gap-3 px-3 py-2.5">
+            <div className="min-w-0">
+              <div className="text-sm text-fg truncate">{r.label}</div>
+              <div className="text-xs text-subtle truncate">{r.detail}</div>
+            </div>
+            <div className="shrink-0 text-base font-semibold font-mono-tab text-fg">{r.value}</div>
+          </div>
+        ))}
+      </div>
+      {both && <div className="mt-1.5 text-[11px] text-muted">{both}</div>}
     </div>
   )
 }
