@@ -436,3 +436,57 @@ years; Form 4 symbols as filed (a few issuers file without one); FINRA
 history depth as served by its API (skipped, and said, if it refuses the
 runner). Consequence: pass → an "Insiders selling" / "Heavily shorted" fact
 on the row with its record, never a trade; fail → research only.
+
+## Added 2026-10-26 — the Fade Screen test (owner spec, 2026-10-26: "Go")
+
+The owner's Fade Screen spec (pre-revenue small caps whose story holds on
+paper while fundamentals and insider behaviour deteriorate; the AIRJ case)
+scored six factors to 100 by judgment. This test asks whether that score,
+computed mechanically and point in time, separates the names that went on
+to fall from the names that went on to double. Fixed before the code runs.
+
+**Universe (built from SEC data, never hand-picked):** every filer whose
+public float (dei:EntityPublicFloat, the mid-year frame for 2022–2025) sat
+in $100M–$2B in any of those years, mapped to a listed ticker, whose latest
+annual revenue known by the day is under $25M (or no revenue tag at all),
+with 20-day average dollar volume over $1M that day. Survivorship: only
+tickers listed today have price history — the names that fell to delisting
+are missing, which hides exactly the outcome being tested. A pass on
+survivors is provisional until delisted-inclusive prices are bought.
+
+**Factors at each month's first close (spec weights, unchanged):**
+1. **Shorts pressing (25):** FINRA short interest up ≥ 15% vs the settlement
+   ~30 days earlier → 10; and the close down ≥ 10% over the same span → 25.
+2. **Failed catalyst (25):** mechanical event day = a close up ≥ 10% on volume
+   ≥ 3× its prior 20-day average, within the last 60 sessions; fires when a
+   later close within 20 sessions of the event sits below the event close.
+   (The milestone ledger's slip points need hand-entered promises and would
+   carry hindsight; not in the test.)
+3. **Runway (15):** cash and equivalents ÷ the latest quarter's operating
+   cash burn (10-Q / 10-K XBRL, YTD rows differenced); under 3 quarters → 15,
+   under 5 → 8; positive cash flow → 0.
+4. **Insider selling (15):** an open-market sale (Form 4 code S) filed in the
+   prior 60 days with no open-market buy in that window; CEO or CFO → 15,
+   another officer → 8; directors and 10% holders → 0 (the spec says officer).
+5. **Capital redirect (10):** not built in this run (8-K / S-3 feed) → 0.
+   The reachable maximum is therefore 90.
+6. **Trend break (10):** the close below the 50-day for 10+ sessions and the
+   50-day below the 200-day.
+Tiers as the spec: 50 watch, 70 actionable. The catalyst blackout needs the
+ledger (not modelled); the squeeze guard's borrow rate isn't available —
+short interest ÷ shares outstanding is reported instead.
+
+**Outcomes within 126 trading days:** fell ≥ 40% from the close to a later
+low ("faller"); rose ≥ 100% to a later high ("doubler"); the 6-month return.
+
+**Reading rule:** train < 2024, test 2024 →, the spec's weights, no refit
+in this run. **Pass** on test, all four, for score ≥ 70: fallers at ≥ 2× the
+universe base rate; doublers at or below the base rate; 6-month median ≥ 10
+points under the universe median; ≥ 100 actionable stock-months. The spec's
+own framing — of the stocks that fell 40%+, how many had scored 70+ before,
+and of the doublers how many — is reported as recall beside it. Each factor
+alone and score ≥ 50 are reported too. **No edge:** any of the four fails.
+Consequence: pass → the score and its factors shown as facts to subscribers
+(no trade structure; puts stay owner-only like the spread bot) and the
+8-K feed + ledger built next; fail → the weights are refit on train only and
+re-read on test once, then research only.
