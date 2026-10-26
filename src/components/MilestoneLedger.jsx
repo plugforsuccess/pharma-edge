@@ -102,6 +102,7 @@ export default function MilestoneLedger({ ticker, positionId, cashLine = null })
       </button>
 
       <Modal open={open} onClose={() => setOpen(false)} ariaLabel={`${ticker} promises`} size="lg">
+        <div className="max-h-[82vh] overflow-y-auto -m-1 p-1 space-y-3">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <div className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold">{ticker} · Promises</div>
@@ -110,7 +111,7 @@ export default function MilestoneLedger({ ticker, positionId, cashLine = null })
           </div>
           <button type="button" onClick={() => setOpen(false)} aria-label="Close" className="shrink-0 min-h-[44px] min-w-[44px] -mr-2 -mt-2 flex items-center justify-center text-subtle hover:text-fg"><X size={16} /></button>
         </div>
-        <div className="max-h-[60vh] overflow-y-auto -mx-1 px-1">
+        <div>
           {rows?.length > 0 && (
             <ul className="divide-y divide-border border border-border rounded-xl overflow-hidden">
               {rows.map((row) => {
@@ -174,6 +175,7 @@ export default function MilestoneLedger({ ticker, positionId, cashLine = null })
           {err && <div className="mt-2 text-xs text-red-300">{err}</div>}
         </div>
         <div className="text-[11px] text-muted">Dates management gave, as you logged them. Slips are facts, not a score.</div>
+        </div>
       </Modal>
     </div>
   )
