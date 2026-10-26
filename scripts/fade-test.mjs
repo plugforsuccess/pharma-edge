@@ -56,8 +56,14 @@ else { await mapLimit(stocks.map((s) => s.tk), 3, async (tk) => { const s = awai
 
 // 3b. SEC submissions: shelves, supplements, 8-K 3.02 (factor 5 + the raise outcome).
 const cikOf = new Map(entries.map((e) => [e.ticker, e.cik]))
-const { filings, ok: flOk, failed: flFailed } = await filingsMap(stocks.map((s) => ({ cik: cikOf.get(s.tk), ticker: s.tk })))
+const { filings, sics, ok: flOk, failed: flFailed } = await filingsMap(stocks.map((s) => ({ cik: cikOf.get(s.tk), ticker: s.tk })))
 console.log(`SEC submissions: ${flOk} · failed ${flFailed}`)
+// Follow-up variants (pre-registered 2026-10-26, second addendum). Binary-prone industries by SEC SIC code: the
+// proxy for "a dated binary inside the window" (no PDUFA / certification / delivery calendar exists in the data).
+const BINARY_SIC = new Set(['2834', '2835', '2836', '8731', '3711', '3713', '3714', '3721', '3724', '3728', '3760'])
+const binaryProne = (tk) => BINARY_SIC.has(sics.get(tk) ?? '')
+// Two-factor score: shorts pressing + failed catalyst only, rescaled to 100.
+const score2 = (f) => (f.shorts + f.catalyst) * 2
 const RAISE_DAYS = 183 // ≈ 126 trading days
 
 // 4. Stock-months, point in time.
@@ -76,7 +82,7 @@ for (const s of stocks) {
     const sc = fadeScore({ bars: s.bars, i, shorts: sh, trades, fin: s.fin, filings: fl })
     const so = sharesOutAt(s.fin, b.t)
     const siPct = so && sc.factors.shorts.known ? (sh.filter((x) => x.date <= b.t).pop()?.shares ?? 0) / so : null
-    const row = { tk: s.tk, t: b.t, score: sc.score, tier: sc.tier, f: Object.fromEntries(Object.entries(sc.factors).map(([k, v]) => [k, v.points])), known: { shorts: !!sc.factors.shorts.known, runway: !!sc.factors.runway.known, redirect: !!fl }, siPct, raised: !!raiseAfter(fl, b.t, RAISE_DAYS), out: forwardFade(s.bars, i) }
+    const row = { tk: s.tk, t: b.t, score: sc.score, tier: sc.tier, score2: score2(Object.fromEntries(Object.entries(sc.factors).map(([k, v]) => [k, v.points]))), binary: binaryProne(s.tk), sic: sics.get(s.tk) ?? null, f: Object.fromEntries(Object.entries(sc.factors).map(([k, v]) => [k, v.points])), known: { shorts: !!sc.factors.shorts.known, runway: !!sc.factors.runway.known, redirect: !!fl }, siPct, raised: !!raiseAfter(fl, b.t, RAISE_DAYS), out: forwardFade(s.bars, i) }
     if (last) todayRows.push(row)
     if (monthStarts.has(b.t) && row.out) rows.push({ ...row, fell: row.out.fell, doubled: row.out.doubled, ret: row.out.ret })
   })
@@ -118,6 +124,34 @@ for (const [name, set, key] of [['Test (2024 →)', test, 'test_'], ['Train (bef
     console.log(line(label, s, v ? `→ ${v.toUpperCase()}` : ''))
   }
 }
+const act = test.filter((r) => r.score >= 70)
+// Follow-up variants (owner, 2026-10-26, after the first result). Same four conditions on each.
+console.log('\n=== Follow-up variants (test, 2024 →) — same pass mark on each')
+console.log(header)
+report.variants = {}
+const nb = test.filter((r) => !r.binary)
+console.log(`  binary-prone industries (SIC ${[...BINARY_SIC].join(' ')}): ${pct(test.filter((r) => r.binary).length / Math.max(1, test.length), 0)} of test months · SIC known ${pct(test.filter((r) => r.sic).length / Math.max(1, test.length), 0)}`)
+for (const [label, set, flag] of [
+  ['A  score ≥ 70, not binary-prone', nb, (r) => r.score >= 70],
+  ['A\' score ≥ 70, binary-prone', test.filter((r) => r.binary), (r) => r.score >= 70],
+  ['B  2-factor ≥ 70 (cat 25 + SI ≥ 10)', test, (r) => r.score2 >= 70],
+  ['B\' 2-factor = 100 (both full)', test, (r) => r.score2 === 100],
+  ['C  2-factor ≥ 70, not binary-prone', nb, (r) => r.score2 >= 70],
+  ['C\' 2-factor = 100, not binary-prone', nb, (r) => r.score2 === 100],
+]) {
+  const s = stats(set, flag)
+  const v = fadeVerdict(s)
+  report.variants[label] = { ...s, verdict: v }
+  console.log(line(label, s, `→ ${v.toUpperCase()}`))
+}
+// Where the actionable doublers sit, by SIC.
+{
+  const bySic = new Map()
+  for (const r of act) { const k = r.sic ?? '?'; const o = bySic.get(k) ?? { n: 0, d: 0, f: 0 }; o.n++; if (r.doubled) o.d++; if (r.fell) o.f++; bySic.set(k, o) }
+  const top = [...bySic].sort((a, b) => b[1].n - a[1].n).slice(0, 10)
+  console.log('  actionable months by SIC (n · doubled · fell): ' + top.map(([k, o]) => `${k}${BINARY_SIC.has(k) ? '*' : ''} ${o.n}·${o.d}·${o.f}`).join(' | ') + '  (* binary-prone)')
+  report.actBySic = Object.fromEntries(bySic)
+}
 // Dilution: did a raise (8-K 3.02 or 424B5) follow within 6 months?
 console.log('\n=== Raised within 6 months (test, 2024 →) — pre-set reading: runway < 5 q ≥ 2× base, runway + shelf ≥ 3×')
 console.log(`  ${'flag'.padEnd(26)} ${'months'.padStart(6)} ${'raised'.padStart(8)} ${'base'.padStart(6)} ${'lift'.padStart(6)} ${'caught'.padStart(7)}`)
@@ -158,7 +192,6 @@ for (const [label, flag] of [['3 runway < 5 q (any)', (r) => r.f.runway > 0], ['
   report.leads = leads
 }
 // Squeeze-guard context: among actionable months, how many were > 25% of shares out short.
-const act = test.filter((r) => r.score >= 70)
 console.log(`\nActionable months with short interest > 25% of shares outstanding: ${act.filter((r) => r.siPct > 0.25).length} of ${act.length}`)
 
 // AIRJ, if it is in the universe: the month-by-month score.

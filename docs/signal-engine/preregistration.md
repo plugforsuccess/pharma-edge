@@ -507,3 +507,37 @@ a shelf or ATM on file at ≥ 3×. Lead time = days from the first month the
 runway flag was lit (an unbroken run) to the raise filing; the stock's move
 from that month start to the day before the filing, and from the day before
 to five sessions after, are reported as facts.
+
+**Added 2026-10-26, after the first result (FAIL on the doublers condition;
+owner: "Exclude flagged months with a dated binary inside the 6-month window
+… Drop insider selling and the shelf flag, re-weight to the two factors that
+carry it, and re-run. Fewer factors, same conditions."). Fixed before the
+second run.** Two variants, each read on the same four conditions on test
+(fallers ≥ 2× base, doublers ≤ base, 6M median ≥ 10 points under the
+universe, ≥ 100 months):
+
+- **A — no dated binary.** No PDUFA / certification / first-delivery
+  calendar exists in the data, so the proxy for "a dated binary inside the
+  window" is the **industry**: SEC SIC codes 2834, 2835, 2836, 8731
+  (pharma, diagnostics, biologics, biological research — FDA dates and
+  readouts) and 3711, 3713, 3714, 3721, 3724, 3728, 3760 (vehicles,
+  aircraft, aircraft parts, space — certification and first delivery) are
+  **binary-prone**; the subset is every other industry. Score ≥ 70 is read
+  on the not-binary-prone subset (A) and, for contrast, on the binary-prone
+  subset (A'). If the doubler rate on A is still at or above the base rate,
+  the hypothesis that doublers are the dated binaries is rejected.
+- **B — two factors.** Score = (shorts pressing + failed catalyst) × 2, so
+  the reachable maximum is still 100; ≥ 70 = a failed catalyst with short
+  interest up at least 15% (B), and 100 = both at full weight (B'). Runway,
+  insider selling, the shelf flag and the trend break are dropped from the
+  score. If B's doubler rate does not fall to the base rate, the score is
+  finding variance, not direction.
+- **C** = B on the not-binary-prone subset.
+
+Also reported: the actionable months by SIC code (count, doublers,
+fallers) so the clustering can be seen rather than assumed. Decided in
+advance: **runway leaves the score whatever the result** (its 440-day lead
+is a balance-sheet description, not a timing signal) and stays a displayed
+fact; "failed catalyst" and "shorts pressing" ship as plain risk facts on a
+holding (no tier, no verdict wording) whatever the result — that decision
+is the owner's and does not depend on this run.

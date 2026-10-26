@@ -20,27 +20,29 @@ function rowsFrom(block) {
   return out
 }
 
-// → [{ form, date, items }] oldest first, filings since `since`.
+// → { rows: [{ form, date, items }] oldest first, filings since `since`; sic } —
+// `sic` is the company's SIC code from the same feed (a string like '2834').
 export async function filingsFor(cik, { since = '2021-01-01' } = {}) {
   const j = await secJson(`https://data.sec.gov/submissions/CIK${cik}.json`)
   if (!j) return null
+  const sic = j.sic ? String(j.sic) : null
   let rows = rowsFrom(j.filings?.recent)
   for (const f of j.filings?.files ?? []) {
     if (f.filingTo && f.filingTo < since) continue
     const page = await secJson(`https://data.sec.gov/submissions/${f.name}`)
     if (page) rows = rows.concat(rowsFrom(page))
   }
-  return rows.filter((r) => r.date >= since).sort((a, b) => a.date.localeCompare(b.date))
+  return { rows: rows.filter((r) => r.date >= since).sort((a, b) => a.date.localeCompare(b.date)), sic }
 }
 
-// entries: [{ cik, ticker }] → { filings: Map ticker → rows, ok, failed }
+// entries: [{ cik, ticker }] → { filings: Map ticker → rows, sics: Map ticker → sic, ok, failed }
 export async function filingsMap(entries, { log = console.log } = {}) {
-  const filings = new Map()
+  const filings = new Map(), sics = new Map()
   let ok = 0, failed = 0, done = 0
   await mapLimit(entries, 2, async ({ cik, ticker }) => {
-    const rows = await filingsFor(cik)
-    if (rows) { filings.set(ticker, rows); ok++ } else failed++
+    const got = await filingsFor(cik)
+    if (got) { filings.set(ticker, got.rows); sics.set(ticker, got.sic); ok++ } else failed++
     if (++done % 200 === 0) log(`  filings ${done}/${entries.length} · ${failed} failed`)
   }, 300)
-  return { filings, ok, failed }
+  return { filings, sics, ok, failed }
 }
