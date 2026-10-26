@@ -8,7 +8,7 @@
 // ticker a user holds or has starred → ticker_risks); `holdingRiskFacts`
 // turns a row into the sentences; `cashLine` the header numbers;
 // `bothLitLine` the test's own reading, shown only when both facts are lit.
-import { FADE, eventDays, runway, cashAt, quarterlyOcfAt } from './fade.js'
+import { FADE, eventDays, cashAt, quarterlyOcfAt, quarterlyJvAt } from './fade.js'
 
 export const HOLDING_RISK = Object.freeze({
   belowSessions: 20,     // failed catalyst: below the event close for 20+ sessions
@@ -52,14 +52,19 @@ export function catalystRow(bars, i) {
   return { event: b.t, level: b.c, jump: b.c / bars[k - 1].c - 1, sessionsBelow: below, last: bars[i].c }
 }
 
-// Cash on hand against the latest quarter's operating cash flow (plain numbers).
+// Cash on hand against the latest quarter's spend (plain numbers). Spend =
+// operating cash flow + capital put into equity-method investees — a company
+// that runs its operations through a JV shows almost no operating burn
+// (AIRJ: ~$1.4M a quarter at the parent, the spend is in AirJoule, LLC —
+// owner, 2026-10-26), so OCF alone understated it ~5×.
 export function runwayRow(fin, asOf) {
   if (!fin) return null
-  const r = runway(fin, asOf)
-  if (!r.known) return null
   const cash = cashAt(fin, asOf), burn = quarterlyOcfAt(fin, asOf)
+  if (cash == null || burn == null) return null
+  const jv = quarterlyJvAt(fin, asOf) ?? 0
+  const spend = Math.max(0, -burn) + jv
   const cashRow = (fin.cash ?? []).filter((x) => x.filed <= asOf).sort((a, b) => a.end.localeCompare(b.end)).pop()
-  return { quarters: Number.isFinite(r.quarters) ? r.quarters : null, cash, burn, periodEnd: cashRow?.end ?? null }
+  return { quarters: spend > 0 ? cash / spend : null, cash, burn, jv: jv || null, periodEnd: cashRow?.end ?? null }
 }
 
 export function riskRow({ bars, shorts = [], fin = null, sharesOut = null, asOf = null }) {
@@ -110,5 +115,6 @@ export function cashLine(row) {
   const r = row?.runway
   if (!r || r.cash == null || r.burn == null) return null
   const when = r.periodEnd ? ` at ${fmtDay(r.periodEnd)}` : ''
-  return r.burn < 0 ? `Cash ${money(r.cash)}${when} · ${money(r.burn)} used last qtr` : `Cash ${money(r.cash)}${when} · ${money(r.burn)} generated last qtr`
+  const ops = r.burn < 0 ? `${money(r.burn)} ops` : `${money(r.burn)} generated`
+  return r.jv ? `Cash ${money(r.cash)}${when} · ${ops} + ${money(r.jv)} to JV last qtr` : `Cash ${money(r.cash)}${when} · ${r.burn < 0 ? `${money(r.burn)} used` : ops} last qtr`
 }

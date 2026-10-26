@@ -8,7 +8,7 @@
 // Data: bars from Yahoo / the price-history edge function, FINRA short
 // interest (scripts/lib/finra.mjs), SEC companyfacts (scripts/lib/sec.mjs).
 import { createClient } from '@supabase/supabase-js'
-import { riskRow, holdingRiskFacts } from '../src/utils/holdingRisks.js'
+import { riskRow, holdingRiskFacts, cashLine } from '../src/utils/holdingRisks.js'
 import { sharesOutAt } from '../src/utils/fade.js'
 import { dailyBars, mapLimit, sources } from './lib/marketData.mjs'
 import { shortInterest, finraStatus } from './lib/finra.mjs'
@@ -56,7 +56,8 @@ for (const [tk, b] of bars) {
   const row = riskRow({ bars: b, shorts: shorts.get(tk) ?? [], fin: f, sharesOut: f ? sharesOutAt(f, asOf) : null, asOf })
   rows.push({ ticker: tk, ...row })
   const facts = holdingRiskFacts(row)
-  if (facts.length) console.log(`  ${tk.padEnd(6)} ${facts.map((x) => `[${x.tone}] ${x.title}`).join(' · ')}`)
+  const jvTag = f?.jv?.length ? [...new Set(f.jv.map((x) => x.tag))].join(',') : null
+  console.log(`  ${tk.padEnd(6)} ${cashLine(row) ?? 'no cash / burn'}${jvTag ? ` · JV tag ${jvTag}` : ''}${facts.length ? ` · ${facts.map((x) => x.text).join(' · ')}` : ''}`)
 }
 console.log(`${rows.length} rows · ${rows.filter((r) => holdingRiskFacts(r).length).length} with at least one fact`)
 
