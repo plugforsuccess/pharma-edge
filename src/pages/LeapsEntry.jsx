@@ -16,6 +16,8 @@ import { confluenceModel, COMPONENTS, MIN_MATCHES } from '../utils/confluence'
 import { trendQuality, tripleStatus, reclaimPlan } from '../utils/plan'
 import LeaderPanel from '../components/LeaderPanel'
 import RiskFactList, { useTickerRisks } from '../components/RiskFacts'
+import MilestoneLedger from '../components/MilestoneLedger'
+import { cashLine } from '../utils/holdingRisks'
 import { StarButton } from '../components/ConfluenceLeaders'
 import { useTracking } from '../hooks/useTracking'
 import { useAdvanced } from '../hooks/useAdvanced'
@@ -499,6 +501,7 @@ export default function LeapsEntry() {
           <div className="min-w-0 md:order-1">
             {!SUITE && !isIndex && <LeaderPanel traits={leaderNow} close={bars[bars.length - 1]?.c} asOf={bars[bars.length - 1]?.t} spyLoading={spyBars === null} advanced={advanced} quality={quality} />}
             {!isIndex && riskRows?.[ticker] && <RiskFactList row={riskRows[ticker]} />}
+            {!isIndex && !SUITE && <MilestoneLedger ticker={ticker} compact cashLine={cashLine(riskRows?.[ticker] ?? null)} />}
             {SUITE && <StatusPanel s={s} model={model} params={params} suite={suite} dailySuite={dailySuite} confirmDays={confirmDays} tfLabel={SUITE_TIMEFRAMES[suiteTf].label.toLowerCase()} conf={conf} pool={pool} trend={trend} metrics={data?.metrics ?? null} />}
             {SUITE && <SuitePanel pack={suitePack} failed={suiteData?.error && suiteData.tf === suiteTf} tf={suiteTf} holdings={holdings} onJump={jumpPeriod} onOpenPane={setExpanded}
               buyZone={!!s?.cond?.all} />}

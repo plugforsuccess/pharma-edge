@@ -2282,6 +2282,27 @@ score, tier, color or verdict.**
   ticker × date; tap opens Portfolio): the day before a call, the open rows
   due by quarter end it must confirm; the day after, what is still
   unconfirmed. No web push from this job yet. The ledger never feeds a score.
+- **Gaps closed 2026-10-26 (owner: "Make changes").** **Published ledgers:**
+  an admin's rows can be published (`holding_milestones.published`; the
+  modal's "Publish this ledger to every subscriber" switch; new rows inherit
+  the ticker's state) and are readable by every subscriber
+  (`holding_milestones_select_published`; a BEFORE trigger,
+  `holding_milestones_publish_guard`, clears the flag for non-admins) —
+  shown with a "Cash Moves" tag, read-only, beside the reader's own rows.
+  The nightly risk job also covers published-ledger tickers. **The ledger
+  on the entry chart** (`/charts/entry/:ticker`, `compact` prop) for any
+  ticker, held or not. **The slip rule:** `leaps_tax_profiles.slip_rule`
+  (Settings → On a slip, free text, the user's own words); `slipActions` in
+  `holdingChecks.jsx` turns ledger rows marked missed / not mentioned /
+  moved in the last 7 days into "Your plan today" rows on Home — the fact,
+  then "Your rule: …" (or "no slip rule yet"). The app never supplies the
+  rule. **The basket's forward record** shows on `/charts/leader-record`
+  (`BasketCard`; `src/utils/basketRecord.js` equal-weight index across
+  rebalances, `npm run basketrecord:check`) — starts at one close, no
+  backfill, "too short to read" under 63 closes. **Research:** the Fade
+  report sizes the survivorship hole (float-range filers with no listed
+  ticker today) and prints a by-year table — 2022, a down year, is in the
+  data.
 
 ## NIGHTFLOW (`/orderflow`) — order-flow intelligence
 

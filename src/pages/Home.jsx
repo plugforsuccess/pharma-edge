@@ -5,7 +5,9 @@ import clsx from 'clsx'
 import NotificationCenter from '../components/NotificationCenter'
 import { useHoldings } from '../hooks/useHoldings'
 import { todayYmd } from '../utils/afterTax'
-import { usd, pctSigned, nameOf, sellCount, gainLabel, isRoc, needsAction } from '../lib/holdingChecks'
+import { usd, pctSigned, nameOf, sellCount, gainLabel, isRoc, needsAction, slipActions, SLIP_WINDOW_DAYS } from '../lib/holdingChecks'
+import { supabase } from '../lib/supabase'
+import { useAuth } from '../context/AuthContext'
 
 // Home — the LEAPS dashboard. One look at what needs attention today,
 // pulled from the same numbers as Positions (useHoldings): net worth after
@@ -29,7 +31,19 @@ export default function Home() {
   const before = (summary?.current_value ?? 0) + (others.before ?? 0)
 
   // ── Needs action, most urgent first (same checks as the Bot view) ──
-  const actions = useMemo(() => needsAction(results, positions, plan, today), [results, positions, plan, today])
+  const { user } = useAuth()
+  const [slips, setSlips] = useState({ rows: [], rule: null })
+  useEffect(() => {
+    let cancelled = false
+    if (!user) return undefined
+    const since = new Date(Date.now() - SLIP_WINDOW_DAYS * 86400e3).toISOString()
+    Promise.all([
+      supabase.from('holding_milestones').select('id, ticker, position_id, title, status, slips, updated_at, created_at').eq('user_id', user.id).gte('updated_at', since).or('status.in.(missed,unmentioned),slips.gt.0'),
+      supabase.from('leaps_tax_profiles').select('slip_rule').eq('user_id', user.id).maybeSingle(),
+    ]).then(([a, b]) => { if (!cancelled) setSlips({ rows: a.data ?? [], rule: b.data?.slip_rule ?? null }) })
+    return () => { cancelled = true }
+  }, [user])
+  const actions = useMemo(() => [...slipActions(slips.rows, positions, slips.rule), ...needsAction(results, positions, plan, today)].sort((a, b) => a.rank - b.rank), [results, positions, plan, today, slips])
 
   const [clearClosed, setClearClosed] = useState(() => {
     try { return localStorage.getItem(CLEAR_KEY) === '1' } catch { return false }

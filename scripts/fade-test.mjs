@@ -26,6 +26,10 @@ const byCik = await tickersFor(new Set(floats.keys()))
 let entries = [...byCik].map(([cik, ticker]) => ({ cik, ticker }))
 if (process.env.TICKERS) { const want = new Set(process.env.TICKERS.split(',').map((s) => s.trim().toUpperCase())); entries = entries.filter((e) => want.has(e.ticker)) }
 console.log(`${floats.size} filers in range · ${entries.length} with a listed ticker`)
+// Survivorship, sized: filers that sat in the float range in some year but have no listed ticker today
+// are the delisted / acquired / gone-dark set the test cannot see.
+const gone = floats.size - entries.length
+console.log(`Survivorship: ${gone} of ${floats.size} (${(gone / floats.size * 100).toFixed(0)}%) float-range filers have no listed ticker today — the fallers the test cannot see are among them; every faller rate below is a floor.`)
 const { fin, ok: finOk, failed: finFailed } = await compactFactsFor(entries)
 console.log(`SEC facts: ${finOk} · failed ${finFailed}`)
 const today = new Date().toISOString().slice(0, 10)
@@ -114,7 +118,7 @@ const FLAGS = [
   ['3 + 4 (runway + insider)', (r) => r.f.runway > 0 && r.f.insider > 0],
   ['1 + 2 (shorts + catalyst)', (r) => r.f.shorts === 25 && r.f.catalyst > 0],
 ]
-const report = { at: new Date().toISOString(), universe: { floats: floats.size, listed: entries.length, preRevenue: preRev.length, withBars: stocks.length, finra: finraOk, form4: f345.quarters.length }, rows: rows.length, train: train.length, test: test.length, test_: {}, train_: {} }
+const report = { at: new Date().toISOString(), universe: { floats: floats.size, listed: entries.length, unlisted: gone, preRevenue: preRev.length, withBars: stocks.length, finra: finraOk, form4: f345.quarters.length }, rows: rows.length, train: train.length, test: test.length, test_: {}, train_: {} }
 for (const [name, set, key] of [['Test (2024 →)', test, 'test_'], ['Train (before 2024)', train, 'train_']]) {
   console.log(`\n=== ${name}`)
   console.log(header)
@@ -126,6 +130,16 @@ for (const [name, set, key] of [['Test (2024 →)', test, 'test_'], ['Train (bef
   }
 }
 const act = test.filter((r) => r.score >= 70)
+// By calendar year (owner, 2026-10-26: "none of the results has been seen in a down year" — 2022 is in the data).
+console.log('\n=== By year, score ≥ 70 vs the universe (2022 was a down year)')
+console.log(`  ${'year'.padEnd(6)} ${'months'.padStart(7)} ${'flagged'.padStart(8)} ${'fell'.padStart(7)} ${'base'.padStart(7)} ${'doubled'.padStart(8)} ${'base'.padStart(7)} ${'median'.padStart(8)} ${'universe'.padStart(9)}`)
+report.byYear = {}
+for (const y of [...new Set(rows.map((r) => r.t.slice(0, 4)))].sort()) {
+  const set = rows.filter((r) => r.t.startsWith(y))
+  const s = stats(set, (r) => r.score >= 70)
+  report.byYear[y] = s
+  console.log(`  ${y.padEnd(6)} ${String(set.length).padStart(7)} ${String(s.flagged).padStart(8)} ${pct(s.fellRate).padStart(7)} ${pct(s.baseFell).padStart(7)} ${pct(s.doubledRate).padStart(8)} ${pct(s.baseDoubled).padStart(7)} ${pct(s.medianRet).padStart(8)} ${pct(s.medianAll).padStart(9)}`)
+}
 // Follow-up variants (owner, 2026-10-26, after the first result). Same four conditions on each.
 console.log('\n=== Follow-up variants (test, 2024 →) — same pass mark on each')
 console.log(header)

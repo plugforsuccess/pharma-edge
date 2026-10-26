@@ -70,6 +70,27 @@ function checksFor(r, plan, today) {
   return out
 }
 
+// A promise slipped (owner, 2026-10-26: "kill on a slip lives in my head,
+// not in the app"): ledger rows marked missed / not mentioned / date moved
+// in the last 7 days become a row on Home that states the fact and the
+// user's own slip rule back to them (Settings → On a slip). The app never
+// supplies the rule.
+export const SLIP_WINDOW_DAYS = 7
+export function slipActions(slipRows, positions, slipRule, now = Date.now()) {
+  const out = []
+  for (const m of slipRows ?? []) {
+    const age = (now - new Date(m.updated_at ?? m.created_at).getTime()) / DAY_MS
+    if (!(age <= SLIP_WINDOW_DAYS)) continue
+    const what = m.status === 'missed' ? 'missed' : m.status === 'unmentioned' ? 'not mentioned on the last call' : (m.slips ?? 0) > 0 ? `date moved ${m.slips}×` : null
+    if (!what) continue
+    const pos = (positions ?? []).find((p) => p.id === m.position_id) ?? (positions ?? []).find((p) => String(p.ticker ?? '').toUpperCase() === m.ticker && !p.closed_at)
+    out.push({ rank: 1, kind: 'slip', tone: m.status === 'missed' ? 'red' : 'amber', pos,
+      title: `${m.ticker}: ${m.title} — ${what}`,
+      body: slipRule ? `Your rule: ${slipRule}` : 'You have no slip rule yet — write one in Settings → On a slip.' })
+  }
+  return out
+}
+
 // Home: everything that needs action today, plus stale prices.
 export function needsAction(results, positions, plan, today, now = Date.now()) {
   const out = results.flatMap((r) => checksFor(r, plan, today))

@@ -24,16 +24,17 @@ const db = createClient(url, key, { auth: { persistSession: false } })
 const TICKER = /^[A-Z][A-Z0-9.-]{0,5}$/
 
 // 1. Tickers: open share / option holdings + every starred ticker.
-const [{ data: pos, error: e1 }, { data: wl, error: e2 }] = await Promise.all([
+const [{ data: pos, error: e1 }, { data: wl, error: e2 }, { data: pub }] = await Promise.all([
   db.from('leaps_positions').select('ticker').is('closed_at', null).in('instrument_type', ['stock', 'equity_option', 'index_option_1256']),
   db.from('watchlist').select('ticker'),
+  db.from('holding_milestones').select('ticker').eq('published', true),
 ])
 if (e1 || e2) { console.error('load failed', e1?.message ?? e2?.message); process.exit(1) }
 // Funds (SPY, sector ETFs, USO …) are skipped: short interest on an ETF is
 // creation / redemption noise and there is no cash runway to read.
-const tickers = [...new Set([...(pos ?? []), ...(wl ?? [])].map((r) => String(r.ticker ?? '').trim().toUpperCase()).filter((t) => TICKER.test(t) && !isFund(t)))].sort()
+const tickers = [...new Set([...(pos ?? []), ...(wl ?? []), ...(pub ?? [])].map((r) => String(r.ticker ?? '').trim().toUpperCase()).filter((t) => TICKER.test(t) && !isFund(t)))].sort()
 if (process.env.TICKERS) tickers.splice(0, tickers.length, ...process.env.TICKERS.split(',').map((s) => s.trim().toUpperCase()))
-console.log(`${tickers.length} tickers (${(pos ?? []).length} holding rows, ${(wl ?? []).length} starred)${DRY ? ' · DRY RUN' : ''}`)
+console.log(`${tickers.length} tickers (${(pos ?? []).length} holding rows, ${(wl ?? []).length} starred, ${(pub ?? []).length} published ledger rows)${DRY ? ' · DRY RUN' : ''}`)
 if (!tickers.length) process.exit(0)
 
 // 2. Bars, FINRA, SEC.

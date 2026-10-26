@@ -4,6 +4,7 @@ import clsx from 'clsx'
 import { ArrowLeft, ChevronRight } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { stintSummary } from '../utils/leaderRecord'
+import { basketIndex } from '../utils/basketRecord'
 
 // /charts/leader-record — the leader record (owner, 2026-10-19: "a live
 // record of the price gain since becoming a leader" → "leaders should be buy
@@ -24,6 +25,34 @@ function Stat({ label, value, sub, tone = 'text-fg' }) {
       <div className={clsx('mt-0.5 text-base font-semibold font-mono-tab leading-6 truncate', tone)}>{value}</div>
       {sub && <div className="text-[11px] text-muted truncate">{sub}</div>}
     </div>
+  )
+}
+
+// The strongest-10 quality basket, logged every close since 2026-10-26
+// (basket_record, append-only, hashed). It is the forward record: no
+// backfill, so it starts at one day and earns its length.
+function BasketCard() {
+  const [rows, setRows] = useState(undefined)
+  useEffect(() => {
+    let cancelled = false
+    supabase.from('basket_record').select('as_of, tickers, closes, spy_close, rebalanced').eq('basket', 'quality_top10').order('as_of').limit(2000)
+      .then(({ data, error }) => { if (!cancelled) setRows(error ? null : data ?? []) })
+    return () => { cancelled = true }
+  }, [])
+  const r = useMemo(() => basketIndex(rows ?? []), [rows])
+  if (!r) return null
+  const pct = (x) => `${x >= 0 ? '+' : '−'}${(Math.abs(x) * 100).toFixed(1)}%`
+  return (
+    <section className="bg-card border border-border rounded-2xl p-5 mt-4">
+      <div className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold">Forward record · strongest 10 by cash flow</div>
+      <div className="mt-2 grid grid-cols-3 gap-3">
+        <Stat label="Basket" value={pct(r.basket)} tone={r.basket >= 0 ? 'text-green-400' : 'text-red-400'} />
+        <Stat label="S&P 500" value={pct(r.spy)} tone={r.spy >= 0 ? 'text-green-400' : 'text-red-400'} />
+        <Stat label="Closes logged" value={String(r.days)} sub={`since ${day(r.start)}`} />
+      </div>
+      <div className="mt-3 text-xs text-subtle">{r.members.join(' · ')}</div>
+      <div className="mt-1 text-[11px] text-muted">Equal weight, re-picked on a month's first close ({r.rebalances} so far), price only. Every row is hashed when written; nothing is backfilled. {r.days < 63 ? 'Too short to read anything into yet.' : ''}</div>
+    </section>
   )
 }
 
@@ -57,6 +86,7 @@ export default function LeaderRecord() {
       <div className="mt-1 text-[11px] text-muted">{asOf ? `As of ${day(asOf)} close` : 'Updated after each close'}</div>
       <h1 className="mt-0.5 text-[28px] leading-9 font-semibold tracking-tight">Leader record</h1>
       <p className="text-sm text-subtle">Each stock bought the day it became a leader and held to today.</p>
+      <BasketCard />
 
       <div className="mt-4 flex gap-2">
         {[['recent', `Past 3 months${rows ? ` · ${recentN}` : ''}`], ['older', `3–12 months${rows ? ` · ${rows.length - recentN}` : ''}`]].map(([k, label]) => (
