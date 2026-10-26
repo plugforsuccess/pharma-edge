@@ -15,6 +15,7 @@ import ReplayCard from '../components/ReplayCard'
 import { confluenceModel, COMPONENTS, MIN_MATCHES } from '../utils/confluence'
 import { trendQuality, tripleStatus, reclaimPlan } from '../utils/plan'
 import LeaderPanel from '../components/LeaderPanel'
+import RiskFactList, { useTickerRisks } from '../components/RiskFacts'
 import { StarButton } from '../components/ConfluenceLeaders'
 import { useTracking } from '../hooks/useTracking'
 import { useAdvanced } from '../hooks/useAdvanced'
@@ -198,6 +199,9 @@ export default function LeapsEntry() {
     return () => { cancelled = true }
   }, [ticker])
   const leaderNow = useMemo(() => (bars?.length && !SUITE ? leaderSeries(bars, spyBars ?? []).at(bars.length - 1) : null), [bars, spyBars])
+  // Risk facts (ticker_risks; only tickers someone holds or has starred have a row).
+  const riskTickers = useMemo(() => (ticker.startsWith('^') ? [] : [ticker]), [ticker])
+  const riskRows = useTickerRisks(riskTickers)
 
   const setField = (k, v) => {
     const next = { ...draft, [k]: v }
@@ -494,6 +498,7 @@ export default function LeapsEntry() {
         <div className="md:grid md:grid-cols-[1fr_280px] md:gap-x-5 md:items-start">
           <div className="min-w-0 md:order-1">
             {!SUITE && !isIndex && <LeaderPanel traits={leaderNow} close={bars[bars.length - 1]?.c} asOf={bars[bars.length - 1]?.t} spyLoading={spyBars === null} advanced={advanced} quality={quality} />}
+            {!isIndex && riskRows?.[ticker] && <RiskFactList row={riskRows[ticker]} />}
             {SUITE && <StatusPanel s={s} model={model} params={params} suite={suite} dailySuite={dailySuite} confirmDays={confirmDays} tfLabel={SUITE_TIMEFRAMES[suiteTf].label.toLowerCase()} conf={conf} pool={pool} trend={trend} metrics={data?.metrics ?? null} />}
             {SUITE && <SuitePanel pack={suitePack} failed={suiteData?.error && suiteData.tf === suiteTf} tf={suiteTf} holdings={holdings} onJump={jumpPeriod} onOpenPane={setExpanded}
               buyZone={!!s?.cond?.all} />}

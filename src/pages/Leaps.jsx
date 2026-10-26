@@ -19,6 +19,8 @@ import NumberInput from '../components/NumberInput'
 import Modal from '../components/Modal'
 import RateBreakdown from '../components/RateBreakdown'
 import PeersView from '../components/PeersView'
+import { useTickerRisks } from '../components/RiskFacts'
+import { holdingRiskFacts } from '../utils/holdingRisks'
 import { useHoldings, DEFAULT_PROFILE, INVESTMENT_TYPES, isQuantity, wholeUnits } from '../hooks/useHoldings'
 
 // LEAPS — after-tax targets + live after-tax value.
@@ -235,6 +237,9 @@ export default function Leaps() {
   }
 
   const allIds = [...results, ...cashResults, ...realEstateResults].map((r) => r.pos.id)
+  // Nightly risk facts for the share / option holdings' tickers (ticker_risks).
+  const riskTickers = useMemo(() => [...new Set(results.map((r) => r.pos.ticker).filter(Boolean))], [results])
+  const risks = useTickerRisks(riskTickers)
 
   // /leaps?open=<id> (from Home, Charts or the LEAPS bot): expand that
   // holding and scroll to it, then drop the param.
@@ -342,6 +347,7 @@ export default function Leaps() {
                 <PositionCard
                   key={pos.id}
                   pos={pos}
+                  risks={risks?.[String(pos.ticker ?? '').toUpperCase()] ?? null}
                   calc={calc}
                   ladder={ladder}
                   ladderLongTerm={ladderLongTerm}
@@ -1106,7 +1112,7 @@ function positionMeta(pos) {
   return { contract: contract.join(' • '), verb: pos.exercised_from_id ? 'Exercised' : 'Bought', asOf: asOfLabel }
 }
 
-function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTerm, runner, dividend, income, plan, previewFor, selectedTargetPct, onSave, onDelete, onExercise, open, onToggle }) {
+function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTerm, runner, dividend, income, plan, previewFor, selectedTargetPct, onSave, onDelete, onExercise, open, onToggle, risks = null }) {
   const [editing, setEditing] = useState(false)
   const [exercising, setExercising] = useState(false)
   const [showTaxDetail, setShowTaxDetail] = useState(false)
@@ -1257,6 +1263,7 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
       )}
 
       <TimeStopBanner stop={stop} positionId={pos.id} />
+      <RiskNotices row={risks} positionId={pos.id} />
 
       {!noExitPlan && calc.tax_saved_by_waiting != null && (ltFits ? (
         <Notice id={`${pos.id}:tax-wait:${calc.long_term_date}`} tone="green"
@@ -1659,6 +1666,17 @@ function TimeStopBanner({ stop, positionId }) {
       Plan to exit or roll by {shortDate(stop.act_by)}, 6 months before expiry.
     </Notice>
   )
+}
+
+// Risk facts on the holding (owner, 2026-10-26): the nightly ticker_risks
+// row as dismissable notices — each fact's key carries its event date, so a
+// dismissal holds until the fact itself changes. Facts, never a verdict.
+function RiskNotices({ row, positionId }) {
+  const facts = holdingRiskFacts(row)
+  if (!facts.length) return null
+  return facts.map((f) => (
+    <Notice key={f.key} id={`${positionId}:risk:${f.key}`} tone={f.tone} title={f.title}>{f.body}</Notice>
+  ))
 }
 
 // One style for every card notice: a bold title and body at the same

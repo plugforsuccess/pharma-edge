@@ -1,0 +1,42 @@
+# Risk facts on holdings (owner, 2026-10-26): for every ticker a user holds
+# or has starred — the latest heavy-volume jump and whether it held, short
+# interest vs ~30 days earlier, cash runway → ticker_risks. Facts only.
+# Weekdays after the close; dispatch and branch pushes default to a dry run.
+
+name: Holding risks
+
+on:
+  schedule:
+    - cron: '20 22 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Compute and report without writing'
+        type: boolean
+        default: true
+  push:
+    branches-ignore: [main]
+    paths:
+      - scripts/holding-risks.mjs
+      - src/utils/holdingRisks.js
+      - scripts/lib/finra.mjs
+      - .github/workflows/holding-risks.yml
+
+jobs:
+  risks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Risk facts
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SEC_USER_AGENT: ${{ vars.SEC_USER_AGENT }}
+          DRY_RUN: ${{ github.event_name == 'schedule' && 'false' || github.event_name == 'push' && 'true' || inputs.dry_run }}
+        run: node scripts/holding-risks.mjs
