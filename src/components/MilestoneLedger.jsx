@@ -29,7 +29,10 @@ const STATE_TEXT = { met: 'Met', missed: 'Missed', overdue: 'Past due', pending:
 function Hero({ st }) {
   if (st.kind === 'met') return <div className="text-green-300"><Check size={22} strokeWidth={2.5} /></div>
   if (st.kind === 'missed') return <div className="text-red-300"><X size={22} strokeWidth={2.5} /></div>
-  if (st.kind === 'overdue') return <div className="text-xl font-semibold font-mono-tab text-red-300 leading-none">{Math.abs(st.daysLeft)}d<div className="text-[10px] font-sans font-normal text-red-300/80 mt-0.5">late</div></div>
+  if (st.kind === 'overdue' || (st.kind === 'unmentioned' && st.daysLeft < 0)) {
+    const c = st.kind === 'overdue' ? 'text-red-300' : 'text-amber-300'
+    return <div className={clsx('text-xl font-semibold font-mono-tab leading-none', c)}>{Math.abs(st.daysLeft)}d<div className={clsx('text-[10px] font-sans font-normal mt-0.5 opacity-80', c)}>late</div></div>
+  }
   // Open promises count down in the brand gold; past due is red.
   return <div className="text-xl font-semibold font-mono-tab leading-none text-amber-300">{st.daysLeft == null ? '—' : st.daysLeft === 0 ? 'now' : `${st.daysLeft}d`}</div>
 }
