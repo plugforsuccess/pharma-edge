@@ -71,6 +71,7 @@ export function riskRow({ bars, shorts = [], fin = null, sharesOut = null, asOf 
 
 const fmtDay = (d) => new Date(`${d}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
 const pct = (x, d = 0) => `${x >= 0 ? '+' : '−'}${Math.abs(x * 100).toFixed(d)}%`
+const mag = (x, d = 0) => `${Math.abs(x * 100).toFixed(d)}%`
 const price = (x) => `$${x >= 100 ? x.toFixed(0) : x.toFixed(2)}`
 const money = (x) => { const a = Math.abs(x); return a >= 1e9 ? `$${(a / 1e9).toFixed(1)}B` : a >= 1e6 ? `$${Math.round(a / 1e6)}M` : `$${Math.round(a / 1e3)}K` }
 const quarters = (q) => (q < 1 ? 'under a quarter' : q < 1.5 ? 'about a quarter' : `about ${Math.round(q)} quarters`)
@@ -83,7 +84,7 @@ export function holdingRiskFacts(row, p = HOLDING_RISK) {
   const c = row.catalyst
   if (c?.brokeOn) {
     out.push({ key: `catalyst:${c.event}:${c.brokeOn}`, tone: 'amber', title: `Hasn't held its ${fmtDay(c.event)} jump`,
-      body: `Rose ${pct(c.jump)} that day on heavy volume, then closed below that day's ${price(c.level)} on ${fmtDay(c.brokeOn)}.` })
+      body: `Rose ${mag(c.jump)} that day on heavy volume, then closed below that day's ${price(c.level)} on ${fmtDay(c.brokeOn)}.` })
   } else if (c) {
     out.push({ key: `catalyst:${c.event}:held`, tone: 'neutral', title: `Jumped ${pct(c.jump)} on ${fmtDay(c.event)} on heavy volume`,
       body: `Still above that day's close (${price(c.level)}) so far.` })
@@ -93,13 +94,13 @@ export function holdingRiskFacts(row, p = HOLDING_RISK) {
     const fell = s.priceChange != null && s.priceChange <= -p.priceDrop
     const held = s.priceChange != null && !fell
     out.push({ key: `shorts:${s.to}`, tone: fell ? 'amber' : 'neutral', title: `Short interest ${pct(s.siChange)} since ${fmtDay(s.from)}`,
-      body: [fell ? `The price fell ${pct(s.priceChange)} over the same span.` : held ? `The price held over the same span (${pct(s.priceChange)}).` : null,
+      body: [fell ? `The price fell ${mag(s.priceChange)} over the same span.` : held ? `The price held over the same span (${pct(s.priceChange)}).` : null,
         s.siPct != null ? `Shorts are ${Math.round(s.siPct * 100)}% of the shares (as of ${fmtDay(s.to)}).` : null].filter(Boolean).join(' ') })
   }
   const r = row.runway
   if (r && r.quarters < p.runwayShow) {
     out.push({ key: `runway:${r.periodEnd ?? row.as_of}`, tone: r.quarters < p.runwayTight ? 'amber' : 'neutral', title: `Cash covers ${quarters(r.quarters)} of spending`,
-      body: `${money(r.cash)} on hand at ${r.periodEnd ? fmtDay(r.periodEnd) : 'the last report'} against ${money(r.burn)} spent in the latest quarter. Companies in this spot usually raise money by selling shares.` })
+      body: `${money(r.cash)} on hand at ${r.periodEnd ? fmtDay(r.periodEnd) : 'the last report'} against ${money(r.burn)} spent in the latest quarter. Companies in this spot often raise money by selling more shares.` })
   }
   return out
 }
