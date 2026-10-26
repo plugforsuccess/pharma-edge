@@ -140,11 +140,12 @@ export default function MilestoneLedger({ ticker, positionId, cashLine = null })
                         <span className={clsx('shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold', PILL[st.kind])}>{STATE_TEXT[st.kind]}</span>
                         <button type="button" onClick={() => remove(row)} aria-label="Remove milestone" className="shrink-0 -mr-1 -mt-1 min-h-[28px] min-w-[28px] flex items-center justify-center text-muted hover:text-fg"><X size={12} /></button>
                       </div>
-                      <div className="mt-0.5 text-xs text-subtle truncate">
-                        {slips > 0 ? <><span className="text-amber-300">Moved {slips}× · </span>{fmtDay(row.due_date)} → {fmtDayYear(dueOf(row))}</> : fmtDayYear(dueOf(row))}
-                        {row.source ? ` · ${row.source}` : ''}
-                        {st.kind === 'met' && st.late > 0 ? ` · ${st.late} days late` : ''}
+                      <div className={clsx('mt-0.5 text-sm font-semibold font-mono-tab', st.kind === 'overdue' ? 'text-red-300' : st.kind === 'unmentioned' ? 'text-amber-300' : 'text-fg')}>
+                        {fmtDayYear(dueOf(row))}
+                        {slips > 0 && <span className="ml-2 text-xs font-sans font-medium text-amber-300">moved {slips}× · was {fmtDay(row.due_date)}</span>}
+                        {st.kind === 'met' && st.late > 0 && <span className="ml-2 text-xs font-sans font-medium text-amber-300">{st.late} days late</span>}
                       </div>
+                      {row.source && <div className="text-xs text-muted truncate">{row.source}</div>}
                       {row.evidence && isOpen && <div className="text-xs text-muted truncate">Confirms: {row.evidence}</div>}
                       {isOpen && (
                         <div className="mt-2 flex flex-wrap gap-1.5 items-center">
