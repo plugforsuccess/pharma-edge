@@ -119,6 +119,7 @@ function worthFrom(t) {
   return {
     other_assets: t?.other_assets != null ? String(t.other_assets) : '',
     other_debts: t?.other_debts != null ? String(t.other_debts) : '',
+    slip_rule: t?.slip_rule ?? '',
   }
 }
 
@@ -367,6 +368,7 @@ export default function Settings() {
         selected_target_pct: goal,
         other_assets: num(worth.other_assets),
         other_debts: num(worth.other_debts),
+        slip_rule: worth.slip_rule.trim() || null,
         birth_date: about.birth_date || null,
         sex: about.sex || null,
         race_ethnicity: about.race_ethnicity || null,
@@ -514,6 +516,14 @@ export default function Settings() {
         </div>
         <p className="text-xs text-muted mt-2">
           Counted in your net worth. Debts are cards, student, car and personal loans; mortgages go on the property.
+        </p>
+      </Section>
+
+      <Section title="On a slip" id="slip-rule">
+        <Input label="Your rule when a promise slips" value={worth.slip_rule} onChange={(v) => setW('slip_rule', v)}
+          placeholder="e.g. Sell the whole position the day a promise slips" />
+        <p className="text-xs text-muted mt-2">
+          In your words. When a milestone on a holding is marked missed, not mentioned or moved, Home shows the fact and repeats this rule back to you. Cash Moves never supplies the rule.
         </p>
       </Section>
 

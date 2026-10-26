@@ -44,8 +44,9 @@ function Tile({ label, value, sub, tone = 'fg' }) {
   )
 }
 
-export default function MilestoneLedger({ ticker, positionId, cashLine = null }) {
-  const { user } = useAuth()
+export default function MilestoneLedger({ ticker, positionId = null, cashLine = null, compact = false }) {
+  const { user, profile } = useAuth()
+  const isAdmin = !!profile?.is_admin
   const [rows, setRows] = useState(null)
   const [open, setOpen] = useState(false)
   const [adding, setAdding] = useState(false)
@@ -59,16 +60,27 @@ export default function MilestoneLedger({ ticker, positionId, cashLine = null })
   useEffect(() => {
     let cancelled = false
     if (!user || !ticker) return undefined
-    supabase.from('holding_milestones').select('*').eq('user_id', user.id).eq('ticker', ticker).order('due_date')
-      .then(({ data, error }) => { if (!cancelled) setRows(error ? [] : data ?? []) })
+    // Own rows plus any published ledger for the ticker (an admin's rows,
+    // readable by every subscriber — RLS: holding_milestones_select_published).
+    supabase.from('holding_milestones').select('*').eq('ticker', ticker).or(`user_id.eq.${user.id},published.eq.true`).order('due_date')
+      .then(({ data, error }) => { if (!cancelled) setRows(error ? [] : (data ?? []).filter((r, i, a) => a.findIndex((x) => x.id === r.id) === i)) })
     return () => { cancelled = true }
   }, [user, ticker])
+  const mine = (row) => row.user_id === user?.id
+  const ownRows = (rows ?? []).filter(mine)
+  const publishedByOthers = (rows ?? []).some((r) => !mine(r))
+  const allPublished = ownRows.length > 0 && ownRows.every((r) => r.published)
+  async function setPublished(on) {
+    const { error } = await supabase.from('holding_milestones').update({ published: on, updated_at: new Date().toISOString() }).eq('user_id', user.id).eq('ticker', ticker)
+    if (error) { setErr(error.message); return }
+    setRows((r) => r.map((x) => (mine(x) ? { ...x, published: on } : x)))
+  }
 
   const sortRows = (r) => [...r].sort((a, b) => dueOf(a).localeCompare(dueOf(b)))
   async function add() {
     if (!form.title.trim() || !form.due) return
     setErr(null)
-    const { data, error } = await supabase.from('holding_milestones').insert({ user_id: user.id, ticker, position_id: positionId ?? null, title: form.title.trim(), due_date: form.due, source: form.source.trim() || null, evidence: form.evidence.trim() || null }).select().single()
+    const { data, error } = await supabase.from('holding_milestones').insert({ user_id: user.id, ticker, position_id: positionId ?? null, title: form.title.trim(), due_date: form.due, source: form.source.trim() || null, evidence: form.evidence.trim() || null, published: isAdmin && allPublished }).select().single()
     if (error) { setErr(error.message); return }
     setRows((r) => sortRows([...(r ?? []), data]))
     setForm({ title: '', due: '', source: '', evidence: '' }); setAdding(false)
@@ -92,7 +104,7 @@ export default function MilestoneLedger({ ticker, positionId, cashLine = null })
   const sum = ledgerSummary(rows ?? [], today)
   const n = rows?.length ?? 0
   return (
-    <div className="mb-4">
+    <div className={compact ? 'bg-card border border-border rounded-2xl p-5 mt-4' : 'mb-4'}>
       <button type="button" onClick={() => setOpen(true)} className="w-full text-left group">
         <div className="flex items-center justify-between">
           <div className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold">Promises</div>
@@ -124,12 +136,20 @@ export default function MilestoneLedger({ ticker, positionId, cashLine = null })
           </div>
           <button type="button" onClick={() => setOpen(false)} aria-label="Close" className="shrink-0 min-h-[44px] min-w-[44px] -mr-2 -mt-2 flex items-center justify-center text-subtle hover:text-fg"><X size={16} /></button>
         </div>
+        {isAdmin && ownRows.length > 0 && (
+          <label className="flex items-center justify-between gap-3 min-h-[44px] rounded-xl border border-border px-3 text-sm">
+            <span className="text-subtle">Publish this ledger to every subscriber</span>
+            <input type="checkbox" checked={allPublished} onChange={(e) => setPublished(e.target.checked)} className="h-5 w-5 accent-amber-400" />
+          </label>
+        )}
+        {publishedByOthers && <div className="text-xs text-subtle">Rows marked <span className="text-amber-300">Cash Moves</span> are published for every subscriber — dates management gave, as logged. Your own rows stay private.</div>}
         <div>
           {rows?.length > 0 && (
             <ul className="divide-y divide-border border border-border rounded-xl overflow-hidden">
               {rows.map((row) => {
                 const st = milestoneState(row, today)
-                const isOpen = st.kind !== 'met' && st.kind !== 'missed'
+                const own = mine(row)
+                const isOpen = own && st.kind !== 'met' && st.kind !== 'missed'
                 const slips = row.slips ?? 0
                 return (
                   <li key={row.id} className={clsx('px-3 py-3 flex gap-3', st.kind === 'overdue' && 'bg-red-500/5', st.kind === 'unmentioned' && 'bg-amber-500/5')}>
@@ -137,8 +157,9 @@ export default function MilestoneLedger({ ticker, positionId, cashLine = null })
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start gap-2">
                         <div className="flex-1 min-w-0 text-sm font-semibold text-fg leading-snug">{row.title}</div>
+                        {!own && <span className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold bg-amber-500/15 text-amber-300">Cash Moves</span>}
                         <span className={clsx('shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold', PILL[st.kind])}>{STATE_TEXT[st.kind]}</span>
-                        <button type="button" onClick={() => remove(row)} aria-label="Remove milestone" className="shrink-0 -mr-1 -mt-1 min-h-[28px] min-w-[28px] flex items-center justify-center text-muted hover:text-fg"><X size={12} /></button>
+                        {own && <button type="button" onClick={() => remove(row)} aria-label="Remove milestone" className="shrink-0 -mr-1 -mt-1 min-h-[28px] min-w-[28px] flex items-center justify-center text-muted hover:text-fg"><X size={12} /></button>}
                       </div>
                       <div className={clsx('mt-0.5 text-sm font-semibold font-mono-tab', st.kind === 'overdue' ? 'text-red-300' : isOpen ? 'text-amber-300' : 'text-subtle')}>
                         {fmtDayYear(dueOf(row))}
