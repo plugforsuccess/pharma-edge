@@ -197,3 +197,93 @@ the typical 6-month return (+14.8%): squeezes — volatility, not direction,
 the fourth test with that shape. Consequence: research only; no
 "insiders selling" / "heavily shorted" label. Data loaders
 (`scripts/lib/form345.mjs`, `scripts/lib/finra.mjs`) stay for later tests.
+
+## 2026-10-26 — the Fade Screen test (owner spec, 2026-10-26: "Go")
+
+Pre-registered (preregistration.md, "the Fade Screen test" + the same-day
+addendum: factor 5 from SEC submissions, the "raised within 6 months"
+outcome). Universe built from SEC public-float frames ($100M–$2B in any
+mid-year frame 2022–2025): 1,982 filers with a listed ticker → 678
+pre-revenue today (annual revenue < $25M or none) → 658 with ≥ 300 daily
+bars. Form 4: 21 quarters, 515 issuers with trades; FINRA short interest
+655 of 658 symbols; SEC submissions 658 of 658. Stock-months at SPY month
+starts, point in time: 12,094 (train 3,153 / test 8,941), 570 tickers.
+Base rates on test: fell 40% within 6 months 24.4%, doubled 13.9%, 6M
+median +0.8%. Workflow run 40352484409 (`fade-test` artifact).
+
+**Verdict on the pre-registered mark (test, score ≥ 70): FAIL.** Three of
+the four conditions pass, the doublers condition fails.
+
+| condition (test, 2024 →) | required | found |
+|---|---|---|
+| months flagged | ≥ 100 | 246 |
+| fell 40% within 6 months | ≥ 2× base (48.8%) | 57.7% (2.37×) |
+| doubled within 6 months | ≤ base (13.9%) | **32.9% (2.37×)** |
+| 6M median vs universe | ≥ 10 pts under | −22.2% vs +0.8% (23 pts) |
+
+Per factor and tier on test:
+
+| flag | months | fell 40% | doubled | caught | 6M median |
+|---|---|---|---|---|---|
+| score ≥ 70 (actionable) | 246 | 57.7% | 32.9% | 6.5% | −22.2% |
+| score ≥ 50 (watch) | 1,683 | 50.6% | 28.5% | 39.1% | −17.2% |
+| score ≥ 30 (caution) | 3,327 | 43.3% | 25.5% | 66.1% | −9.6% |
+| 1 shorts pressing (SI up + price down) | 692 | 44.1% | 23.8% | 14.0% | −11.0% |
+| 1 shorts up, price not down | 2,128 | 21.5% | 12.1% | 21.0% | +3.1% |
+| 2 failed catalyst (mechanical) | 2,560 | 45.5% | 26.6% | 53.4% | −12.5% |
+| 3 runway < 3 q | 2,768 | 41.0% | 24.0% | 52.1% | −7.5% |
+| 4 CEO / CFO sale, no buy | 901 | 29.3% | 17.8% | 12.1% | −0.6% |
+| 5 shelf / ATM on file | 4,276 | 32.6% | 18.3% | 63.9% | −1.7% |
+| 6 trend break | 1,622 | 36.2% | 19.9% | 26.9% | −6.5% |
+| 1 + 2 | 305 | 55.4% | 32.5% | 7.7% | −18.4% |
+| 3 + 5 | 2,239 | 43.6% | 24.5% | 44.8% | −8.8% |
+
+Train (< 2024) has the same shape on 33 actionable months (57.6% fell,
+30.3% doubled, −13.3% median).
+
+Reading. Unlike the weakness and insider tests, this score **does** point
+down: the typical actionable stock is 22% lower six months on, and the
+40%-fall rate is 2.4× the universe — the first direction signal any of the
+tests has found. But one actionable stock in three also **doubles** inside
+the same six months (2.4× the universe's rate, the opposite of the
+pre-set condition), so the flag selects violent stocks, not just falling
+ones. A long put at the spec's size would be stopped out or run to zero
+on that third; the spec's trade cannot be called supported. Factors 1 + 2
+(shorts pressing + failed catalyst) carry almost all of it; insider
+selling (factor 4) adds nothing again (−0.6% median, 1.2× fall rate),
+and factor 5 (a shelf on file) is on 64% of fallers but also on nearly
+half the universe. Short interest rising while the price holds (the
+"shorts up only" row) is mildly **positive** (+3.1%, fewer falls than
+base).
+
+Raised within 6 months (test; base 33.6% of stock-months): runway < 5 q
+51.0% (1.52×; pre-set ≥ 2× — **not met**), runway + shelf 55.9% (1.66×;
+pre-set ≥ 3× — **not met**), score ≥ 70 62.2% (1.85×). Lead time: of
+1,829 raises on test, 68% had the runway flag lit at the prior month start,
+but the median lead from the flag's first month is 440 days — the flag
+stays on for over a year, so it is a description of the company (it burns
+cash) rather than a timing signal; the stock fell a median 39.9% over that
+lead and a median 3.2% in the raise week. A raise can be told early only
+as "this company will raise at some point", which is already public from
+its balance sheet.
+
+AIRJ (the spec's worked example), scored mechanically month by month: 0 in
+Feb–Mar 2024 while it fell 53% over the next six months; 40–50 through
+mid-2024 (fell 47–55%); its only 70 was Dec 2025, after which it rose 84%.
+The walkthrough in the spec does not reproduce from the inputs as
+defined.
+
+Caveats: survivors only (delisted names missing — the true faller rate is
+higher, and the doubler share among all names somewhat lower, but the
+survivor doublers are real); factor 2 is the mechanical event test, no
+milestone ledger; factor 5 is shelf / supplement only; FINRA data is
+bi-monthly and lags; one bull market in the test period.
+
+Consequence (as pre-registered): no Fade Screen tier, label or put trade
+ships. The failed-catalyst and shorts-pressing facts could be shown as
+**risk facts** on a holding (wording like the risk flags, never a verdict)
+if the owner wants them — a separate decision. Modules
+(`src/utils/fade.js`, `scripts/lib/secUniverse.mjs`,
+`scripts/lib/secFilings.mjs`) stay for later tests. Owner also asked
+about delisted-inclusive price data: this result does not justify buying
+it (the failure is the doublers, who are in the data).
