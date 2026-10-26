@@ -2232,6 +2232,40 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   by kind (ROC shown as due at sale); the rate breakdown
   (`components/RateBreakdown.jsx`, shared with Portfolio's View rates).
 
+## Risk facts on holdings + the milestone ledger (owner, 2026-10-26)
+
+After the Fade Screen test (`docs/signal-engine/variants.md`, 2026-10-26:
+FAIL on the pre-registered doublers condition — the score points down but
+one actionable stock in three also doubles) the owner shipped the two
+factors that carried it as **plain facts on a holding — no tier, no verdict
+wording**, and kept runway as a displayed fact (its 440-day lead is a
+balance sheet, not a timing signal).
+- **`ticker_risks`** (ticker PK; authenticated SELECT, service-role write):
+  one row per ticker a user holds (open share / option rows) or has starred,
+  written by `scripts/holding-risks.mjs` in
+  `.github/workflows/holding-risks.yml` (weekdays 22:20 UTC; dispatch and
+  branch pushes default to a dry run). `catalyst` = the latest close up ≥ 10%
+  on ≥ 3× volume within 60 sessions and whether a later close undercut it;
+  `shorts` = FINRA short interest vs the settlement ≥ 30 days earlier, the
+  price over that span, % of shares out; `runway` = cash ÷ the latest
+  quarter's operating burn (SEC XBRL). Funds are skipped. Math + copy in
+  `src/utils/holdingRisks.js` (`riskRow`, `holdingRiskFacts`;
+  `npm run holdingrisks:check`): "Hasn't held its Jul 2 jump", "Short
+  interest +25% since Aug 29 · The price fell 18% over the same span", "Cash
+  covers about 4 quarters of spending" (shown under 8 quarters; amber under
+  3). Portfolio shows each as a dismissable `Notice` on the card
+  (`RiskNotices`, key = the event's date so a dismissal holds until the fact
+  changes); the entry chart shows a "Risks to watch" card
+  (`components/RiskFacts.jsx`, `useTickerRisks`).
+- **Milestone ledger** — `holding_milestones` (own rows, RLS; per user ×
+  ticker, optional position id): what the company promised and when,
+  marked met / missed / delayed (new date). `src/utils/milestones.js`
+  (`milestoneState`, `ledgerSummary`, `ledgerLine`;
+  `npm run milestones:check`) states the record — "1 of 4 met on time · 2
+  slipped, 77 days on average · 1 missed · 1 past due with no word".
+  `components/MilestoneLedger.jsx` on every share / option holding card
+  (not crypto). The ledger never feeds a score.
+
 ## NIGHTFLOW (`/orderflow`) — order-flow intelligence
 
 Built 2026-10-08 (owner: "NIGHTFLOW — Order Flow Intelligence Engine").
