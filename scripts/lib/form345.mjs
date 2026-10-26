@@ -11,6 +11,7 @@ import { createInterface } from 'node:readline'
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { secJson } from './sec.mjs'
+import { insiderRole } from '../../src/utils/fade.js'
 
 const UA = process.env.SEC_USER_AGENT || 'Cash Moves research admin@cashmoves.io'
 const MON = { JAN: '01', FEB: '02', MAR: '03', APR: '04', MAY: '05', JUN: '06', JUL: '07', AUG: '08', SEP: '09', OCT: '10', NOV: '11', DEC: '12' }
@@ -88,7 +89,9 @@ export async function loadForm345(wanted, { dir = '.form345', from = '2021q1', l
       if (wanted.has(sym)) acc.set(r.ACCESSION_NUMBER, { filed: isoDate(r.FILING_DATE), symbol: sym })
     }
     const owner = new Map()
-    for await (const r of tsv(own)) if (acc.has(r.ACCESSION_NUMBER) && !owner.has(r.ACCESSION_NUMBER)) owner.set(r.ACCESSION_NUMBER, r.RPTOWNERCIK || r.RPTOWNERNAME)
+    // One owner per filing (joint filings are rare); the role comes from the
+    // relationship + title columns (Fade Screen: CEO / CFO / officer / director).
+    for await (const r of tsv(own)) if (acc.has(r.ACCESSION_NUMBER) && !owner.has(r.ACCESSION_NUMBER)) owner.set(r.ACCESSION_NUMBER, { id: r.RPTOWNERCIK || r.RPTOWNERNAME, role: insiderRole(r.RPTOWNER_RELATIONSHIP ?? '', r.RPTOWNER_TITLE ?? ''), title: r.RPTOWNER_TITLE ?? '' })
     let n = 0
     for await (const r of tsv(tr)) {
       const a = acc.get(r.ACCESSION_NUMBER)
@@ -98,7 +101,8 @@ export async function loadForm345(wanted, { dir = '.form345', from = '2021q1', l
       const shares = Number(r.TRANS_SHARES), price = Number(r.TRANS_PRICEPERSHARE)
       if (!(shares > 0)) continue
       if (!trades.has(a.symbol)) trades.set(a.symbol, [])
-      trades.get(a.symbol).push({ filed: a.filed, date: isoDate(r.TRANS_DATE), code, shares, price: price > 0 ? price : 0, owner: owner.get(r.ACCESSION_NUMBER) ?? r.ACCESSION_NUMBER })
+      const o = owner.get(r.ACCESSION_NUMBER)
+      trades.get(a.symbol).push({ filed: a.filed, date: isoDate(r.TRANS_DATE), code, shares, price: price > 0 ? price : 0, owner: o?.id ?? r.ACCESSION_NUMBER, role: o?.role ?? 'other', title: o?.title ?? '' })
       n++
     }
     quarters.push(q)

@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import clsx from 'clsx'
 
 // Centered modal wrapper. Standardised backdrop + ESC handling +
@@ -59,7 +60,12 @@ export default function Modal({
     : accent === 'green' ? 'border-green-700/60'
     : 'border-amber-400/40'
 
-  return (
+  // Rendered on document.body: Layout's main column carries a translate3d
+  // (an iOS paint hack), and a transformed ancestor turns position: fixed
+  // into "fixed to that box" — a modal opened after scrolling landed off
+  // screen (owner, 2026-10-26, the Promises modal). TickerDrawer already
+  // portals for the same reason.
+  return createPortal(
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center p-4"
       role="dialog"
@@ -81,6 +87,7 @@ export default function Modal({
       >
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

@@ -197,3 +197,150 @@ the typical 6-month return (+14.8%): squeezes — volatility, not direction,
 the fourth test with that shape. Consequence: research only; no
 "insiders selling" / "heavily shorted" label. Data loaders
 (`scripts/lib/form345.mjs`, `scripts/lib/finra.mjs`) stay for later tests.
+
+## 2026-10-26 — the Fade Screen test (owner spec, 2026-10-26: "Go")
+
+Pre-registered (preregistration.md, "the Fade Screen test" + the same-day
+addendum: factor 5 from SEC submissions, the "raised within 6 months"
+outcome). Universe built from SEC public-float frames ($100M–$2B in any
+mid-year frame 2022–2025): 1,982 filers with a listed ticker → 678
+pre-revenue today (annual revenue < $25M or none) → 658 with ≥ 300 daily
+bars. Form 4: 21 quarters, 515 issuers with trades; FINRA short interest
+655 of 658 symbols; SEC submissions 658 of 658. Stock-months at SPY month
+starts, point in time: 12,094 (train 3,153 / test 8,941), 570 tickers.
+Base rates on test: fell 40% within 6 months 24.4%, doubled 13.9%, 6M
+median +0.8%. Workflow run 40352484409 (`fade-test` artifact).
+
+**Verdict on the pre-registered mark (test, score ≥ 70): FAIL.** Three of
+the four conditions pass, the doublers condition fails.
+
+| condition (test, 2024 →) | required | found |
+|---|---|---|
+| months flagged | ≥ 100 | 246 |
+| fell 40% within 6 months | ≥ 2× base (48.8%) | 57.7% (2.37×) |
+| doubled within 6 months | ≤ base (13.9%) | **32.9% (2.37×)** |
+| 6M median vs universe | ≥ 10 pts under | −22.2% vs +0.8% (23 pts) |
+
+Per factor and tier on test:
+
+| flag | months | fell 40% | doubled | caught | 6M median |
+|---|---|---|---|---|---|
+| score ≥ 70 (actionable) | 246 | 57.7% | 32.9% | 6.5% | −22.2% |
+| score ≥ 50 (watch) | 1,683 | 50.6% | 28.5% | 39.1% | −17.2% |
+| score ≥ 30 (caution) | 3,327 | 43.3% | 25.5% | 66.1% | −9.6% |
+| 1 shorts pressing (SI up + price down) | 692 | 44.1% | 23.8% | 14.0% | −11.0% |
+| 1 shorts up, price not down | 2,128 | 21.5% | 12.1% | 21.0% | +3.1% |
+| 2 failed catalyst (mechanical) | 2,560 | 45.5% | 26.6% | 53.4% | −12.5% |
+| 3 runway < 3 q | 2,768 | 41.0% | 24.0% | 52.1% | −7.5% |
+| 4 CEO / CFO sale, no buy | 901 | 29.3% | 17.8% | 12.1% | −0.6% |
+| 5 shelf / ATM on file | 4,276 | 32.6% | 18.3% | 63.9% | −1.7% |
+| 6 trend break | 1,622 | 36.2% | 19.9% | 26.9% | −6.5% |
+| 1 + 2 | 305 | 55.4% | 32.5% | 7.7% | −18.4% |
+| 3 + 5 | 2,239 | 43.6% | 24.5% | 44.8% | −8.8% |
+
+Train (< 2024) has the same shape on 33 actionable months (57.6% fell,
+30.3% doubled, −13.3% median).
+
+Reading. Unlike the weakness and insider tests, this score **does** point
+down: the typical actionable stock is 22% lower six months on, and the
+40%-fall rate is 2.4× the universe — the first direction signal any of the
+tests has found. But one actionable stock in three also **doubles** inside
+the same six months (2.4× the universe's rate, the opposite of the
+pre-set condition), so the flag selects violent stocks, not just falling
+ones. A long put at the spec's size would be stopped out or run to zero
+on that third; the spec's trade cannot be called supported. Factors 1 + 2
+(shorts pressing + failed catalyst) carry almost all of it; insider
+selling (factor 4) adds nothing again (−0.6% median, 1.2× fall rate),
+and factor 5 (a shelf on file) is on 64% of fallers but also on nearly
+half the universe. Short interest rising while the price holds (the
+"shorts up only" row) is mildly **positive** (+3.1%, fewer falls than
+base).
+
+Raised within 6 months (test; base 33.6% of stock-months): runway < 5 q
+51.0% (1.52×; pre-set ≥ 2× — **not met**), runway + shelf 55.9% (1.66×;
+pre-set ≥ 3× — **not met**), score ≥ 70 62.2% (1.85×). Lead time: of
+1,829 raises on test, 68% had the runway flag lit at the prior month start,
+but the median lead from the flag's first month is 440 days — the flag
+stays on for over a year, so it is a description of the company (it burns
+cash) rather than a timing signal; the stock fell a median 39.9% over that
+lead and a median 3.2% in the raise week. A raise can be told early only
+as "this company will raise at some point", which is already public from
+its balance sheet.
+
+AIRJ (the spec's worked example), scored mechanically month by month: 0 in
+Feb–Mar 2024 while it fell 53% over the next six months; 40–50 through
+mid-2024 (fell 47–55%); its only 70 was Dec 2025, after which it rose 84%.
+The walkthrough in the spec does not reproduce from the inputs as
+defined.
+
+Caveats: survivors only (delisted names missing — the true faller rate is
+higher, and the doubler share among all names somewhat lower, but the
+survivor doublers are real); factor 2 is the mechanical event test, no
+milestone ledger; factor 5 is shelf / supplement only; FINRA data is
+bi-monthly and lags; one bull market in the test period.
+
+Consequence (as pre-registered): no Fade Screen tier, label or put trade
+ships. The failed-catalyst and shorts-pressing facts could be shown as
+**risk facts** on a holding (wording like the risk flags, never a verdict)
+if the owner wants them — a separate decision. Modules
+(`src/utils/fade.js`, `scripts/lib/secUniverse.mjs`,
+`scripts/lib/secFilings.mjs`) stay for later tests. Owner also asked
+about delisted-inclusive price data: this result does not justify buying
+it (the failure is the doublers, who are in the data).
+
+### 2026-10-26, follow-up variants (owner: "Exclude flagged months with a dated binary … Drop insider selling and the shelf flag, re-weight to the two factors that carry it")
+
+Pre-registered the same day (preregistration.md, second addendum). Run
+40358351354. Binary-prone industries by SEC SIC code (pharma / diagnostics
+/ biologics / bio research; vehicles / aircraft / parts / space) = 34% of
+test months (SIC known for 94%). Same four conditions on each flag.
+
+| flag (test, 2024 →) | months | fell 40% | base | doubled | base | 6M median | universe | verdict |
+|---|---|---|---|---|---|---|---|---|
+| A  score ≥ 70, **not** binary-prone | 118 | 57.6% | 15.2% | **37.3%** | 9.4% | −23.4% | +2.2% | FAIL |
+| A' score ≥ 70, binary-prone | 128 | 57.8% | 42.2% | 28.9% | 22.7% | −19.6% | −7.9% | FAIL |
+| B  two factors (catalyst 25 + SI ≥ 10) | 953 | 50.6% | 24.4% | 28.2% | 13.9% | −17.2% | +0.8% | FAIL |
+| B' two factors, both full | 305 | 55.4% | 24.4% | 32.5% | 13.9% | −18.4% | +0.8% | FAIL |
+| C  two factors ≥ 70, not binary-prone | 452 | 49.8% | 15.2% | 31.4% | 9.4% | −17.2% | +2.2% | FAIL |
+| C' both full, not binary-prone | 152 | 56.6% | 15.2% | 34.2% | 9.4% | −19.6% | +2.2% | FAIL |
+
+Actionable months by SIC (n · doubled · fell): 2834* 70·15·41, 2836*
+42·16·21, 3569 13·3·10, 3690 9·4·5, 7371 8·2·5, 3841 7·4·5, 4522 7·3·7
+(* binary-prone).
+
+Reading. **Both hypotheses are rejected.** Outside the binary-prone
+industries the doubler rate is *higher* relative to its base (37% vs 9%,
+4×), so the doublers are not FDA dates, certifications or first deliveries;
+they are the same violent names doubling on anything. Dropping the four
+weaker factors moves nothing: the two carrying factors alone double at 2×
+base (28–33%) exactly as the full score did. Per the owner's pre-set rule
+("if that doesn't move the doubler rate, it confirms this is
+variance-finding, not direction-finding"), **the scored version is closed.**
+What ships (owner, same day): the two facts as dated sentences on a holding
+and the milestone ledger, no score, no tier, no verdict —
+`docs/holdings/milestone-ledger.md`.
+
+### 2026-10-26, the long-side inverse (owner spec v2: "pre-register and test the long-side inverse … before any of it is shown to a holder")
+
+Pre-registered the same day (preregistration.md, third addendum). Run
+40360314832. Catalyst held = the latest event day ≥ 20 sessions back with
+no close since below its close; shorts covering = SI down ≥ 15% vs the
+settlement ≥ 30 days earlier while the close is up ≥ 10%. Pass: doublers
+≥ 2× base, fallers ≤ base, 6M median ≥ 10 points **above** the universe,
+≥ 100 months.
+
+| flag (test, 2024 →) | months | fell 40% | base | doubled | base | 6M median | universe | verdict |
+|---|---|---|---|---|---|---|---|---|
+| D  held + covering | 8 | 50.0% | 24.4% | 25.0% | 14.0% | +9.4% | +0.9% | INCONCLUSIVE |
+| D1 catalyst held alone | 102 | 40.2% | 24.4% | 11.8% | 14.0% | +2.1% | +0.9% | FAIL |
+| D2 shorts covering alone | 318 | 29.6% | 24.4% | 19.8% | 14.0% | −8.3% | +0.9% | FAIL |
+| D' both, not binary-prone | 4 | — | — | — | — | — | — | INCONCLUSIVE |
+
+Reading. The pair almost never co-occurs (8 months in two years), so the
+inverse as specified cannot be read. Each half alone fails in the wrong
+direction: a catalyst that **held** 20 sessions is followed by *more* 40%
+falls than the universe (40% vs 24%) and fewer doublers; shorts covering
+into a rising price is followed by a −8% median. Nothing long-side is
+shown to a holder, as pre-registered; the card stays the ledger plus the
+two risk facts. **The Fade Screen test series is closed** (primary, two
+follow-ups, inverse — all recorded above).

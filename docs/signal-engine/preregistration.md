@@ -436,3 +436,124 @@ years; Form 4 symbols as filed (a few issuers file without one); FINRA
 history depth as served by its API (skipped, and said, if it refuses the
 runner). Consequence: pass → an "Insiders selling" / "Heavily shorted" fact
 on the row with its record, never a trade; fail → research only.
+
+## Added 2026-10-26 — the Fade Screen test (owner spec, 2026-10-26: "Go")
+
+The owner's Fade Screen spec (pre-revenue small caps whose story holds on
+paper while fundamentals and insider behaviour deteriorate; the AIRJ case)
+scored six factors to 100 by judgment. This test asks whether that score,
+computed mechanically and point in time, separates the names that went on
+to fall from the names that went on to double. Fixed before the code runs.
+
+**Universe (built from SEC data, never hand-picked):** every filer whose
+public float (dei:EntityPublicFloat, the mid-year frame for 2022–2025) sat
+in $100M–$2B in any of those years, mapped to a listed ticker, whose latest
+annual revenue known by the day is under $25M (or no revenue tag at all),
+with 20-day average dollar volume over $1M that day. Survivorship: only
+tickers listed today have price history — the names that fell to delisting
+are missing, which hides exactly the outcome being tested. A pass on
+survivors is provisional until delisted-inclusive prices are bought.
+
+**Factors at each month's first close (spec weights, unchanged):**
+1. **Shorts pressing (25):** FINRA short interest up ≥ 15% vs the settlement
+   ~30 days earlier → 10; and the close down ≥ 10% over the same span → 25.
+2. **Failed catalyst (25):** mechanical event day = a close up ≥ 10% on volume
+   ≥ 3× its prior 20-day average, within the last 60 sessions; fires when a
+   later close within 20 sessions of the event sits below the event close.
+   (The milestone ledger's slip points need hand-entered promises and would
+   carry hindsight; not in the test.)
+3. **Runway (15):** cash and equivalents ÷ the latest quarter's operating
+   cash burn (10-Q / 10-K XBRL, YTD rows differenced); under 3 quarters → 15,
+   under 5 → 8; positive cash flow → 0.
+4. **Insider selling (15):** an open-market sale (Form 4 code S) filed in the
+   prior 60 days with no open-market buy in that window; CEO or CFO → 15,
+   another officer → 8; directors and 10% holders → 0 (the spec says officer).
+5. **Capital redirect (10):** not built in this run (8-K / S-3 feed) → 0.
+   The reachable maximum is therefore 90.
+6. **Trend break (10):** the close below the 50-day for 10+ sessions and the
+   50-day below the 200-day.
+Tiers as the spec: 50 watch, 70 actionable. The catalyst blackout needs the
+ledger (not modelled); the squeeze guard's borrow rate isn't available —
+short interest ÷ shares outstanding is reported instead.
+
+**Outcomes within 126 trading days:** fell ≥ 40% from the close to a later
+low ("faller"); rose ≥ 100% to a later high ("doubler"); the 6-month return.
+
+**Reading rule:** train < 2024, test 2024 →, the spec's weights, no refit
+in this run. **Pass** on test, all four, for score ≥ 70: fallers at ≥ 2× the
+universe base rate; doublers at or below the base rate; 6-month median ≥ 10
+points under the universe median; ≥ 100 actionable stock-months. The spec's
+own framing — of the stocks that fell 40%+, how many had scored 70+ before,
+and of the doublers how many — is reported as recall beside it. Each factor
+alone and score ≥ 50 are reported too. **No edge:** any of the four fails.
+Consequence: pass → the score and its factors shown as facts to subscribers
+(no trade structure; puts stay owner-only like the spread bot) and the
+8-K feed + ledger built next; fail → the weights are refit on train only and
+re-read on test once, then research only.
+
+**Added 2026-10-26, same day (owner: "Yes all of the above") — Factor 5 and
+the raise outcome.** Fixed before the second run. **Factor 5, capital
+redirect (10):** from SEC's per-company submissions feed — an S-3 / S-3ASR
+shelf filed within the prior 365 days, or a 424B5 prospectus supplement
+(an offering or an ATM program) within the prior 180 days → 10. The spec's
+"acquisition spending 25%+ of cash" needs the 8-K's text and is not in the
+test. The reachable maximum becomes 100. **A second outcome, "raised within
+126 trading days":** an 8-K with item 3.02 (unregistered sale of equity) or
+a 424B5 filed after the month start (a 424B5 also marks an ATM program's
+start, which is counted and said). **Pre-set reading, reported beside the
+score verdict, not gating it:** on test, months with runway under 5
+quarters see a raise within 6 months at ≥ 2× the universe rate; runway plus
+a shelf or ATM on file at ≥ 3×. Lead time = days from the first month the
+runway flag was lit (an unbroken run) to the raise filing; the stock's move
+from that month start to the day before the filing, and from the day before
+to five sessions after, are reported as facts.
+
+**Added 2026-10-26, after the first result (FAIL on the doublers condition;
+owner: "Exclude flagged months with a dated binary inside the 6-month window
+… Drop insider selling and the shelf flag, re-weight to the two factors that
+carry it, and re-run. Fewer factors, same conditions."). Fixed before the
+second run.** Two variants, each read on the same four conditions on test
+(fallers ≥ 2× base, doublers ≤ base, 6M median ≥ 10 points under the
+universe, ≥ 100 months):
+
+- **A — no dated binary.** No PDUFA / certification / first-delivery
+  calendar exists in the data, so the proxy for "a dated binary inside the
+  window" is the **industry**: SEC SIC codes 2834, 2835, 2836, 8731
+  (pharma, diagnostics, biologics, biological research — FDA dates and
+  readouts) and 3711, 3713, 3714, 3721, 3724, 3728, 3760 (vehicles,
+  aircraft, aircraft parts, space — certification and first delivery) are
+  **binary-prone**; the subset is every other industry. Score ≥ 70 is read
+  on the not-binary-prone subset (A) and, for contrast, on the binary-prone
+  subset (A'). If the doubler rate on A is still at or above the base rate,
+  the hypothesis that doublers are the dated binaries is rejected.
+- **B — two factors.** Score = (shorts pressing + failed catalyst) × 2, so
+  the reachable maximum is still 100; ≥ 70 = a failed catalyst with short
+  interest up at least 15% (B), and 100 = both at full weight (B'). Runway,
+  insider selling, the shelf flag and the trend break are dropped from the
+  score. If B's doubler rate does not fall to the base rate, the score is
+  finding variance, not direction.
+- **C** = B on the not-binary-prone subset.
+
+Also reported: the actionable months by SIC code (count, doublers,
+fallers) so the clustering can be seen rather than assumed. Decided in
+advance: **runway leaves the score whatever the result** (its 440-day lead
+is a balance-sheet description, not a timing signal) and stays a displayed
+fact; "failed catalyst" and "shorts pressing" ship as plain risk facts on a
+holding (no tier, no verdict wording) whatever the result — that decision
+is the owner's and does not depend on this run.
+
+**Added 2026-10-26, same day (owner spec v2: "pre-register and test the
+long-side inverse (catalyst held, shorts covering, ledger clean) before any
+of it is shown to a holder"). Fixed before the run.** The ledger has no
+history to test (it is hand-entered from calls), so the inverse is the two
+mechanical inputs mirrored: **catalyst held** = the latest event day (a close
+up ≥ 10% on ≥ 3× volume within 60 sessions) is ≥ 20 sessions back and no
+close since has undercut its close; **shorts covering** = short interest
+down ≥ 15% vs the settlement ≥ 30 days earlier while the close is up ≥ 10%
+over the same span. Flag D = both; D1 / D2 = each alone; D' = both on the
+not-binary-prone subset. Same outcomes and window. **Pass** on test, all
+four: doublers ≥ 2× the base rate; fallers at or below the base rate;
+6-month median ≥ 10 points **above** the universe; ≥ 100 months. **Fail:**
+any one misses. Consequence: pass → the two inverse facts may be shown on a
+holding as dated facts (still no verdict); fail → nothing long-side is
+shown, and the wording stays as the two risk facts only.

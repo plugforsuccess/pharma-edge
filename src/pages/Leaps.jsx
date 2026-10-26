@@ -19,6 +19,9 @@ import NumberInput from '../components/NumberInput'
 import Modal from '../components/Modal'
 import RateBreakdown from '../components/RateBreakdown'
 import PeersView from '../components/PeersView'
+import { useTickerRisks, RiskSentences } from '../components/RiskFacts'
+import MilestoneLedger from '../components/MilestoneLedger'
+import { holdingRiskFacts, cashLine } from '../utils/holdingRisks'
 import { useHoldings, DEFAULT_PROFILE, INVESTMENT_TYPES, isQuantity, wholeUnits } from '../hooks/useHoldings'
 
 // LEAPS — after-tax targets + live after-tax value.
@@ -235,6 +238,9 @@ export default function Leaps() {
   }
 
   const allIds = [...results, ...cashResults, ...realEstateResults].map((r) => r.pos.id)
+  // Nightly risk facts for the share / option holdings' tickers (ticker_risks).
+  const riskTickers = useMemo(() => [...new Set(results.map((r) => r.pos.ticker).filter(Boolean))], [results])
+  const risks = useTickerRisks(riskTickers)
 
   // /leaps?open=<id> (from Home, Charts or the LEAPS bot): expand that
   // holding and scroll to it, then drop the param.
@@ -342,6 +348,7 @@ export default function Leaps() {
                 <PositionCard
                   key={pos.id}
                   pos={pos}
+                  risks={risks?.[String(pos.ticker ?? '').toUpperCase()] ?? null}
                   calc={calc}
                   ladder={ladder}
                   ladderLongTerm={ladderLongTerm}
@@ -1106,7 +1113,7 @@ function positionMeta(pos) {
   return { contract: contract.join(' • '), verb: pos.exercised_from_id ? 'Exercised' : 'Bought', asOf: asOfLabel }
 }
 
-function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTerm, runner, dividend, income, plan, previewFor, selectedTargetPct, onSave, onDelete, onExercise, open, onToggle }) {
+function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTerm, runner, dividend, income, plan, previewFor, selectedTargetPct, onSave, onDelete, onExercise, open, onToggle, risks = null }) {
   const [editing, setEditing] = useState(false)
   const [exercising, setExercising] = useState(false)
   const [showTaxDetail, setShowTaxDetail] = useState(false)
@@ -1256,6 +1263,10 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
         </div>
       )}
 
+      {pos.ticker && INVESTMENT_TYPES.has(pos.instrument_type) && pos.instrument_type !== 'crypto' && (
+        <MilestoneLedger ticker={String(pos.ticker).toUpperCase()} positionId={pos.id} cashLine={cashLine(risks)} />
+      )}
+      <RiskNotices row={risks} />
       <TimeStopBanner stop={stop} positionId={pos.id} />
 
       {!noExitPlan && calc.tax_saved_by_waiting != null && (ltFits ? (
@@ -1658,6 +1669,19 @@ function TimeStopBanner({ stop, positionId }) {
     <Notice id={id} tone="amber" title={`Roll window · ${months} months left`}>
       Plan to exit or roll by {shortDate(stop.act_by)}, 6 months before expiry.
     </Notice>
+  )
+}
+
+// Risk facts on the holding (owner spec v2, 2026-10-26): two plain
+// sentences under the ledger — no color, no score, no dismissal (a fact
+// stays until it changes). Facts, never a verdict.
+function RiskNotices({ row }) {
+  if (!holdingRiskFacts(row).length) return null
+  return (
+    <div className="mb-4">
+      <div className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold mb-2">Tape</div>
+      <RiskSentences row={row} />
+    </div>
   )
 }
 

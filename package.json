@@ -40,7 +40,10 @@
     "leaderrecord:check": "node scripts/check-leader-record.mjs",
     "quality:check": "node scripts/check-quality.mjs",
     "weakness:check": "node scripts/check-weakness.mjs",
-    "insiders:check": "node scripts/check-insiders.mjs"
+    "insiders:check": "node scripts/check-insiders.mjs",
+    "fade:check": "node scripts/check-fade.mjs",
+    "holdingrisks:check": "node scripts/check-holding-risks.mjs",
+    "milestones:check": "node scripts/check-milestones.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",

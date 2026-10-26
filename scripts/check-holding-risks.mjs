@@ -1,0 +1,41 @@
+// npm run holdingrisks:check — src/utils/holdingRisks.js
+import { riskRow, holdingRiskFacts, shortsRow, catalystRow, cashLine, bothLitLine, riskRows } from '../src/utils/holdingRisks.js'
+import { compactFacts } from '../src/utils/fade.js'
+let pass = 0, fail = 0
+const ok = (name, cond) => { if (cond) pass++; else { fail++; console.log('FAIL', name) } }
+const day = (n) => new Date(Date.UTC(2026, 0, 1) + n * 86400e3).toISOString().slice(0, 10)
+const bars = []
+for (let i = 0; i < 300; i++) bars.push({ t: day(i), o: 100, h: 101, l: 99, c: 100, v: 1e6 })
+bars.push({ t: day(300), o: 100, h: 122, l: 100, c: 120, v: 5e6 })
+for (let i = 301; i < 306; i++) bars.push({ t: day(i), o: 121, h: 122, l: 120.5, c: 121, v: 1e6 })
+for (let i = 306; i < 330; i++) { const c = 121 * 0.98 ** (i - 305); bars.push({ t: day(i), o: c, h: c + 1, l: c - 1, c, v: 1e6 }) }
+const c = catalystRow(bars, 329)
+ok('catalyst: the event and 24 sessions below its close', c.event === day(300) && c.sessionsBelow === 24 && c.level === 120 && Math.abs(c.jump - 0.2) < 1e-9)
+ok('still holding → 0 sessions below', catalystRow(bars, 303).sessionsBelow === 0)
+ok('no event on a flat stretch', catalystRow(bars, 250) === null)
+ok('fact shows only after 20 sessions below', holdingRiskFacts({ catalyst: catalystRow(bars, 320) }).length === 0 && holdingRiskFacts({ catalyst: c }).length === 1)
+const shorts = [{ date: day(290), shares: 1e6 }, { date: day(325), shares: 1.3e6 }]
+const s = shortsRow(shorts, bars, 329, 10e6)
+ok('shorts: +30% over 35 days, price down, 13% of shares', s && Math.abs(s.siChange - 0.3) < 1e-9 && s.spanDays === 35 && s.priceChange < -0.1 && Math.abs(s.siPct - 0.13) < 1e-9)
+ok('stale shorts → no row', shortsRow([{ date: day(100), shares: 1e6 }, { date: day(200), shares: 2e6 }], bars, 329) === null)
+ok('shorts up but price held → no fact', holdingRiskFacts({ shorts: { ...s, priceChange: 0.01 } }).length === 0)
+const fy = (y, val, filed) => ({ start: `${y}-01-01`, end: `${y}-12-31`, val, form: '10-K', filed })
+const fin = compactFacts({ facts: { 'us-gaap': {
+  Revenues: { units: { USD: [fy(2025, 1e6, '2026-03-01')] } },
+  NetCashProvidedByUsedInOperatingActivities: { units: { USD: [{ start: '2026-01-01', end: '2026-03-31', val: -6e6, form: '10-Q', filed: '2026-05-10' }] } },
+  CashAndCashEquivalentsAtCarryingValue: { units: { USD: [{ end: '2026-03-31', val: 24e6, form: '10-Q', filed: '2026-05-10' }] } },
+}, dei: {} } })
+const row = riskRow({ bars, shorts, fin, sharesOut: 10e6, asOf: day(329) })
+ok('runway row: 4 quarters, $24M, −$6M', row.runway && Math.abs(row.runway.quarters - 4) < 1e-9 && row.runway.periodEnd === '2026-03-31')
+const facts = holdingRiskFacts(row)
+ok('two facts, catalyst first', facts.length === 2 && facts[0].key.startsWith('catalyst:') && facts[1].key.startsWith('shorts:'))
+ok('catalyst sentence', /^Has not held its Oct 28 close \(\$120\) for 24 sessions; now \$7\d\.\d\d\.$/.test(facts[0].text))
+ok('shorts sentence', /^Short interest \+30% in 35 days to 13\.0% of shares out; price −\d+% over the same window\.$/.test(facts[1].text))
+ok('both lit → the test line, both halves', /18% lower six months later at the median, and doubled one time in 3\./.test(bothLitLine(facts)) && bothLitLine(facts.slice(0, 1)) === null)
+ok('cash line: plain numbers', cashLine(row) === 'Cash $24M at Mar 31 · $6M used last qtr')
+ok('no cash row → no line', cashLine({ runway: null }) === null)
+ok('no verdict words', [...facts.map((f) => f.text), bothLitLine(facts), cashLine(row)].every((t) => !/\b(sell|buy|hold|exit|should)\b/i.test(t)))
+ok('empty row → nothing', holdingRiskFacts(null).length === 0)
+ok('compact rows mirror the facts', riskRows(row).length === 2 && riskRows(row)[0].value === '24 sessions' && /^price −\d+%$/.test(riskRows(row)[1].value))
+console.log(`${pass} passed, ${fail} failed`)
+if (fail) process.exit(1)

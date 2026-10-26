@@ -2232,6 +2232,57 @@ Built 2026-10-03; all three read `useHoldings` like Home and Portfolio.
   by kind (ROC shown as due at sale); the rate breakdown
   (`components/RateBreakdown.jsx`, shared with Portfolio's View rates).
 
+## Risk facts on holdings + the milestone ledger (owner spec v2, 2026-10-26)
+
+Spec: `docs/holdings/milestone-ledger.md` (kept verbatim, with build notes).
+The scored Fade Screen failed its pre-registered mark and its follow-ups
+(`docs/signal-engine/variants.md`, 2026-10-26: points down, but one flagged
+stock in three also doubles; the doublers are not the dated binaries and the
+two carrying factors alone double just as often) — **closed.** What ships is
+**one card per holding: the ledger on top, two risk facts under it, no
+score, tier, color or verdict.**
+- **`ticker_risks`** (ticker PK; authenticated SELECT, service-role write):
+  one row per ticker a user holds (open share / option rows) or has starred,
+  from `scripts/holding-risks.mjs` in `.github/workflows/holding-risks.yml`
+  (weekdays 22:20 UTC; dispatch and branch pushes default to a dry run; funds
+  skipped). `catalyst` = the latest close up ≥ 10% on ≥ 3× volume within 60
+  sessions and how many sessions in a row the stock has closed below it;
+  `shorts` = FINRA short interest vs the settlement ≥ 30 days earlier, the
+  price over that span, % of shares out; `runway` = cash and the latest
+  quarter's operating cash flow (SEC XBRL) — plain numbers, never a signal.
+  `src/utils/holdingRisks.js` (`riskRow`, `holdingRiskFacts`, `bothLitLine`,
+  `cashLine`; `npm run holdingrisks:check`). The two sentences: "Has not
+  held its Jul 2 close ($5.90) for 78 sessions; now $3.05." (shows at 20+
+  sessions below) and "Short interest +25% in 61 days to 17.4% of shares
+  out; price −48% over the same window." (SI up ≥ 15% **and** price down
+  ≥ 10%; SI up alone was mildly positive in the test and is not shown).
+  When both are lit, one more line gives the test's own reading of months
+  with both (row "1 + 2": 18% lower at the median, doubled one time in
+  three) — counsel has not reviewed showing that figure; it is one sentence
+  and easy to flag off. `RiskSentences` in `components/RiskFacts.jsx`
+  (holding card via `RiskNotices` in `Leaps.jsx`; the entry chart's "Risks
+  to watch" card). Insider selling, shelf filings and a runway countdown are
+  deliberately not shown.
+- **Milestone ledger** — `holding_milestones` (own rows, RLS; per user ×
+  ticker, optional position id): each dated promise (`due_date` = first
+  promised, `current_due` = the latest restatement, `slips` = how many times
+  it moved, `source` "Q4 2025 call", `evidence` "8-K naming the cert"),
+  status pending / met / missed / **unmentioned** (dropped out of the
+  script — the earliest slip signal). `src/utils/milestones.js`
+  (`milestoneState`, `ledgerSummary`, `ledgerLines`, `callChecklist`;
+  `npm run milestones:check`). Header lines: "Next: UL certification · due
+  Dec 31 (66 days)", "3 due this quarter · 1 past due, unconfirmed · 1 not
+  mentioned on the last call", "1 of 3 met on time · 1 date moved, 168 days
+  on average · 1 missed", then "Cash $61M at Jun 30 · $17M used in the
+  latest quarter". Row actions: Met · Missed · Not mentioned · Date moved
+  (keeps the first date, bumps slips). `components/MilestoneLedger.jsx` on
+  every share / option holding card (not crypto). **Call alerts** (bell,
+  `alert_type` `milestone_call_tomorrow` / `milestone_call_check`, written
+  by the nightly job from `earnings_calendar`, unique per user × type ×
+  ticker × date; tap opens Portfolio): the day before a call, the open rows
+  due by quarter end it must confirm; the day after, what is still
+  unconfirmed. No web push from this job yet. The ledger never feeds a score.
+
 ## NIGHTFLOW (`/orderflow`) — order-flow intelligence
 
 Built 2026-10-08 (owner: "NIGHTFLOW — Order Flow Intelligence Engine").
