@@ -30,8 +30,8 @@ function Hero({ st }) {
   if (st.kind === 'met') return <div className="text-green-300"><Check size={22} strokeWidth={2.5} /></div>
   if (st.kind === 'missed') return <div className="text-red-300"><X size={22} strokeWidth={2.5} /></div>
   if (st.kind === 'overdue') return <div className="text-xl font-semibold font-mono-tab text-red-300 leading-none">{Math.abs(st.daysLeft)}d<div className="text-[10px] font-sans font-normal text-red-300/80 mt-0.5">late</div></div>
-  const soon = st.daysLeft != null && st.daysLeft <= 14
-  return <div className={clsx('text-xl font-semibold font-mono-tab leading-none', st.kind === 'unmentioned' ? 'text-amber-300' : soon ? 'text-amber-300' : 'text-fg')}>{st.daysLeft == null ? '—' : st.daysLeft === 0 ? 'now' : `${st.daysLeft}d`}</div>
+  // Open promises count down in the brand gold; past due is red.
+  return <div className="text-xl font-semibold font-mono-tab leading-none text-amber-300">{st.daysLeft == null ? '—' : st.daysLeft === 0 ? 'now' : `${st.daysLeft}d`}</div>
 }
 
 function Tile({ label, value, sub, tone = 'fg' }) {
@@ -100,7 +100,7 @@ export default function MilestoneLedger({ ticker, positionId, cashLine = null })
         </div>
         {n ? (
           <div className="mt-2 grid grid-cols-3 gap-2">
-            <Tile label="Next" value={sum.next ? (sum.next.daysLeft === 0 ? 'Today' : `${sum.next.daysLeft}d`) : '—'} sub={sum.next ? sum.next.row.title : 'None dated'} tone={sum.next && sum.next.daysLeft <= 14 ? 'amber' : 'fg'} />
+            <Tile label="Next" value={sum.next ? (sum.next.daysLeft === 0 ? 'Today' : `${sum.next.daysLeft}d`) : '—'} sub={sum.next ? sum.next.row.title : 'None dated'} tone={sum.next ? 'amber' : 'fg'} />
             <Tile label="This qtr" value={String(sum.dueThisQuarter.length)} sub="due" />
             <Tile label="Past due" value={String(sum.overdue.length + sum.unmentioned.length)} sub={sum.overdue.length + sum.unmentioned.length ? 'no word' : 'none'} tone={sum.overdue.length + sum.unmentioned.length ? 'red' : 'fg'} />
           </div>
@@ -140,10 +140,10 @@ export default function MilestoneLedger({ ticker, positionId, cashLine = null })
                         <span className={clsx('shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold', PILL[st.kind])}>{STATE_TEXT[st.kind]}</span>
                         <button type="button" onClick={() => remove(row)} aria-label="Remove milestone" className="shrink-0 -mr-1 -mt-1 min-h-[28px] min-w-[28px] flex items-center justify-center text-muted hover:text-fg"><X size={12} /></button>
                       </div>
-                      <div className={clsx('mt-0.5 text-sm font-semibold font-mono-tab', st.kind === 'overdue' ? 'text-red-300' : st.kind === 'unmentioned' ? 'text-amber-300' : 'text-fg')}>
+                      <div className={clsx('mt-0.5 text-sm font-semibold font-mono-tab', st.kind === 'overdue' ? 'text-red-300' : isOpen ? 'text-amber-300' : 'text-subtle')}>
                         {fmtDayYear(dueOf(row))}
-                        {slips > 0 && <span className="ml-2 text-xs font-sans font-medium text-amber-300">moved {slips}× · was {fmtDay(row.due_date)}</span>}
-                        {st.kind === 'met' && st.late > 0 && <span className="ml-2 text-xs font-sans font-medium text-amber-300">{st.late} days late</span>}
+                        {slips > 0 && <span className="ml-2 text-xs font-sans font-medium text-subtle">moved {slips}× · was {fmtDay(row.due_date)}</span>}
+                        {st.kind === 'met' && st.late > 0 && <span className="ml-2 text-xs font-sans font-medium text-subtle">{st.late} days late</span>}
                       </div>
                       {row.source && <div className="text-xs text-muted truncate">{row.source}</div>}
                       {row.evidence && isOpen && <div className="text-xs text-muted truncate">Confirms: {row.evidence}</div>}
