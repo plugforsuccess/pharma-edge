@@ -20,6 +20,7 @@ import Modal from '../components/Modal'
 import RateBreakdown from '../components/RateBreakdown'
 import PeersView from '../components/PeersView'
 import { useTickerRisks } from '../components/RiskFacts'
+import MilestoneLedger from '../components/MilestoneLedger'
 import { holdingRiskFacts } from '../utils/holdingRisks'
 import { useHoldings, DEFAULT_PROFILE, INVESTMENT_TYPES, isQuantity, wholeUnits } from '../hooks/useHoldings'
 
@@ -1299,6 +1300,10 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
             {!is1256 && calc.goal_st_multiple != null && <> · <span className="font-mono-tab text-fg">{mult(calc.goal_st_multiple)}</span> short-term</>}
           </div>
         </div>
+      )}
+
+      {pos.ticker && INVESTMENT_TYPES.has(pos.instrument_type) && pos.instrument_type !== 'crypto' && (
+        <MilestoneLedger ticker={String(pos.ticker).toUpperCase()} positionId={pos.id} />
       )}
 
       {exercising && (
