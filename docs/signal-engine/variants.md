@@ -370,3 +370,44 @@ of it), so the down-year reading rests on 2023's first half more than on
 −21.1% added nothing. The doubler rate is highest in the strongest years
 (2024–25), consistent with the variance reading. Nothing here reopens
 the closed verdict.
+
+### 2026-10-26, the straddle test (owner: "how am I supposed to use this to profit?" → "Start it")
+
+Pre-registered the same day (preregistration.md, "the straddle test"):
+if the flagged names fall 2× as often **and** double 2× as often, the
+tradeable claim is not direction but *movement* — so buy both sides.
+An at-the-money call + put on the flag day, Black-Scholes on 60-day
+realised vol × a premium (1.0 / 1.3 / 1.6 — real IV on these names sits
+above trailing vol), 2% slippage each way, 126-day expiry; variant: out
+at 2× the premium paid, marked daily. Pass: the flag's average straddle
+return ≥ 10 points above the universe control on ≥ 100 months at the
+1.3 premium, held to expiry. Run 40391936751, `src/utils/straddle.js`
+(`npm run straddle:check`).
+
+| rows (test, 2024 →) | premium | exit | n | avg | median | win | lost ½ |
+|---|---|---|---|---|---|---|---|
+| universe control | 1.3 | expiry | all | −18.6% | −45.7% | 24% | 47% |
+| **B' both facts lit** | **1.3** | **expiry** | **305** | **−37.6%** | **−55.7%** | **18%** | **54%** |
+| universe control | 1.3 | 2× target | all | −20.6% | | | |
+| B' both lit | 1.3 | 2× target | 305 | −24.4% | | | |
+| B' both lit | 1.0 | expiry | 305 | −21.3% | −46.2% | | |
+| scan definition (20 sessions below, SI +15%, price −10%) | 1.0 | expiry | — | −18.9% | | | |
+| universe control | 1.0 | 2× target | all | −0.2% | | | |
+| B' both lit | 1.0 | 2× target | 305 | −4.7% | | | |
+| scan definition | 1.0 | 2× target | — | −9.1% | | | |
+| B' both lit | 1.6 | expiry | 305 | −47.5% | | | |
+
+Train (< 2024) has the same shape: B' at 1.3 to expiry −40.1% on 50
+months. **FAIL (primary).** Long volatility on the flagged names loses
+*more* than the universe at every premium and every exit — the gap runs
+19 points the wrong way at the pre-set premium. The moves the Fade
+Screen finds are already in the option price: a name that has doubled
+or halved one time in three carries the implied vol to match, and the
+one-in-three doubler does not pay for the two-in-three that bleed
+premium. Only an optimistic premium (1.0 — the option priced at trailing
+realised vol, which these names never trade at) with a 2× take-profit
+gets the universe to break-even, and the flag still trails it. Nothing
+long-vol ships; `/charts/tape` stays a watch list of facts (the same
+rows the risk facts show on a holding), with no play attached. That
+closes the profit question the owner asked: the information says which
+holdings are not holding their story, not which options to buy.
