@@ -14,6 +14,7 @@ import { dailyBars, mapLimit, sources } from './lib/marketData.mjs'
 import { shortInterest, finraStatus } from './lib/finra.mjs'
 import { cikMap, secStatus } from './lib/sec.mjs'
 import { compactFactsFor } from './lib/secUniverse.mjs'
+import { isFund } from '../src/utils/quality.js'
 
 const DRY = /^(1|true)$/i.test(process.env.DRY_RUN ?? '')
 const url = process.env.SUPABASE_URL, key = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -27,7 +28,9 @@ const [{ data: pos, error: e1 }, { data: wl, error: e2 }] = await Promise.all([
   db.from('watchlist').select('ticker'),
 ])
 if (e1 || e2) { console.error('load failed', e1?.message ?? e2?.message); process.exit(1) }
-const tickers = [...new Set([...(pos ?? []), ...(wl ?? [])].map((r) => String(r.ticker ?? '').trim().toUpperCase()).filter((t) => TICKER.test(t)))].sort()
+// Funds (SPY, sector ETFs, USO …) are skipped: short interest on an ETF is
+// creation / redemption noise and there is no cash runway to read.
+const tickers = [...new Set([...(pos ?? []), ...(wl ?? [])].map((r) => String(r.ticker ?? '').trim().toUpperCase()).filter((t) => TICKER.test(t) && !isFund(t)))].sort()
 if (process.env.TICKERS) tickers.splice(0, tickers.length, ...process.env.TICKERS.split(',').map((s) => s.trim().toUpperCase()))
 console.log(`${tickers.length} tickers (${(pos ?? []).length} holding rows, ${(wl ?? []).length} starred)${DRY ? ' · DRY RUN' : ''}`)
 if (!tickers.length) process.exit(0)
