@@ -1,0 +1,41 @@
+# The tape scan (owner, 2026-10-26): the two holding-card facts for every
+# liquid pre-revenue small cap (SEC-built universe) → ticker_risks (scan =
+# true), feeding /charts/tape. Weekdays after holding-risks; dispatch and
+# branch pushes default to a dry run. About 20 minutes (SEC facts for ~2,000
+# filers, bars, FINRA).
+
+name: Tape scan
+
+on:
+  schedule:
+    - cron: '40 22 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Compute and report without writing'
+        type: boolean
+        default: true
+  push:
+    branches-ignore: [main]
+    paths:
+      - scripts/tape-scan.mjs
+      - .github/workflows/tape-scan.yml
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Scan
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SEC_USER_AGENT: ${{ vars.SEC_USER_AGENT }}
+          DRY_RUN: ${{ github.event_name == 'schedule' && 'false' || github.event_name == 'push' && 'true' || inputs.dry_run }}
+        run: node scripts/tape-scan.mjs

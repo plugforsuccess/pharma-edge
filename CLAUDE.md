@@ -2303,6 +2303,28 @@ score, tier, color or verdict.**
   report sizes the survivorship hole (float-range filers with no listed
   ticker today) and prints a by-year table — 2022, a down year, is in the
   data.
+- **The tape scan (`/charts/tape`, "Stopped believing"; owner, 2026-10-26:
+  "When does the app run a scanner to find these stocks?" → "Build").**
+  `scripts/tape-scan.mjs` in `.github/workflows/tape-scan.yml` (weekdays
+  22:40 UTC; dispatch and branch pushes default to a dry run): universe =
+  SEC public-float filers with a listed ticker, not a fund, pre-revenue
+  today (revenue < $25M or none **and** operating cash flow ≤ $2.5M a
+  quarter — `OCF_MAX`, keeps lenders out), ≥ 80 daily bars and a 20-day
+  dollar volume ≥ $1M (~280 names), FINRA short interest, then `riskRow`
+  per ticker → `ticker_risks` with `scan = true` (partial index) and
+  `spark` (last 63 closes); tickers that leave the universe get `scan`
+  cleared, rows for held / starred tickers are untouched. The page
+  (`src/pages/TapeScan.jsx`, linked under Leaders): "Both facts lit" rows
+  (ticker + last price, 3-month sparkline, red price-since-the-jump pill,
+  "Below its Jul 2 jump ($68.40)" with the sessions-below bar against 120,
+  amber shorts chip, red price chip, muted cash line), then "One fact lit"
+  collapsed. The value in the jump line's parentheses is the jump-day
+  close. **It is a watch list of facts, not a play:** the straddle test
+  (variants.md, 2026-10-26) found long volatility on these names loses
+  more than the universe at every premium and exit (B' −37.6% avg vs
+  −18.6%, 305 months) — the moves are priced in — so nothing long-vol
+  ships and no trade wording appears on the page. Migration
+  `20261026050000_ticker_risks_scan.sql`.
 
 ## NIGHTFLOW (`/orderflow`) — order-flow intelligence
 

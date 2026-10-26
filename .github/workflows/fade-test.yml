@@ -17,6 +17,7 @@ on:
       - scripts/lib/secFilings.mjs
       - scripts/lib/finra.mjs
       - src/utils/fade.js
+      - src/utils/straddle.js
       - .github/workflows/fade-test.yml
 
 jobs:

@@ -44,7 +44,8 @@
     "fade:check": "node scripts/check-fade.mjs",
     "holdingrisks:check": "node scripts/check-holding-risks.mjs",
     "milestones:check": "node scripts/check-milestones.mjs",
-    "basketrecord:check": "node scripts/check-basket-record.mjs"
+    "basketrecord:check": "node scripts/check-basket-record.mjs",
+    "straddle:check": "node scripts/check-straddle.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",

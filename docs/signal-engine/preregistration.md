@@ -557,3 +557,53 @@ four: doublers ≥ 2× the base rate; fallers at or below the base rate;
 any one misses. Consequence: pass → the two inverse facts may be shown on a
 holding as dated facts (still no verdict); fail → nothing long-side is
 shown, and the wording stays as the two risk facts only.
+
+## Added 2026-10-26 — the straddle test (owner: "how am I supposed to use this to profit?" → "Start it")
+
+The Fade series found a state with two fat tails: months with both tape
+facts lit (a failed catalyst and shorts pressing) were 18% lower six
+months later at the median, fell 40% in 55 of 100 cases and doubled in 32
+of 100 — against 24 and 14 for the universe. A direction trade failed its
+pass mark on the doublers. The instrument that matches two fat tails is
+**long volatility**: an at-the-money straddle. This test asks whether that
+pays, net of the premium such names carry. Fixed before the code runs.
+
+**Entries.** The same 12,094 stock-months (test 2024 →, train < 2024),
+flag **B'** from the follow-ups: failed catalyst (factor 2 lit) and shorts
+pressing at full weight (factor 1 = 25). 305 months on test. Reported
+beside it: the **scan definition** as shipped on `/charts/tape` (20+
+consecutive sessions below the jump close, SI up ≥ 15% and price down
+≥ 10%), and the **universe** (every stock-month) as the control.
+
+**Instrument.** Buy one ATM call and one ATM put (strike = the close) at
+the month start, expiring at the outcome horizon, **126 trading days**.
+Priced with Black-Scholes (rate 4%, no dividends) at
+σ = **premium × 60-day realised vol** (floor 15%). Pre-revenue small caps
+carry implied vol well above realised, so the **primary premium is 1.3**;
+1.0 and 1.6 are reported as sensitivity, 1.0 marked optimistic.
+Slippage **2% per fill** on the way in and out (4% round trip).
+
+**Exits.** Primary: **hold to expiry**, value = |S_T − K|. Secondary:
+**sell on the first close where the straddle's model value ≥ 2× the
+premium paid** (marked daily with the same σ), else at expiry.
+
+**Measured.** Return on premium per trade: average, median, win rate
+(> 0 after slippage), share lost ≥ 50%, count. The universe's straddle on
+the same terms is the control — it carries the same premium assumption,
+so the comparison cancels the pricing model's level and isolates whether
+these months move more than the premium prices in.
+
+**Pass** on test, primary premium (1.3), primary exit, all four:
+average return on premium > 0; average ≥ 10 points above the universe's
+average; median above the universe's median; ≥ 100 trades. **Fail:** any
+one misses. **Inconclusive:** < 100 trades.
+
+**Consequences.** Pass → a pre-registered forward test on paper for a
+quarter before anything is shown; the list page stays a watch list
+meanwhile. Fail → long volatility joins the closed set; the list page
+stays exactly as it is and nothing on it suggests a trade. Known
+weaknesses stated now: survivors only (the delisted fallers would have
+paid the put side — the result is a floor on the downside leg); realised
+vol as the premium base is a model, not a quote; no earnings-date or
+event-date adjustment to the premium; one bull market in the test period
+with 2022 thin.
