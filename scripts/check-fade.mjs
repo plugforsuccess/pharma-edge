@@ -1,5 +1,5 @@
 // npm run fade:check — src/utils/fade.js
-import { FADE, financingEvents, capitalRedirect, raiseAfter, outcomeRates, compactFacts, revenueAt, cashAt, quarterlyOcfAt, shortsPressing, eventDays, failedCatalyst, runway, insiderRole, insiderSelling, trendBreak, fadeScore, forwardFade, fadeStats, fadeVerdict } from '../src/utils/fade.js'
+import { FADE, shortsCovering, catalystHeld, financingEvents, capitalRedirect, raiseAfter, outcomeRates, compactFacts, revenueAt, cashAt, quarterlyOcfAt, shortsPressing, eventDays, failedCatalyst, runway, insiderRole, insiderSelling, trendBreak, fadeScore, forwardFade, fadeStats, fadeVerdict } from '../src/utils/fade.js'
 let pass = 0, fail = 0
 const ok = (name, cond) => { if (cond) pass++; else { fail++; console.log('FAIL', name) } }
 
@@ -85,5 +85,10 @@ ok('filings after the day are not known', capitalRedirect(fl, '2025-01-01').poin
 const orr = outcomeRates([{ flagged: true, raised: true }, { flagged: true, raised: false }, { flagged: false, raised: false }, { flagged: false, raised: true }], 'raised')
 ok('outcome rates: 50% vs base 50%, recall 50%', orr.rate === 0.5 && orr.base === 0.5 && orr.recall === 0.5)
 ok('score with a shelf on file includes factor 5', fadeScore({ bars, i: 250, shorts: [], trades: [], fin: null, filings: [{ form: 'S-3', date: bars[240].t, items: [] }] }).factors.redirect.points === 10)
+// The long-side inverse.
+ok('catalyst held: 20+ sessions and never undercut', catalystHeld(bars, 325).on === false && catalystHeld([...bars.slice(0, 301), ...bars.slice(301, 330).map((b) => ({ ...b, c: 125, h: 126, l: 124 }))], 329).on === true)
+ok('catalyst too young to be held', catalystHeld(bars, 303).on === false && catalystHeld(bars, 303).young === true)
+ok('shorts covering: SI −30% while price +20%', shortsCovering([{ date: bars[260].t, shares: 1e6 }, { date: bars[301].t, shares: 0.7e6 }], bars, 303).on === true)
+ok('shorts covering needs both halves', shortsCovering([{ date: bars[200].t, shares: 1e6 }, { date: bars[240].t, shares: 0.7e6 }], bars, 245).on === false)
 console.log(`${pass} passed, ${fail} failed`)
 if (fail) process.exit(1)

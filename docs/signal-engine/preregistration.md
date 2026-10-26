@@ -541,3 +541,19 @@ is a balance-sheet description, not a timing signal) and stays a displayed
 fact; "failed catalyst" and "shorts pressing" ship as plain risk facts on a
 holding (no tier, no verdict wording) whatever the result — that decision
 is the owner's and does not depend on this run.
+
+**Added 2026-10-26, same day (owner spec v2: "pre-register and test the
+long-side inverse (catalyst held, shorts covering, ledger clean) before any
+of it is shown to a holder"). Fixed before the run.** The ledger has no
+history to test (it is hand-entered from calls), so the inverse is the two
+mechanical inputs mirrored: **catalyst held** = the latest event day (a close
+up ≥ 10% on ≥ 3× volume within 60 sessions) is ≥ 20 sessions back and no
+close since has undercut its close; **shorts covering** = short interest
+down ≥ 15% vs the settlement ≥ 30 days earlier while the close is up ≥ 10%
+over the same span. Flag D = both; D1 / D2 = each alone; D' = both on the
+not-binary-prone subset. Same outcomes and window. **Pass** on test, all
+four: doublers ≥ 2× the base rate; fallers at or below the base rate;
+6-month median ≥ 10 points **above** the universe; ≥ 100 months. **Fail:**
+any one misses. Consequence: pass → the two inverse facts may be shown on a
+holding as dated facts (still no verdict); fail → nothing long-side is
+shown, and the wording stays as the two risk facts only.

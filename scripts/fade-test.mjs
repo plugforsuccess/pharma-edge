@@ -8,7 +8,7 @@
 // Train < 2024 / test 2024 →; pass for score ≥ 70: fallers ≥ 2× base,
 // doublers ≤ base, 6M median ≥ 10 points under the universe, ≥ 100 months.
 import { writeFileSync } from 'node:fs'
-import { FADE, FADE_PASS, fadeScore, forwardFade, fadeStats, fadeVerdict, revenueAt, sharesOutAt, raiseAfter, outcomeRates, financingEvents } from '../src/utils/fade.js'
+import { FADE, FADE_PASS, fadeScore, shortsCovering, catalystHeld, forwardFade, fadeStats, fadeVerdict, revenueAt, sharesOutAt, raiseAfter, outcomeRates, financingEvents } from '../src/utils/fade.js'
 import { filingsMap } from './lib/secFilings.mjs'
 import { dailyBars, mapLimit, sources } from './lib/marketData.mjs'
 import { publicFloatCiks, tickersFor, compactFactsFor } from './lib/secUniverse.mjs'
@@ -82,7 +82,8 @@ for (const s of stocks) {
     const sc = fadeScore({ bars: s.bars, i, shorts: sh, trades, fin: s.fin, filings: fl })
     const so = sharesOutAt(s.fin, b.t)
     const siPct = so && sc.factors.shorts.known ? (sh.filter((x) => x.date <= b.t).pop()?.shares ?? 0) / so : null
-    const row = { tk: s.tk, t: b.t, score: sc.score, tier: sc.tier, score2: score2(Object.fromEntries(Object.entries(sc.factors).map(([k, v]) => [k, v.points]))), binary: binaryProne(s.tk), sic: sics.get(s.tk) ?? null, f: Object.fromEntries(Object.entries(sc.factors).map(([k, v]) => [k, v.points])), known: { shorts: !!sc.factors.shorts.known, runway: !!sc.factors.runway.known, redirect: !!fl }, siPct, raised: !!raiseAfter(fl, b.t, RAISE_DAYS), out: forwardFade(s.bars, i) }
+    const inv = { cover: shortsCovering(sh, s.bars, i).on, held: catalystHeld(s.bars, i).on }
+    const row = { tk: s.tk, t: b.t, score: sc.score, tier: sc.tier, inv, score2: score2(Object.fromEntries(Object.entries(sc.factors).map(([k, v]) => [k, v.points]))), binary: binaryProne(s.tk), sic: sics.get(s.tk) ?? null, f: Object.fromEntries(Object.entries(sc.factors).map(([k, v]) => [k, v.points])), known: { shorts: !!sc.factors.shorts.known, runway: !!sc.factors.runway.known, redirect: !!fl }, siPct, raised: !!raiseAfter(fl, b.t, RAISE_DAYS), out: forwardFade(s.bars, i) }
     if (last) todayRows.push(row)
     if (monthStarts.has(b.t) && row.out) rows.push({ ...row, fell: row.out.fell, doubled: row.out.doubled, ret: row.out.ret })
   })
@@ -142,6 +143,23 @@ for (const [label, set, flag] of [
   const s = stats(set, flag)
   const v = fadeVerdict(s)
   report.variants[label] = { ...s, verdict: v }
+  console.log(line(label, s, `→ ${v.toUpperCase()}`))
+}
+// D — the long-side inverse (pre-registered: doublers ≥ 2× base, fallers ≤ base, 6M median ≥ 10 points ABOVE the universe, ≥ 100 months).
+console.log('\n=== D  Long-side inverse (test, 2024 →) — pass: doublers ≥ 2× base, fallers ≤ base, median ≥ +10 pts vs universe, ≥ 100 months')
+console.log(header)
+report.inverse = {}
+const inverseVerdict = (s) => (s.flagged < FADE_PASS.minFlagged ? 'inconclusive' : s.doubledRate >= FADE_PASS.lift * s.baseDoubled && s.fellRate <= s.baseFell && s.medianRet - s.medianAll >= FADE_PASS.medianGap ? 'pass' : 'fail')
+for (const [label, set, flag] of [
+  ['D  held + covering', test, (r) => r.inv.held && r.inv.cover],
+  ['D1 catalyst held alone', test, (r) => r.inv.held],
+  ['D2 shorts covering alone', test, (r) => r.inv.cover],
+  ['D\' held + covering, not binary-prone', nb, (r) => r.inv.held && r.inv.cover],
+  ['D  held + covering (train)', train, (r) => r.inv.held && r.inv.cover],
+]) {
+  const s = stats(set, flag)
+  const v = inverseVerdict(s)
+  report.inverse[label] = { ...s, verdict: v }
   console.log(line(label, s, `→ ${v.toUpperCase()}`))
 }
 // Where the actionable doublers sit, by SIC.

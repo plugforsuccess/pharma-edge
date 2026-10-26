@@ -81,6 +81,35 @@ export function shortsPressing(shorts, bars, i, p = FADE) {
   return { points: siUp && priceChange <= -p.priceDrop ? p.weights.shorts : siUp ? 10 : 0, known: true, siChange, priceChange }
 }
 
+// The long-side inverse (owner spec v2, 2026-10-26; pre-registered before
+// its run): short interest DOWN ≥ siRise vs the settlement ~30 days earlier
+// while the close is UP ≥ priceDrop over the same span.
+export function shortsCovering(shorts, bars, i, p = FADE) {
+  const asOf = bars[i].t
+  const rows = (shorts ?? []).filter((s) => s.date <= asOf && s.shares != null).sort((a, b) => a.date.localeCompare(b.date))
+  const cur = rows[rows.length - 1]
+  if (!cur || days(cur.date, asOf) > p.siStale) return { on: false, known: false }
+  let prev = null
+  for (const r of rows) { if (days(r.date, cur.date) >= p.siDays) prev = r; else break }
+  if (!prev || !(prev.shares > 0)) return { on: false, known: false }
+  const siChange = cur.shares / prev.shares - 1
+  let j = i
+  while (j > 0 && bars[j - 1].t >= prev.date) j--
+  const priceChange = bars[i].c / bars[j].c - 1
+  return { on: siChange <= -p.siRise && priceChange >= p.priceDrop, known: true, siChange, priceChange }
+}
+// Catalyst held: the latest event day is ≥ eventWindow sessions back and no
+// close since has undercut its close.
+export function catalystHeld(bars, i, p = FADE) {
+  const ev = eventDays(bars, i, p)
+  if (!ev.length) return { on: false }
+  const k = ev[ev.length - 1]
+  if (i - k < p.eventWindow) return { on: false, event: bars[k].t, young: true }
+  const level = bars[k].c
+  for (let m = k + 1; m <= i; m++) if (bars[m].c < level) return { on: false, event: bars[k].t, brokeOn: bars[m].t }
+  return { on: true, event: bars[k].t, level }
+}
+
 // Event days inside the look-back: a close up ≥ eventJump on volume ≥ eventVolX × the prior 20-day average.
 export function eventDays(bars, i, p = FADE) {
   const out = []
