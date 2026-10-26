@@ -344,3 +344,29 @@ into a rising price is followed by a −8% median. Nothing long-side is
 shown to a holder, as pre-registered; the card stays the ledger plus the
 two risk facts. **The Fade Screen test series is closed** (primary, two
 follow-ups, inverse — all recorded above).
+
+### 2026-10-26, the two research gaps (owner: "Make changes")
+
+Run 40382557061, same universe and factors. **Survivorship, sized:** 770 of
+2,752 float-range filers (28%) have no listed ticker today — delisted,
+acquired or gone dark — and none of them is in any table above. Every
+faller rate recorded here is a floor. (Buying delisted-inclusive prices
+would raise the faller rates; it cannot lower the doubler rates, which are
+among the survivors.) **By calendar year, score ≥ 70 vs the universe:**
+
+| year | months | flagged | fell 40% | base | doubled | base | 6M median | universe |
+|---|---|---|---|---|---|---|---|---|
+| 2022 (down year) | 447 | 4 | 75.0% | 41.4% | 25.0% | 4.5% | −21.1% | −22.5% |
+| 2023 | 2,706 | 29 | 55.2% | 26.8% | 31.0% | 8.6% | −13.3% | −2.4% |
+| 2024 | 3,234 | 59 | 66.1% | 28.6% | 35.6% | 10.4% | −38.0% | −4.8% |
+| 2025 | 4,074 | 142 | 54.2% | 22.5% | 33.1% | 17.4% | −14.1% | +4.4% |
+| 2026 (open) | 1,633 | 45 | 57.8% | 20.8% | 28.9% | 12.2% | −28.6% | +4.2% |
+
+Reading. The shape is the same in every year: fallers at roughly 2× base,
+doublers at 2–5× base, the median under the universe. 2022 has only 4
+flagged months (the universe starts in 2022 and the look-backs eat most
+of it), so the down-year reading rests on 2023's first half more than on
+2022 itself; in a year where the universe median was −22.5%, the flag's
+−21.1% added nothing. The doubler rate is highest in the strongest years
+(2024–25), consistent with the variance reading. Nothing here reopens
+the closed verdict.
