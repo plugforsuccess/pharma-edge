@@ -319,3 +319,28 @@ variance-finding, not direction-finding"), **the scored version is closed.**
 What ships (owner, same day): the two facts as dated sentences on a holding
 and the milestone ledger, no score, no tier, no verdict —
 `docs/holdings/milestone-ledger.md`.
+
+### 2026-10-26, the long-side inverse (owner spec v2: "pre-register and test the long-side inverse … before any of it is shown to a holder")
+
+Pre-registered the same day (preregistration.md, third addendum). Run
+40360314832. Catalyst held = the latest event day ≥ 20 sessions back with
+no close since below its close; shorts covering = SI down ≥ 15% vs the
+settlement ≥ 30 days earlier while the close is up ≥ 10%. Pass: doublers
+≥ 2× base, fallers ≤ base, 6M median ≥ 10 points **above** the universe,
+≥ 100 months.
+
+| flag (test, 2024 →) | months | fell 40% | base | doubled | base | 6M median | universe | verdict |
+|---|---|---|---|---|---|---|---|---|
+| D  held + covering | 8 | 50.0% | 24.4% | 25.0% | 14.0% | +9.4% | +0.9% | INCONCLUSIVE |
+| D1 catalyst held alone | 102 | 40.2% | 24.4% | 11.8% | 14.0% | +2.1% | +0.9% | FAIL |
+| D2 shorts covering alone | 318 | 29.6% | 24.4% | 19.8% | 14.0% | −8.3% | +0.9% | FAIL |
+| D' both, not binary-prone | 4 | — | — | — | — | — | — | INCONCLUSIVE |
+
+Reading. The pair almost never co-occurs (8 months in two years), so the
+inverse as specified cannot be read. Each half alone fails in the wrong
+direction: a catalyst that **held** 20 sessions is followed by *more* 40%
+falls than the universe (40% vs 24%) and fewer doublers; shorts covering
+into a rising price is followed by a −8% median. Nothing long-side is
+shown to a holder, as pre-registered; the card stays the ledger plus the
+two risk facts. **The Fade Screen test series is closed** (primary, two
+follow-ups, inverse — all recorded above).
