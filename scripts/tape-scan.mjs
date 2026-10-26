@@ -59,7 +59,7 @@ for (const [tk, b] of bars) {
   const f = fin.get(tk) ?? null
   const asOf = b[b.length - 1].t
   const row = riskRow({ bars: b, shorts: shorts.get(tk) ?? [], fin: f, sharesOut: f ? sharesOutAt(f, asOf) : null, asOf })
-  rows.push({ ticker: tk, ...row, scan: true, updated_at: new Date().toISOString() })
+  rows.push({ ticker: tk, ...row, spark: b.slice(-63).map((x) => +x.c.toFixed(4)), scan: true, updated_at: new Date().toISOString() })
 }
 const lit = rows.map((r) => ({ r, n: holdingRiskFacts(r).length })).filter((x) => x.n === 2)
 const one = rows.filter((r) => holdingRiskFacts(r).length === 1).length
