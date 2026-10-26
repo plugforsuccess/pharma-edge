@@ -10,7 +10,7 @@
 // function, FINRA short interest.
 import { createClient } from '@supabase/supabase-js'
 import { riskRow, holdingRiskFacts, cashLine } from '../src/utils/holdingRisks.js'
-import { revenueAt, sharesOutAt } from '../src/utils/fade.js'
+import { revenueAt, sharesOutAt, quarterlyOcfAt } from '../src/utils/fade.js'
 import { dailyBars, mapLimit, sources } from './lib/marketData.mjs'
 import { shortInterest, finraStatus } from './lib/finra.mjs'
 import { publicFloatCiks, tickersFor, compactFactsFor } from './lib/secUniverse.mjs'
@@ -31,7 +31,16 @@ let entries = [...byCik].map(([cik, ticker]) => ({ cik, ticker })).filter((e) =>
 if (process.env.TICKERS) { const want = new Set(process.env.TICKERS.split(',').map((s) => s.trim().toUpperCase())); entries = entries.filter((e) => want.has(e.ticker)) }
 console.log(`${floats.size} filers in range · ${entries.length} with a listed ticker${DRY ? ' · DRY RUN' : ''}`)
 const { fin, failed: finFailed } = await compactFactsFor(entries)
-const preRev = entries.filter((e) => { const f = fin.get(e.ticker); if (!f) return false; const r = revenueAt(f, today); return r == null || r < U.revenueMax })
+// Pre-revenue = annual revenue under $25M or no revenue tag — and not generating
+// operating cash: banks and lenders file no plain revenue tag (LDI slipped in
+// on the first dry run, generating $520M a quarter), so a company whose latest
+// quarter's operating cash flow is above +$2.5M is out whatever its tags say.
+const OCF_MAX = 2.5e6
+const preRev = entries.filter((e) => {
+  const f = fin.get(e.ticker); if (!f) return false
+  const r = revenueAt(f, today); if (!(r == null || r < U.revenueMax)) return false
+  const q = quarterlyOcfAt(f, today); return !(q != null && q > OCF_MAX)
+})
 console.log(`SEC facts: ${fin.size} · failed ${finFailed} · status ${JSON.stringify(secStatus)} · pre-revenue today: ${preRev.length}`)
 
 // 2. Bars (liquid names only) and FINRA.
