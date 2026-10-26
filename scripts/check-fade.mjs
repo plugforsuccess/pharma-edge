@@ -1,5 +1,5 @@
 // npm run fade:check — src/utils/fade.js
-import { FADE, compactFacts, revenueAt, cashAt, quarterlyOcfAt, shortsPressing, eventDays, failedCatalyst, runway, insiderRole, insiderSelling, trendBreak, fadeScore, forwardFade, fadeStats, fadeVerdict } from '../src/utils/fade.js'
+import { FADE, financingEvents, capitalRedirect, raiseAfter, outcomeRates, compactFacts, revenueAt, cashAt, quarterlyOcfAt, shortsPressing, eventDays, failedCatalyst, runway, insiderRole, insiderSelling, trendBreak, fadeScore, forwardFade, fadeStats, fadeVerdict } from '../src/utils/fade.js'
 let pass = 0, fail = 0
 const ok = (name, cond) => { if (cond) pass++; else { fail++; console.log('FAIL', name) } }
 
@@ -73,5 +73,17 @@ ok('that flag fails the minimum count (20 < 100) → inconclusive', fadeVerdict(
 ok('a strong flag at count passes', fadeVerdict({ ...st, flagged: 150 }) === 'pass')
 ok('lift without a worse median fails', fadeVerdict({ ...st, flagged: 150, medianRet: 0.04 }) === 'fail')
 ok('weights are the spec’s', Object.values(FADE.weights).reduce((a, b) => a + b, 0) === 100 && FADE.tiers.actionable === 70)
+// Financing from SEC submissions.
+const fl = [{ form: 'S-3', date: '2025-01-15', items: [] }, { form: '8-K', date: '2025-03-01', items: ['2.02', '9.01'] }, { form: '424B5', date: '2025-06-10', items: [] }, { form: '8-K', date: '2025-09-20', items: ['1.01', '3.02', '9.01'] }]
+ok('shelf within a year → factor 5', capitalRedirect(fl, '2025-04-01').points === 10 && capitalRedirect(fl, '2025-04-01').shelf)
+ok('shelf older than a year, no supplement → 0', capitalRedirect(fl, '2026-03-01').points === 0)
+ok('supplement within 180 days → factor 5 (atm)', capitalRedirect(fl, '2025-08-01').atm && capitalRedirect(fl, '2025-08-01').points === 10)
+ok('an earnings 8-K (2.02) is not a raise', financingEvents(fl, '2025-04-01').raises.length === 0)
+ok('424B5 and 8-K 3.02 are raises', financingEvents(fl, '2025-12-31').raises.join() === '2025-06-10,2025-09-20')
+ok('first raise after a day, within the window', raiseAfter(fl, '2025-04-01', 183) === '2025-06-10' && raiseAfter(fl, '2025-07-01', 183) === '2025-09-20' && raiseAfter(fl, '2025-10-01', 183) === null)
+ok('filings after the day are not known', capitalRedirect(fl, '2025-01-01').points === 0)
+const orr = outcomeRates([{ flagged: true, raised: true }, { flagged: true, raised: false }, { flagged: false, raised: false }, { flagged: false, raised: true }], 'raised')
+ok('outcome rates: 50% vs base 50%, recall 50%', orr.rate === 0.5 && orr.base === 0.5 && orr.recall === 0.5)
+ok('score with a shelf on file includes factor 5', fadeScore({ bars, i: 250, shorts: [], trades: [], fin: null, filings: [{ form: 'S-3', date: bars[240].t, items: [] }] }).factors.redirect.points === 10)
 console.log(`${pass} passed, ${fail} failed`)
 if (fail) process.exit(1)

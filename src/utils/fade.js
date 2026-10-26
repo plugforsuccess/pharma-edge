@@ -141,15 +141,15 @@ export function trendBreak(bars, i, p = FADE) {
   return { points: s50 < s200 ? p.weights.trend : 0 }
 }
 
-// All six on one bar; `redirect` is 0 until the 8-K / S-3 feed exists.
-export function fadeScore({ bars, i, shorts, trades, fin, p = FADE }) {
+// All six on one bar; `filings` (SEC submissions) drives capital redirect.
+export function fadeScore({ bars, i, shorts, trades, fin, filings = null, p = FADE }) {
   const asOf = bars[i].t
   const f = {
     shorts: shortsPressing(shorts, bars, i, p),
     catalyst: failedCatalyst(bars, i, p),
     runway: fin ? runway(fin, asOf, p) : { points: 0, known: false },
     insider: insiderSelling(trades, asOf, p),
-    redirect: { points: 0, known: false },
+    redirect: filings ? capitalRedirect(filings, asOf, p) : { points: 0, known: false },
     trend: trendBreak(bars, i, p),
   }
   const score = Object.values(f).reduce((s, x) => s + x.points, 0)
@@ -183,4 +183,39 @@ export function fadeVerdict(s, p = FADE_PASS) {
   if (!s || s.fellRate == null || s.baseFell == null || s.medianRet == null || s.medianAll == null) return 'inconclusive'
   if (s.flagged < p.minFlagged) return 'inconclusive'
   return s.fellRate >= p.lift * s.baseFell && s.doubledRate <= s.baseDoubled && s.medianRet <= s.medianAll - p.medianGap ? 'pass' : 'fail'
+}
+
+// ---- financing (SEC submissions: [{ form, date, items }])
+export const RAISE_FORMS = Object.freeze({ shelf: ['S-3', 'S-3ASR'], supplement: ['424B5'], raiseItems: ['3.02'] })
+// Filings on or before asOf that mark financing capacity or a raise.
+export function financingEvents(filings, asOf) {
+  const out = { shelves: [], supplements: [], raises: [] }
+  for (const f of filings ?? []) {
+    if (!f.date || f.date > asOf) continue
+    if (RAISE_FORMS.shelf.includes(f.form)) out.shelves.push(f.date)
+    if (RAISE_FORMS.supplement.includes(f.form)) { out.supplements.push(f.date); out.raises.push(f.date) }
+    if (f.form === '8-K' && (f.items ?? []).some((it) => RAISE_FORMS.raiseItems.includes(it))) out.raises.push(f.date)
+  }
+  return out
+}
+// Factor 5: a shelf within 365 days or a supplement within 180 days before asOf.
+export function capitalRedirect(filings, asOf, p = FADE) {
+  const e = financingEvents(filings, asOf)
+  const shelf = e.shelves.some((d) => days(d, asOf) <= 365), atm = e.supplements.some((d) => days(d, asOf) <= 180)
+  return { points: shelf || atm ? p.weights.redirect : 0, known: true, shelf, atm }
+}
+// The first raise filing strictly after asOf, within `horizonDays` calendar days (null if none).
+export function raiseAfter(filings, asOf, horizonDays) {
+  let first = null
+  for (const f of filings ?? []) {
+    const isRaise = RAISE_FORMS.supplement.includes(f.form) || (f.form === '8-K' && (f.items ?? []).some((it) => RAISE_FORMS.raiseItems.includes(it)))
+    if (!isRaise || !f.date || f.date <= asOf || days(asOf, f.date) > horizonDays) continue
+    if (!first || f.date < first) first = f.date
+  }
+  return first
+}
+// Rates of an extra yes / no outcome (e.g. raised) for a flag vs the base.
+export function outcomeRates(rows, key) {
+  const f = rows.filter((r) => r.flagged), all = rows.filter((r) => r[key]).length
+  return { base: rows.length ? all / rows.length : null, rate: f.length ? f.filter((r) => r[key]).length / f.length : null, recall: all ? f.filter((r) => r[key]).length / all : null }
 }

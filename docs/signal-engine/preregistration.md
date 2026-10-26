@@ -490,3 +490,20 @@ Consequence: pass → the score and its factors shown as facts to subscribers
 (no trade structure; puts stay owner-only like the spread bot) and the
 8-K feed + ledger built next; fail → the weights are refit on train only and
 re-read on test once, then research only.
+
+**Added 2026-10-26, same day (owner: "Yes all of the above") — Factor 5 and
+the raise outcome.** Fixed before the second run. **Factor 5, capital
+redirect (10):** from SEC's per-company submissions feed — an S-3 / S-3ASR
+shelf filed within the prior 365 days, or a 424B5 prospectus supplement
+(an offering or an ATM program) within the prior 180 days → 10. The spec's
+"acquisition spending 25%+ of cash" needs the 8-K's text and is not in the
+test. The reachable maximum becomes 100. **A second outcome, "raised within
+126 trading days":** an 8-K with item 3.02 (unregistered sale of equity) or
+a 424B5 filed after the month start (a 424B5 also marks an ATM program's
+start, which is counted and said). **Pre-set reading, reported beside the
+score verdict, not gating it:** on test, months with runway under 5
+quarters see a raise within 6 months at ≥ 2× the universe rate; runway plus
+a shelf or ATM on file at ≥ 3×. Lead time = days from the first month the
+runway flag was lit (an unbroken run) to the raise filing; the stock's move
+from that month start to the day before the filing, and from the day before
+to five sessions after, are reported as facts.

@@ -14,6 +14,7 @@ on:
       - scripts/fade-test.mjs
       - scripts/lib/secUniverse.mjs
       - scripts/lib/form345.mjs
+      - scripts/lib/secFilings.mjs
       - src/utils/fade.js
       - .github/workflows/fade-test.yml
 
