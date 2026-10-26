@@ -52,7 +52,7 @@ const shorts = new Map()
 const probe = await shortInterest('AAPL')
 const finraOk = !!(probe && probe.length)
 if (!finraOk) console.log(`FINRA unavailable (${JSON.stringify(finraStatus)}) — factor 1 scores 0 everywhere.`)
-else { await mapLimit(stocks.map((s) => s.tk), 4, async (tk) => { const s = await shortInterest(tk); if (s) shorts.set(tk, s) }, 100); console.log(`FINRA: ${shorts.size} symbols`) }
+else { await mapLimit(stocks.map((s) => s.tk), 3, async (tk) => { const s = await shortInterest(tk); if (s) shorts.set(tk, s) }, 150); console.log(`FINRA: ${shorts.size} of ${stocks.length} symbols · non-200 ${JSON.stringify(finraStatus)}`) }
 
 // 3b. SEC submissions: shelves, supplements, 8-K 3.02 (factor 5 + the raise outcome).
 const cikOf = new Map(entries.map((e) => [e.ticker, e.cik]))
