@@ -14,6 +14,10 @@ on:
         description: 'Compute and report without writing'
         type: boolean
         default: true
+      probe_tags:
+        description: 'Tickers whose SEC duration tags to print (debug)'
+        type: string
+        default: ''
   push:
     branches-ignore: [main]
     paths:
@@ -39,4 +43,5 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SEC_USER_AGENT: ${{ vars.SEC_USER_AGENT }}
           DRY_RUN: ${{ github.event_name == 'schedule' && 'false' || github.event_name == 'push' && 'true' || inputs.dry_run }}
+          PROBE_TAGS: ${{ inputs.probe_tags || '' }}
         run: node scripts/holding-risks.mjs
