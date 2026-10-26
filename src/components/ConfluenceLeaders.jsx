@@ -786,6 +786,10 @@ function LeadersView({ list, scope, setScope, strict, setStrict, play, playKey, 
         <span className="flex-1">Leader record: how each stock has moved since joining</span>
         <ChevronRight size={14} aria-hidden />
       </Link>
+      <Link to="/charts/tape" className="min-h-[44px] px-1 flex items-center gap-2 text-sm text-subtle hover:text-fg">
+        <span className="flex-1">Stopped believing: pre-revenue stocks whose last jump didn't hold</span>
+        <ChevronRight size={14} aria-hidden />
+      </Link>
       {/* The option-trade research is the Advanced view (owner, 2026-10-19). */}
       {advanced && (
         <Link to="/charts/record" className="min-h-[44px] px-1 flex items-center gap-2 text-xs text-subtle hover:text-fg">

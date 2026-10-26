@@ -33,6 +33,7 @@ const Charts = lazy(() => import('./pages/Charts'))
 const LeapsEntry = lazy(() => import('./pages/LeapsEntry'))
 const SignalRecord = lazy(() => import('./pages/SignalRecord'))
 const LeaderRecord = lazy(() => import('./pages/LeaderRecord'))
+const TapeScan = lazy(() => import('./pages/TapeScan'))
 const Taxes = lazy(() => import('./pages/Taxes'))
 const Bot = lazy(() => import('./pages/Bot'))
 const Leaps = lazy(() => import('./pages/Leaps'))
@@ -132,6 +133,7 @@ export default function App() {
             <Route path="charts" element={<Charts />} />
             <Route path="charts/record" element={<SignalRecord />} />
             <Route path="charts/leader-record" element={<LeaderRecord />} />
+            <Route path="charts/tape" element={<TapeScan />} />
             <Route path="charts/entry" element={<LeapsEntry />} />
             <Route path="charts/entry/:ticker" element={<LeapsEntry />} />
             <Route path="taxes" element={<Taxes />} />
