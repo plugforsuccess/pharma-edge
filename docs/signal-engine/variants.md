@@ -287,3 +287,35 @@ if the owner wants them — a separate decision. Modules
 `scripts/lib/secFilings.mjs`) stay for later tests. Owner also asked
 about delisted-inclusive price data: this result does not justify buying
 it (the failure is the doublers, who are in the data).
+
+### 2026-10-26, follow-up variants (owner: "Exclude flagged months with a dated binary … Drop insider selling and the shelf flag, re-weight to the two factors that carry it")
+
+Pre-registered the same day (preregistration.md, second addendum). Run
+40358351354. Binary-prone industries by SEC SIC code (pharma / diagnostics
+/ biologics / bio research; vehicles / aircraft / parts / space) = 34% of
+test months (SIC known for 94%). Same four conditions on each flag.
+
+| flag (test, 2024 →) | months | fell 40% | base | doubled | base | 6M median | universe | verdict |
+|---|---|---|---|---|---|---|---|---|
+| A  score ≥ 70, **not** binary-prone | 118 | 57.6% | 15.2% | **37.3%** | 9.4% | −23.4% | +2.2% | FAIL |
+| A' score ≥ 70, binary-prone | 128 | 57.8% | 42.2% | 28.9% | 22.7% | −19.6% | −7.9% | FAIL |
+| B  two factors (catalyst 25 + SI ≥ 10) | 953 | 50.6% | 24.4% | 28.2% | 13.9% | −17.2% | +0.8% | FAIL |
+| B' two factors, both full | 305 | 55.4% | 24.4% | 32.5% | 13.9% | −18.4% | +0.8% | FAIL |
+| C  two factors ≥ 70, not binary-prone | 452 | 49.8% | 15.2% | 31.4% | 9.4% | −17.2% | +2.2% | FAIL |
+| C' both full, not binary-prone | 152 | 56.6% | 15.2% | 34.2% | 9.4% | −19.6% | +2.2% | FAIL |
+
+Actionable months by SIC (n · doubled · fell): 2834* 70·15·41, 2836*
+42·16·21, 3569 13·3·10, 3690 9·4·5, 7371 8·2·5, 3841 7·4·5, 4522 7·3·7
+(* binary-prone).
+
+Reading. **Both hypotheses are rejected.** Outside the binary-prone
+industries the doubler rate is *higher* relative to its base (37% vs 9%,
+4×), so the doublers are not FDA dates, certifications or first deliveries;
+they are the same violent names doubling on anything. Dropping the four
+weaker factors moves nothing: the two carrying factors alone double at 2×
+base (28–33%) exactly as the full score did. Per the owner's pre-set rule
+("if that doesn't move the doubler rate, it confirms this is
+variance-finding, not direction-finding"), **the scored version is closed.**
+What ships (owner, same day): the two facts as dated sentences on a holding
+and the milestone ledger, no score, no tier, no verdict —
+`docs/holdings/milestone-ledger.md`.

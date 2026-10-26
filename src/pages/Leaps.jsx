@@ -19,9 +19,9 @@ import NumberInput from '../components/NumberInput'
 import Modal from '../components/Modal'
 import RateBreakdown from '../components/RateBreakdown'
 import PeersView from '../components/PeersView'
-import { useTickerRisks } from '../components/RiskFacts'
+import { useTickerRisks, RiskSentences } from '../components/RiskFacts'
 import MilestoneLedger from '../components/MilestoneLedger'
-import { holdingRiskFacts } from '../utils/holdingRisks'
+import { holdingRiskFacts, cashLine } from '../utils/holdingRisks'
 import { useHoldings, DEFAULT_PROFILE, INVESTMENT_TYPES, isQuantity, wholeUnits } from '../hooks/useHoldings'
 
 // LEAPS — after-tax targets + live after-tax value.
@@ -1263,8 +1263,11 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
         </div>
       )}
 
+      {pos.ticker && INVESTMENT_TYPES.has(pos.instrument_type) && pos.instrument_type !== 'crypto' && (
+        <MilestoneLedger ticker={String(pos.ticker).toUpperCase()} positionId={pos.id} cashLine={cashLine(risks)} />
+      )}
+      <RiskNotices row={risks} />
       <TimeStopBanner stop={stop} positionId={pos.id} />
-      <RiskNotices row={risks} positionId={pos.id} />
 
       {!noExitPlan && calc.tax_saved_by_waiting != null && (ltFits ? (
         <Notice id={`${pos.id}:tax-wait:${calc.long_term_date}`} tone="green"
@@ -1300,10 +1303,6 @@ function PositionCard({ pos, calc, ladder, ladderLongTerm, custom, customLongTer
             {!is1256 && calc.goal_st_multiple != null && <> · <span className="font-mono-tab text-fg">{mult(calc.goal_st_multiple)}</span> short-term</>}
           </div>
         </div>
-      )}
-
-      {pos.ticker && INVESTMENT_TYPES.has(pos.instrument_type) && pos.instrument_type !== 'crypto' && (
-        <MilestoneLedger ticker={String(pos.ticker).toUpperCase()} positionId={pos.id} />
       )}
 
       {exercising && (
@@ -1673,15 +1672,17 @@ function TimeStopBanner({ stop, positionId }) {
   )
 }
 
-// Risk facts on the holding (owner, 2026-10-26): the nightly ticker_risks
-// row as dismissable notices — each fact's key carries its event date, so a
-// dismissal holds until the fact itself changes. Facts, never a verdict.
-function RiskNotices({ row, positionId }) {
-  const facts = holdingRiskFacts(row)
-  if (!facts.length) return null
-  return facts.map((f) => (
-    <Notice key={f.key} id={`${positionId}:risk:${f.key}`} tone={f.tone} title={f.title}>{f.body}</Notice>
-  ))
+// Risk facts on the holding (owner spec v2, 2026-10-26): two plain
+// sentences under the ledger — no color, no score, no dismissal (a fact
+// stays until it changes). Facts, never a verdict.
+function RiskNotices({ row }) {
+  if (!holdingRiskFacts(row).length) return null
+  return (
+    <div className="mb-4">
+      <div className="text-xs text-muted mb-1">Risk facts</div>
+      <RiskSentences row={row} />
+    </div>
+  )
 }
 
 // One style for every card notice: a bold title and body at the same

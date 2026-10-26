@@ -40,6 +40,9 @@ const TYPE_META = {
   market_trend: { Icon: TrendingUp, tone: 'red', label: 'Market trend' },
   econ_tomorrow: { Icon: Clock, tone: 'amber', label: 'Economy' },
   earnings_soon: { Icon: Clock, tone: 'amber', label: 'Earnings' },
+  // Milestone ledger (owner spec v2, 2026-10-26): tap opens Portfolio.
+  milestone_call_tomorrow: { Icon: Clock, tone: 'amber', label: 'Call tomorrow' },
+  milestone_call_check: { Icon: Clock, tone: 'amber', label: 'After the call' },
 }
 
 const TONE_BG = {
@@ -163,6 +166,11 @@ export default function NotificationCenter() {
 
   function handleRowClick(alert) {
     markRead(alert.id)
+    if (alert.alert_type?.startsWith('milestone_')) {
+      setOpen(false)
+      navigate('/leaps')
+      return
+    }
     if (alert.alert_type === 'market_trend' || alert.alert_type === 'econ_tomorrow') {
       setOpen(false)
       navigate('/charts')

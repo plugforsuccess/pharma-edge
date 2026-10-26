@@ -1,28 +1,31 @@
-// Risk facts on a holding (owner, 2026-10-26, after the Fade Screen test —
-// the score failed its pass mark, but "yes to 'failed catalyst' and 'shorts
-// pressing' as plain risk facts on a holding, no verdict wording, no tier";
-// runway: "keep it as a displayed fact, drop it as a score input").
+// Risk facts on a holding (owner spec v2, 2026-10-26, after the Fade Screen
+// test: two facts "each shown as a sentence with its numbers, no color
+// coding, no score" — the two inputs that carried the test; insider selling,
+// shelf filings and a runway countdown are deliberately not shown. Cash and
+// burn appear as plain numbers in the ledger header, not as a signal).
 //
-// Two halves: `riskRow` builds the stored row (scripts/holding-risks.mjs runs
-// it nightly on every ticker a user holds or has starred → ticker_risks);
-// `holdingRiskFacts` turns a row into lines for a card. Facts only: what
-// happened, dated and priced — never what to do about it.
-import { FADE, eventDays, failedCatalyst, runway, cashAt, quarterlyOcfAt } from './fade.js'
+// `riskRow` builds the stored row (scripts/holding-risks.mjs, nightly, every
+// ticker a user holds or has starred → ticker_risks); `holdingRiskFacts`
+// turns a row into the sentences; `cashLine` the header numbers;
+// `bothLitLine` the test's own reading, shown only when both facts are lit.
+import { FADE, eventDays, runway, cashAt, quarterlyOcfAt } from './fade.js'
 
 export const HOLDING_RISK = Object.freeze({
-  runwayShow: 8,        // show the runway fact only under 8 quarters of cash
-  runwayTight: 3,       // amber under 3 quarters (the test's "full" threshold)
-  siRise: FADE.siRise,  // short interest up ≥ 15% vs the settlement ~30 days earlier
+  belowSessions: 20,     // failed catalyst: below the event close for 20+ sessions
+  siRise: FADE.siRise,   // shorts pressing: SI up ≥ 15% vs the settlement ≥ 30 days earlier …
   siDays: FADE.siDays,
   siStale: FADE.siStale,
-  priceDrop: FADE.priceDrop,
+  priceDrop: FADE.priceDrop, // … while the close is down ≥ 10% over the same span
 })
+// The test's reading of months with both facts lit (variants.md, 2026-10-26,
+// row "1 + 2": 305 months, 6M median −18.4%, doubled 32.5%, fell 55.4%).
+export const BOTH_LIT = Object.freeze({ median: -0.18, doubled: 0.325, fell: 0.554, months: 305 })
 
 const DAY = 86400000
 const days = (a, b) => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / DAY)
 
-// The short-interest row: the latest settlement on or before `asOf`, the one
-// ~30+ days before it, and the close-to-close move between them.
+// Short interest: the latest settlement on or before the bar, the one ≥ 30
+// days before it, and the close-to-close move between them.
 export function shortsRow(shorts, bars, i, sharesOut = null, p = HOLDING_RISK) {
   const asOf = bars[i]?.t
   if (!asOf || !shorts?.length) return null
@@ -33,34 +36,30 @@ export function shortsRow(shorts, bars, i, sharesOut = null, p = HOLDING_RISK) {
   if (!prev || !(prev.shares > 0)) return null
   const closeOn = (d) => { let c = null; for (const b of bars) { if (b.t <= d) c = b.c; else break } return c }
   const c0 = closeOn(prev.date), c1 = closeOn(cur.date)
-  return {
-    from: prev.date, to: cur.date, siChange: cur.shares / prev.shares - 1, shares: cur.shares,
-    priceChange: c0 && c1 ? c1 / c0 - 1 : null,
-    siPct: sharesOut > 0 ? cur.shares / sharesOut : null,
-  }
+  return { from: prev.date, to: cur.date, spanDays: days(prev.date, cur.date), siChange: cur.shares / prev.shares - 1, shares: cur.shares, priceChange: c0 && c1 ? c1 / c0 - 1 : null, siPct: sharesOut > 0 ? cur.shares / sharesOut : null }
 }
 
-// The catalyst row: the latest event day (a close up ≥ 10% on ≥ 3× volume
-// within the last 60 sessions) and whether a later close undercut it.
+// The latest event day (a close up ≥ 10% on ≥ 3× volume within the last 60
+// sessions), its close, and how many sessions in a row the stock has now
+// closed below it (0 = holding above).
 export function catalystRow(bars, i) {
   const ev = eventDays(bars, i)
   if (!ev.length) return null
   const k = ev[ev.length - 1]
   const b = bars[k]
-  const jump = b.c / bars[k - 1].c - 1
-  const broke = failedCatalyst(bars, i)
-  const held = broke.points > 0 && broke.event === b.t ? broke.brokeOn : null
-  return { event: b.t, level: b.c, jump, brokeOn: held, last: bars[i].c }
+  let below = 0
+  for (let m = i; m > k; m--) { if (bars[m].c < b.c) below++; else break }
+  return { event: b.t, level: b.c, jump: b.c / bars[k - 1].c - 1, sessionsBelow: below, last: bars[i].c }
 }
 
-// The runway row: cash on hand against the latest quarter's operating burn.
+// Cash on hand against the latest quarter's operating cash flow (plain numbers).
 export function runwayRow(fin, asOf) {
   if (!fin) return null
   const r = runway(fin, asOf)
-  if (!r.known || !Number.isFinite(r.quarters)) return null
+  if (!r.known) return null
   const cash = cashAt(fin, asOf), burn = quarterlyOcfAt(fin, asOf)
   const cashRow = (fin.cash ?? []).filter((x) => x.filed <= asOf).sort((a, b) => a.end.localeCompare(b.end)).pop()
-  return { quarters: r.quarters, cash, burn, periodEnd: cashRow?.end ?? null }
+  return { quarters: Number.isFinite(r.quarters) ? r.quarters : null, cash, burn, periodEnd: cashRow?.end ?? null }
 }
 
 export function riskRow({ bars, shorts = [], fin = null, sharesOut = null, asOf = null }) {
@@ -70,37 +69,35 @@ export function riskRow({ bars, shorts = [], fin = null, sharesOut = null, asOf 
 }
 
 const fmtDay = (d) => new Date(`${d}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
-const pct = (x, d = 0) => `${x >= 0 ? '+' : '−'}${Math.abs(x * 100).toFixed(d)}%`
-const mag = (x, d = 0) => `${Math.abs(x * 100).toFixed(d)}%`
+const signed = (x, d = 0) => `${x >= 0 ? '+' : '−'}${Math.abs(x * 100).toFixed(d)}%`
 const price = (x) => `$${x >= 100 ? x.toFixed(0) : x.toFixed(2)}`
 const money = (x) => { const a = Math.abs(x); return a >= 1e9 ? `$${(a / 1e9).toFixed(1)}B` : a >= 1e6 ? `$${Math.round(a / 1e6)}M` : `$${Math.round(a / 1e3)}K` }
-const quarters = (q) => (q < 1 ? 'under a quarter' : q < 1.5 ? 'about a quarter' : `about ${Math.round(q)} quarters`)
 
-// row: a ticker_risks row → [{ key, tone, title, body }]. Each key carries the
-// event's date so a dismissal stays dismissed until the fact changes.
+// row: a ticker_risks row → [{ key, text }] — the two facts, each one sentence.
 export function holdingRiskFacts(row, p = HOLDING_RISK) {
   const out = []
   if (!row) return out
   const c = row.catalyst
-  if (c?.brokeOn) {
-    out.push({ key: `catalyst:${c.event}:${c.brokeOn}`, tone: 'amber', title: `Hasn't held its ${fmtDay(c.event)} jump`,
-      body: `Rose ${mag(c.jump)} that day on heavy volume, then closed below that day's ${price(c.level)} on ${fmtDay(c.brokeOn)}.` })
-  } else if (c) {
-    out.push({ key: `catalyst:${c.event}:held`, tone: 'neutral', title: `Jumped ${pct(c.jump)} on ${fmtDay(c.event)} on heavy volume`,
-      body: `Still above that day's close (${price(c.level)}) so far.` })
+  if (c && c.sessionsBelow >= p.belowSessions) {
+    out.push({ key: `catalyst:${c.event}`, text: `Has not held its ${fmtDay(c.event)} close (${price(c.level)}) for ${c.sessionsBelow} sessions; now ${price(c.last)}.` })
   }
   const s = row.shorts
-  if (s && s.siChange >= p.siRise) {
-    const fell = s.priceChange != null && s.priceChange <= -p.priceDrop
-    const held = s.priceChange != null && !fell
-    out.push({ key: `shorts:${s.to}`, tone: fell ? 'amber' : 'neutral', title: `Short interest ${pct(s.siChange)} since ${fmtDay(s.from)}`,
-      body: [fell ? `The price fell ${mag(s.priceChange)} over the same span.` : held ? `The price held over the same span (${pct(s.priceChange)}).` : null,
-        s.siPct != null ? `Shorts are ${Math.round(s.siPct * 100)}% of the shares (as of ${fmtDay(s.to)}).` : null].filter(Boolean).join(' ') })
-  }
-  const r = row.runway
-  if (r && r.quarters < p.runwayShow) {
-    out.push({ key: `runway:${r.periodEnd ?? row.as_of}`, tone: r.quarters < p.runwayTight ? 'amber' : 'neutral', title: `Cash covers ${quarters(r.quarters)} of spending`,
-      body: `${money(r.cash)} on hand at ${r.periodEnd ? fmtDay(r.periodEnd) : 'the last report'} against ${money(r.burn)} spent in the latest quarter. Companies in this spot often raise money by selling more shares.` })
+  if (s && s.siChange >= p.siRise && s.priceChange != null && s.priceChange <= -p.priceDrop) {
+    out.push({ key: `shorts:${s.to}`, text: `Short interest ${signed(s.siChange)} in ${s.spanDays} days${s.siPct != null ? ` to ${(s.siPct * 100).toFixed(1)}% of shares out` : ''}; price ${signed(s.priceChange)} over the same window.` })
   }
   return out
+}
+
+// Shown only when both facts are lit — the test's own reading, both halves.
+export function bothLitLine(facts, b = BOTH_LIT) {
+  if (!facts || facts.length < 2) return null
+  return `In the test behind these two facts, a stock with both was ${Math.round(Math.abs(b.median) * 100)}% lower six months later at the median, and doubled about one time in ${Math.round(1 / b.doubled)}.`
+}
+
+// The ledger header's plain numbers: cash and last-quarter burn, no framing.
+export function cashLine(row) {
+  const r = row?.runway
+  if (!r || r.cash == null || r.burn == null) return null
+  const when = r.periodEnd ? ` at ${fmtDay(r.periodEnd)}` : ''
+  return r.burn < 0 ? `Cash ${money(r.cash)}${when} · ${money(r.burn)} used in the latest quarter` : `Cash ${money(r.cash)}${when} · ${money(r.burn)} generated in the latest quarter`
 }

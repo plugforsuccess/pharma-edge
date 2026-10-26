@@ -1,17 +1,11 @@
-// Risk facts on a ticker (owner, 2026-10-26): the nightly ticker_risks row
-// turned into dated, priced lines — what happened, never what to do.
-// `useTickerRisks(tickers)` loads the rows; <RiskFactList> renders them as a
-// plain list (entry chart); the holding card wraps each fact in its own
-// dismissable Notice instead (Leaps.jsx).
+// Risk facts on a ticker (owner spec v2, 2026-10-26): the nightly
+// ticker_risks row as two plain sentences — no color, no score — plus the
+// test's own reading when both are lit. `useTickerRisks(tickers)` loads the
+// rows; <RiskFactList> is the entry chart's card; the holding card renders
+// the same facts inline (RiskNotices in Leaps.jsx).
 import { useEffect, useState } from 'react'
-import clsx from 'clsx'
 import { supabase } from '../lib/supabase'
-import { holdingRiskFacts } from '../utils/holdingRisks'
-
-export const RISK_TONE = {
-  amber: 'border-amber-500/40 bg-amber-500/5 text-amber-100',
-  neutral: 'border-border bg-bg/40 text-fg',
-}
+import { holdingRiskFacts, bothLitLine } from '../utils/holdingRisks'
 
 // tickers: string[] → { TICKER: row } (undefined while loading, {} when none).
 export function useTickerRisks(tickers) {
@@ -27,21 +21,25 @@ export function useTickerRisks(tickers) {
   return rows
 }
 
-export default function RiskFactList({ row, title = 'Risks to watch' }) {
+export function RiskSentences({ row }) {
   const facts = holdingRiskFacts(row)
   if (!facts.length) return null
+  const both = bothLitLine(facts)
+  return (
+    <div className="space-y-1.5">
+      {facts.map((f) => <p key={f.key} className="text-sm text-fg">{f.text}</p>)}
+      {both && <p className="text-sm text-subtle">{both}</p>}
+    </div>
+  )
+}
+
+export default function RiskFactList({ row, title = 'Risks to watch' }) {
+  if (!holdingRiskFacts(row).length) return null
   return (
     <section className="bg-card border border-border rounded-2xl p-5 mt-4">
-      <div className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold">{title}</div>
-      <div className="mt-2 space-y-2">
-        {facts.map((f) => (
-          <div key={f.key} className={clsx('rounded-2xl border px-4 py-3', RISK_TONE[f.tone])}>
-            <div className="text-sm font-semibold">{f.title}</div>
-            <div className="mt-0.5 text-sm text-subtle">{f.body}</div>
-          </div>
-        ))}
-      </div>
-      <div className="mt-2 text-[11px] text-muted">As of {row.as_of} · facts from prices, FINRA short interest and SEC filings, not advice.</div>
+      <div className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold mb-2">{title}</div>
+      <RiskSentences row={row} />
+      <div className="mt-2 text-[11px] text-muted">As of {row.as_of} · from prices and FINRA short interest · facts, not advice.</div>
     </section>
   )
 }

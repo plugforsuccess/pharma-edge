@@ -15,6 +15,7 @@ import { shortInterest, finraStatus } from './lib/finra.mjs'
 import { cikMap, secStatus } from './lib/sec.mjs'
 import { compactFactsFor } from './lib/secUniverse.mjs'
 import { isFund } from '../src/utils/quality.js'
+import { callChecklist } from '../src/utils/milestones.js'
 
 const DRY = /^(1|true)$/i.test(process.env.DRY_RUN ?? '')
 const url = process.env.SUPABASE_URL, key = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -59,8 +60,38 @@ for (const [tk, b] of bars) {
 }
 console.log(`${rows.length} rows · ${rows.filter((r) => holdingRiskFacts(r).length).length} with at least one fact`)
 
-// 4. Write.
+// 4. Earnings-call alerts for ledgers (owner spec v2): the day before a call,
+// which rows it must confirm; the day after, which are still unconfirmed.
+const shift = (d, n) => new Date(Date.parse(`${d}T00:00:00Z`) + n * 86400e3).toISOString().slice(0, 10)
+const today = new Date().toISOString().slice(0, 10)
+const alertsOut = []
+{
+  const { data: ms } = await db.from('holding_milestones').select('user_id, ticker, title, due_date, current_due, slips, status')
+  const byKey = new Map()
+  for (const m of ms ?? []) { const k = `${m.user_id}|${m.ticker}`; if (!byKey.has(k)) byKey.set(k, []); byKey.get(k).push(m) }
+  if (byKey.size) {
+    const { data: ec } = await db.from('earnings_calendar').select('ticker, earnings_date').in('ticker', [...new Set([...byKey.values()].flat().map((m) => m.ticker))]).gte('earnings_date', shift(today, -2)).lte('earnings_date', shift(today, 2))
+    for (const [k, list] of byKey) {
+      const [user_id, ticker] = k.split('|')
+      const e = (ec ?? []).find((x) => x.ticker === ticker)
+      if (!e) continue
+      const rows = callChecklist(list, today)
+      if (!rows.length) continue
+      const names = rows.map((r) => r.title).join('; ')
+      if (e.earnings_date === shift(today, 1)) alertsOut.push({ user_id, alert_type: 'milestone_call_tomorrow', ticker, event_date: e.earnings_date, sent_via: 'in_app', message: `${ticker} reports tomorrow. Promises the call should confirm: ${names}.` })
+      else if (e.earnings_date === shift(today, -1)) alertsOut.push({ user_id, alert_type: 'milestone_call_check', ticker, event_date: e.earnings_date, sent_via: 'in_app', message: `${ticker} reported yesterday. Still unconfirmed on your ledger: ${names}. Mark each met, moved, missed or not mentioned.` })
+    }
+  }
+  console.log(`call alerts: ${alertsOut.length}`)
+  for (const a of alertsOut) console.log(`  ${a.alert_type} ${a.ticker}: ${a.message}`)
+}
+
+// 5. Write.
 if (DRY) { console.log('dry run — nothing written'); process.exit(0) }
+for (const a of alertsOut) {
+  const { error } = await db.from('alerts').upsert(a, { onConflict: 'user_id,alert_type,ticker,event_date', ignoreDuplicates: true })
+  if (error) console.warn('alert insert failed', error.message)
+}
 for (let k = 0; k < rows.length; k += 200) {
   const { error } = await db.from('ticker_risks').upsert(rows.slice(k, k + 200).map((r) => ({ ...r, updated_at: new Date().toISOString() })), { onConflict: 'ticker' })
   if (error) { console.error('upsert failed', error.message); process.exit(1) }
