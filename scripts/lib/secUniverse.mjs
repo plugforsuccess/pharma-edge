@@ -36,6 +36,15 @@ export async function compactFactsFor(entries, { log = console.log } = {}) {
     const all = []
     for (const c of [cik, ...(PREDECESSOR_CIKS[ticker] ?? [])]) all.push(await secJson(`https://data.sec.gov/api/xbrl/companyfacts/CIK${c}.json`))
     const f = mergeFacts(all)
+    // PROBE_TAGS=AIRJ,… prints every cash-flow-sized duration tag filed in the
+    // last year, to find a company's own name for a line (owner, 2026-10-26).
+    if (f && (process.env.PROBE_TAGS ?? '').split(',').includes(ticker)) {
+      const since = new Date(Date.now() - 400 * 86400e3).toISOString().slice(0, 10)
+      for (const [ns, tags] of Object.entries(f.facts ?? {})) for (const [tag, v] of Object.entries(tags ?? {})) {
+        const rows = (v?.units?.USD ?? []).filter((r) => r.start && r.filed >= since && Math.abs(r.val) >= 5e5)
+        if (rows.length) log(`  PROBE ${ticker} ${ns}:${tag} ${rows.slice(-3).map((r) => `${r.start}→${r.end} ${Math.round(r.val / 1e5) / 10}M`).join(' | ')}`)
+      }
+    }
     if (f) { fin.set(ticker, compactFacts(f)); ok++ } else failed++
     if (++done % 200 === 0) log(`  facts ${done}/${entries.length} · ${failed} failed`)
   }, 300)

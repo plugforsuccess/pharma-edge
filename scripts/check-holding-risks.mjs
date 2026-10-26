@@ -1,5 +1,5 @@
 // npm run holdingrisks:check — src/utils/holdingRisks.js
-import { riskRow, holdingRiskFacts, shortsRow, catalystRow, cashLine, bothLitLine, riskRows } from '../src/utils/holdingRisks.js'
+import { riskRow, holdingRiskFacts, shortsRow, catalystRow, cashLine, bothLitLine, riskRows, runwayRow } from '../src/utils/holdingRisks.js'
 import { compactFacts } from '../src/utils/fade.js'
 let pass = 0, fail = 0
 const ok = (name, cond) => { if (cond) pass++; else { fail++; console.log('FAIL', name) } }
@@ -33,9 +33,35 @@ ok('catalyst sentence', /^Has not held its Oct 28 close \(\$120\) for 24 session
 ok('shorts sentence', /^Short interest \+30% in 35 days to 13\.0% of shares out; price −\d+% over the same window\.$/.test(facts[1].text))
 ok('both lit → the test line, both halves', /18% lower six months later at the median, and doubled one time in 3\./.test(bothLitLine(facts)) && bothLitLine(facts.slice(0, 1)) === null)
 ok('cash line: plain numbers', cashLine(row) === 'Cash $24M at Mar 31 · $6M used last qtr')
+// A JV-run company: $1.4M at the parent, $2.5M contributed to the LLC (a company-extension tag).
+const finJv = compactFacts({ facts: { 'us-gaap': {
+  NetCashProvidedByUsedInOperatingActivities: { units: { USD: [{ start: '2026-01-01', end: '2026-03-31', val: -2.36e6, form: '10-Q', filed: '2026-05-10' }, { start: '2026-01-01', end: '2026-06-30', val: -3.76e6, form: '10-Q', filed: '2026-08-10' }] } },
+  CashAndCashEquivalentsAtCarryingValue: { units: { USD: [{ end: '2026-06-30', val: 41.4e6, form: '10-Q', filed: '2026-08-10' }] } },
+}, mtek: { InvestmentInAirJouleLlc: { units: { USD: [{ start: '2026-01-01', end: '2026-03-31', val: 10e6, form: '10-Q', filed: '2026-05-10' }, { start: '2026-01-01', end: '2026-06-30', val: 12.5e6, form: '10-Q', filed: '2026-08-10' }] } } }, dei: {} } })
+const rowJv = riskRow({ bars, fin: finJv, asOf: day(329) })
+ok('JV spend from a company-extension tag, differenced to the quarter', Math.abs(rowJv.runway.jv - 2.5e6) < 1 && Math.abs(rowJv.runway.burn + 1.4e6) < 1)
+ok('runway counts ops + JV', Math.abs(rowJv.runway.quarters - 41.4 / 3.9) < 1e-6)
+ok('cash line shows both', cashLine(rowJv) === 'Cash $41M at Jun 30 · $1M ops + $3M to JV last qtr')
+ok('fact-test runway factor is untouched', typeof runwayRow === 'function')
+// AIRJ's real shape: the generic PaymentsToAcquireInvestments, plus equity-method income → counted.
+const finGen = compactFacts({ facts: { 'us-gaap': {
+  NetCashProvidedByUsedInOperatingActivities: { units: { USD: [{ start: '2026-01-01', end: '2026-03-31', val: -2.3e6, form: '10-Q', filed: '2026-05-10' }, { start: '2026-01-01', end: '2026-06-30', val: -3.8e6, form: '10-Q', filed: '2026-08-10' }] } },
+  CashAndCashEquivalentsAtCarryingValue: { units: { USD: [{ end: '2026-06-30', val: 41.4e6, form: '10-Q', filed: '2026-08-10' }] } },
+  PaymentsToAcquireInvestments: { units: { USD: [{ start: '2026-01-01', end: '2026-03-31', val: 10e6, form: '10-Q', filed: '2026-05-10' }, { start: '2026-01-01', end: '2026-06-30', val: 12.5e6, form: '10-Q', filed: '2026-08-10' }] } },
+  IncomeLossFromEquityMethodInvestments: { units: { USD: [{ start: '2026-04-01', end: '2026-06-30', val: -2.5e6, form: '10-Q', filed: '2026-08-10' }] } },
+}, dei: {} } })
+const rowGen = riskRow({ bars, fin: finGen, asOf: day(329) })
+ok('generic investments tag counts for an equity-method filer', Math.abs(rowGen.runway.jv - 2.5e6) < 1 && Math.abs(rowGen.runway.quarters - 41.4 / 4.0) < 1e-6)
+const finNoEq = compactFacts({ facts: { 'us-gaap': {
+  NetCashProvidedByUsedInOperatingActivities: { units: { USD: [{ start: '2026-01-01', end: '2026-03-31', val: 5e8, form: '10-Q', filed: '2026-05-10' }] } },
+  CashAndCashEquivalentsAtCarryingValue: { units: { USD: [{ end: '2026-03-31', val: 2e9, form: '10-Q', filed: '2026-05-10' }] } },
+  PaymentsToAcquireInvestments: { units: { USD: [{ start: '2026-01-01', end: '2026-03-31', val: 1e9, form: '10-Q', filed: '2026-05-10' }] } },
+}, dei: {} } })
+ok('…but not for a company buying securities with no equity-method stake', riskRow({ bars, fin: finNoEq, asOf: day(329) }).runway.jv === null)
 ok('no cash row → no line', cashLine({ runway: null }) === null)
 ok('no verdict words', [...facts.map((f) => f.text), bothLitLine(facts), cashLine(row)].every((t) => !/\b(sell|buy|hold|exit|should)\b/i.test(t)))
 ok('empty row → nothing', holdingRiskFacts(null).length === 0)
 ok('compact rows mirror the facts', riskRows(row).length === 2 && riskRows(row)[0].value === '24 sessions' && /^price −\d+%$/.test(riskRows(row)[1].value))
+ok('a negative differenced JV figure is clamped, not shown', cashLine({ runway: { cash: 2e9, burn: 1.2e9, jv: -3e6, periodEnd: '2026-06-30' } }) === 'Cash $2.0B at Jun 30 · $1.2B generated last qtr')
 console.log(`${pass} passed, ${fail} failed`)
 if (fail) process.exit(1)

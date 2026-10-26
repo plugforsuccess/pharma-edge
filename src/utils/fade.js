@@ -25,6 +25,22 @@ const TAGS = {
   revenue: ['Revenues', 'RevenueFromContractWithCustomerExcludingAssessedTax', 'RevenueFromContractWithCustomerIncludingAssessedTax', 'SalesRevenueNet'],
   ocf: ['NetCashProvidedByUsedInOperatingActivities', 'NetCashProvidedByUsedInOperatingActivitiesContinuingOperations'],
   cash: ['CashAndCashEquivalentsAtCarryingValue', 'CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents'],
+  // Capital contributions to equity-method investees (investing activities).
+  // A company that runs its operations through a JV (AIRJ → AirJoule, LLC)
+  // shows almost no operating burn; the spend is here (owner, 2026-10-26).
+  jv: ['PaymentsToAcquireEquityMethodInvestments', 'PaymentsToAcquireInterestInJointVenture', 'PaymentsToAcquireInterestInSubsidiariesAndAffiliates', 'PaymentsForAdvanceToAffiliate'],
+}
+// Company-extension tags for the same thing ("mtek:InvestmentInAirJouleLlc"):
+// any non-us-gaap, non-dei namespace whose tag names an investment in /
+// contribution to a JV / LLC / equity-method investee, duration rows in USD.
+const JV_EXT = /(InvestmentIn|ContributionsTo|ContributionTo|CapitalContribution|PaymentsTo).*(Llc|LLC|JointVenture|Jv\b|EquityMethod|Investee|Affiliate)|(JointVenture|EquityMethod).*(Contribution|Investment|Payments)/
+function jvExtensionRows(facts) {
+  const out = []
+  for (const [ns, tags] of Object.entries(facts?.facts ?? {})) {
+    if (ns === 'us-gaap' || ns === 'dei' || ns === 'srt' || ns === 'ifrs-full') continue
+    for (const [tag, v] of Object.entries(tags ?? {})) if (JV_EXT.test(tag)) for (const f of v?.units?.USD ?? []) out.push({ ...f, tag: `${ns}:${tag}` })
+  }
+  return out
 }
 const rowsOf = (facts, tags, unit) => tags.flatMap((t) => facts?.facts?.['us-gaap']?.[t]?.units?.[unit] ?? [])
 // → { revenue: [{ end, filed, val }] (annual), ocf: [{ start, end, filed, val }], cash: [{ end, filed, val }], sharesOut: [{ end, filed, val }], hasRevenueTag }
@@ -33,9 +49,18 @@ export function compactFacts(facts) {
   const revenue = rowsOf(facts, TAGS.revenue, 'USD').filter(annual).map((f) => ({ end: f.end, filed: f.filed, val: f.val }))
   const ocf = rowsOf(facts, TAGS.ocf, 'USD').filter((f) => f.start && f.end && f.filed).map((f) => ({ start: f.start, end: f.end, filed: f.filed, val: f.val }))
   const cash = rowsOf(facts, TAGS.cash, 'USD').filter((f) => !f.start && f.end && f.filed).map((f) => ({ end: f.end, filed: f.filed, val: f.val }))
+  const jvRaw = rowsOf(facts, TAGS.jv, 'USD').map((f) => ({ ...f, tag: 'us-gaap' })).concat(jvExtensionRows(facts))
+  const jv = jvRaw.filter((f) => f.start && f.end && f.filed && f.val != null).map((f) => ({ start: f.start, end: f.end, filed: f.filed, val: Math.abs(f.val), tag: f.tag }))
+  // AIRJ files "Investment in AirJoule, LLC" under the generic
+  // PaymentsToAcquireInvestments; it counts as JV spend only for a company
+  // that also reports equity-method income / an equity-method investment —
+  // otherwise it is a cash-rich company buying securities.
+  const eq = facts?.facts?.['us-gaap'] ?? {}
+  const hasEquityMethod = ['IncomeLossFromEquityMethodInvestments', 'EquityMethodInvestments', 'EquityMethodInvestmentOwnershipPercentage'].some((t) => (eq[t]?.units && Object.values(eq[t].units).some((u) => u?.length)))
+  const jvGeneric = hasEquityMethod ? rowsOf(facts, ['PaymentsToAcquireInvestments'], 'USD').filter((f) => f.start && f.end && f.filed && f.val != null).map((f) => ({ start: f.start, end: f.end, filed: f.filed, val: Math.abs(f.val), tag: 'us-gaap:PaymentsToAcquireInvestments' })) : []
   const sharesOut = (facts?.facts?.dei?.EntityCommonStockSharesOutstanding?.units?.shares ?? []).filter((f) => f.end && f.filed && f.val > 0).map((f) => ({ end: f.end, filed: f.filed, val: f.val }))
   const hasRevenueTag = TAGS.revenue.some((t) => facts?.facts?.['us-gaap']?.[t])
-  return { revenue, ocf, cash, sharesOut, hasRevenueTag }
+  return { revenue, ocf, cash, sharesOut, hasRevenueTag, jv, jvGeneric, hasEquityMethod }
 }
 const latestFiled = (rows, asOf, pick = (r) => true) => { let b = null; for (const r of rows ?? []) if (r.filed <= asOf && pick(r) && (!b || r.end > b.end || (r.end === b.end && r.filed > b.filed))) b = r; return b }
 
@@ -44,11 +69,14 @@ export const revenueAt = (fin, asOf) => latestFiled(fin.revenue, asOf)?.val ?? n
 export const cashAt = (fin, asOf) => latestFiled(fin.cash, asOf)?.val ?? null
 export const sharesOutAt = (fin, asOf) => latestFiled(fin.sharesOut, asOf)?.val ?? null
 
-// The latest single quarter's operating cash flow known by asOf: a ~90-day
+// The latest single quarter of a duration series known by asOf: a ~90-day
 // row directly, else a YTD row minus the YTD row one quarter shorter with
 // the same start.
-export function quarterlyOcfAt(fin, asOf) {
-  const rows = (fin.ocf ?? []).filter((r) => r.filed <= asOf)
+export const quarterlyOcfAt = (fin, asOf) => quarterlyAt(fin.ocf, asOf)
+// Capital put into equity-method investees in the latest quarter (≥ 0, null when the company reports none).
+export const quarterlyJvAt = (fin, asOf) => quarterlyAt(fin.jv, asOf) ?? (fin.jvGeneric?.length ? quarterlyAt(fin.jvGeneric, asOf) : null)
+export function quarterlyAt(series, asOf) {
+  const rows = (series ?? []).filter((r) => r.filed <= asOf)
   const quarters = []
   for (const r of rows) {
     const d = days(r.start, r.end)
