@@ -18,14 +18,27 @@ const todayYmd = () => new Date().toISOString().slice(0, 10)
 const fmtDay = (d) => new Date(`${d}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
 const fmtDayYear = (d) => new Date(`${d}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
 const inputCls = 'min-h-[44px] bg-bg border border-border rounded-lg px-3 py-2 text-sm text-fg placeholder:text-muted focus:outline-none focus:border-amber-400/60 focus:ring-1 focus:ring-amber-400/30 transition-colors'
-const chip = 'min-h-[36px] px-2.5 rounded-lg border text-xs transition'
-const STATE_TEXT = { met: 'Met', missed: 'Missed', overdue: 'Past due · unconfirmed', pending: 'Pending', unmentioned: 'Not mentioned' }
+const chip = 'min-h-[34px] px-2.5 rounded-lg border text-xs font-medium transition'
+// Status pill + the hero on the left of each row: the countdown while a
+// promise is open, what became of it once it isn't.
+const PILL = {
+  met: 'bg-green-500/15 text-green-300', missed: 'bg-red-500/15 text-red-300', overdue: 'bg-red-500/15 text-red-300',
+  unmentioned: 'bg-amber-500/15 text-amber-300', pending: 'bg-bg text-subtle border border-border',
+}
+const STATE_TEXT = { met: 'Met', missed: 'Missed', overdue: 'Past due', pending: 'Pending', unmentioned: 'Not mentioned' }
+function Hero({ st }) {
+  if (st.kind === 'met') return <div className="text-green-300"><Check size={22} strokeWidth={2.5} /></div>
+  if (st.kind === 'missed') return <div className="text-red-300"><X size={22} strokeWidth={2.5} /></div>
+  if (st.kind === 'overdue') return <div className="text-xl font-semibold font-mono-tab text-red-300 leading-none">{Math.abs(st.daysLeft)}d<div className="text-[10px] font-sans font-normal text-red-300/80 mt-0.5">late</div></div>
+  const soon = st.daysLeft != null && st.daysLeft <= 14
+  return <div className={clsx('text-xl font-semibold font-mono-tab leading-none', st.kind === 'unmentioned' ? 'text-amber-300' : soon ? 'text-amber-300' : 'text-fg')}>{st.daysLeft == null ? '—' : st.daysLeft === 0 ? 'now' : `${st.daysLeft}d`}</div>
+}
 
 function Tile({ label, value, sub, tone = 'fg' }) {
   return (
     <div className="min-w-0 rounded-xl bg-bg/40 border border-border px-3 py-2.5">
       <div className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold truncate">{label}</div>
-      <div className={clsx('mt-0.5 text-base font-semibold font-mono-tab truncate', tone === 'amber' ? 'text-amber-300' : 'text-fg')}>{value}</div>
+      <div className={clsx('mt-0.5 text-xl font-semibold font-mono-tab truncate leading-tight', tone === 'amber' ? 'text-amber-300' : tone === 'red' ? 'text-red-300' : 'text-fg')}>{value}</div>
       {sub && <div className="text-xs text-subtle truncate">{sub}</div>}
     </div>
   )
@@ -87,9 +100,9 @@ export default function MilestoneLedger({ ticker, positionId, cashLine = null })
         </div>
         {n ? (
           <div className="mt-2 grid grid-cols-3 gap-2">
-            <Tile label="Next" value={sum.next ? (sum.next.daysLeft === 0 ? 'Today' : `${sum.next.daysLeft}d`) : '—'} sub={sum.next ? sum.next.row.title : 'None dated'} />
+            <Tile label="Next" value={sum.next ? (sum.next.daysLeft === 0 ? 'Today' : `${sum.next.daysLeft}d`) : '—'} sub={sum.next ? sum.next.row.title : 'None dated'} tone={sum.next && sum.next.daysLeft <= 14 ? 'amber' : 'fg'} />
             <Tile label="This qtr" value={String(sum.dueThisQuarter.length)} sub="due" />
-            <Tile label="Past due" value={String(sum.overdue.length + sum.unmentioned.length)} sub={sum.overdue.length + sum.unmentioned.length ? 'no word' : 'none'} tone={sum.overdue.length + sum.unmentioned.length ? 'amber' : 'fg'} />
+            <Tile label="Past due" value={String(sum.overdue.length + sum.unmentioned.length)} sub={sum.overdue.length + sum.unmentioned.length ? 'no word' : 'none'} tone={sum.overdue.length + sum.unmentioned.length ? 'red' : 'fg'} />
           </div>
         ) : (
           <div className="mt-2 text-sm text-subtle">What management promised, and when.</div>
@@ -106,8 +119,8 @@ export default function MilestoneLedger({ ticker, positionId, cashLine = null })
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <div className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold">{ticker} · Promises</div>
-            {ledgerLines(sum).map((l, i) => <div key={i} className={clsx('text-sm', i === 0 ? 'text-fg' : 'text-subtle')}>{l}</div>)}
-            {cashLine && <div className="text-sm text-subtle">{cashLine}</div>}
+            {ledgerLines(sum).slice(-1).map((l, i) => <div key={i} className="text-sm text-fg">{l}</div>)}
+            {cashLine && <div className="text-xs text-subtle">{cashLine}</div>}
           </div>
           <button type="button" onClick={() => setOpen(false)} aria-label="Close" className="shrink-0 min-h-[44px] min-w-[44px] -mr-2 -mt-2 flex items-center justify-center text-subtle hover:text-fg"><X size={16} /></button>
         </div>
@@ -119,36 +132,37 @@ export default function MilestoneLedger({ ticker, positionId, cashLine = null })
                 const isOpen = st.kind !== 'met' && st.kind !== 'missed'
                 const slips = row.slips ?? 0
                 return (
-                  <li key={row.id} className="px-3 py-2.5">
-                    <div className="flex items-start gap-2">
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm text-fg">{row.title}</div>
-                        <div className="text-xs text-muted">
-                          {slips > 0 ? <>First {fmtDayYear(row.due_date)} · now {fmtDayYear(dueOf(row))} · moved {slips}×</> : <>Promised {fmtDayYear(row.due_date)}</>}
-                          {row.source ? ` · ${row.source}` : ''}
-                          {st.kind === 'met' ? (st.late > 0 ? ` · met ${st.late} days late` : ' · on time') : st.kind === 'pending' && st.daysLeft != null ? ` · in ${st.daysLeft} days` : ''}
+                  <li key={row.id} className={clsx('px-3 py-3 flex gap-3', st.kind === 'overdue' && 'bg-red-500/5', st.kind === 'unmentioned' && 'bg-amber-500/5')}>
+                    <div className="w-11 shrink-0 pt-0.5"><Hero st={st} /></div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start gap-2">
+                        <div className="flex-1 min-w-0 text-sm font-semibold text-fg leading-snug">{row.title}</div>
+                        <span className={clsx('shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold', PILL[st.kind])}>{STATE_TEXT[st.kind]}</span>
+                        <button type="button" onClick={() => remove(row)} aria-label="Remove milestone" className="shrink-0 -mr-1 -mt-1 min-h-[28px] min-w-[28px] flex items-center justify-center text-muted hover:text-fg"><X size={12} /></button>
+                      </div>
+                      <div className="mt-0.5 text-xs text-subtle truncate">
+                        {slips > 0 ? <><span className="text-amber-300">Moved {slips}× · </span>{fmtDay(row.due_date)} → {fmtDayYear(dueOf(row))}</> : fmtDayYear(dueOf(row))}
+                        {row.source ? ` · ${row.source}` : ''}
+                        {st.kind === 'met' && st.late > 0 ? ` · ${st.late} days late` : ''}
+                      </div>
+                      {row.evidence && isOpen && <div className="text-xs text-muted truncate">Confirms: {row.evidence}</div>}
+                      {isOpen && (
+                        <div className="mt-2 flex flex-wrap gap-1.5 items-center">
+                          <button type="button" onClick={() => mark(row, 'met')} className={clsx(chip, 'border-green-500/40 text-green-200 flex items-center gap-1')}><Check size={12} /> Met</button>
+                          <button type="button" onClick={() => mark(row, 'missed')} className={clsx(chip, 'border-red-500/40 text-red-200')}>Missed</button>
+                          {st.kind !== 'unmentioned' && <button type="button" onClick={() => mark(row, 'unmentioned')} className={clsx(chip, 'border-amber-500/40 text-amber-200')}>Not mentioned</button>}
+                          {moving === row.id ? (
+                            <>
+                              <input type="date" value={newDue} min={dueOf(row)} onChange={(e) => setNewDue(e.target.value)} className={clsx(inputCls, 'min-h-[36px] py-1 w-[150px] appearance-none')} aria-label="New date" />
+                              <button type="button" disabled={!newDue} onClick={() => move(row)} className={clsx(chip, 'border-amber-400/50 text-amber-200 disabled:opacity-40')}>Save</button>
+                              <button type="button" onClick={() => { setMoving(null); setNewDue('') }} className={clsx(chip, 'border-border text-subtle')}>Cancel</button>
+                            </>
+                          ) : (
+                            <button type="button" onClick={() => setMoving(row.id)} className={clsx(chip, 'border-border text-subtle hover:text-fg')}>Date moved</button>
+                          )}
                         </div>
-                        {row.evidence && isOpen && <div className="text-xs text-muted">Confirms it: {row.evidence}</div>}
-                      </div>
-                      <div className="text-xs text-subtle shrink-0 pt-0.5">{STATE_TEXT[st.kind]}</div>
-                      <button type="button" onClick={() => remove(row)} aria-label="Remove milestone" className="shrink-0 -mr-1 min-h-[32px] min-w-[32px] flex items-center justify-center text-muted hover:text-fg"><X size={12} /></button>
+                      )}
                     </div>
-                    {isOpen && (
-                      <div className="mt-2 flex flex-wrap gap-2 items-center">
-                        <button type="button" onClick={() => mark(row, 'met')} className={clsx(chip, 'border-border text-fg flex items-center gap-1')}><Check size={12} /> Met</button>
-                        <button type="button" onClick={() => mark(row, 'missed')} className={clsx(chip, 'border-border text-fg')}>Missed</button>
-                        {st.kind !== 'unmentioned' && <button type="button" onClick={() => mark(row, 'unmentioned')} className={clsx(chip, 'border-border text-fg')}>Not mentioned</button>}
-                        {moving === row.id ? (
-                          <>
-                            <input type="date" value={newDue} min={dueOf(row)} onChange={(e) => setNewDue(e.target.value)} className={clsx(inputCls, 'min-h-[36px] py-1 w-[150px] appearance-none')} aria-label="New date" />
-                            <button type="button" disabled={!newDue} onClick={() => move(row)} className={clsx(chip, 'border-amber-400/50 text-amber-200 disabled:opacity-40')}>Save</button>
-                            <button type="button" onClick={() => { setMoving(null); setNewDue('') }} className={clsx(chip, 'border-border text-subtle')}>Cancel</button>
-                          </>
-                        ) : (
-                          <button type="button" onClick={() => setMoving(row.id)} className={clsx(chip, 'border-border text-fg')}>Date moved</button>
-                        )}
-                      </div>
-                    )}
                   </li>
                 )
               })}
