@@ -451,3 +451,41 @@ often been the best price of the next six months than the start of a
 run. Consequence as pre-registered: the list stays a watch list of facts,
 nothing on it suggests a buy. Survivors only — the delisted names would
 make every listed number worse.
+
+### 2026-10-27, the bear side of the second jump (owner: "why not short or long put a stock on this list after a jump" → "Run it")
+
+Pre-registered the same day (preregistration.md). Run 40458050754,
+`src/utils/jumpBear.js` (`npm run jumpbear:check`). The same 175 listed
+second jumps on test (2024 →), entered at the open after the jump; σ =
+premium × 60-day realised vol on the jump day; 2% slippage per fill.
+
+| test, 2024 → | n | avg | median | win | lost ½ | worst | verdict |
+|---|---|---|---|---|---|---|---|
+| **long put, 126d, prem 1.3** (primary) | 175 | −14.1% | −14.9% | 42% | 39% | −100% | **FAIL** (2024 −15%, 2025 −21%, 2026 +5%) |
+| long put, 63d, prem 1.3 | 175 | −15.5% | −26.3% | 37% | 43% | −100% | |
+| long put, 126d, prem 1.6 | 175 | −27.6% | −28.8% | 37% | 43% | −100% | |
+| **put spread, 63d, prem 1.3** (primary) | 113 (62 skipped, debit > 40%) | −5.3% | −25.6% | 39% | 38% | −98% | **FAIL** (2024 −9%, 2025 −10%, 2026 +8%) |
+| put spread, 63d, prem 1.6 | 92 | −13.6% | −29.9% | 32% | 39% | −94% | |
+| short, borrow 30%, stop +50% | 175 | −19.6% | −6.2% | 49% | 43% | −373% | |
+| **short, borrow 30%, stop +100%** (primary) | 175 | −10.9% | +14.6% | 59% | 25% | −373% | **FAIL** (2024 −18%, 2025 −11%, 2026 +1%) |
+| short, borrow 30%, no stop | 175 | +3.6% | +21.2% | 64% | 15% | −998% | |
+| short, borrow 100%, any stop | 175 | −31% to −45% | | | | | |
+
+The same trades on jumps in stocks not listed (control A) did far worse
+every time — long put 126d −32.5%, spread −11.6%, short with +100% stop
+−28.5% — so the list carries real information about direction. It is
+not enough to pay for the trade. **All three primaries FAIL.**
+
+Reading. Puts: the post-jump premium is about what the typical drop
+delivers; the put wins 42% of the time and loses half or more 39% of the
+time. Spread: the 40% debit cap skips a third of the jumps (vol is too
+high to buy a spread that cheap), and the −50% stop fires on 40%.
+Short: the typical short makes money (median +14.6%, 59% win), but the
++100% stop fires on one in five and each one costs 100%+; without a stop
+the average turns barely positive (+3.6%) only by riding DBVT to −998%,
+which no account survives. At a 100% borrow fee every short loses.
+Stops hurt the short here as they hurt every swing variant before. The
+only positive rows are the no-stop short at 30% borrow (not a primary,
+fatal tail) and 2026 alone (35 jumps, open year). Nothing ships;
+survivors only, so the true bear-side numbers are somewhat better than
+these — not enough on this evidence to change a fail into a pass.
