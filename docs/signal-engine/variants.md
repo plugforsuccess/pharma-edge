@@ -411,3 +411,43 @@ long-vol ships; `/charts/tape` stays a watch list of facts (the same
 rows the risk facts show on a holding), with no play attached. That
 closes the profit question the owner asked: the information says which
 holdings are not holding their story, not which options to buy.
+
+### 2026-10-27, the second jump (owner: "use the losers list and wait for a positive milestone then buy then ride up" → "Run it")
+
+Pre-registered the same day (preregistration.md, "the second jump").
+Run 40453079474, `src/utils/secondJump.js` (`npm run secondjump:check`).
+Shares bought at the open after a jump (≥ 10% on ≥ 3× volume) on a stock
+that was on the tape list (scan definition) on one of the 60 sessions
+before; one jump per stock per 21 sessions.
+
+| test, 2024 → | n | 21-session median | 63 | 126 | avg 126 | higher at 126 | fell 40% | doubled |
+|---|---|---|---|---|---|---|---|---|
+| **listed: second jump** | **175** | **−13.3%** | **−24.0%** | **−39.4%** | −22.1% | 25% | **71%** | 28% |
+| listed, short ≥ 15% of shares | 44 | −15.4% | −10.5% | −31.5% | −20.1% | 25% | 61% | 25% |
+| listed, short < 15% of shares | 118 | −11.9% | −26.1% | −40.1% | −23.5% | 23% | 75% | 28% |
+| control A: jumps not listed | 877 | −3.8% | −7.2% | −12.4% | +10.7% | 39% | 45% | 25% |
+| control B: any day | 8,955 | +0.1% | +0.3% | +1.0% | +10.1% | 51% | 24% | 14% |
+
+The +40% target exit: listed median +0.3% (hit 47%) vs +7.6% on other
+jumps. By year (126-session median, listed vs not listed): 2023 −8.8% vs
+−19.8% (16 jumps), 2024 −40.1% vs −14.9%, 2025 −29.1% vs −6.6%, 2026
+−46.8% vs −9.4%. Train (< 2024) has only 19 listed jumps: −14.1% median,
+68% fell 40%.
+
+**FAIL (primary).** The second jump on a listed stock is the worst entry
+measured in the whole series: the typical one is 39% lower six months
+on, 27 points under other jumps, and seven in ten fall 40% or more,
+three times the any-day rate. High short interest does not rescue it
+(−31.5%, 61% fell): the squeeze reading is not in the data. The doublers
+are real and huge — DBVT +960%, CAPR +314%, QBTS +199% — but one in four,
+with no trait found that picks them in advance. The best 8 and worst 8
+are in the job log.
+
+Reading the same table from the holder's side (not the graded question,
+stated as such): a listed stock's second jump has been followed by a
+lower price in three cases of four at every horizon measured, starting
+from the next open. For someone already holding one, the jump has more
+often been the best price of the next six months than the start of a
+run. Consequence as pre-registered: the list stays a watch list of facts,
+nothing on it suggests a buy. Survivors only — the delisted names would
+make every listed number worse.
