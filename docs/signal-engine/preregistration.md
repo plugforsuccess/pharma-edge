@@ -655,3 +655,50 @@ suggests a trade. Known weaknesses: survivors only (delisted names, the
 likeliest to have failed twice, are missing — a pass is flattered); a
 jump is not a milestone; FINRA data is bi-monthly and lags; one bull
 market, 2022 thin.
+
+## Added 2026-10-27 — the bear side of the second jump (owner: "why not short or long put a stock on this list after a jump" → "Run it")
+
+Written before the code exists, after the second-jump result (variants.md,
+2026-10-27). Same entries: listed second jumps, one per stock per 21
+sessions, entered at the open after the jump (S0). Control: the same
+trades on jumps in stocks **not** listed (control A). For the owner's own
+trading only — whatever the result, nothing on the list suggests a put or
+a short to subscribers (no investment-adviser activity; counsel first).
+
+**Volatility.** σ = premium × 60-day realised vol on the jump day (it
+includes the jump — the honest post-jump price), floor 15%; rate 4%; 2%
+slippage per fill. Premiums 1.3 (primary) and 1.6.
+
+**Three instruments, each graded on its own primary:**
+1. **Long put** — at the money (K = S0), 126 sessions to expiry, held to
+   expiry, value = max(K − S, 0). Also reported: 63 sessions, premium 1.6.
+   Primary: 126 sessions, premium 1.3.
+2. **Put debit spread under the spread rules** (`PUT_MODEL`) — long put
+   at the money, short put one expected move lower (K2 = S0 × (1 − σ√T)),
+   63 sessions to expiry; skipped when the debit is over 40% of the width;
+   marked daily at the same σ; sell half at +100%, a quarter more at
+   +200%; everything left out at −50% or with 21 sessions to go.
+   Primary: premium 1.3.
+3. **Short shares** — short at S0, cover at the 126-session close, or at
+   the first close ≥ (1 + stop) × S0. Borrow fee accrues daily on S0.
+   Grid: borrow 30% / 100% a year × stop +50% / +100% / none. Primary:
+   borrow 30%, stop +100%.
+
+**Measured** per trade: return on capital (premium paid; for the short,
+on S0), average, median, win rate, share losing ≥ 50%, worst trade, n.
+
+**Pass** per instrument on its primary, test period (jumps ≥ 2024-01-01),
+all of: average > 0 and median > 0 after costs; ≥ 100 trades; the
+average positive in each of 2024, 2025 and 2026 separately. **Fail:** any
+one misses. **Inconclusive:** < 100 trades. Train (< 2024, 19 listed
+jumps) reported, not graded.
+
+**Consequences.** A pass means a forward paper record of that
+instrument on new listed second jumps for a quarter, for the owner only,
+before any real money; nothing changes in the app. A fail closes that
+instrument. Known weaknesses: survivors only — delisted names would
+have paid shorts and puts, so the bear-side result is a floor; Black-
+Scholes on realised vol is a model, not a quote, and real post-jump put
+prices on these names can be higher; borrow fees and availability vary
+by name and day, and some shares can't be borrowed at all; the short
+stop fills at the close, gaps can be worse.
