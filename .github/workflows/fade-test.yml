@@ -18,6 +18,7 @@ on:
       - scripts/lib/finra.mjs
       - src/utils/fade.js
       - src/utils/straddle.js
+      - src/utils/secondJump.js
       - .github/workflows/fade-test.yml
 
 jobs:

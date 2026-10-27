@@ -12,6 +12,7 @@ import { FADE, FADE_PASS, fadeScore, shortsCovering, catalystHeld, forwardFade, 
 import { filingsMap } from './lib/secFilings.mjs'
 import { straddleTrade, straddleStats, straddleVerdict, STRADDLE } from '../src/utils/straddle.js'
 import { catalystRow, shortsRow, HOLDING_RISK } from '../src/utils/holdingRisks.js'
+import { eventFlags, listedFlags, jumpOutcome, countedJumps, wasListed, jumpStats, secondJumpVerdict, SECOND_JUMP, SECOND_JUMP_PASS } from '../src/utils/secondJump.js'
 import { dailyBars, mapLimit, sources } from './lib/marketData.mjs'
 import { publicFloatCiks, tickersFor, compactFactsFor } from './lib/secUniverse.mjs'
 import { loadForm345 } from './lib/form345.mjs'
@@ -212,6 +213,55 @@ for (const [label, set, flag] of [
     }
   }
   console.log(`  Pass (test, premium ${STRADDLE.premium}, hold to expiry, B'): avg > 0, avg ≥ universe + 10 pts, median > universe median, ≥ 100 trades. Premium 1.0 is optimistic for these names.`)
+}
+// The second jump (pre-registered 2026-10-27): the next jump on a listed stock vs jumps elsewhere vs any day.
+{
+  const listedJ = [], otherJ = [], anyDay = []
+  for (const s of stocks) {
+    const sh = shorts.get(s.tk) ?? []
+    const ev = eventFlags(s.bars)
+    const lst = listedFlags(s.bars, ev, sh)
+    const okAt = (i) => { if (i < 252) return false; const rev = revenueAt(s.fin, s.bars[i].t); return (rev == null || rev < U.revenueMax) && adv(s.bars, i) >= U.advMin }
+    for (const e of countedJumps(ev, 252)) {
+      if (!okAt(e)) continue
+      const out = jumpOutcome(s.bars, e)
+      if (!out) continue
+      const so = sharesOutAt(s.fin, s.bars[e - 1].t)
+      const cur = sh.filter((x) => x.date <= s.bars[e - 1].t).pop()
+      const siPct = so && cur ? cur.shares / so : null
+      const row = { tk: s.tk, t: s.bars[e].t, jump: s.bars[e].c / s.bars[e - 1].c - 1, siPct, out }
+      ;(wasListed(lst, e) ? listedJ : otherJ).push(row)
+    }
+    s.bars.forEach((b, i) => { if (monthStarts.has(b.t) && okAt(i)) { const out = jumpOutcome(s.bars, i); if (out) anyDay.push({ tk: s.tk, t: b.t, out }) } })
+  }
+  const H = SECOND_JUMP.horizon
+  const fmt = (name, st) => `  ${name.padEnd(34)} ${String(st.n).padStart(5)} ${SECOND_JUMP.holds.map((h) => pct(st.holds[h].median).padStart(8)).join('')} ${pct(st.holds[H].avg).padStart(8)} ${pct(st.holds[H].win, 0).padStart(6)} ${pct(st.target.median).padStart(8)} ${pct(st.target.hitRate, 0).padStart(6)} ${pct(st.fell, 0).padStart(6)} ${pct(st.doubled, 0).padStart(6)}`
+  console.log(`\n=== Second jump — shares bought the open after a jump (≥ 10% on ≥ 3× volume), one per stock per ${SECOND_JUMP.gap} sessions`)
+  console.log(`  ${'set'.padEnd(34)} ${'n'.padStart(5)} ${SECOND_JUMP.holds.map((h) => `med ${h}`.padStart(8)).join('')} ${'avg 126'.padStart(8)} ${'up126'.padStart(6)} ${'+40% ex'.padStart(8)} ${'hit'.padStart(6)} ${'fell40'.padStart(6)} ${'dbl'.padStart(6)}`)
+  report.secondJump = {}
+  for (const [pname, inP] of [['test', (r) => r.t >= SPLIT], ['train', (r) => r.t < SPLIT]]) {
+    console.log(`  — ${pname}`)
+    const L = jumpStats(listedJ.filter(inP).map((r) => r.out)), A = jumpStats(otherJ.filter(inP).map((r) => r.out)), B = jumpStats(anyDay.filter(inP).map((r) => r.out))
+    const hi = jumpStats(listedJ.filter(inP).filter((r) => r.siPct != null && r.siPct >= SECOND_JUMP.siHigh).map((r) => r.out))
+    const lo = jumpStats(listedJ.filter(inP).filter((r) => r.siPct != null && r.siPct < SECOND_JUMP.siHigh).map((r) => r.out))
+    const v = pname === 'test' ? secondJumpVerdict(L, A, B) : ''
+    console.log(fmt('listed: second jump', L) + (v ? `  → ${v.toUpperCase()} (primary)` : ''))
+    console.log(fmt('  short ≥ 15% of shares', hi)); console.log(fmt('  short < 15% of shares', lo))
+    console.log(fmt('control A: jumps not listed', A)); console.log(fmt('control B: any day', B))
+    report.secondJump[pname] = { listed: L, siHigh: hi, siLow: lo, unlisted: A, anyDay: B, verdict: v || undefined }
+  }
+  console.log('  by year (126-session median · fell 40% · n):')
+  report.secondJump.byYear = {}
+  for (const y of [...new Set(listedJ.concat(otherJ).map((r) => r.t.slice(0, 4)))].sort()) {
+    const L = jumpStats(listedJ.filter((r) => r.t.startsWith(y)).map((r) => r.out)), A = jumpStats(otherJ.filter((r) => r.t.startsWith(y)).map((r) => r.out))
+    report.secondJump.byYear[y] = { listed: L, unlisted: A }
+    console.log(`  ${y}  listed ${pct(L.holds[H].median).padStart(7)} · ${pct(L.fell, 0).padStart(4)} · ${String(L.n).padStart(4)}    not listed ${pct(A.holds[H].median).padStart(7)} · ${pct(A.fell, 0).padStart(4)} · ${String(A.n).padStart(5)}`)
+  }
+  const best = [...listedJ].filter((r) => r.t >= SPLIT).sort((a, b) => b.out.ret[H] - a.out.ret[H])
+  console.log('  listed second jumps, test — best 8 and worst 8 (126 sessions):')
+  for (const r of best.slice(0, 8).concat(best.slice(-8))) console.log(`    ${r.tk.padEnd(6)} ${r.t}  jump ${pct(r.jump, 0).padStart(5)}  ${pct(r.out.ret[H], 0).padStart(6)}${r.siPct != null ? `  short ${pct(r.siPct, 0)}` : ''}`)
+  report.secondJump.examples = best.slice(0, 20).concat(best.slice(-20)).map((r) => ({ tk: r.tk, t: r.t, jump: r.jump, siPct: r.siPct, ret126: r.out.ret[H] }))
+  console.log(`  Pass (test): ≥ ${SECOND_JUMP_PASS.minN} listed jumps, 126-session median ≥ control A + ${SECOND_JUMP_PASS.medianGap * 100} pts, fell-40% rate ≤ control B.`)
 }
 // Dilution: did a raise (8-K 3.02 or 424B5) follow within 6 months?
 console.log('\n=== Raised within 6 months (test, 2024 →) — pre-set reading: runway < 5 q ≥ 2× base, runway + shelf ≥ 3×')

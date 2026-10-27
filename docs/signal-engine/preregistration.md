@@ -607,3 +607,51 @@ paid the put side — the result is a floor on the downside leg); realised
 vol as the premium base is a model, not a quote; no earnings-date or
 event-date adjustment to the premium; one bull market in the test period
 with 2022 thin.
+
+## Added 2026-10-27 — the second jump (owner: "Why not just use the losers list and wait for a positive milestone then buy then ride up" → "Run it")
+
+Written before the code exists. The list on `/charts/tape` is made of
+stocks whose last jump failed. This test asks whether the **next** jump on
+a listed stock holds better than jumps in general — whether rising short
+interest turns a real milestone into a squeeze.
+
+**Universe.** The Fade Screen universe (SEC float-range filers listed
+today, pre-revenue at the date, 20-day dollar volume ≥ $1M, ≥ 252 bars of
+history), survivors only.
+
+**Jump.** A close up ≥ 10% on volume ≥ 3× the prior 20-day average (the
+Fade event definition, unchanged). One jump per stock per 21 sessions: a
+jump within 21 sessions after the last counted jump on the same stock is
+skipped, whichever group either belongs to. No milestone calendar exists
+across the market; the jump stands in for "a positive milestone".
+
+**Listed.** The scan definition as shipped: on at least one of the 60
+sessions **before** the jump, the stock had closed below its previous
+jump's close for 20+ sessions in a row **and** short interest was up
+≥ 15% over ≥ 30 days while the price fell ≥ 10% over the same span
+(`HOLDING_RISK`). The jump day itself is never used to decide.
+
+**Trade.** Buy the shares at the next session's open. No options. Exits
+measured from that open: hold 21 / 63 / 126 sessions; and a +40% target
+(first close ≥ 1.4× entry within 126 sessions, else the 126-session
+close). Outcomes inside 126 sessions: fell 40% (a low ≤ 0.6× entry),
+doubled (a high ≥ 2× entry).
+
+**Controls.** (A) Jumps on the same universe in stocks **not** listed in
+the prior 60 sessions, same rules. (B) The universe on any day: every
+stock-month start, bought at the next open, same measures.
+
+**Pass** on test (jumps on or after 2024-01-01), all three: ≥ 100 listed
+jumps; 126-session median ≥ 10 points above control A's; fell-40% rate no
+higher than control B's. **Fail:** any one misses. **Inconclusive:**
+< 100 listed jumps. Reported, not graded: train (< 2024), each hold, the
++40% target, by year, and listed jumps split at short interest ≥ 15% of
+shares out on the session before the jump.
+
+**Consequences.** Pass → a forward paper record of listed second jumps
+for a quarter before anything is shown; the page stays a watch list
+meanwhile. Fail → the list stays a watch list of facts and nothing on it
+suggests a trade. Known weaknesses: survivors only (delisted names, the
+likeliest to have failed twice, are missing — a pass is flattered); a
+jump is not a milestone; FINRA data is bi-monthly and lags; one bull
+market, 2022 thin.
