@@ -474,7 +474,11 @@ export default function LeapsEntry() {
   return (
     <div className="px-4 py-4 pb-24 max-w-md md:max-w-3xl mx-auto">
       <header className="flex items-center gap-2 mb-4">
-        <Link to="/charts" aria-label="Back to Charts"
+        {/* Back returns to the page that opened the chart (Leaders, Stopped believing,
+            Leader record, Portfolio…); opened from a link or a notification with no
+            history in the app, it falls back to Charts (owner, 2026-10-28). */}
+        <Link to="/charts" aria-label="Back"
+          onClick={(e) => { if ((window.history.state?.idx ?? 0) > 0) { e.preventDefault(); navigate(-1) } }}
           className="min-h-[44px] min-w-[44px] -ml-2 flex items-center justify-center rounded-xl text-subtle hover:text-fg">
           <ArrowLeft size={18} />
         </Link>
@@ -685,7 +689,7 @@ export default function LeapsEntry() {
         watchlist={tracking ?? []}
         gatedSet={NO_GATES}
         selected={ticker}
-        onSelect={(sym) => { setSearchOpen(false); navigate(`/charts/entry/${encodeURIComponent(sym)}`) }}
+        onSelect={(sym) => { setSearchOpen(false); navigate(`/charts/entry/${encodeURIComponent(sym)}`, { replace: true }) }}
         allowCustom
         feedLabels={false}
       />
