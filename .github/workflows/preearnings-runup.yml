@@ -1,0 +1,52 @@
+# Research (owner, 2026-10-28): the pre-earnings run-up test. Builds the
+# earnings events (SEC 8-K Item 2.02 + Nasdaq calendar timing) and runs the
+# in-sample stock-drift diagnostic. The option backtest runs only when chain
+# data exists. Writes nothing to the DB. research/preearnings-runup/PREREG.md
+
+name: Pre-earnings run-up
+
+on:
+  workflow_dispatch:
+  push:
+    branches-ignore: [main]
+    paths:
+      - research/preearnings-runup/**
+      - .github/workflows/preearnings-runup.yml
+
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Checks
+        working-directory: research/preearnings-runup
+        run: node check.mjs && node e2e.mjs
+      - name: Events
+        working-directory: research/preearnings-runup
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SEC_USER_AGENT: ${{ vars.SEC_USER_AGENT }}
+        run: node events.mjs
+      - name: Drift diagnostic (in-sample only)
+        working-directory: research/preearnings-runup
+        run: node drift.mjs
+      - name: Option backtest (in-sample; needs chain data)
+        working-directory: research/preearnings-runup
+        run: node backtest.mjs --events events.json --bars bars.json --chains data/chains --out out || echo "no chain data — option backtest skipped"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: preearnings-runup
+          path: |
+            research/preearnings-runup/events.json
+            research/preearnings-runup/drift.json
+            research/preearnings-runup/*.svg
+            research/preearnings-runup/out/
+          retention-days: 30
+          if-no-files-found: warn
