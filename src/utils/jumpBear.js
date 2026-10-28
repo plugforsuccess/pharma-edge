@@ -83,3 +83,17 @@ export function bearVerdict(rows, pass = JUMP_BEAR_PASS) {
   const ok = all.avg > 0 && all.median > 0 && pass.years.every((y) => years[y].n > 0 && years[y].avg > 0)
   return { verdict: ok ? 'pass' : 'fail', all, years }
 }
+
+// List entry (pre-registered 2026-10-28): the first session a stock is listed after
+// `gap` sessions off the list; one entry per stock per `gap` sessions.
+export const LIST_ENTRY = Object.freeze({ gap: 63, minIdx: 252 })
+export function listEntries(listed, { gap = LIST_ENTRY.gap, minIdx = LIST_ENTRY.minIdx } = {}) {
+  const out = []
+  let lastOn = -Infinity, lastEntry = -Infinity
+  for (let i = 0; i < listed.length; i++) {
+    if (!listed[i]) continue
+    if (i >= minIdx && i - lastOn > gap && i - lastEntry >= gap) { out.push(i); lastEntry = i }
+    lastOn = i
+  }
+  return out
+}

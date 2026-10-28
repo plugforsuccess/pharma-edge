@@ -1,4 +1,4 @@
-import { jumpVol, putTrade, spreadTrade, shortTrade, bearStats, bearVerdict, JUMP_BEAR } from '../src/utils/jumpBear.js'
+import { jumpVol, putTrade, spreadTrade, shortTrade, bearStats, bearVerdict, JUMP_BEAR, listEntries, LIST_ENTRY } from '../src/utils/jumpBear.js'
 import { bsPut } from '../src/utils/replay.js'
 let pass = 0, fail = 0
 const ok = (c, m) => { if (c) pass++; else { fail++; console.log('FAIL', m) } }
@@ -47,5 +47,10 @@ ok(bearVerdict(mixed).verdict === 'fail', 'fail: one losing year')
 const st = bearStats([{ ret: -1 }, { ret: 0.5 }, { ret: 2 }, { skipped: true }])
 ok(st.n === 3 && st.skipped === 1 && close(st.median, 0.5) && close(st.lostHalf, 1 / 3) && st.worst === -1, 'bearStats')
 ok(JUMP_BEAR.short.primary.borrow === 0.3 && JUMP_BEAR.short.primary.stop === 1 && JUMP_BEAR.put.primary === 126 && JUMP_BEAR.spread.horizon === 63, 'pre-registered constants')
+// List entry: first listed session after 63 off; one per 63 sessions; none before 252 bars.
+const L = Array(1000).fill(false)
+for (const i of [100, 300, 301, 302, 340, 420, 500, 700, 760]) L[i] = true
+ok(JSON.stringify(listEntries(L)) === JSON.stringify([300, 420, 500, 700]), 'list entry: first day back after 63 off, gap respected, warm-up skipped')
+ok(LIST_ENTRY.gap === 63 && LIST_ENTRY.minIdx === 252, 'list-entry constants')
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)
