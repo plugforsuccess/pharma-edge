@@ -80,11 +80,7 @@ By year, 2 sessions before → last session: 2022 0.0%, 2023 +0.9%,
 haven't checked current plans, so each needs a quote before anything is
 bought.
 
-1. **Massive (Polygon): ask first, may cost nothing new.** A
-   `MASSIVE_API_KEY` is still in Supabase secrets, and it still writes
-   daily IV rows. If that plan includes historical option quotes, it
-   covers the chains with no new spend. **Owner: which Massive plan is
-   active?**
+1. **Massive (Polygon): not an option.** The plan is inactive (owner, 2026-10-28: about $200 a month to restart). The daily IV rows still labelled "polygon" are empty: none since 2026-10-20 has an IV value.
 2. **ThetaData.** Historical option quotes at intraday times for US
    names, which fits the 10:00 / 15:45 / 15:55 snapshots exactly.
 3. **Cboe DataShop, Option EOD Summary.** Carries a 15:45 ET quote with
