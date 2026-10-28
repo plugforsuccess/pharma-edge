@@ -738,3 +738,32 @@ short to subscribers (no investment-adviser activity; counsel first). A fail
 closes the list-entry bear side. Known weakness: survivors only — the 28% of
 filers delisted since are missing, and they are the names that fell most,
 so every bear number here is a floor.
+
+### Addendum 1 (2026-10-28, before any result of the list-entry run was read)
+
+Owner: "ensure these stocks have enough volume to trade options" and "how
+long did it take for these stocks to be delisted on average".
+
+**Tradeable subset becomes the graded primary.** There is no historical
+option volume or open interest in our data (Massive inactive), so options
+liquidity is proxied on the stock: an entry counts only when the entry-day
+close is ≥ $3 (the exchanges' listing floor for new option classes) and the
+20-day average dollar volume is ≥ $10M (about 10× the universe floor). The
+pass rule above applies to this subset; the full list-entry set and a $5M
+tier are reported, not graded. Wide option quotes on these names make 2%
+slippage optimistic, so every primary is also reported at 5% per fill; a
+pass at 2% that turns negative at 5% is recorded as "pass at 2% only" and
+does not start a paper record.
+
+**Delisted names, from SEC filings (descriptive, no pass mark).** For every
+float-range filer with no listed ticker today: SEC submissions since 2019 —
+Form 25 / 25-NSE (delisting; date = first one), Form 15 (deregistration),
+8-K item 3.01 (exchange notice of a listing-standard failure), 8-K item 1.03
+(bankruptcy), DEFM14A / SC TO-T / SC 14D9 (merger or tender). Reason =
+bankruptcy if 1.03, else acquired if a merger / tender form, else
+"delisted, other". Reported: counts by reason, and the median / quartiles of
+(a) days from the first 3.01 notice to the delisting, (b) days from the
+mid-year float filing (June 30 of the latest float-range year) to the
+delisting, overall and for the pre-revenue ones (revenue < $25M at that
+year end). This sizes how fast these names disappear; it adds no price data
+(none exists for them in our sources), so the bear test stays survivors-only.
