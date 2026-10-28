@@ -40,6 +40,7 @@ const PARAMS_KEY = 'cm:entry-params'
 const PANES_KEY = 'cm:entry-panes:v3'
 // v3: Triple ◆ + the reclaim zone were added (on by default).
 const LAYERS_KEY = 'cm:entry-layers:v3'
+const REJECTIONS_KEY = 'cm:entry-rejections'
 const DEFAULT_LAYERS = ['triple', 'zone', 'bravoSignals', 'exits', 'swings']
 // The signal suite runs on daily (default — matches TradingView on a daily
 // chart), weekly or monthly bars. A Hardening bull this many trading days
@@ -234,6 +235,9 @@ export default function LeapsEntry() {
     setLayers(next)
     saveJson(LAYERS_KEY, next)
   }
+  // Rejection levels (owner, 2026-10-28), on by default, remembered on the device.
+  const [rejections, setRejections] = useState(() => loadJson(REJECTIONS_KEY) !== false)
+  const toggleRejections = () => { const next = !rejections; setRejections(next); saveJson(REJECTIONS_KEY, next) }
   const togglePane = (k) => {
     const next = panes.includes(k) ? panes.filter((x) => x !== k) : [...panes, k]
     setPanes(next)
@@ -416,7 +420,7 @@ export default function LeapsEntry() {
   // no price layers.
   const paneItems = (periodMode || intraBars ? SUB_PANES.filter(([k]) => !DAILY_ONLY_PANES.has(k)) : SUB_PANES).filter(([k]) => SUITE || !SUITE_PANES.has(k))
   const shownPanes = SUITE ? panes : panes.filter((k) => !SUITE_PANES.has(k))
-  const shownLayers = SUITE ? layers : []
+  const shownLayers = [...(SUITE ? layers : []), ...(rejections ? ['rejections'] : [])]
   const cbars = chart?.bars ?? bars
   // Drawing tools (owner, 2026-10-16), shared with the Charts price chart
   // per ticker on this device (cm:chart-tools:TICKER).
@@ -623,12 +627,14 @@ export default function LeapsEntry() {
               {/* What's drawn: indicator panels, then layers on the price chart. */}
               <div className="px-5 pb-3 space-y-3">
                 <ToggleGroup label="Panels" items={paneItems} isOn={(k) => panes.includes(k)} onToggle={togglePane} />
-                {SUITE && <ToggleGroup label="On price" items={LAYERS} isOn={(k) => layers.includes(k)} onToggle={toggleLayer} />}
+                <ToggleGroup label="On price" items={[['rejections', 'Rejection levels'], ...(SUITE ? LAYERS : [])]} isOn={(k) => (k === 'rejections' ? rejections : layers.includes(k))} onToggle={(k) => (k === 'rejections' ? toggleRejections() : toggleLayer(k))} />
               </div>
               <div className="px-5 py-3 border-t border-hairline flex flex-wrap gap-x-4 gap-y-1.5 text-[11px] text-muted">
                 {SUITE && !periodMode && <Key className="text-green-400" glyph="▲">Buy signal</Key>}
                 {SUITE && !periodMode && <Key className="text-green-400/50" glyph="●">MACD confirms</Key>}
                 <Key className="text-amber-300" glyph="●">Golden cross</Key>
+                {rejections && <Key className="text-rose-300" glyph="—">Ceiling: rejected from below</Key>}
+                {rejections && <Key className="text-green-400" glyph="—">Floor: rejected from above</Key>}
                 <Key className="text-rose-300" glyph="●">Death cross</Key>
                 {SUITE && !periodMode && <Key glyph={<span className="inline-block w-3 h-2.5 rounded-sm bg-green-400/15 align-middle" />}>Buy zone</Key>}
                 {shownLayers.includes('hardening') && <Key className="text-amber-300" glyph="▲">Hardening bull</Key>}

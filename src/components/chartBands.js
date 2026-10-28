@@ -152,8 +152,8 @@ export class FibLevels {
             }
             for (const l of pts) {
               ctx.strokeStyle = l.color
-              ctx.lineWidth = 1
-              ctx.setLineDash(l.kind === 'extension' ? [4, 4] : [])
+              ctx.lineWidth = l.width ?? 1
+              ctx.setLineDash(l.dash ?? (l.kind === 'extension' ? [4, 4] : []))
               ctx.beginPath()
               ctx.moveTo(x0, Math.round(l.y) + 0.5)
               ctx.lineTo(x1, Math.round(l.y) + 0.5)
@@ -192,7 +192,7 @@ export class FibLevels {
               ctx.beginPath()
               if (ctx.roundRect) ctx.roundRect(x, l.y - 7, w, 14, 3); else ctx.rect(x, l.y - 7, w, 14)
               ctx.fill()
-              ctx.fillStyle = l.color
+              ctx.fillStyle = l.labelColor ?? l.color
               ctx.fillText(l.text, x + 4, l.y + 0.5)
             }
           })

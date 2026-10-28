@@ -47,7 +47,8 @@
     "basketrecord:check": "node scripts/check-basket-record.mjs",
     "straddle:check": "node scripts/check-straddle.mjs",
     "secondjump:check": "node scripts/check-second-jump.mjs",
-    "jumpbear:check": "node scripts/check-jump-bear.mjs"
+    "jumpbear:check": "node scripts/check-jump-bear.mjs",
+    "rejections:check": "node scripts/check-rejections.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",

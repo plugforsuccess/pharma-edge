@@ -130,6 +130,8 @@
   --color-suite-bear: #f2545b;
   /* Confluence score + swing lows on the entry chart (canvas needs hex). */
   --color-confluence: #a78bfa;
+  /* 20-bar average on the entry chart (owner, 2026-10-28), beside the gold 50 and the green / red 200. */
+  --color-ma20: #38bdf8;
 
   /* Fonts — Space Grotesk reads modern + confident without the
      literary weight Fraunces carried (Pharma/Wiley Edge era). It
