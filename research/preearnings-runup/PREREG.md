@@ -183,3 +183,20 @@ sealed for the graded run. It speaks only to driver (b).
   the fixed-time exit quote does not capture.
 - With about 30 names and 4 reports a year, 18 months out of sample
   holds roughly 180 events before filters, close to the 100-trade floor.
+
+## Addendum 1, 2026-10-28 (before any diagnostic result existed)
+
+The first events run found that Nasdaq's historical calendar answers every
+past date but carries no time for past reports ("time-not-supplied" on
+every row sampled from 2016 on). So no past event has a second timing
+source, and §2's rule confirms none. **The graded option test keeps §2
+unchanged:** it waits for a vendor calendar with historical BMO / AMC
+timing to act as the second source (ORATS, Wall Street Horizon or the
+option vendor's own calendar).
+
+**The §9 diagnostic only** may use events with EDGAR timing alone, labelled
+"single-source" in every output. EDGAR gives the 8-K's acceptance minute
+(converted from UTC to Eastern; 1,249 of 1,255 Item 2.02 filings fall
+before 9:30 or at or after 16:00 ET). Everything else in §9 is unchanged:
+in-sample events only, the same windows, the same controls. The diagnostic
+is still never graded and never the answer.
