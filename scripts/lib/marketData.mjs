@@ -86,15 +86,18 @@ async function fromYahoo(ticker, range, attempts = 3) {
   return { bars: null, error: last }
 }
 
-async function fromEdge(ticker) {
+// leaps-entry returns 5 years of daily bars; a longer history (10y / max)
+// comes from price-history's daily interval (owner, 2026-10-28: back to 2015).
+async function fromEdge(ticker, range = '5y') {
   const url = process.env.SUPABASE_URL
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY
   if (!url || !key) return { bars: null, error: 'no edge fallback' }
+  const long = range === '10y' || range === 'max'
   try {
-    const resp = await fetch(`${url}/functions/v1/leaps-entry`, {
+    const resp = await fetch(`${url}/functions/v1/${long ? 'price-history' : 'leaps-entry'}`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, apikey: key, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ticker }),
+      body: JSON.stringify(long ? { ticker, range, interval: '1d' } : { ticker }),
       signal: AbortSignal.timeout(45000),
     })
     const body = await resp.json().catch(() => null)
@@ -119,11 +122,11 @@ export async function dailyBars(ticker, { range = '5y' } = {}) {
       refusals++
       if (refusals >= 4 && !sources.blocked) { sources.blocked = true; console.log('  Yahoo is refusing this runner — using the edge function for the rest.') }
     }
-    const e = await fromEdge(ticker)
+    const e = await fromEdge(ticker, range)
     if (e.bars) { sources.edge++; return e.bars }
     throw new Error(`${ticker}: yahoo ${y.error}; ${e.error}`)
   }
-  const e = await fromEdge(ticker)
+  const e = await fromEdge(ticker, range)
   if (e.bars) { sources.edge++; return e.bars }
   if (/not found|404/.test(e.error ?? '')) throw new Error(`${ticker}: not found`)
   throw new Error(`${ticker}: ${e.error}`)

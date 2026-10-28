@@ -48,7 +48,9 @@
     "straddle:check": "node scripts/check-straddle.mjs",
     "secondjump:check": "node scripts/check-second-jump.mjs",
     "jumpbear:check": "node scripts/check-jump-bear.mjs",
-    "rejections:check": "node scripts/check-rejections.mjs"
+    "rejections:check": "node scripts/check-rejections.mjs",
+    "topforming:check": "node scripts/check-top-forming.mjs",
+    "exitpolicies:check": "node scripts/check-exit-policies.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
