@@ -702,3 +702,39 @@ Scholes on realised vol is a model, not a quote, and real post-jump put
 prices on these names can be higher; borrow fees and availability vary
 by name and day, and some shares can't be borrowed at all; the short
 stop fills at the close, gaps can be worse.
+
+## Added 2026-10-28 — the bear side on list entry (owner: "if the stopped believing are all down significantly it's your job to figure an algo to short or long puts")
+
+Written before the code exists. The 2026-10-27 bear test entered only after
+a **second jump** on a listed stock — the moment implied vol is highest.
+This one enters on the day a stock **lands on the list**: the first session
+the scan definition (`listedFlags`, the same rows `/charts/tape` shows) is
+true after 63 sessions off it; one entry per stock per 63 sessions; same
+universe filters as the second-jump test (pre-revenue, $1M dollar volume,
+252 bars of history). Entered at the next open (S0).
+
+**Same three instruments, same primaries, same pricing** (`jumpBear.js`):
+σ = premium × 60-day realised vol on the entry day, floor 15%, 2% slippage
+per fill, premiums 1.3 (primary) / 1.6.
+1. Long ATM put, 126 sessions, held to expiry (also 63 sessions).
+2. Put debit spread under `PUT_MODEL` (63 sessions, ≤ 40% debit-of-width,
+   +100% / +200% takes, −50% stop, out at 21 left).
+3. Short shares, borrow 30% / 100% × stop +50% / +100% / none; primary
+   borrow 30%, stop +100%.
+
+**Control:** the same trades on universe month-start days (the any-day
+sample of the second-jump test). Also reported, not graded: the stock's own
+21 / 63 / 126-session median after list entry, fell 40%, doubled.
+
+**Pass** per instrument on its primary, test period (entries ≥ 2024-01-01),
+all of: average > 0 and median > 0 after costs; ≥ 100 trades; the average
+positive in each of 2024, 2025 and 2026 separately; and the average above
+the control's. **Fail:** any one misses. **Inconclusive:** < 100 trades.
+Train (< 2024) reported, not graded.
+
+**Consequences.** A pass means a forward paper record for the owner only,
+for a quarter, before any real money; nothing in the app suggests a put or a
+short to subscribers (no investment-adviser activity; counsel first). A fail
+closes the list-entry bear side. Known weakness: survivors only — the 28% of
+filers delisted since are missing, and they are the names that fell most,
+so every bear number here is a floor.
