@@ -489,3 +489,50 @@ only positive rows are the no-stop short at 30% borrow (not a primary,
 fatal tail) and 2026 alone (35 jumps, open year). Nothing ships;
 survivors only, so the true bear-side numbers are somewhat better than
 these — not enough on this evidence to change a fail into a pass.
+
+### 2026-10-28, the bear side on list entry (owner: "it's your job to figure an algo to short or long puts" → "ensure these stocks have enough volume to trade options")
+
+Pre-registered the same day, addendum 1 before any result (preregistration.md).
+Run 40768205647. Entry = the open after the first session a stock lands on the
+list (scan definition) after 63 sessions off it; same pricing as the 2026-10-27
+bear test. Graded on the options-tradeable subset (close ≥ $3, 20-day dollar
+volume ≥ $10M).
+
+The stock after list entry (test, 2024 →): all 189 — median −3.6% / −7.8% /
+−17.6% at 21 / 63 / 126 sessions, 49% fell 40%, 25% doubled (any day: +0.9%,
+24%, 14%); tradeable 62 — −2.6% / −0.0% / −8.7%, 42% fell 40%, 27% doubled.
+
+| test, 2024 → | set | n | avg | median | win | verdict |
+|---|---|---|---|---|---|---|
+| **long put 126d, prem 1.3** | tradeable, 2% slip | 62 | −49.1% | −78.9% | 21% | **INCONCLUSIVE** (< 100) |
+| same | tradeable, 5% slip | 62 | −52.0% | −80.2% | 16% | |
+| same | all list entries | 189 | −41.6% | −53.9% | 24% | |
+| **put spread 63d, prem 1.3** | tradeable, 2% slip | 58 (13 skipped) | −21.6% | −51.3% | 28% | **INCONCLUSIVE** |
+| same | all list entries | 157 | −18.4% | −33.7% | 30% | |
+| **short, borrow 30%, stop +100%** | tradeable, 2% slip | 62 | −35.3% | −12.3% | 42% | **INCONCLUSIVE** |
+| same | all list entries | 189 | −44.7% | −3.3% | 48% | |
+| short, borrow 30%, no stop | all list entries | 189 | −24.2% | −1.1% | 49% | |
+| any-day control: put 126d / spread / short +100% stop | universe | ~9,000 | −38.5% / −19.1% / −28.0% | | | |
+
+Reading. Inconclusive on the count (only 62 tradeable entries in the test
+years), but no row is close: every instrument loses on average in every set,
+at both slippages, and in train. The stocks do fall (−17.6% median at six
+months, twice the any-day rate of 40% falls), yet the put priced at these
+names' volatility costs more than the typical fall delivers, and one in four
+doubles. The short's typical trade roughly breaks even before the doublers:
+a 17.6% fall minus ~15% borrow for six months minus slippage. Nothing ships;
+the list-entry bear side is closed with the second-jump bear side.
+
+**Delisted filers (descriptive, same run).** 770 float-range filers have no
+listed ticker today: **427 acquired (55%)**, 247 delisted other (many of the
+pre-revenue ones are SPACs that merged or liquidated), **79 bankruptcies
+(10%)**, 17 with no delisting filing. From the mid-year float filing to the
+delisting: median 1.2 years (middle half 0.9–1.6). From the exchange's first
+warning (8-K 3.01) to the delisting: bankruptcy median 196 days, delisted
+other 285 days, acquired 0 days (the notice is filed at closing). Pre-revenue
+only (434): 184 acquired, 25 bankruptcies, 215 other; warning → delisting
+median 182 days. **Correction to earlier readings:** this series has called
+the survivorship gap "the fallers the test cannot see" and every bear number
+"a floor". Most missing names were bought out (usually at a premium — a loss
+for a short) or were SPACs; bankruptcies are one in ten. The gap does not
+clearly favour the bear side.
