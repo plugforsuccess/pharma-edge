@@ -1,4 +1,4 @@
-import { rejectionLevels, swings, atrAt, REJECTION } from '../src/utils/rejections.js'
+import { rejectionLevels, nearestLevels, swings, atrAt, REJECTION } from '../src/utils/rejections.js'
 let pass = 0, fail = 0
 const ok = (c, m) => { if (c) pass++; else { fail++; console.log('FAIL', m) } }
 const day = (i) => new Date(Date.UTC(2025, 0, 1) + i * 86400e3).toISOString().slice(0, 10)
@@ -38,5 +38,23 @@ for (let i = 0; i < 300; i++) { const step = Math.floor(i / 20), ph = i % 20, ba
 const sl = rejectionLevels(stair, { ...REJECTION, minTouches: 1 })
 const span = sl.length ? Math.max(...sl.map((l) => l.price)) - Math.min(...sl.map((l) => l.price)) : 0
 ok(sl.length >= 5 && span > 10, `swing points 1% apart stay separate levels (${sl.length} levels)`)
+// A stock that quadrupled: its old base (24 floor / 26 ceiling, narrow bars) must not
+// merge into one level on today's much wider ATR.
+const quad = []
+for (let i = 0; i < 200; i++) {
+  const ph = i % 20, up = ph < 10, base = up ? 24.3 + ph * 0.15 : 25.7 - (ph - 10) * 0.15
+  let o = base - 0.05, c = base + 0.05, h = c + 0.03, l = o - 0.03
+  if (!up) { o = base + 0.05; c = base - 0.05; h = o + 0.03; l = c - 0.03 }
+  if (ph === 9) { o = 25.75; c = 25.7; h = 26; l = 25.65 }
+  if (ph === 19) { o = 24.25; c = 24.3; h = 24.35; l = 24 }
+  quad.push({ t: day(i), o, h, l, c, v: 1 })
+}
+for (let i = 0; i < 120; i++) { const b = 26 + i * 0.7; quad.push({ t: day(200 + i), o: b, h: b + 3 + (i % 3), l: b - 3, c: b + 1, v: 1 }) }
+const ql = rejectionLevels(quad)
+ok(ql.some((l) => Math.abs(l.price - 24) < 0.3) && ql.some((l) => Math.abs(l.price - 26) < 0.3), `old 24 floor and 26 ceiling stay separate on per-bar tolerance (${ql.map((l) => l.price.toFixed(2)).join(', ')})`)
+// The chart shows the nearest 3 each side within 35%.
+const fake = [90, 95, 99, 101, 104, 108, 112, 140, 60].map((price, k) => ({ price, touches: 2, role: price >= 100 ? 'resistance' : 'support', last: k }))
+const nl = nearestLevels(fake, 100)
+ok(nl.map((l) => l.price).join(',') === '101,104,108,99,95,90', `nearest 3 above and below, far ones dropped (${nl.map((l) => l.price).join(',')})`)
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)
