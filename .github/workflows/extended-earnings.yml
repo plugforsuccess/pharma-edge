@@ -1,0 +1,40 @@
+# Research (owner, 2026-10-28): does a stock that goes into earnings extended
+# fall back toward its average more than when it isn't? Prices + SEC 8-K
+# timing. Writes nothing to the DB. research/extended-earnings/PREREG.md
+
+name: Extended into earnings
+
+on:
+  workflow_dispatch:
+  push:
+    branches-ignore: [main]
+    paths:
+      - research/extended-earnings/**
+      - .github/workflows/extended-earnings.yml
+
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Checks
+        working-directory: research/extended-earnings
+        run: node check.mjs
+      - name: Study
+        working-directory: research/extended-earnings
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SEC_USER_AGENT: ${{ vars.SEC_USER_AGENT }}
+        run: node run.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: extended-earnings
+          path: research/extended-earnings/results.json
+          retention-days: 30

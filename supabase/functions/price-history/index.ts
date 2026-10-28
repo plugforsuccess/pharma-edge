@@ -1,7 +1,9 @@
 // price-history — daily bars for one ticker, for /charts.
 //
 // POST { ticker: "AAPL", range: "1d" | "5d" | "1mo" | "3mo" | "6mo" | "1y" | "2y" | "5y" | "max", crypto?: true,
-//        interval?: "5m" | "15m" | "30m" | "60m" }
+//        interval?: "5m" | "15m" | "30m" | "60m" | "1d" }
+//   interval "1d" with range 5y / 10y / max = full daily history (owner,
+//   2026-10-28: the Top Forming backtest needs daily bars back to 2015).
 //   interval (owner, 2026-10-16: intraday candle sizes on the entry chart)
 //   overrides the range's default; Yahoo serves 5m / 15m / 30m up to 60
 //   days back and 60m up to 730 days, so only those pairings are accepted.
@@ -31,13 +33,14 @@ function json(body: unknown, status = 200): Response {
 
 // Range → bar interval. Intraday ranges refresh faster.
 const INTERVAL: Record<string, string> = {
-  '1d': '5m', '5d': '30m', '1mo': '1d', '3mo': '1d', '6mo': '1d', '1y': '1d', '2y': '1d', '5y': '1wk', max: '1mo',
+  '1d': '5m', '5d': '30m', '1mo': '1d', '3mo': '1d', '6mo': '1d', '1y': '1d', '2y': '1d', '5y': '1wk', '10y': '1wk', max: '1mo',
 }
 const INTRADAY = new Set(['5m', '15m', '30m', '60m'])
 // Explicit intraday intervals and the ranges Yahoo allows for each.
 const INTERVAL_RANGES: Record<string, Set<string>> = {
   '5m': new Set(['1d', '5d', '1mo']), '15m': new Set(['1d', '5d', '1mo']), '30m': new Set(['1d', '5d', '1mo']),
   '60m': new Set(['1d', '5d', '1mo', '3mo', '6mo', '1y', '2y']),
+  '1d': new Set(['1mo', '3mo', '6mo', '1y', '2y', '5y', '10y', 'max']),
 }
 const CACHE_MS = 15 * 60 * 1000
 const INTRADAY_CACHE_MS = 2 * 60 * 1000

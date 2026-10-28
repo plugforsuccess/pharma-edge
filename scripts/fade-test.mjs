@@ -9,9 +9,12 @@
 // doublers ≤ base, 6M median ≥ 10 points under the universe, ≥ 100 months.
 import { writeFileSync } from 'node:fs'
 import { FADE, FADE_PASS, fadeScore, shortsCovering, catalystHeld, forwardFade, fadeStats, fadeVerdict, revenueAt, sharesOutAt, raiseAfter, outcomeRates, financingEvents } from '../src/utils/fade.js'
-import { filingsMap } from './lib/secFilings.mjs'
+import { filingsMap, exitFilingsFor } from './lib/secFilings.mjs'
 import { straddleTrade, straddleStats, straddleVerdict, STRADDLE } from '../src/utils/straddle.js'
 import { catalystRow, shortsRow, HOLDING_RISK } from '../src/utils/holdingRisks.js'
+import { exitOf, exitStats } from '../src/utils/delisted.js'
+import { putTrade, spreadTrade, shortTrade, bearStats, bearVerdict, JUMP_BEAR, listEntries } from '../src/utils/jumpBear.js'
+import { eventFlags, listedFlags, jumpOutcome, countedJumps, wasListed, jumpStats, secondJumpVerdict, SECOND_JUMP, SECOND_JUMP_PASS } from '../src/utils/secondJump.js'
 import { dailyBars, mapLimit, sources } from './lib/marketData.mjs'
 import { publicFloatCiks, tickersFor, compactFactsFor } from './lib/secUniverse.mjs'
 import { loadForm345 } from './lib/form345.mjs'
@@ -213,6 +216,140 @@ for (const [label, set, flag] of [
   }
   console.log(`  Pass (test, premium ${STRADDLE.premium}, hold to expiry, B'): avg > 0, avg ≥ universe + 10 pts, median > universe median, ≥ 100 trades. Premium 1.0 is optimistic for these names.`)
 }
+// The second jump (pre-registered 2026-10-27): the next jump on a listed stock vs jumps elsewhere vs any day.
+{
+  const listedJ = [], otherJ = [], anyDay = []
+  for (const s of stocks) {
+    const sh = shorts.get(s.tk) ?? []
+    const ev = eventFlags(s.bars)
+    const lst = listedFlags(s.bars, ev, sh)
+    const okAt = (i) => { if (i < 252) return false; const rev = revenueAt(s.fin, s.bars[i].t); return (rev == null || rev < U.revenueMax) && adv(s.bars, i) >= U.advMin }
+    for (const e of countedJumps(ev, 252)) {
+      if (!okAt(e)) continue
+      const out = jumpOutcome(s.bars, e)
+      if (!out) continue
+      const so = sharesOutAt(s.fin, s.bars[e - 1].t)
+      const cur = sh.filter((x) => x.date <= s.bars[e - 1].t).pop()
+      const siPct = so && cur ? cur.shares / so : null
+      const row = { tk: s.tk, e, t: s.bars[e].t, jump: s.bars[e].c / s.bars[e - 1].c - 1, siPct, out }
+      ;(wasListed(lst, e) ? listedJ : otherJ).push(row)
+    }
+    s.bars.forEach((b, i) => { if (monthStarts.has(b.t) && okAt(i)) { const out = jumpOutcome(s.bars, i); if (out) anyDay.push({ tk: s.tk, t: b.t, out }) } })
+  }
+  const H = SECOND_JUMP.horizon
+  const fmt = (name, st) => `  ${name.padEnd(34)} ${String(st.n).padStart(5)} ${SECOND_JUMP.holds.map((h) => pct(st.holds[h].median).padStart(8)).join('')} ${pct(st.holds[H].avg).padStart(8)} ${pct(st.holds[H].win, 0).padStart(6)} ${pct(st.target.median).padStart(8)} ${pct(st.target.hitRate, 0).padStart(6)} ${pct(st.fell, 0).padStart(6)} ${pct(st.doubled, 0).padStart(6)}`
+  console.log(`\n=== Second jump — shares bought the open after a jump (≥ 10% on ≥ 3× volume), one per stock per ${SECOND_JUMP.gap} sessions`)
+  console.log(`  ${'set'.padEnd(34)} ${'n'.padStart(5)} ${SECOND_JUMP.holds.map((h) => `med ${h}`.padStart(8)).join('')} ${'avg 126'.padStart(8)} ${'up126'.padStart(6)} ${'+40% ex'.padStart(8)} ${'hit'.padStart(6)} ${'fell40'.padStart(6)} ${'dbl'.padStart(6)}`)
+  report.secondJump = {}
+  for (const [pname, inP] of [['test', (r) => r.t >= SPLIT], ['train', (r) => r.t < SPLIT]]) {
+    console.log(`  — ${pname}`)
+    const L = jumpStats(listedJ.filter(inP).map((r) => r.out)), A = jumpStats(otherJ.filter(inP).map((r) => r.out)), B = jumpStats(anyDay.filter(inP).map((r) => r.out))
+    const hi = jumpStats(listedJ.filter(inP).filter((r) => r.siPct != null && r.siPct >= SECOND_JUMP.siHigh).map((r) => r.out))
+    const lo = jumpStats(listedJ.filter(inP).filter((r) => r.siPct != null && r.siPct < SECOND_JUMP.siHigh).map((r) => r.out))
+    const v = pname === 'test' ? secondJumpVerdict(L, A, B) : ''
+    console.log(fmt('listed: second jump', L) + (v ? `  → ${v.toUpperCase()} (primary)` : ''))
+    console.log(fmt('  short ≥ 15% of shares', hi)); console.log(fmt('  short < 15% of shares', lo))
+    console.log(fmt('control A: jumps not listed', A)); console.log(fmt('control B: any day', B))
+    report.secondJump[pname] = { listed: L, siHigh: hi, siLow: lo, unlisted: A, anyDay: B, verdict: v || undefined }
+  }
+  console.log('  by year (126-session median · fell 40% · n):')
+  report.secondJump.byYear = {}
+  for (const y of [...new Set(listedJ.concat(otherJ).map((r) => r.t.slice(0, 4)))].sort()) {
+    const L = jumpStats(listedJ.filter((r) => r.t.startsWith(y)).map((r) => r.out)), A = jumpStats(otherJ.filter((r) => r.t.startsWith(y)).map((r) => r.out))
+    report.secondJump.byYear[y] = { listed: L, unlisted: A }
+    console.log(`  ${y}  listed ${pct(L.holds[H].median).padStart(7)} · ${pct(L.fell, 0).padStart(4)} · ${String(L.n).padStart(4)}    not listed ${pct(A.holds[H].median).padStart(7)} · ${pct(A.fell, 0).padStart(4)} · ${String(A.n).padStart(5)}`)
+  }
+  const best = [...listedJ].filter((r) => r.t >= SPLIT).sort((a, b) => b.out.ret[H] - a.out.ret[H])
+  console.log('  listed second jumps, test — best 8 and worst 8 (126 sessions):')
+  for (const r of best.slice(0, 8).concat(best.slice(-8))) console.log(`    ${r.tk.padEnd(6)} ${r.t}  jump ${pct(r.jump, 0).padStart(5)}  ${pct(r.out.ret[H], 0).padStart(6)}${r.siPct != null ? `  short ${pct(r.siPct, 0)}` : ''}`)
+  report.secondJump.examples = best.slice(0, 20).concat(best.slice(-20)).map((r) => ({ tk: r.tk, t: r.t, jump: r.jump, siPct: r.siPct, ret126: r.out.ret[H] }))
+  // The bear side (pre-registered 2026-10-27): long put, put spread, short shares on the same entries.
+  {
+    const barsOf = new Map(stocks.map((s) => [s.tk, s.bars]))
+    const isTest = (r) => r.t >= SPLIT
+    const variants = []
+    for (const prem of JUMP_BEAR.premiums) for (const h of JUMP_BEAR.put.horizons) variants.push({ name: `long put ${h}d · prem ${prem}`, kind: 'put', primary: prem === JUMP_BEAR.premium && h === JUMP_BEAR.put.primary, fn: (b, e) => putTrade(b, e, { premium: prem, horizon: h }) })
+    for (const prem of JUMP_BEAR.premiums) variants.push({ name: `put spread 63d · prem ${prem}`, kind: 'spread', primary: prem === JUMP_BEAR.premium, fn: (b, e) => spreadTrade(b, e, { premium: prem }) })
+    for (const borrow of JUMP_BEAR.short.borrows) for (const stop of JUMP_BEAR.short.stops) variants.push({ name: `short · borrow ${borrow * 100}% · stop ${stop == null ? 'none' : `+${stop * 100}%`}`, kind: 'short', primary: borrow === JUMP_BEAR.short.primary.borrow && stop === JUMP_BEAR.short.primary.stop, fn: (b, e) => shortTrade(b, e, { borrow, stop }) })
+    const line2 = (name, st, v = '') => `  ${name.padEnd(40)} ${String(st.n).padStart(5)} ${pct(st.avg).padStart(8)} ${pct(st.median).padStart(8)} ${pct(st.win, 0).padStart(5)} ${pct(st.lostHalf, 0).padStart(6)} ${pct(st.worst, 0).padStart(7)} ${pct(st.best, 0).padStart(7)}${st.stopped != null ? ` ${pct(st.stopped, 0).padStart(6)}` : ''}${st.skipped ? `  skipped ${st.skipped}` : ''}${v}`
+    console.log('\n=== Bear side of the second jump — entered at the open after the jump (test, 2024 →)')
+    console.log(`  ${'variant'.padEnd(40)} ${'n'.padStart(5)} ${'avg'.padStart(8)} ${'median'.padStart(8)} ${'win'.padStart(5)} ${'lost½'.padStart(6)} ${'worst'.padStart(7)} ${'best'.padStart(7)} ${'stop'.padStart(6)}`)
+    report.secondJump.bear = {}
+    for (const v of variants) {
+      const L = listedJ.filter(isTest).map((r) => ({ t: r.t, trade: v.fn(barsOf.get(r.tk), r.e) }))
+      const A = otherJ.filter(isTest).map((r) => ({ t: r.t, trade: v.fn(barsOf.get(r.tk), r.e) }))
+      const Tr = listedJ.filter((r) => !isTest(r)).map((r) => ({ t: r.t, trade: v.fn(barsOf.get(r.tk), r.e) }))
+      const vd = bearVerdict(L)
+      const yrs = Object.entries(vd.years).map(([y, st]) => `${y} ${pct(st.avg, 0)} (${st.n})`).join(' · ')
+      console.log(line2(v.name + (v.primary ? ' *' : ''), vd.all, v.primary ? `  → ${vd.verdict.toUpperCase()} (primary ${v.kind})${yrs ? `  ${yrs}` : ''}` : ''))
+      const sa = bearStats(A.map((r) => r.trade)), st = bearStats(Tr.map((r) => r.trade))
+      console.log(line2('    control A: jumps not listed', sa))
+      console.log(line2('    train (< 2024) listed', st))
+      report.secondJump.bear[v.name] = { kind: v.kind, primary: v.primary, ...vd, unlisted: sa, train: st }
+    }
+    console.log('  * = primary. Pass per instrument: avg > 0 and median > 0 after costs, ≥ 100 trades, avg > 0 in each of 2024, 2025, 2026.')
+  }
+  console.log(`  Pass (test): ≥ ${SECOND_JUMP_PASS.minN} listed jumps, 126-session median ≥ control A + ${SECOND_JUMP_PASS.medianGap * 100} pts, fell-40% rate ≤ control B.`)
+}
+// The bear side on list entry (pre-registered 2026-10-28): put / spread / short the day a stock lands on the list.
+{
+  const entries = [], control = []
+  for (const s of stocks) {
+    const okAt = (i) => { if (i < 252) return false; const rev = revenueAt(s.fin, s.bars[i].t); return (rev == null || rev < U.revenueMax) && adv(s.bars, i) >= U.advMin }
+    const lst = listedFlags(s.bars, eventFlags(s.bars), shorts.get(s.tk) ?? [])
+    for (const e of listEntries(lst)) if (okAt(e)) entries.push({ tk: s.tk, e, t: s.bars[e].t, bars: s.bars, px: s.bars[e].c, adv: adv(s.bars, e) })
+    s.bars.forEach((b, i) => { if (monthStarts.has(b.t) && okAt(i)) control.push({ tk: s.tk, e: i, t: b.t, bars: s.bars }) })
+  }
+  const isTest = (r) => r.t >= SPLIT
+  const H = SECOND_JUMP.horizon
+  console.log(`\n=== Bear side on list entry — the day a stock lands on the list, entered at the next open (${entries.length} entries; test ${entries.filter(isTest).length})`)
+  report.listBear = { stock: {} }
+  for (const [pname, inP] of [['test', isTest], ['train', (r) => !isTest(r)]]) {
+    const st = jumpStats(entries.filter(inP).map((r) => jumpOutcome(r.bars, r.e)).filter(Boolean))
+    const cs = jumpStats(control.filter(inP).map((r) => jumpOutcome(r.bars, r.e)).filter(Boolean))
+    report.listBear.stock[pname] = { entries: st, control: cs }
+    console.log(`  stock after list entry (${pname}): n ${st.n} · median ${SECOND_JUMP.holds.map((h) => `${h}d ${pct(st.holds[h].median)}`).join(' / ')} · fell 40% ${pct(st.fell, 0)} · doubled ${pct(st.doubled, 0)}   control: 126d ${pct(cs.holds[H].median)} · fell ${pct(cs.fell, 0)} · dbl ${pct(cs.doubled, 0)}`)
+  }
+  const variants = []
+  for (const prem of JUMP_BEAR.premiums) for (const h of JUMP_BEAR.put.horizons) variants.push({ name: `long put ${h}d · prem ${prem}`, kind: 'put', primary: prem === JUMP_BEAR.premium && h === JUMP_BEAR.put.primary, fn: (b, e, p) => putTrade(b, e, { premium: prem, horizon: h, p }) })
+  for (const prem of JUMP_BEAR.premiums) variants.push({ name: `put spread 63d · prem ${prem}`, kind: 'spread', primary: prem === JUMP_BEAR.premium, fn: (b, e, p) => spreadTrade(b, e, { premium: prem, p }) })
+  for (const borrow of JUMP_BEAR.short.borrows) for (const stop of JUMP_BEAR.short.stops) variants.push({ name: `short · borrow ${borrow * 100}% · stop ${stop == null ? 'none' : `+${stop * 100}%`}`, kind: 'short', primary: borrow === JUMP_BEAR.short.primary.borrow && stop === JUMP_BEAR.short.primary.stop, fn: (b, e, p) => shortTrade(b, e, { borrow, stop, p }) })
+  const line2 = (name, st, v = '') => `  ${name.padEnd(40)} ${String(st.n).padStart(5)} ${pct(st.avg).padStart(8)} ${pct(st.median).padStart(8)} ${pct(st.win, 0).padStart(5)} ${pct(st.lostHalf, 0).padStart(6)} ${pct(st.worst, 0).padStart(7)} ${pct(st.best, 0).padStart(7)}${st.stopped != null ? ` ${pct(st.stopped, 0).padStart(6)}` : ''}${st.skipped ? `  skipped ${st.skipped}` : ''}${v}`
+  console.log(`  ${'variant'.padEnd(40)} ${'n'.padStart(5)} ${'avg'.padStart(8)} ${'median'.padStart(8)} ${'win'.padStart(5)} ${'lost½'.padStart(6)} ${'worst'.padStart(7)} ${'best'.padStart(7)} ${'stop'.padStart(6)}`)
+  report.listBear.variants = {}
+  // Addendum 1: the graded primary is the options-tradeable subset (close ≥ $3, 20-day $ volume ≥ $10M).
+  const TRADEABLE = { px: 3, adv: 10e6 }, tradeable = (r) => r.px >= TRADEABLE.px && r.adv >= TRADEABLE.adv
+  console.log(`  options-tradeable subset (close ≥ $${TRADEABLE.px}, 20-day $ volume ≥ $${TRADEABLE.adv / 1e6}M): ${entries.filter(tradeable).length} entries, test ${entries.filter(isTest).filter(tradeable).length}; $5M tier test ${entries.filter(isTest).filter((r) => r.px >= 3 && r.adv >= 5e6).length}`)
+  for (const [pname, inP] of [['test', isTest]]) {
+    const st = jumpStats(entries.filter(inP).filter(tradeable).map((r) => jumpOutcome(r.bars, r.e)).filter(Boolean))
+    report.listBear.stock.tradeable = st
+    console.log(`  stock after list entry, tradeable (${pname}): n ${st.n} · median ${SECOND_JUMP.holds.map((h) => `${h}d ${pct(st.holds[h].median)}`).join(' / ')} · fell 40% ${pct(st.fell, 0)} · doubled ${pct(st.doubled, 0)}`)
+  }
+  const sets = [['TRADEABLE (graded)', tradeable], ['$5M tier', (r) => r.px >= 3 && r.adv >= 5e6], ['all list entries', () => true]]
+  const slips = [JUMP_BEAR.slip, 0.05]
+  for (const [setName, inSet] of sets) for (const slip of slips) {
+  if (slip !== JUMP_BEAR.slip && setName !== 'TRADEABLE (graded)') continue
+  console.log(`  — ${setName} · slippage ${slip * 100}% per fill`)
+  const pp = { ...JUMP_BEAR, slip }
+  const testRows = entries.filter(isTest).filter(inSet)
+  for (const v0 of variants) {
+    const v = { ...v0, primary: v0.primary && setName === 'TRADEABLE (graded)', fn: (b, e) => v0.fn(b, e, pp) }
+    const L = testRows.map((r) => ({ t: r.t, tk: r.tk, trade: v.fn(r.bars, r.e) }))
+    const C = control.filter(isTest).map((r) => ({ t: r.t, trade: v.fn(r.bars, r.e) }))
+    const Tr = entries.filter((r) => !isTest(r)).map((r) => ({ t: r.t, trade: v.fn(r.bars, r.e) }))
+    const vd = bearVerdict(L), cs = bearStats(C.map((r) => r.trade)), st = bearStats(Tr.map((r) => r.trade))
+    const verdict = vd.verdict === 'pass' && !(vd.all.avg > cs.avg) ? 'fail' : vd.verdict
+    const yrs = Object.entries(vd.years).map(([y, x]) => `${y} ${pct(x.avg, 0)} (${x.n})`).join(' · ')
+    console.log(line2(v.name + (v.primary ? ' *' : ''), vd.all, v.primary ? `  → ${verdict.toUpperCase()} (primary ${v.kind})${yrs ? `  ${yrs}` : ''}` : ''))
+    console.log(line2('    control: any day', cs))
+    console.log(line2('    train (< 2024)', st))
+    const ranked = L.filter((r) => r.trade && Number.isFinite(r.trade.ret)).sort((a, b) => b.trade.ret - a.trade.ret)
+    report.listBear.variants[`${setName}|${slip}|${v.name}`] = { kind: v.kind, primary: v.primary, verdict, ...vd, control: cs, train: st, best: ranked.slice(0, 8).map((r) => [r.tk, r.t, r.trade.ret]), worst: ranked.slice(-8).map((r) => [r.tk, r.t, r.trade.ret]) }
+    if (v.primary) { console.log(`    best: ${ranked.slice(0, 6).map((r) => `${r.tk} ${r.t} ${pct(r.trade.ret, 0)}`).join(' · ')}`); console.log(`    worst: ${ranked.slice(-6).map((r) => `${r.tk} ${r.t} ${pct(r.trade.ret, 0)}`).join(' · ')}`) }
+  }
+  }
+  console.log('  * = primary. Pass per instrument: avg > 0 and median > 0 after costs, ≥ 100 trades, avg > 0 in 2024, 2025, 2026 each, avg above the any-day control; graded on the tradeable subset at 2% slippage, 5% shown beside it.')
+}
 // Dilution: did a raise (8-K 3.02 or 424B5) follow within 6 months?
 console.log('\n=== Raised within 6 months (test, 2024 →) — pre-set reading: runway < 5 q ≥ 2× base, runway + shelf ≥ 3×')
 console.log(`  ${'flag'.padEnd(26)} ${'months'.padStart(6)} ${'raised'.padStart(8)} ${'base'.padStart(6)} ${'lift'.padStart(6)} ${'caught'.padStart(7)}`)
@@ -269,5 +406,31 @@ report.airj = airj
 
 console.log(`\nPass mark (test, score ≥ 70): fallers ≥ ${FADE_PASS.lift}× base, doublers ≤ base, 6M median ≥ ${FADE_PASS.medianGap * 100} points under the universe, ≥ ${FADE_PASS.minFlagged} months. Outcome window ${FADE.horizon} trading days; fall ${FADE.fall * 100}%, rise ${FADE.rise * 100}%.`)
 console.log('Caveats: survivors only (delisted names missing — hides the fallers); factor 5 = shelf / supplement only (no acquisition reading); a 424B5 also marks an ATM start; no milestone ledger (factor 2 is the mechanical event test); FINRA short interest is bi-monthly and lags; one bull market.')
+
+// Delisted names from SEC filings (list-entry bear addendum 1, descriptive).
+{
+  const goneCiks = [...floats.keys()].filter((c) => !byCik.has(c))
+  console.log(`\n=== Delisted float-range filers (no listed ticker today): ${goneCiks.length} — SEC exit filings since 2019`)
+  const { fin: goneFin } = await compactFactsFor(goneCiks.map((cik) => ({ cik, ticker: `CIK${cik}` })), { log: () => {} })
+  const exits = []
+  await mapLimit(goneCiks, 2, async (cik) => {
+    const got = await exitFilingsFor(cik)
+    if (!got) return
+    const last = floats.get(cik).last
+    const f = goneFin.get(`CIK${cik}`), rev = f ? revenueAt(f, `${last}-12-31`) : undefined
+    exits.push({ cik, name: got.name, preRev: f ? (rev == null || rev < U.revenueMax) : null, ...exitOf(got.rows, last) })
+  }, 300)
+  const yrs = (d) => (d == null ? '—' : `${Math.round(d)}d (${(d / 365.25).toFixed(1)}y)`)
+  report.delisted = {}
+  for (const [name, set] of [['all', exits], ['pre-revenue', exits.filter((e) => e.preRev)]]) {
+    const st = exitStats(set)
+    report.delisted[name] = st
+    console.log(`  ${name}: ${st.n} with filings · ${Object.entries(st.by).map(([k, n]) => `${k} ${n}`).join(' · ')}`)
+    console.log(`    exchange notice (8-K 3.01) → delisting: n ${st.noticeToDelist.n} · median ${yrs(st.noticeToDelist.median)} · middle half ${yrs(st.noticeToDelist.p25)}–${yrs(st.noticeToDelist.p75)} · avg ${yrs(st.noticeToDelist.avg)}`)
+    console.log(`    mid-year float filing → delisting: n ${st.floatToDelist.n} · median ${yrs(st.floatToDelist.median)} · middle half ${yrs(st.floatToDelist.p25)}–${yrs(st.floatToDelist.p75)} · avg ${yrs(st.floatToDelist.avg)}`)
+    for (const reason of ['bankruptcy', 'acquired', 'delisted, other']) { const sub = exitStats(set.filter((e) => e.reason === reason)); console.log(`    ${reason.padEnd(16)} n ${String(sub.n).padStart(4)} · float → delisting median ${yrs(sub.floatToDelist.median)} · notice → delisting median ${yrs(sub.noticeToDelist.median)} (n ${sub.noticeToDelist.n})`) }
+  }
+  console.log('  examples (pre-revenue, bankruptcy or delisted-other, latest first): ' + exits.filter((e) => e.preRev && (e.reason === 'bankruptcy' || e.reason === 'delisted, other')).sort((a, b) => b.delisted.localeCompare(a.delisted)).slice(0, 12).map((e) => `${e.name} ${e.delisted}`).join(' · '))
+}
 writeFileSync('fade-test.json', JSON.stringify(report, null, 1))
 console.log('Wrote fade-test.json')

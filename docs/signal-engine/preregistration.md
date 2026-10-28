@@ -607,3 +607,163 @@ paid the put side — the result is a floor on the downside leg); realised
 vol as the premium base is a model, not a quote; no earnings-date or
 event-date adjustment to the premium; one bull market in the test period
 with 2022 thin.
+
+## Added 2026-10-27 — the second jump (owner: "Why not just use the losers list and wait for a positive milestone then buy then ride up" → "Run it")
+
+Written before the code exists. The list on `/charts/tape` is made of
+stocks whose last jump failed. This test asks whether the **next** jump on
+a listed stock holds better than jumps in general — whether rising short
+interest turns a real milestone into a squeeze.
+
+**Universe.** The Fade Screen universe (SEC float-range filers listed
+today, pre-revenue at the date, 20-day dollar volume ≥ $1M, ≥ 252 bars of
+history), survivors only.
+
+**Jump.** A close up ≥ 10% on volume ≥ 3× the prior 20-day average (the
+Fade event definition, unchanged). One jump per stock per 21 sessions: a
+jump within 21 sessions after the last counted jump on the same stock is
+skipped, whichever group either belongs to. No milestone calendar exists
+across the market; the jump stands in for "a positive milestone".
+
+**Listed.** The scan definition as shipped: on at least one of the 60
+sessions **before** the jump, the stock had closed below its previous
+jump's close for 20+ sessions in a row **and** short interest was up
+≥ 15% over ≥ 30 days while the price fell ≥ 10% over the same span
+(`HOLDING_RISK`). The jump day itself is never used to decide.
+
+**Trade.** Buy the shares at the next session's open. No options. Exits
+measured from that open: hold 21 / 63 / 126 sessions; and a +40% target
+(first close ≥ 1.4× entry within 126 sessions, else the 126-session
+close). Outcomes inside 126 sessions: fell 40% (a low ≤ 0.6× entry),
+doubled (a high ≥ 2× entry).
+
+**Controls.** (A) Jumps on the same universe in stocks **not** listed in
+the prior 60 sessions, same rules. (B) The universe on any day: every
+stock-month start, bought at the next open, same measures.
+
+**Pass** on test (jumps on or after 2024-01-01), all three: ≥ 100 listed
+jumps; 126-session median ≥ 10 points above control A's; fell-40% rate no
+higher than control B's. **Fail:** any one misses. **Inconclusive:**
+< 100 listed jumps. Reported, not graded: train (< 2024), each hold, the
++40% target, by year, and listed jumps split at short interest ≥ 15% of
+shares out on the session before the jump.
+
+**Consequences.** Pass → a forward paper record of listed second jumps
+for a quarter before anything is shown; the page stays a watch list
+meanwhile. Fail → the list stays a watch list of facts and nothing on it
+suggests a trade. Known weaknesses: survivors only (delisted names, the
+likeliest to have failed twice, are missing — a pass is flattered); a
+jump is not a milestone; FINRA data is bi-monthly and lags; one bull
+market, 2022 thin.
+
+## Added 2026-10-27 — the bear side of the second jump (owner: "why not short or long put a stock on this list after a jump" → "Run it")
+
+Written before the code exists, after the second-jump result (variants.md,
+2026-10-27). Same entries: listed second jumps, one per stock per 21
+sessions, entered at the open after the jump (S0). Control: the same
+trades on jumps in stocks **not** listed (control A). For the owner's own
+trading only — whatever the result, nothing on the list suggests a put or
+a short to subscribers (no investment-adviser activity; counsel first).
+
+**Volatility.** σ = premium × 60-day realised vol on the jump day (it
+includes the jump — the honest post-jump price), floor 15%; rate 4%; 2%
+slippage per fill. Premiums 1.3 (primary) and 1.6.
+
+**Three instruments, each graded on its own primary:**
+1. **Long put** — at the money (K = S0), 126 sessions to expiry, held to
+   expiry, value = max(K − S, 0). Also reported: 63 sessions, premium 1.6.
+   Primary: 126 sessions, premium 1.3.
+2. **Put debit spread under the spread rules** (`PUT_MODEL`) — long put
+   at the money, short put one expected move lower (K2 = S0 × (1 − σ√T)),
+   63 sessions to expiry; skipped when the debit is over 40% of the width;
+   marked daily at the same σ; sell half at +100%, a quarter more at
+   +200%; everything left out at −50% or with 21 sessions to go.
+   Primary: premium 1.3.
+3. **Short shares** — short at S0, cover at the 126-session close, or at
+   the first close ≥ (1 + stop) × S0. Borrow fee accrues daily on S0.
+   Grid: borrow 30% / 100% a year × stop +50% / +100% / none. Primary:
+   borrow 30%, stop +100%.
+
+**Measured** per trade: return on capital (premium paid; for the short,
+on S0), average, median, win rate, share losing ≥ 50%, worst trade, n.
+
+**Pass** per instrument on its primary, test period (jumps ≥ 2024-01-01),
+all of: average > 0 and median > 0 after costs; ≥ 100 trades; the
+average positive in each of 2024, 2025 and 2026 separately. **Fail:** any
+one misses. **Inconclusive:** < 100 trades. Train (< 2024, 19 listed
+jumps) reported, not graded.
+
+**Consequences.** A pass means a forward paper record of that
+instrument on new listed second jumps for a quarter, for the owner only,
+before any real money; nothing changes in the app. A fail closes that
+instrument. Known weaknesses: survivors only — delisted names would
+have paid shorts and puts, so the bear-side result is a floor; Black-
+Scholes on realised vol is a model, not a quote, and real post-jump put
+prices on these names can be higher; borrow fees and availability vary
+by name and day, and some shares can't be borrowed at all; the short
+stop fills at the close, gaps can be worse.
+
+## Added 2026-10-28 — the bear side on list entry (owner: "if the stopped believing are all down significantly it's your job to figure an algo to short or long puts")
+
+Written before the code exists. The 2026-10-27 bear test entered only after
+a **second jump** on a listed stock — the moment implied vol is highest.
+This one enters on the day a stock **lands on the list**: the first session
+the scan definition (`listedFlags`, the same rows `/charts/tape` shows) is
+true after 63 sessions off it; one entry per stock per 63 sessions; same
+universe filters as the second-jump test (pre-revenue, $1M dollar volume,
+252 bars of history). Entered at the next open (S0).
+
+**Same three instruments, same primaries, same pricing** (`jumpBear.js`):
+σ = premium × 60-day realised vol on the entry day, floor 15%, 2% slippage
+per fill, premiums 1.3 (primary) / 1.6.
+1. Long ATM put, 126 sessions, held to expiry (also 63 sessions).
+2. Put debit spread under `PUT_MODEL` (63 sessions, ≤ 40% debit-of-width,
+   +100% / +200% takes, −50% stop, out at 21 left).
+3. Short shares, borrow 30% / 100% × stop +50% / +100% / none; primary
+   borrow 30%, stop +100%.
+
+**Control:** the same trades on universe month-start days (the any-day
+sample of the second-jump test). Also reported, not graded: the stock's own
+21 / 63 / 126-session median after list entry, fell 40%, doubled.
+
+**Pass** per instrument on its primary, test period (entries ≥ 2024-01-01),
+all of: average > 0 and median > 0 after costs; ≥ 100 trades; the average
+positive in each of 2024, 2025 and 2026 separately; and the average above
+the control's. **Fail:** any one misses. **Inconclusive:** < 100 trades.
+Train (< 2024) reported, not graded.
+
+**Consequences.** A pass means a forward paper record for the owner only,
+for a quarter, before any real money; nothing in the app suggests a put or a
+short to subscribers (no investment-adviser activity; counsel first). A fail
+closes the list-entry bear side. Known weakness: survivors only — the 28% of
+filers delisted since are missing, and they are the names that fell most,
+so every bear number here is a floor.
+
+### Addendum 1 (2026-10-28, before any result of the list-entry run was read)
+
+Owner: "ensure these stocks have enough volume to trade options" and "how
+long did it take for these stocks to be delisted on average".
+
+**Tradeable subset becomes the graded primary.** There is no historical
+option volume or open interest in our data (Massive inactive), so options
+liquidity is proxied on the stock: an entry counts only when the entry-day
+close is ≥ $3 (the exchanges' listing floor for new option classes) and the
+20-day average dollar volume is ≥ $10M (about 10× the universe floor). The
+pass rule above applies to this subset; the full list-entry set and a $5M
+tier are reported, not graded. Wide option quotes on these names make 2%
+slippage optimistic, so every primary is also reported at 5% per fill; a
+pass at 2% that turns negative at 5% is recorded as "pass at 2% only" and
+does not start a paper record.
+
+**Delisted names, from SEC filings (descriptive, no pass mark).** For every
+float-range filer with no listed ticker today: SEC submissions since 2019 —
+Form 25 / 25-NSE (delisting; date = first one), Form 15 (deregistration),
+8-K item 3.01 (exchange notice of a listing-standard failure), 8-K item 1.03
+(bankruptcy), DEFM14A / SC TO-T / SC 14D9 (merger or tender). Reason =
+bankruptcy if 1.03, else acquired if a merger / tender form, else
+"delisted, other". Reported: counts by reason, and the median / quartiles of
+(a) days from the first 3.01 notice to the delisting, (b) days from the
+mid-year float filing (June 30 of the latest float-range year) to the
+delisting, overall and for the pre-revenue ones (revenue < $25M at that
+year end). This sizes how fast these names disappear; it adds no price data
+(none exists for them in our sources), so the bear test stays survivors-only.

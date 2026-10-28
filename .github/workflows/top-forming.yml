@@ -1,0 +1,50 @@
+# Research (owner, 2026-10-28): Top Forming job 1 — do stage-based exits beat a
+# 25% trailing stop on stocks a holder is up 50%+ on? Prices only. Writes
+# nothing to the DB. research/top-forming/PREREG.md
+
+name: Top Forming job 1
+
+on:
+  workflow_dispatch:
+    inputs:
+      tickers:
+        description: 'Optional comma-separated tickers (smoke test)'
+        required: false
+  push:
+    branches-ignore: [main]
+    paths:
+      - research/top-forming/**
+      - src/utils/topForming.js
+      - src/utils/topFormingConfig.js
+      - src/utils/exitPolicies.js
+      - .github/workflows/top-forming.yml
+
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Checks
+        run: npm run -s topforming:check && npm run -s exitpolicies:check
+      - name: Job 1
+        working-directory: research/top-forming
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SEC_USER_AGENT: ${{ vars.SEC_USER_AGENT }}
+          TICKERS: ${{ github.event.inputs.tickers }}
+        run: node --max-old-space-size=6144 job1.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: top-forming-job1
+          path: |
+            research/top-forming/job1-results.json
+            research/top-forming/out/
+          retention-days: 30
+          if-no-files-found: warn

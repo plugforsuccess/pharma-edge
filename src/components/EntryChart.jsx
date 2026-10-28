@@ -1,10 +1,12 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { FEATURES } from '../lib/features'
 import { Maximize2 } from 'lucide-react'
 import { DiamondMarkers, LANE_PX } from './chartDiamonds'
 import { VerticalBands, ZoneFill, FibLevels } from './chartBands'
 import { tripleEvents } from '../utils/signalSuite'
 import { snapPin } from '../utils/chartTools'
+import { sma } from '../utils/indicators'
+import { rejectionLevels } from '../utils/rejections'
 import {
   createChart, createSeriesMarkers, BaselineSeries, CandlestickSeries, HistogramSeries, LineSeries,
   ColorType, CrosshairMode, LineStyle, LineType,
@@ -18,7 +20,10 @@ import {
 // One chart, one time scale, stacked panes (so the crosshair and zoom
 // stay in sync):
 //   price     candles, 200-day SMA (bold; green while its 20-day slope is
-//             up, red while down), 50-day SMA, weekly 50 EMA (dashed),
+//             up, red while down), 50-day SMA, 20-day SMA (sky, thin;
+//             owner, 2026-10-28), weekly 50 EMA (dashed), rejection levels
+//             (layer 'rejections': utils/rejections.js, red above the
+//             price, green below, dashed at 2 rejections, solid at 3+),
 //             golden / death cross markers, buy-signal triangles under the
 //             candle, lighter MACD-confirmation dots, buy-zone shading
 //   dist      % from the 200-day, shaded ±band
@@ -212,6 +217,8 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
   const priceH = PRICE_H + (footerIn ? FOOTER_H : 0)
   const height = fill ?? (showPrice ? priceH : 0) + (shown.length - (showPrice ? 1 : 0)) * SUB_H
   const key = `${shown.join(',')}|${layers.join(',')}|${tf}|${style}`
+  // 20-bar average on whatever bars are drawn (daily, weekly, monthly, intraday).
+  const s20 = useMemo(() => (bars?.length ? sma(bars.map((b) => b.c), 20) : []), [bars])
 
   useEffect(() => {
     const el = box.current
@@ -222,7 +229,7 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
       suiteBull: token('--color-suite-bull'), suiteBear: token('--color-suite-bear'), bg: token('--color-bg'),
       goldHi: token('--color-amber-200'), fg: token('--color-fg'), muted: token('--color-muted'),
       subtle: token('--color-subtle'), faint: token('--color-faint'), border: token('--color-border'), borderHi: token('--color-border-hover'),
-      violet: token('--color-confluence'),
+      violet: token('--color-confluence'), ma20: token('--color-ma20'),
     }
     const chart = createChart(el, {
       autoSize: true,
@@ -314,6 +321,8 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
       const wema = addS(LineSeries, { ...quiet, color: alpha(t.fg, 0.7), lineWidth: 1, lineStyle: LineStyle.Dashed }, 0)
       wema.setData(line(model.wema))
     }
+    const s20line = addS(LineSeries, { ...quiet, color: t.ma20, lineWidth: 1 }, 0)
+    s20line.setData(line(s20))
     const s50 = addS(LineSeries, { ...quiet, color: t.gold, lineWidth: 1.5 }, 0)
     s50.setData(line(model.s50))
     const s200 = addS(LineSeries, { ...quiet, color: t.up, lineWidth: 3 }, 0)
@@ -390,6 +399,22 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
     }
     markers.sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0))
     createSeriesMarkers(candles, markers)
+    // Rejection levels (owner, 2026-10-28): every price the bars pushed into
+    // and closed back away from with a wick, 2+ times. Red = above the last
+    // close, green = below; dashed at 2 rejections, solid at 3+; the label
+    // counts them. Drawn like the Fibonacci lines (no axis tags).
+    if (layers.includes('rejections')) {
+      const rej = new FibLevels()
+      candles.attachPrimitive(rej)
+      const lv = rejectionLevels(bars)
+      rej.setLevels(lv.length ? {
+        from: null, font: getComputedStyle(el).fontFamily, labelBg: alpha(t.bg, 0.85),
+        levels: lv.map((l) => {
+          const c = l.role === 'resistance' ? t.down : t.up
+          return { price: l.price, kind: 'rejection', color: alpha(c, l.touches >= 4 ? 0.85 : l.touches === 3 ? 0.65 : 0.45), labelColor: c, dash: l.touches >= 3 ? [] : [3, 3], width: l.touches >= 4 ? 1.5 : 1, text: `${l.role === 'resistance' ? 'Ceiling' : 'Floor'} ${l.price.toFixed(2)} · ${l.touches}×` }
+        }),
+      } : null)
+    }
     const fibPrim = new FibLevels()
     candles.attachPrimitive(fibPrim)
     toolsRef.current = { candles, markers: createSeriesMarkers(candles, []), line: null, fib: fibPrim, font: getComputedStyle(el).fontFamily, t }
@@ -692,6 +717,7 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
     price: [
       { label: `200${iv.unit}`, value: fmt(v(model?.s200)), cls: slope == null ? 'text-subtle' : slope > 0 ? 'text-green-400' : 'text-rose-300', swatch: slope > 0 ? 'bg-green-400' : 'bg-red-400', thick: true },
       { label: `50${iv.unit}`, value: fmt(v(model?.s50)), cls: 'text-amber-300', swatch: 'bg-amber-400' },
+      { label: `20${iv.unit}`, value: fmt(v(s20)), cls: 'text-ma20', swatch: 'bg-ma20' },
       ...(daily ? [{ label: 'W50', value: fmt(v(model?.wema)), cls: 'text-subtle', swatch: 'bg-fg/70', dashed: true }] : []),
       ...(layers.includes('zone') && v(suite?.bravo?.zoneHigh) != null ? [zoneLegend(v(bars), v(suite.bravo.zoneLow), v(suite.bravo.zoneHigh))] : []),
     ],

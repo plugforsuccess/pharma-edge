@@ -411,3 +411,128 @@ long-vol ships; `/charts/tape` stays a watch list of facts (the same
 rows the risk facts show on a holding), with no play attached. That
 closes the profit question the owner asked: the information says which
 holdings are not holding their story, not which options to buy.
+
+### 2026-10-27, the second jump (owner: "use the losers list and wait for a positive milestone then buy then ride up" → "Run it")
+
+Pre-registered the same day (preregistration.md, "the second jump").
+Run 40453079474, `src/utils/secondJump.js` (`npm run secondjump:check`).
+Shares bought at the open after a jump (≥ 10% on ≥ 3× volume) on a stock
+that was on the tape list (scan definition) on one of the 60 sessions
+before; one jump per stock per 21 sessions.
+
+| test, 2024 → | n | 21-session median | 63 | 126 | avg 126 | higher at 126 | fell 40% | doubled |
+|---|---|---|---|---|---|---|---|---|
+| **listed: second jump** | **175** | **−13.3%** | **−24.0%** | **−39.4%** | −22.1% | 25% | **71%** | 28% |
+| listed, short ≥ 15% of shares | 44 | −15.4% | −10.5% | −31.5% | −20.1% | 25% | 61% | 25% |
+| listed, short < 15% of shares | 118 | −11.9% | −26.1% | −40.1% | −23.5% | 23% | 75% | 28% |
+| control A: jumps not listed | 877 | −3.8% | −7.2% | −12.4% | +10.7% | 39% | 45% | 25% |
+| control B: any day | 8,955 | +0.1% | +0.3% | +1.0% | +10.1% | 51% | 24% | 14% |
+
+The +40% target exit: listed median +0.3% (hit 47%) vs +7.6% on other
+jumps. By year (126-session median, listed vs not listed): 2023 −8.8% vs
+−19.8% (16 jumps), 2024 −40.1% vs −14.9%, 2025 −29.1% vs −6.6%, 2026
+−46.8% vs −9.4%. Train (< 2024) has only 19 listed jumps: −14.1% median,
+68% fell 40%.
+
+**FAIL (primary).** The second jump on a listed stock is the worst entry
+measured in the whole series: the typical one is 39% lower six months
+on, 27 points under other jumps, and seven in ten fall 40% or more,
+three times the any-day rate. High short interest does not rescue it
+(−31.5%, 61% fell): the squeeze reading is not in the data. The doublers
+are real and huge — DBVT +960%, CAPR +314%, QBTS +199% — but one in four,
+with no trait found that picks them in advance. The best 8 and worst 8
+are in the job log.
+
+Reading the same table from the holder's side (not the graded question,
+stated as such): a listed stock's second jump has been followed by a
+lower price in three cases of four at every horizon measured, starting
+from the next open. For someone already holding one, the jump has more
+often been the best price of the next six months than the start of a
+run. Consequence as pre-registered: the list stays a watch list of facts,
+nothing on it suggests a buy. Survivors only — the delisted names would
+make every listed number worse.
+
+### 2026-10-27, the bear side of the second jump (owner: "why not short or long put a stock on this list after a jump" → "Run it")
+
+Pre-registered the same day (preregistration.md). Run 40458050754,
+`src/utils/jumpBear.js` (`npm run jumpbear:check`). The same 175 listed
+second jumps on test (2024 →), entered at the open after the jump; σ =
+premium × 60-day realised vol on the jump day; 2% slippage per fill.
+
+| test, 2024 → | n | avg | median | win | lost ½ | worst | verdict |
+|---|---|---|---|---|---|---|---|
+| **long put, 126d, prem 1.3** (primary) | 175 | −14.1% | −14.9% | 42% | 39% | −100% | **FAIL** (2024 −15%, 2025 −21%, 2026 +5%) |
+| long put, 63d, prem 1.3 | 175 | −15.5% | −26.3% | 37% | 43% | −100% | |
+| long put, 126d, prem 1.6 | 175 | −27.6% | −28.8% | 37% | 43% | −100% | |
+| **put spread, 63d, prem 1.3** (primary) | 113 (62 skipped, debit > 40%) | −5.3% | −25.6% | 39% | 38% | −98% | **FAIL** (2024 −9%, 2025 −10%, 2026 +8%) |
+| put spread, 63d, prem 1.6 | 92 | −13.6% | −29.9% | 32% | 39% | −94% | |
+| short, borrow 30%, stop +50% | 175 | −19.6% | −6.2% | 49% | 43% | −373% | |
+| **short, borrow 30%, stop +100%** (primary) | 175 | −10.9% | +14.6% | 59% | 25% | −373% | **FAIL** (2024 −18%, 2025 −11%, 2026 +1%) |
+| short, borrow 30%, no stop | 175 | +3.6% | +21.2% | 64% | 15% | −998% | |
+| short, borrow 100%, any stop | 175 | −31% to −45% | | | | | |
+
+The same trades on jumps in stocks not listed (control A) did far worse
+every time — long put 126d −32.5%, spread −11.6%, short with +100% stop
+−28.5% — so the list carries real information about direction. It is
+not enough to pay for the trade. **All three primaries FAIL.**
+
+Reading. Puts: the post-jump premium is about what the typical drop
+delivers; the put wins 42% of the time and loses half or more 39% of the
+time. Spread: the 40% debit cap skips a third of the jumps (vol is too
+high to buy a spread that cheap), and the −50% stop fires on 40%.
+Short: the typical short makes money (median +14.6%, 59% win), but the
++100% stop fires on one in five and each one costs 100%+; without a stop
+the average turns barely positive (+3.6%) only by riding DBVT to −998%,
+which no account survives. At a 100% borrow fee every short loses.
+Stops hurt the short here as they hurt every swing variant before. The
+only positive rows are the no-stop short at 30% borrow (not a primary,
+fatal tail) and 2026 alone (35 jumps, open year). Nothing ships;
+survivors only, so the true bear-side numbers are somewhat better than
+these — not enough on this evidence to change a fail into a pass.
+
+### 2026-10-28, the bear side on list entry (owner: "it's your job to figure an algo to short or long puts" → "ensure these stocks have enough volume to trade options")
+
+Pre-registered the same day, addendum 1 before any result (preregistration.md).
+Run 40768205647. Entry = the open after the first session a stock lands on the
+list (scan definition) after 63 sessions off it; same pricing as the 2026-10-27
+bear test. Graded on the options-tradeable subset (close ≥ $3, 20-day dollar
+volume ≥ $10M).
+
+The stock after list entry (test, 2024 →): all 189 — median −3.6% / −7.8% /
+−17.6% at 21 / 63 / 126 sessions, 49% fell 40%, 25% doubled (any day: +0.9%,
+24%, 14%); tradeable 62 — −2.6% / −0.0% / −8.7%, 42% fell 40%, 27% doubled.
+
+| test, 2024 → | set | n | avg | median | win | verdict |
+|---|---|---|---|---|---|---|
+| **long put 126d, prem 1.3** | tradeable, 2% slip | 62 | −49.1% | −78.9% | 21% | **INCONCLUSIVE** (< 100) |
+| same | tradeable, 5% slip | 62 | −52.0% | −80.2% | 16% | |
+| same | all list entries | 189 | −41.6% | −53.9% | 24% | |
+| **put spread 63d, prem 1.3** | tradeable, 2% slip | 58 (13 skipped) | −21.6% | −51.3% | 28% | **INCONCLUSIVE** |
+| same | all list entries | 157 | −18.4% | −33.7% | 30% | |
+| **short, borrow 30%, stop +100%** | tradeable, 2% slip | 62 | −35.3% | −12.3% | 42% | **INCONCLUSIVE** |
+| same | all list entries | 189 | −44.7% | −3.3% | 48% | |
+| short, borrow 30%, no stop | all list entries | 189 | −24.2% | −1.1% | 49% | |
+| any-day control: put 126d / spread / short +100% stop | universe | ~9,000 | −38.5% / −19.1% / −28.0% | | | |
+
+Reading. Inconclusive on the count (only 62 tradeable entries in the test
+years), but no row is close: every instrument loses on average in every set,
+at both slippages, and in train. The stocks do fall (−17.6% median at six
+months, twice the any-day rate of 40% falls), yet the put priced at these
+names' volatility costs more than the typical fall delivers, and one in four
+doubles. The short's typical trade roughly breaks even before the doublers:
+a 17.6% fall minus ~15% borrow for six months minus slippage. Nothing ships;
+the list-entry bear side is closed with the second-jump bear side.
+
+**Delisted filers (descriptive, same run).** 770 float-range filers have no
+listed ticker today: **427 acquired (55%)**, 247 delisted other (many of the
+pre-revenue ones are SPACs that merged or liquidated), **79 bankruptcies
+(10%)**, 17 with no delisting filing. From the mid-year float filing to the
+delisting: median 1.2 years (middle half 0.9–1.6). From the exchange's first
+warning (8-K 3.01) to the delisting: bankruptcy median 196 days, delisted
+other 285 days, acquired 0 days (the notice is filed at closing). Pre-revenue
+only (434): 184 acquired, 25 bankruptcies, 215 other; warning → delisting
+median 182 days. **Correction to earlier readings:** this series has called
+the survivorship gap "the fallers the test cannot see" and every bear number
+"a floor". Most missing names were bought out (usually at a premium — a loss
+for a short) or were SPACs; bankruptcies are one in ten. The gap does not
+clearly favour the bear side.
