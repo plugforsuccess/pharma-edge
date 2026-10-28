@@ -7,6 +7,8 @@ for weekly expiries at fixed times of day. We have none before
 2026-10-27. Nothing has been bought. Per the guardrails, buying data
 waits for the owner.
 
+**Parked (owner, 2026-10-28).** No data is being bought or collected. The test stays as built and can run unchanged if chains ever exist.
+
 Nothing ships as a signal or a trade. One trade (NOW, +45% in four
 hours) cannot separate edge from luck, and no result here says otherwise.
 
