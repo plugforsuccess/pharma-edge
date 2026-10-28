@@ -21,7 +21,7 @@ async function itemFilings(cik) {
   return rows.filter((r) => r.filed >= SINCE).sort((a, b) => a.acceptance.localeCompare(b.acceptance))
 }
 
-const nasdaqCache = new Map(), nasdaqStatus = {}
+const nasdaqCache = new Map(), nasdaqStatus = {}, nasdaqSamples = []
 async function nasdaqDay(date) {
   if (nasdaqCache.has(date)) return nasdaqCache.get(date)
   let out = null
@@ -29,7 +29,7 @@ async function nasdaqDay(date) {
     try {
       const r = await fetch(`https://api.nasdaq.com/api/calendar/earnings?date=${date}`, { headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 Safari/605.1.15', Accept: 'application/json', Origin: 'https://www.nasdaq.com', Referer: 'https://www.nasdaq.com/' }, signal: AbortSignal.timeout(15000) })
       nasdaqStatus[r.status] = (nasdaqStatus[r.status] ?? 0) + 1
-      if (r.ok) { const j = await r.json(); out = new Map((j?.data?.rows ?? []).map((x) => [String(x.symbol).toUpperCase(), x.time])) }
+      if (r.ok) { const j = await r.json(); out = new Map((j?.data?.rows ?? []).map((x) => [String(x.symbol).toUpperCase(), x.time])); if (nasdaqSamples.length < 6) nasdaqSamples.push({ date, keys: Object.keys(j?.data ?? {}), rows: (j?.data?.rows ?? []).length, sample: (j?.data?.rows ?? []).slice(0, 2), message: j?.message ?? j?.status ?? null }) }
     } catch { nasdaqStatus.error = (nasdaqStatus.error ?? 0) + 1 }
     if (out == null) await new Promise((r) => setTimeout(r, 1500 * (a + 1)))
   }
@@ -68,7 +68,8 @@ for (const tk of tickers) {
   }
 }
 console.log(`events: ${events.length} · ${JSON.stringify(counts)} · Nasdaq HTTP ${JSON.stringify(nasdaqStatus)}`)
-console.log(`8-K 2.02 acceptance hour (ET wall clock): ${hours.map((n, h) => (n ? `${h}h ${n}` : '')).filter(Boolean).join(' · ')}`)
+console.log(`Nasdaq samples: ${JSON.stringify(nasdaqSamples).slice(0, 2500)}`)
+console.log(`8-K 2.02 acceptance hour (Eastern): ${hours.map((n, h) => (n ? `${h}h ${n}` : '')).filter(Boolean).join(' · ')}`)
 const conf = events.filter((e) => e.status === 'confirmed')
 console.log(`confirmed: ${conf.length} (${conf.filter((e) => e.timing === 'AMC').length} AMC, ${conf.filter((e) => e.timing === 'BMO').length} BMO) · in-sample ${conf.filter((e) => e.L && e.L < RULES.oosFrom).length} · held out ${conf.filter((e) => e.L && e.L >= RULES.oosFrom).length}`)
 for (const tk of ['NOW', 'NVDA', 'JPM']) console.log(`  ${tk}: ${events.filter((e) => e.tk === tk).slice(-4).map((e) => `${e.date} ${e.timing ?? ''} ${e.status}`).join(' | ')}`)

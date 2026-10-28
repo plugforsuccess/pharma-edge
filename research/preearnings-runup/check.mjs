@@ -4,12 +4,16 @@ let pass = 0, fail = 0
 const ok = (c, m) => { if (c) pass++; else { fail++; console.log('FAIL', m) } }
 const near = (a, b, e = 1e-9) => Math.abs(a - b) < e
 
-// timing
-ok(edgarTiming('2024-07-24T16:05:22.000Z').timing === 'AMC', '16:05 ET is after the close')
-ok(edgarTiming('2024-07-24T07:01:00.000Z').timing === 'BMO', '07:01 ET is before the open')
-ok(edgarTiming('2024-07-24T09:30:00.000Z').timing === 'DMH' && edgarTiming('2024-07-24T15:59:00.000Z').timing === 'DMH', '09:30–15:59 is during market')
-ok(edgarTiming('2024-07-24T16:00:00.000Z').timing === 'AMC', '16:00 counts as after the close')
-const e = edgarTiming('2024-07-24T16:05:22.000Z')
+// timing (EDGAR acceptance is UTC; summer = EDT, UTC−4; winter = EST, UTC−5)
+ok(edgarTiming('2024-07-24T20:05:22.000Z').timing === 'AMC' && edgarTiming('2024-07-24T20:05:22.000Z').date === '2024-07-24', '20:05Z in July is 4:05 pm EDT, after the close')
+ok(edgarTiming('2024-01-24T21:05:00.000Z').timing === 'AMC', '21:05Z in January is 4:05 pm EST')
+ok(edgarTiming('2024-01-24T20:05:00.000Z').timing === 'DMH', '20:05Z in January is 3:05 pm EST, during market')
+ok(edgarTiming('2024-07-24T11:01:00.000Z').timing === 'BMO', '11:01Z in July is 7:01 am, before the open')
+ok(edgarTiming('2024-07-25T02:30:00.000Z').date === '2024-07-24' && edgarTiming('2024-07-25T02:30:00.000Z').timing === 'AMC', 'a 10:30 pm ET filing stays on its Eastern date')
+ok(edgarTiming('2024-03-10T06:59:00.000Z').minutes === 1 * 60 + 59 && edgarTiming('2024-03-10T07:00:00.000Z').minutes === 3 * 60, 'spring-forward at 2 am')
+ok(edgarTiming('2024-11-03T05:59:00.000Z').minutes === 60 + 59 && edgarTiming('2024-11-03T06:00:00.000Z').minutes === 60, 'fall-back at 2 am')
+ok(edgarTiming('2024-07-24T20:00:00.000Z').timing === 'AMC', '4:00 pm counts as after the close')
+const e = edgarTiming('2024-07-24T20:05:22.000Z')
 ok(confirm(e, { date: '2024-07-24', timing: 'AMC' }).status === 'confirmed', 'two sources agree')
 ok(confirm(e, { date: '2024-07-24', timing: 'BMO' }).status === 'timing-mismatch', 'timing disagreement is not used')
 ok(confirm(e, { date: '2024-07-25', timing: 'AMC' }).status === 'date-mismatch', 'date disagreement is not used')

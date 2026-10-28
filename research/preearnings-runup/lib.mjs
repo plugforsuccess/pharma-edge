@@ -22,15 +22,27 @@ export const RULES = Object.freeze({
 })
 
 // ---- 1. Event timing ------------------------------------------------------
-// EDGAR's acceptanceDateTime carries a 'Z' but its clock is Eastern time
-// (a filing accepted at 4:05 pm ET reads "…T16:05:00.000Z"). The events job
-// prints the hour-of-day distribution so a wrong reading shows at once.
+// EDGAR's acceptanceDateTime is UTC (the first events run showed filings at
+// 20–21h and 10–11h "Z" — 4–5 pm and 6–7 am Eastern). Converted to Eastern
+// with US daylight saving (2nd Sunday of March → 1st Sunday of November, 2 am).
+function nthSunday(y, m, n) { const d = new Date(Date.UTC(y, m, 1)); const first = (7 - d.getUTCDay()) % 7; return 1 + first + 7 * (n - 1) }
+export function etOffsetHours(utcMs) {
+  const y = new Date(utcMs).getUTCFullYear()
+  const start = Date.UTC(y, 2, nthSunday(y, 2, 2), 7)   // 2 am EST = 07:00 UTC
+  const end = Date.UTC(y, 10, nthSunday(y, 10, 1), 6)   // 2 am EDT = 06:00 UTC
+  return utcMs >= start && utcMs < end ? -4 : -5
+}
+export function toEastern(acceptance) {
+  const ms = Date.parse(/[zZ]|[+-]\d{2}:?\d{2}$/.test(acceptance ?? '') ? acceptance : `${acceptance}Z`)
+  if (!Number.isFinite(ms)) return null
+  const et = new Date(ms + etOffsetHours(ms) * 3600e3)
+  return { date: et.toISOString().slice(0, 10), minutes: et.getUTCHours() * 60 + et.getUTCMinutes() }
+}
 export function edgarTiming(acceptance) {
-  const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/.exec(acceptance ?? '')
-  if (!m) return null
-  const mins = Number(m[2]) * 60 + Number(m[3])
-  const timing = mins < 9 * 60 + 30 ? 'BMO' : mins >= 16 * 60 ? 'AMC' : 'DMH'
-  return { date: m[1], timing, minutes: mins }
+  const e = toEastern(acceptance)
+  if (!e) return null
+  const timing = e.minutes < 9 * 60 + 30 ? 'BMO' : e.minutes >= 16 * 60 ? 'AMC' : 'DMH'
+  return { date: e.date, timing, minutes: e.minutes }
 }
 
 // Two sources agree on date and timing → a confirmed event.
