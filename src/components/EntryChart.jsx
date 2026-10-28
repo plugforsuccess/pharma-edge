@@ -6,7 +6,7 @@ import { VerticalBands, ZoneFill, FibLevels } from './chartBands'
 import { tripleEvents } from '../utils/signalSuite'
 import { snapPin } from '../utils/chartTools'
 import { sma } from '../utils/indicators'
-import { rejectionLevels } from '../utils/rejections'
+import { rejectionLevels, nearestLevels } from '../utils/rejections'
 import {
   createChart, createSeriesMarkers, BaselineSeries, CandlestickSeries, HistogramSeries, LineSeries,
   ColorType, CrosshairMode, LineStyle, LineType,
@@ -399,19 +399,20 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
     }
     markers.sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0))
     createSeriesMarkers(candles, markers)
-    // Rejection levels (owner, 2026-10-28): every price the bars pushed into
-    // and closed back away from with a wick, 2+ times. Red = above the last
+    // Rejection levels (owner, 2026-10-28): prices the bars pushed into and
+    // closed back away from with a wick, 2+ times — the nearest few each side. Red = above the last
     // close, green = below; dashed at 2 rejections, solid at 3+; the label
     // counts them. Drawn like the Fibonacci lines (no axis tags).
     if (layers.includes('rejections')) {
       const rej = new FibLevels()
       candles.attachPrimitive(rej)
-      const lv = rejectionLevels(bars)
+      // The nearest 3 each side within 35% of the last close; each line starts at its first rejection.
+      const lv = nearestLevels(rejectionLevels(bars), bars[bars.length - 1].c)
       rej.setLevels(lv.length ? {
         from: null, font: getComputedStyle(el).fontFamily, labelBg: alpha(t.bg, 0.85),
         levels: lv.map((l) => {
           const c = l.role === 'resistance' ? t.down : t.up
-          return { price: l.price, kind: 'rejection', color: alpha(c, l.touches >= 4 ? 0.85 : l.touches === 3 ? 0.65 : 0.45), labelColor: c, dash: l.touches >= 3 ? [] : [3, 3], width: l.touches >= 4 ? 1.5 : 1, text: `${l.role === 'resistance' ? 'Ceiling' : 'Floor'} ${l.price.toFixed(2)} · ${l.touches}×` }
+          return { price: l.price, from: time[l.first], kind: 'rejection', color: alpha(c, l.touches >= 4 ? 0.85 : l.touches === 3 ? 0.65 : 0.45), labelColor: c, dash: l.touches >= 3 ? [] : [3, 3], width: l.touches >= 4 ? 1.5 : 1, text: `${l.role === 'resistance' ? 'Ceiling' : 'Floor'} ${l.price.toFixed(2)} · ${l.touches}×` }
         }),
       } : null)
     }

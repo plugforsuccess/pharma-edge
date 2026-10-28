@@ -154,8 +154,10 @@ export class FibLevels {
               ctx.strokeStyle = l.color
               ctx.lineWidth = l.width ?? 1
               ctx.setLineDash(l.dash ?? (l.kind === 'extension' ? [4, 4] : []))
+              // A level may start at its own time (rejection levels start at their first rejection).
+              const lx = l.from != null ? Math.max(0, ts.timeToCoordinate(l.from) ?? 0) : x0
               ctx.beginPath()
-              ctx.moveTo(x0, Math.round(l.y) + 0.5)
+              ctx.moveTo(lx, Math.round(l.y) + 0.5)
               ctx.lineTo(x1, Math.round(l.y) + 0.5)
               ctx.stroke()
             }

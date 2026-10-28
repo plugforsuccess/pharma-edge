@@ -48,20 +48,22 @@ export function swings(bars, k = REJECTION.pivot) {
 
 // → [{ price, touches, fromAbove, fromBelow, first, last, role }] strongest first.
 // fromAbove = rejections of price pushing up into it (a ceiling); fromBelow = pushing down (a floor).
+// The tolerance is set per bar from that bar's ATR (owner, 2026-10-28: on a stock that
+// doubled, today's ATR applied to old prices merged years of a base into one "18×" floor).
 export function rejectionLevels(bars, p = REJECTION) {
   if (!bars?.length || bars.length < p.pivot * 2 + p.atrBars) return []
   const atr = atrAt(bars, p.atrBars)
+  const firstAtr = atr.find((x) => x != null) ?? 0
+  const tolAt = (i) => Math.max((atr[i] ?? firstAtr) * p.tolAtr, bars[i].c * p.minTolPct)
   const lastClose = bars[bars.length - 1].c
-  const tol = Math.max((atr[atr.length - 1] ?? 0) * p.tolAtr, lastClose * p.minTolPct)
-  // 1. Cluster swing prices.
+  // 1. Cluster swing prices; a level is at most one tolerance wide (from its lowest swing).
   const piv = swings(bars, p.pivot).sort((a, b) => a.price - b.price)
   const clusters = []
   for (const s of piv) {
     const c = clusters[clusters.length - 1]
-    // A level is at most one tolerance wide: join only while the new price is within tol of the cluster's lowest.
-    if (c && s.price - c.min <= tol) { c.sum += s.price; c.n++ } else clusters.push({ sum: s.price, n: 1, min: s.price })
+    if (c && s.price - c.min <= tolAt(s.i)) { c.sum += s.price; c.n++ } else clusters.push({ sum: s.price, n: 1, min: s.price })
   }
-  // 2. Count rejections at each level.
+  // 2. Count rejections at each level, each bar judged on its own tolerance.
   const levels = []
   for (const c of clusters) {
     const L = c.sum / c.n
@@ -69,6 +71,8 @@ export function rejectionLevels(bars, p = REJECTION) {
     for (let i = 0; i < bars.length; i++) {
       const b = bars[i], range = b.h - b.l
       if (!(range > 0)) continue
+      const tol = tolAt(i)
+      if (b.h < L - tol || b.l > L + tol) continue
       const upWick = (b.h - Math.max(b.o, b.c)) / range, dnWick = (Math.min(b.o, b.c) - b.l) / range
       let topTurn = true, botTurn = true
       for (let j = Math.max(0, i - p.turn); j <= Math.min(bars.length - 1, i + p.turn); j++) { if (j === i) continue; if (bars[j].h > b.h) topTurn = false; if (bars[j].l < b.l) botTurn = false }
@@ -85,4 +89,14 @@ export function rejectionLevels(bars, p = REJECTION) {
     if (touches >= p.minTouches) levels.push({ price: L, touches, fromAbove: above, fromBelow: below, first, last, role: L >= lastClose ? 'resistance' : 'support' })
   }
   return levels.sort((a, b) => b.touches - a.touches || b.last - a.last)
+}
+
+// What the chart draws: the nearest `perSide` ceilings above and floors below the
+// last close, within `within` of it (owner, 2026-10-28: six floors 25–55% under
+// CSCO and nothing near the price read as broken).
+export const NEAREST = Object.freeze({ perSide: 3, within: 0.35 })
+export function nearestLevels(levels, lastClose, { perSide = NEAREST.perSide, within = NEAREST.within } = {}) {
+  const near = levels.filter((l) => Math.abs(l.price / lastClose - 1) <= within)
+  const by = (role) => near.filter((l) => l.role === role).sort((a, b) => Math.abs(a.price - lastClose) - Math.abs(b.price - lastClose)).slice(0, perSide)
+  return [...by('resistance'), ...by('support')]
 }
