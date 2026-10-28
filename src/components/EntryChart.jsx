@@ -197,6 +197,24 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
   const hoverRef = useRef(onHover)
   hoverRef.current = onHover
   const rangeRef = useRef(null)      // keeps zoom / pan across rebuilds
+  const rejRef = useRef(null)        // the rejection-levels primitive, redrawn when the range changes
+  // Rejection levels (owner, 2026-10-28): prices the bars pushed into and closed back away
+  // from with a wick, 2+ times, counted inside the selected range (from = its first bar) —
+  // the nearest 3 each side within 35% of the last close. Red = above the last close, green =
+  // below; dashed at 2 rejections, solid at 3+; each line starts at its first rejection.
+  const drawRejections = (from) => {
+    const r = rejRef.current
+    if (!r || !bars?.length) return
+    const { t } = r
+    const lv = nearestLevels(rejectionLevels(bars, undefined, { from }), bars[bars.length - 1].c)
+    r.prim.setLevels(lv.length ? {
+      from: null, font: r.font, labelBg: alpha(t.bg, 0.85),
+      levels: lv.map((l) => {
+        const c = l.role === 'resistance' ? t.down : t.up
+        return { price: l.price, from: bars[l.first].t, kind: 'rejection', color: alpha(c, l.touches >= 4 ? 0.85 : l.touches === 3 ? 0.65 : 0.45), labelColor: c, dash: l.touches >= 3 ? [] : [3, 3], width: l.touches >= 4 ? 1.5 : 1, text: `${l.role === 'resistance' ? 'Ceiling' : 'Floor'} ${l.price.toFixed(2)} · ${l.touches}×` }
+      }),
+    } : null)
+  }
   const chartRef = useRef(null)
   const holdRef = useRef(0)
   const priceHeadRef = useRef(null) // the price pane's header (it wraps on phones)
@@ -406,16 +424,9 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
     if (layers.includes('rejections')) {
       const rej = new FibLevels()
       candles.attachPrimitive(rej)
-      // The nearest 3 each side within 35% of the last close; each line starts at its first rejection.
-      const lv = nearestLevels(rejectionLevels(bars), bars[bars.length - 1].c)
-      rej.setLevels(lv.length ? {
-        from: null, font: getComputedStyle(el).fontFamily, labelBg: alpha(t.bg, 0.85),
-        levels: lv.map((l) => {
-          const c = l.role === 'resistance' ? t.down : t.up
-          return { price: l.price, from: time[l.first], kind: 'rejection', color: alpha(c, l.touches >= 4 ? 0.85 : l.touches === 3 ? 0.65 : 0.45), labelColor: c, dash: l.touches >= 3 ? [] : [3, 3], width: l.touches >= 4 ? 1.5 : 1, text: `${l.role === 'resistance' ? 'Ceiling' : 'Floor'} ${l.price.toFixed(2)} · ${l.touches}×` }
-        }),
-      } : null)
-    }
+      rejRef.current = { prim: rej, font: getComputedStyle(el).fontFamily, t }
+      drawRejections(range ? rangeStart(bars, range.key) : Math.max(0, bars.length - iv.show))
+    } else rejRef.current = null
     const fibPrim = new FibLevels()
     candles.attachPrimitive(fibPrim)
     toolsRef.current = { candles, markers: createSeriesMarkers(candles, []), line: null, fib: fibPrim, font: getComputedStyle(el).fontFamily, t }
@@ -708,6 +719,7 @@ export default function EntryChart({ bars, model, suite, conf = null, suiteLabel
     const r = { from: rangeStart(bars, range.key), to: bars.length - 1 + 4, tf }
     rangeRef.current = r
     chart.timeScale().setVisibleLogicalRange(r)
+    drawRejections(r.from)
   }, [range, bars, tf])
 
   // Legends follow the crosshair; off the chart they show the latest day.

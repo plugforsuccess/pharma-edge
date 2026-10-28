@@ -56,5 +56,9 @@ ok(ql.some((l) => Math.abs(l.price - 24) < 0.3) && ql.some((l) => Math.abs(l.pri
 const fake = [90, 95, 99, 101, 104, 108, 112, 140, 60].map((price, k) => ({ price, touches: 2, role: price >= 100 ? 'resistance' : 'support', last: k }))
 const nl = nearestLevels(fake, 100)
 ok(nl.map((l) => l.price).join(',') === '101,104,108,99,95,90', `nearest 3 above and below, far ones dropped (${nl.map((l) => l.price).join(',')})`)
+// The window: counting from a later bar gives fewer touches; a window after the range has none at 110.
+const half = rejectionLevels(bars, REJECTION, { from: 80 }).find((l) => Math.abs(l.price - 110) < 1)
+ok(half && half.fromAbove < top.fromAbove && half.first >= 80, `a shorter window counts only its own rejections (${half?.fromAbove} vs ${top.fromAbove})`)
+ok(rejectionLevels(quad, REJECTION, { from: 200 }).every((l) => l.price > 27), 'a window after the old base shows none of its levels')
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

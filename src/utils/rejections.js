@@ -50,14 +50,16 @@ export function swings(bars, k = REJECTION.pivot) {
 // fromAbove = rejections of price pushing up into it (a ceiling); fromBelow = pushing down (a floor).
 // The tolerance is set per bar from that bar's ATR (owner, 2026-10-28: on a stock that
 // doubled, today's ATR applied to old prices merged years of a base into one "18×" floor).
-export function rejectionLevels(bars, p = REJECTION) {
+// from: only swings and rejections on bars from this index on count (owner, 2026-10-28:
+// "the number of times depends on the chart window selected") — earlier bars still warm up the ATR.
+export function rejectionLevels(bars, p = REJECTION, { from = 0 } = {}) {
   if (!bars?.length || bars.length < p.pivot * 2 + p.atrBars) return []
   const atr = atrAt(bars, p.atrBars)
   const firstAtr = atr.find((x) => x != null) ?? 0
   const tolAt = (i) => Math.max((atr[i] ?? firstAtr) * p.tolAtr, bars[i].c * p.minTolPct)
   const lastClose = bars[bars.length - 1].c
   // 1. Cluster swing prices; a level is at most one tolerance wide (from its lowest swing).
-  const piv = swings(bars, p.pivot).sort((a, b) => a.price - b.price)
+  const piv = swings(bars, p.pivot).filter((x) => x.i >= from).sort((a, b) => a.price - b.price)
   const clusters = []
   for (const s of piv) {
     const c = clusters[clusters.length - 1]
@@ -68,7 +70,7 @@ export function rejectionLevels(bars, p = REJECTION) {
   for (const c of clusters) {
     const L = c.sum / c.n
     let above = 0, below = 0, first = null, last = null, lastI = -Infinity
-    for (let i = 0; i < bars.length; i++) {
+    for (let i = Math.max(0, from); i < bars.length; i++) {
       const b = bars[i], range = b.h - b.l
       if (!(range > 0)) continue
       const tol = tolAt(i)
