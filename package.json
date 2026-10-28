@@ -50,7 +50,8 @@
     "jumpbear:check": "node scripts/check-jump-bear.mjs",
     "rejections:check": "node scripts/check-rejections.mjs",
     "topforming:check": "node scripts/check-top-forming.mjs",
-    "exitpolicies:check": "node scripts/check-exit-policies.mjs"
+    "exitpolicies:check": "node scripts/check-exit-policies.mjs",
+    "delisted:check": "node scripts/check-delisted.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",

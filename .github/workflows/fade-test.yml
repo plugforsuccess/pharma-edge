@@ -20,6 +20,7 @@ on:
       - src/utils/straddle.js
       - src/utils/secondJump.js
       - src/utils/jumpBear.js
+      - src/utils/delisted.js
       - .github/workflows/fade-test.yml
 
 jobs:

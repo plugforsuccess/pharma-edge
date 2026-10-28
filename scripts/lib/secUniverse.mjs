@@ -14,7 +14,7 @@ export async function publicFloatCiks({ years, min, max, log = console.log }) {
     const j = await secJson(`https://data.sec.gov/api/xbrl/frames/dei/EntityPublicFloat/USD/CY${y}Q2I.json`)
     const rows = j?.data ?? []
     let n = 0
-    for (const r of rows) if (r.val >= min && r.val <= max) { n++; const cik = String(r.cik).padStart(10, '0'); if (!out.has(cik)) out.set(cik, { float: r.val, year: y }) }
+    for (const r of rows) if (r.val >= min && r.val <= max) { n++; const cik = String(r.cik).padStart(10, '0'); if (!out.has(cik)) out.set(cik, { float: r.val, year: y, last: y }); else out.get(cik).last = y }
     log(`  float frame CY${y}Q2I: ${rows.length} filers, ${n} in range`)
   }
   return out
