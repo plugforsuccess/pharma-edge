@@ -1,4 +1,4 @@
-import { entrySignal, pathAfter, putAfter, shortAfter, pathStats, windowVerdict, SHORT_WINDOW, bearCallAfter, shortPlusCallAfter } from '../src/utils/shortWindow.js'
+import { entrySignal, pathAfter, putAfter, shortAfter, pathStats, windowVerdict, SHORT_WINDOW, bearCallAfter, shortPlusCallAfter, jumpPath, jumpPathStats, QUARTER_MONTHS, sessionsFor } from '../src/utils/shortWindow.js'
 let pass = 0, fail = 0
 const ok = (c, m) => { if (c) pass++; else { fail++; console.log('FAIL', m) } }
 const day = (i) => new Date(Date.UTC(2024, 0, 1) + i * 86400e3).toISOString().slice(0, 10)
@@ -50,5 +50,12 @@ ok(spcUp.ret < -2, 'short + call: a rocket loses on both legs (> 2× the price)'
 const climb = mk([12.5, 11.9, 11.8, 11.7, 11.6, ...Array.from({ length: 30 }, (_, k) => 11.6 * (1 + 0.06 * (k + 1))), ...flat(200, 40)])
 const spcStop = shortPlusCallAfter(climb, 84, { stop: 0.5 }), spcHold = shortPlusCallAfter(climb, 84)
 ok(spcStop.stopped && spcStop.ret > spcHold.ret, 'the +50% stop closes both early and caps the loss on a steady climb')
+// Addendum 2: the path from the jump close at every quarter month.
+ok(QUARTER_MONTHS.length === 24 && QUARTER_MONTHS[0] === 0.25 && QUARTER_MONTHS[23] === 6 && sessionsFor(0.25) === 5 && sessionsFor(1.25) === 26 && sessionsFor(6) === 126, 'quarter months 1W … 6M in sessions')
+const jp = jumpPath(down, 80)
+ok(jp && Math.abs(jp[1].ret - (9 / 12 - 1)) < 1e-9 && jp[0.25].lowSoFar <= jp[0.25].ret, 'path measured from the jump close; deepest drop so far ≤ the close change')
+ok(jumpPath(mk(flat(60, 11)), 80) === null, 'path needs 6 months after the jump')
+const js = jumpPathStats([jp, null, jp])
+ok(js.n === 2 && js.at[1].below === 1 && js.at[1].down20 === 1 && js.at[0.25].ret < 0, 'path stats')
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

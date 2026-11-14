@@ -13,7 +13,7 @@ import { filingsMap, exitFilingsFor } from './lib/secFilings.mjs'
 import { straddleTrade, straddleStats, straddleVerdict, STRADDLE } from '../src/utils/straddle.js'
 import { catalystRow, shortsRow, HOLDING_RISK } from '../src/utils/holdingRisks.js'
 import { exitOf, exitStats } from '../src/utils/delisted.js'
-import { entrySignal, pathAfter, putAfter, shortAfter, pathStats, tradeStats, windowVerdict, SHORT_WINDOW, bearCallAfter, shortPlusCallAfter, PREMIUM_SELL } from '../src/utils/shortWindow.js'
+import { entrySignal, pathAfter, putAfter, shortAfter, pathStats, tradeStats, windowVerdict, SHORT_WINDOW, bearCallAfter, shortPlusCallAfter, PREMIUM_SELL, jumpPath, jumpPathStats, QUARTER_MONTHS } from '../src/utils/shortWindow.js'
 import { putTrade, spreadTrade, shortTrade, bearStats, bearVerdict, JUMP_BEAR, listEntries } from '../src/utils/jumpBear.js'
 import { eventFlags, listedFlags, jumpOutcome, countedJumps, wasListed, jumpStats, secondJumpVerdict, SECOND_JUMP, SECOND_JUMP_PASS } from '../src/utils/secondJump.js'
 import { dailyBars, mapLimit, sources } from './lib/marketData.mjs'
@@ -392,6 +392,20 @@ for (const [label, set, flag] of [
     }
   }
   console.log('  Pass per primary: avg > 0 and median > 0 after costs, ≥ 100 trades, avg > 0 in 2024, 2025, 2026 each.')
+  // Addendum 2: the price path from the jump close (E0's signal bar = the jump) at every quarter month.
+  {
+    console.log('\n  path from the jump close (E0) vs any day — median change · below the jump close · down 10/20/30% · median deepest drop so far · deepest ≥ 20/30%')
+    report.shortWindow.jumpPath = {}
+    const sets = [['jumps · test', sig.E0.filter(isTest)], ['jumps · train', sig.E0.filter((r) => !isTest(r))], ['any day · test', control.filter(isTest)]]
+    const stats = sets.map(([name, rows]) => [name, jumpPathStats(rows.map((r) => jumpPath(r.bars, r.s)))])
+    for (const [name, st] of stats) { report.shortWindow.jumpPath[name] = st; console.log(`  ${name}: n ${st.n}`) }
+    console.log(`  ${'when'.padEnd(6)} ${stats.map(([name]) => name.padEnd(54)).join(' ')}`)
+    for (const m of QUARTER_MONTHS) {
+      const cell = (x) => `${pct(x.ret, 0).padStart(5)} ${pct(x.below, 0).padStart(4)} ${pct(x.down10, 0).padStart(4)}/${pct(x.down20, 0).padStart(3)}/${pct(x.down30, 0).padStart(3)} ${pct(x.low, 0).padStart(5)} ${pct(x.low20, 0).padStart(4)}/${pct(x.low30, 0).padStart(3)}`
+      const label = m < 1 ? `${Math.round(m * 4)}W` : `${m}M`
+      console.log(`  ${label.padEnd(6)} ${stats.map(([, st]) => cell(st.at[m]).padEnd(54)).join(' ')}`)
+    }
+  }
   // Addendum 1: premium selling, 21 sessions — bear call spread (primary on E3) and short stock + short call.
   console.log('\n  premium selling, 21 sessions (avg / median / win / lost half) — bear call return on max loss; short + call return on the price')
   report.shortWindow.premium = {}
