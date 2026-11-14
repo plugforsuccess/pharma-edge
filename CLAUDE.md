@@ -2321,7 +2321,13 @@ score, tier, color or verdict.**
   "Below its Jul 2 jump ($68.40)" with the sessions-below bar against 120,
   amber shorts chip, red price chip, muted cash line), then "One fact lit"
   collapsed. The value in the jump line's parentheses is the jump-day
-  close. **It is a watch list of facts, not a play:** the straddle test
+  close. **Fresh jumps** (owner, 2026-11-14: "I can't wait 20 sessions after the
+  jump … signal me on the jump"): a section above Both facts lit listing every
+  scanned stock whose latest jump closed within the past 7 days (`catalyst.event`,
+  the same jump the list later counts from) — jump %, jump close, % since, short %
+  of shares and cash; one outcome line from the second-jump test's control A
+  (877 jumps, 2024 →: −12% median at six months, 45% fell 40%+, one in four
+  doubled). Updated after each close; facts, no trade wording. **It is a watch list of facts, not a play:** the straddle test
   (variants.md, 2026-10-26) found long volatility on these names loses
   more than the universe at every premium and exit (B' −37.6% avg vs
   −18.6%, 305 months) — the moves are priced in — so nothing long-vol

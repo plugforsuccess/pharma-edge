@@ -21,6 +21,14 @@ const money = (x) => { const a = Math.abs(x); return a >= 1e9 ? `$${(a / 1e9).to
 const price = (x) => `$${x >= 100 ? x.toFixed(0) : x.toFixed(2)}`
 const signed = (x) => `${x >= 0 ? '+' : '−'}${Math.abs(x * 100).toFixed(0)}%`
 const BAR_MAX = 120 // sessions below the jump that fill the bar
+// Fresh jumps (owner, 2026-11-14: "I can't wait 20 sessions after the jump … signal me on
+// the jump"): every scanned stock whose latest jump (≥ 10% on ≥ 3× volume) closed within
+// the last week — the day the "Below its … jump" lines start counting. The one outcome line
+// is the second-jump test's control A (variants.md, 2026-10-27: 877 jumps in stocks not on
+// the list, 2024 →, bought the next open).
+const FRESH_DAYS = 7
+const JUMP_AFTER = { n: 877, median126: -0.124, fell40: 0.45, doubled: 0.25 }
+const daysBetween = (a, b) => Math.round((Date.parse(`${b}T12:00:00Z`) - Date.parse(`${a}T12:00:00Z`)) / 86400e3)
 
 export default function TapeScan() {
   const [rows, setRows] = useState(undefined)
@@ -31,6 +39,9 @@ export default function TapeScan() {
       .then(({ data, error }) => { if (!cancelled) setRows(error ? null : data ?? []) })
     return () => { cancelled = true }
   }, [])
+  const fresh = useMemo(() => (rows ?? [])
+    .filter((r) => r.catalyst?.event && daysBetween(r.catalyst.event, r.as_of) <= FRESH_DAYS)
+    .sort((a, b) => b.catalyst.event.localeCompare(a.catalyst.event) || b.catalyst.jump - a.catalyst.jump), [rows])
   const { both, one, asOf } = useMemo(() => {
     const scored = (rows ?? []).map((r) => ({ r, n: holdingRiskFacts(r).length }))
     const by = (x) => (x.r.catalyst?.sessionsBelow ?? 0)
@@ -60,6 +71,21 @@ export default function TapeScan() {
       {rows === undefined && <div className="mt-6 text-sm text-muted">Loading…</div>}
       {rows === null && <div className="mt-6 text-sm text-red-300">Couldn't load the scan.</div>}
       {rows?.length === 0 && <div className="mt-6 text-sm text-muted">The scan hasn't run yet. It runs after each close.</div>}
+
+      {fresh.length > 0 && (
+        <section className="mt-5">
+          <div className="flex items-baseline justify-between">
+            <div className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold">Fresh jumps · past week</div>
+            <div className="text-2xl font-semibold font-mono-tab text-green-300 leading-none">{fresh.length}</div>
+          </div>
+          <ul className="mt-2 space-y-2">
+            {fresh.map((r) => <JumpRow key={r.ticker} r={r} />)}
+          </ul>
+          <p className="mt-3 text-[11px] text-muted">
+            A jump is a close up 10%+ on 3× normal volume. In the test of {JUMP_AFTER.n.toLocaleString()} past jumps like these (2024 →), the stock was {Math.round(Math.abs(JUMP_AFTER.median126) * 100)}% lower six months later at the median; {Math.round(JUMP_AFTER.fell40 * 100)}% fell 40%+ and one in {Math.round(1 / JUMP_AFTER.doubled)} doubled. Updated after each close. A watch list, not a forecast.
+          </p>
+        </section>
+      )}
 
       {both.length > 0 && (
         <section className="mt-5">
@@ -141,6 +167,40 @@ function Row({ r }) {
         </div>
         {rw?.cash != null && (
           <div className="mt-2 text-[11px] text-muted font-mono-tab truncate">{money(rw.cash)} cash{rw.burn < 0 ? ` · ${money(rw.burn)}${rw.jv > 0 ? ` + ${money(rw.jv)} JV` : ''} a qtr` : ''}</div>
+        )}
+      </Link>
+    </li>
+  )
+}
+
+// A fresh jump: ticker, the jump itself, where the price is against the jump close, the
+// shorts and cash lines when known. Tap → the entry chart.
+function JumpRow({ r }) {
+  const c = r.catalyst, s = r.shorts, rw = r.runway
+  const vsJump = c.last / c.level - 1
+  const spark = Array.isArray(r.spark) && r.spark.length > 2 ? r.spark : null
+  const ago = daysBetween(c.event, r.as_of)
+  return (
+    <li>
+      <Link to={`/charts/entry/${encodeURIComponent(r.ticker)}`} className="block bg-card border border-border rounded-2xl px-4 py-3.5 min-h-[44px] hover:border-amber-400/30 transition">
+        <div className="flex items-center gap-3">
+          <div className="w-16 shrink-0">
+            <div className="text-lg font-semibold text-fg leading-tight">{r.ticker}</div>
+            <div className="text-[11px] text-muted font-mono-tab">{price(c.last)}</div>
+          </div>
+          {spark ? <Sparkline values={spark} className="flex-1 min-w-0 h-8 text-green-400" /> : <div className="flex-1" />}
+          <div className="shrink-0 rounded-full px-2.5 py-1 text-sm font-semibold font-mono-tab bg-green-500/15 text-green-300">{signed(c.jump)}</div>
+          <ChevronRight size={14} className="text-muted shrink-0 -mr-1" aria-hidden />
+        </div>
+        <div className="mt-2.5 flex flex-wrap items-baseline justify-between gap-x-3 text-xs">
+          <span className="text-subtle">Jumped {ago === 0 ? 'at the last close' : day(c.event)} · closed {price(c.level)}</span>
+          {ago > 0 && <span className={clsx('font-mono-tab font-semibold', vsJump < 0 ? 'text-red-300' : 'text-green-300')}>{signed(vsJump)} since</span>}
+        </div>
+        {(s?.siPct != null || rw?.cash != null) && (
+          <div className="mt-1.5 text-[11px] text-muted font-mono-tab truncate">
+            {s?.siPct != null ? `Short ${(s.siPct * 100).toFixed(0)}% of shares` : ''}{s?.siPct != null && rw?.cash != null ? ' · ' : ''}
+            {rw?.cash != null ? `${money(rw.cash)} cash${rw.burn < 0 ? ` · ${money(rw.burn)} a qtr` : ''}` : ''}
+          </div>
         )}
       </Link>
     </li>
