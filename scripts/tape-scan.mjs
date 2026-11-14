@@ -82,6 +82,7 @@ for (const { r } of lit.sort((a, b) => (b.r.catalyst?.sessionsBelow ?? 0) - (a.r
 // 4. The jump record: log each fresh jump once (with whether it came on an
 // earnings report, SEC 8-K item 2.02, and the next report date), then fill the
 // path from the jump close for every record still inside 6 months.
+const addDaysISO = (d, n) => new Date(Date.parse(`${d}T00:00:00Z`) + n * 86400e3).toISOString().slice(0, 10)
 const cikOf = new Map(entries.map((e) => [e.ticker, e.cik]))
 const since = new Date(Date.now() - 200 * 86400e3).toISOString().slice(0, 10)
 const { data: openRecs, error: recErr } = await db.from('jump_record').select('ticker, jump_date, next_report, next_report_est').gte('jump_date', since)
@@ -98,7 +99,8 @@ const inserts = []
 for (const r of fresh) {
   const c = r.catalyst, b = bars.get(r.ticker)
   const fl = cikOf.get(r.ticker) ? (await filingsFor(cikOf.get(r.ticker), { since: '2025-01-01' }).catch(() => null))?.rows ?? [] : []
-  const rep = reportOnJump(fl, c.event), nx = nextReport(cal.get(r.ticker), fl, c.event), rp = recordPath(b, c.event)
+  // The next report comes after the one the jump was on (calendar rows within 3 weeks of it are that same report).
+  const rep = reportOnJump(fl, c.event), nx = nextReport(cal.get(r.ticker), fl, rep ? addDaysISO(rep, 21) : c.event), rp = recordPath(b, c.event)
   inserts.push({ ticker: r.ticker, jump_date: c.event, jump_close: c.level, jump_pct: +c.jump.toFixed(4), logged_on: today, earnings_jump: !!rep, report_date: rep, next_report: nx.date, next_report_est: nx.est, si_pct: r.shorts?.siPct ?? null, cash: r.runway?.cash ?? null, burn: r.runway?.burn ?? null, path: rp?.path ?? {}, last_close: rp?.last ?? null })
 }
 console.log(`jump record: ${inserts.length} new fresh jumps · ${openRecs?.length ?? 0} open records`)
