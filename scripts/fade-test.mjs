@@ -13,6 +13,7 @@ import { filingsMap, exitFilingsFor } from './lib/secFilings.mjs'
 import { straddleTrade, straddleStats, straddleVerdict, STRADDLE } from '../src/utils/straddle.js'
 import { catalystRow, shortsRow, HOLDING_RISK } from '../src/utils/holdingRisks.js'
 import { exitOf, exitStats } from '../src/utils/delisted.js'
+import { entrySignal, pathAfter, putAfter, shortAfter, pathStats, tradeStats, windowVerdict, SHORT_WINDOW } from '../src/utils/shortWindow.js'
 import { putTrade, spreadTrade, shortTrade, bearStats, bearVerdict, JUMP_BEAR, listEntries } from '../src/utils/jumpBear.js'
 import { eventFlags, listedFlags, jumpOutcome, countedJumps, wasListed, jumpStats, secondJumpVerdict, SECOND_JUMP, SECOND_JUMP_PASS } from '../src/utils/secondJump.js'
 import { dailyBars, mapLimit, sources } from './lib/marketData.mjs'
@@ -349,6 +350,48 @@ for (const [label, set, flag] of [
   }
   }
   console.log('  * = primary. Pass per instrument: avg > 0 and median > 0 after costs, ≥ 100 trades, avg > 0 in 2024, 2025, 2026 each, avg above the any-day control; graded on the tradeable subset at 2% slippage, 5% shown beside it.')
+}
+// Short windows after a jump (pre-registered 2026-11-14): E0 / E3 / E5 / D10 entries, 1M–6M drawdowns, puts, short.
+{
+  const KINDS = ['E0', 'E3', 'E5', 'D10']
+  const sig = Object.fromEntries(KINDS.map((k) => [k, []])), control = []
+  for (const s of stocks) {
+    const okAt = (i) => { if (i < 252) return false; const rev = revenueAt(s.fin, s.bars[i].t); return (rev == null || rev < U.revenueMax) && adv(s.bars, i) >= U.advMin }
+    for (const e of countedJumps(eventFlags(s.bars), 252)) {
+      if (!okAt(e)) continue
+      for (const k of KINDS) { const g = entrySignal(s.bars, e, k); if (g != null) sig[k].push({ tk: s.tk, s: g, t: s.bars[g].t, bars: s.bars }) }
+    }
+    s.bars.forEach((b, i) => { if (monthStarts.has(b.t) && okAt(i)) control.push({ tk: s.tk, s: i, t: b.t, bars: s.bars }) })
+  }
+  const isTest = (r) => r.t >= SPLIT
+  const H = SHORT_WINDOW.horizons
+  report.shortWindow = { paths: {}, trades: {} }
+  console.log(`\n=== Short windows after a jump (test, 2024 →) — entries: ${KINDS.map((k) => `${k} ${sig[k].filter(isTest).length}`).join(' · ')} · control ${control.filter(isTest).length}`)
+  console.log('  stock after the entry: median close return / median deepest drawdown / fell 20% · 30% · 40% / rose 50%, at 1M · 2M · 3M · 6M')
+  for (const [name, rows] of [...KINDS.map((k) => [k, sig[k]]), ['control', control]]) {
+    for (const [pname, inP] of [['test', isTest], ['train', (r) => !isTest(r)]]) {
+      const st = pathStats(rows.filter(inP).map((r) => pathAfter(r.bars, r.s)))
+      report.shortWindow.paths[`${name}|${pname}`] = st
+      if (pname === 'train' && name === 'control') continue
+      console.log(`  ${(name + ' · ' + pname).padEnd(16)} n ${String(st.n).padStart(5)}  ${H.map((h) => { const x = st.by[h]; return `${h}d ${pct(x.ret, 0)}/${pct(x.dd, 0)} ${pct(x.falls[0.2], 0)}·${pct(x.falls[0.3], 0)}·${pct(x.falls[0.4], 0)} ↑${pct(x.rose, 0)}` }).join('  ')}`)
+    }
+  }
+  console.log('  trades (avg / median / win / lost half / took the −20% exit) — * = primary, graded')
+  const lineT = (name, st, v = '') => `  ${name.padEnd(34)} ${String(st.n).padStart(5)} ${pct(st.avg).padStart(8)} ${pct(st.median).padStart(8)} ${pct(st.win, 0).padStart(5)} ${pct(st.lostHalf, 0).padStart(6)} ${st.took != null ? pct(st.took, 0).padStart(5) : ''}${v}`
+  for (const k of KINDS) {
+    const test = sig[k].filter(isTest)
+    const variants = []
+    for (const d of SHORT_WINDOW.putDays) for (const take of [false, true]) variants.push({ name: `${k} put ${d}d${take ? ' · −20% take' : ' · hold'}`, primary: k === SHORT_WINDOW.primary.entry && d === SHORT_WINDOW.primary.putDays && take, fn: (r) => putAfter(r.bars, r.s, d, { take }) })
+    variants.push({ name: `${k} short · −20% / +50% / 63d`, primary: k === SHORT_WINDOW.primary.entry, fn: (r) => shortAfter(r.bars, r.s) })
+    for (const v of variants) {
+      const vd = windowVerdict(test.map((r) => ({ t: r.t, trade: v.fn(r) })))
+      const tr = tradeStats(sig[k].filter((r) => !isTest(r)).map(v.fn))
+      const yrs = Object.entries(vd.years).map(([y, x]) => `${y} ${pct(x.avg, 0)} (${x.n})`).join(' · ')
+      console.log(lineT(v.name + (v.primary ? ' *' : ''), vd.all, v.primary ? `  → ${vd.verdict.toUpperCase()}  ${yrs}` : '') + `   train ${pct(tr.avg)} (${tr.n})`)
+      report.shortWindow.trades[v.name] = { primary: v.primary, ...vd, train: tr }
+    }
+  }
+  console.log('  Pass per primary: avg > 0 and median > 0 after costs, ≥ 100 trades, avg > 0 in 2024, 2025, 2026 each.')
 }
 // Dilution: did a raise (8-K 3.02 or 424B5) follow within 6 months?
 console.log('\n=== Raised within 6 months (test, 2024 →) — pre-set reading: runway < 5 q ≥ 2× base, runway + shelf ≥ 3×')

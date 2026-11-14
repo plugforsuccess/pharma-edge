@@ -21,6 +21,7 @@ on:
       - src/utils/secondJump.js
       - src/utils/jumpBear.js
       - src/utils/delisted.js
+      - src/utils/shortWindow.js
       - .github/workflows/fade-test.yml
 
 jobs:
