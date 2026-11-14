@@ -806,3 +806,24 @@ that instrument on a forward paper record for the owner for a quarter; a
 fail is recorded and nothing trades. The "not held" check on the card
 moves to the window this test supports best on the drawdown shares,
 chosen on train, read on test.
+
+### Addendum 1 (2026-11-14, before any result of the short-window run was read)
+
+Owner: "Bear call spread and short stock sell calls on the short shares. Max 1M."
+Two premium-selling instruments join the test, same entries (E0 / E3 / E5 /
+D10), same pricing (σ = 1.3 × 60-day vol, 2% slippage per fill, rate 4%),
+21 sessions to expiry, held to expiry:
+4. **Bear call spread** — sell the at-the-money call, buy the call one
+   expected move higher (K2 = S0 × (1 + σ√T)); return = P&L ÷ max loss
+   (width − credit). Reported also: the subset meeting the app's credit
+   rule (credit ≥ 60% of width), and a short strike half an expected move
+   above the price.
+5. **Short stock + short at-the-money call** on the same shares — P&L =
+   (S0 − S_T) + call premium − max(0, S_T − K) − borrow 30% a year;
+   return on S0. Reported also: closed early at the first close ≥ 50%
+   above S0. Unlimited risk on both legs — research only, never shown in
+   the app.
+**Primary:** entry E3, the bear call spread as specified. Same pass rule
+(average > 0 and median > 0 after costs, ≥ 100 trades, average > 0 in
+each of 2024, 2025, 2026). Instrument 5 is reported with the same numbers,
+graded, and labelled unlimited risk.
