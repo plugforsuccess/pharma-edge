@@ -125,6 +125,9 @@ export function cashLine(row) {
 // (variants.md, 2026-10-27: 877 jumps in stocks not on the list, 2024 →).
 export const FRESH_DAYS = 7
 export const FRESH_JUMP = Object.freeze({ n: 877, median126: -0.124, fell40: 0.45, doubled: 0.25 })
+// The same jumps split by whether they came on an earnings report (8-K 2.02, jump −3 … +1 days),
+// 2024 → at six months (short-window test, addendum 4): earnings jumps held, the rest faded.
+export const FRESH_SPLIT = Object.freeze({ other: { n: 942, median126: -0.18, lower: 0.64 }, earnings: { n: 136, median126: -0.01, lower: 0.51 } })
 export const daysSince = (a, b) => days(a, b)
 
 // The loser rules on one ticker_risks row (owner, 2026-11-14: "for stopped believing

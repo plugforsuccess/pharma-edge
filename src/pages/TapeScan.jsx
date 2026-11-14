@@ -13,7 +13,7 @@ import { Link } from 'react-router-dom'
 import clsx from 'clsx'
 import { ArrowLeft, ChevronRight } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { holdingRiskFacts, BOTH_LIT, FRESH_DAYS, FRESH_JUMP as JUMP_AFTER, daysSince as daysBetween } from '../utils/holdingRisks'
+import { holdingRiskFacts, BOTH_LIT, FRESH_DAYS, FRESH_JUMP as JUMP_AFTER, FRESH_SPLIT, daysSince as daysBetween } from '../utils/holdingRisks'
 import { Sparkline } from '../components/ConfluenceLeaders'
 import { recordSummary, monthLabel } from '../utils/jumpRecord'
 import EarningsLine from '../components/EarningsLine'
@@ -22,6 +22,7 @@ const day = (t) => (t ? new Date(`${t}T12:00:00Z`).toLocaleDateString('en-US', {
 const money = (x) => { const a = Math.abs(x); return a >= 1e9 ? `$${(a / 1e9).toFixed(1)}B` : a >= 1e6 ? `$${Math.round(a / 1e6)}M` : `$${Math.round(a / 1e3)}K` }
 const price = (x) => `$${x >= 100 ? x.toFixed(0) : x.toFixed(2)}`
 const signed = (x) => `${x >= 0 ? '+' : '−'}${Math.abs(x * 100).toFixed(0)}%`
+const ernRank = (rec) => (!rec ? 1 : rec.earnings_jump ? 2 : 0)
 const BAR_MAX = 120 // sessions below the jump that fill the bar
 // Fresh losers (owner, 2026-11-14: "I can't wait 20 sessions after the jump … signal me on the
 // jump" → "call it fresh losers"): every scanned stock whose latest jump closed within the
@@ -46,7 +47,9 @@ export default function TapeScan() {
   }, [])
   const fresh = useMemo(() => (rows ?? [])
     .filter((r) => r.catalyst?.event && daysBetween(r.catalyst.event, r.as_of) <= FRESH_DAYS)
-    .sort((a, b) => b.catalyst.event.localeCompare(a.catalyst.event) || b.catalyst.jump - a.catalyst.jump), [rows])
+    // Non-earnings jumps first (owner, 2026-11-14: "non earning jumps is the focus of this signal"),
+    // then not yet tagged, then earnings jumps; newest first within each.
+    .sort((a, b) => ernRank(recBy.get(`${a.ticker}|${a.catalyst.event}`)) - ernRank(recBy.get(`${b.ticker}|${b.catalyst.event}`)) || b.catalyst.event.localeCompare(a.catalyst.event) || b.catalyst.jump - a.catalyst.jump), [rows, recBy])
   const { both, one, asOf } = useMemo(() => {
     const scored = (rows ?? []).map((r) => ({ r, n: holdingRiskFacts(r).length }))
     const by = (x) => (x.r.catalyst?.sessionsBelow ?? 0)
@@ -87,7 +90,7 @@ export default function TapeScan() {
             {fresh.map((r) => <JumpRow key={r.ticker} r={r} rec={recBy.get(`${r.ticker}|${r.catalyst.event}`)} />)}
           </ul>
           <p className="mt-3 text-[11px] text-muted">
-            A jump is a close up 10%+ on 3× normal volume. In the test of {JUMP_AFTER.n.toLocaleString()} past jumps like these (2024 →), the stock was {Math.round(Math.abs(JUMP_AFTER.median126) * 100)}% lower six months later at the median; {Math.round(JUMP_AFTER.fell40 * 100)}% fell 40%+ and one in {Math.round(1 / JUMP_AFTER.doubled)} doubled. Updated after each close. A watch list, not a forecast.
+            A jump is a close up 10%+ on 3× normal volume. Since 2024, jumps <span className="text-fg">not on an earnings report</span> were {Math.round(Math.abs(FRESH_SPLIT.other.median126) * 100)}% lower six months later at the median ({Math.round(FRESH_SPLIT.other.lower * 100)}% ended lower, {FRESH_SPLIT.other.n.toLocaleString()} jumps); jumps on an earnings report ended about flat ({FRESH_SPLIT.earnings.n}). Across all jumps one in {Math.round(1 / JUMP_AFTER.doubled)} doubled. Updated after each close. A watch list, not a forecast.
           </p>
         </section>
       )}
