@@ -767,3 +767,42 @@ mid-year float filing (June 30 of the latest float-range year) to the
 delisting, overall and for the pre-revenue ones (revenue < $25M at that
 year end). This sizes how fast these names disappear; it adds no price data
 (none exists for them in our sources), so the bear test stays survivors-only.
+
+## Added 2026-11-14 — short windows after a jump (owner: "20 sessions is far too large … I don't care about 6 months. It's 1M, 2M, 3M … 6M … catch the drawdowns")
+
+Written before the code exists. Universe, jump definition (close ≥ +10% on
+≥ 3× volume), one jump per stock per 21 sessions and the pre-revenue /
+liquidity filters are the second-jump test's. Test = jumps ≥ 2024-01-01;
+train (< 2024) reported, not graded. Short interest is **not** a gate here
+(FINRA publishes it twice a month with a lag); it stays as context.
+
+**Entries** (each enters at the next open; J = the jump-day close):
+- E0 — the jump itself (the open after the jump day).
+- E3 / E5 — the first close of 3 / 5 sessions in a row under J, within 20
+  sessions of the jump ("failed to hold", short windows).
+- D10 — the first close ≥ 10% under J within 5 sessions of the jump.
+- Control — universe month-start days (the any-day sample).
+
+**Measured per entry, at 21 / 42 / 63 / 126 sessions (1M / 2M / 3M / 6M):**
+the close return; the deepest drawdown from the entry (lowest low); the
+share that fell ≥ 20% / ≥ 30% / ≥ 40% at any point inside the window; the
+share that rose ≥ 50% inside the window. Descriptive.
+
+**Trades (graded), all priced like the bear tests** (σ = 1.3 × 60-day
+realised vol through the signal day, floor 15%, 2% slippage per fill):
+1. Put at the money, 21 / 42 / 63 sessions to expiry, held to expiry.
+2. Same put, sold when the stock first closes ≥ 20% under the entry
+   (marked at the model with the time left), else held to expiry.
+3. Short shares: cover at the first close ≥ 20% under the entry, at the
+   first close ≥ 50% above it, or at 63 sessions; borrow 30% a year.
+Primary per instrument: entry E3, 42-session put with the −20% take;
+short as above. **Pass:** average > 0 and median > 0 after costs, ≥ 100
+trades, average > 0 in each of 2024, 2025, 2026. Every other entry × window
+is reported with the same numbers, not graded (labelled).
+
+**Consequences.** The card's outcome line moves to the 1M / 2M / 3M / 6M
+drawdown shares from this test whatever the verdict (facts). A pass puts
+that instrument on a forward paper record for the owner for a quarter; a
+fail is recorded and nothing trades. The "not held" check on the card
+moves to the window this test supports best on the drawdown shares,
+chosen on train, read on test.
