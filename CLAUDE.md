@@ -2336,7 +2336,15 @@ score, tier, color or verdict.**
   LOSER (jumped within 7 days) / NOT ON THE LIST, four checks — big jump in 60
   sessions, not held 20+ sessions, shorts up 15%+, price down 10%+ same window —
   and the test's outcome line for both / fresh. `loserChecks`, `FRESH_DAYS`,
-  `FRESH_JUMP` in `holdingRisks.js` (`npm run holdingrisks:check`). **It is a watch list of facts, not a play:** the straddle test
+  `FRESH_JUMP` in `holdingRisks.js` (`npm run holdingrisks:check`). **Puts & shorts,
+  owner only** (owner, 2026-11-14: "for losers we care about puts and shorts only"):
+  for `profiles.is_admin` the card adds the three instruments the bear tests used,
+  priced today with the tests' model (`src/utils/loserTrades.js`, `bearPlan`: ATM put
+  126 days, put spread 63 days ATM / one expected move lower with the 40% cap, short
+  shares with borrow 30–100%; σ = 1.3 × 60-day vol, 2% slip — estimates, not quotes;
+  `npm run losertrades:check`), "Options likely / unlikely" (≥ $3 and ≥ $10M a day),
+  and the recorded test result for the setup (fresh → the jump test's control A;
+  on the list / one fact → the list-entry test). Subscribers never see a trade. **It is a watch list of facts, not a play:** the straddle test
   (variants.md, 2026-10-26) found long volatility on these names loses
   more than the universe at every premium and exit (B' −37.6% avg vs
   −18.6%, 305 months) — the moves are priced in — so nothing long-vol

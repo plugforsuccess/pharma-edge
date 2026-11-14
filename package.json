@@ -43,6 +43,7 @@
     "insiders:check": "node scripts/check-insiders.mjs",
     "fade:check": "node scripts/check-fade.mjs",
     "holdingrisks:check": "node scripts/check-holding-risks.mjs",
+    "losertrades:check": "node scripts/check-loser-trades.mjs",
     "milestones:check": "node scripts/check-milestones.mjs",
     "basketrecord:check": "node scripts/check-basket-record.mjs",
     "straddle:check": "node scripts/check-straddle.mjs",

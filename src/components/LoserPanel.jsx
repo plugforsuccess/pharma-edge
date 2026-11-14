@@ -1,5 +1,7 @@
+import { useMemo } from 'react'
 import clsx from 'clsx'
 import { loserChecks, BOTH_LIT, FRESH_JUMP } from '../utils/holdingRisks'
+import { bearPlan, BEAR_RECORD } from '../utils/loserTrades'
 
 // The entry chart's status card for a Stopped-believing stock (owner, 2026-11-14:
 // "for stopped believing stocks why is the leader rules shown … display the loser
@@ -14,8 +16,9 @@ const HEAD = {
   none: ['NOT ON THE LIST', 'Neither list fact is lit', 'text-fg'],
 }
 
-export default function LoserPanel({ row }) {
+export default function LoserPanel({ row, bars = null, owner = false }) {
   const { status, checks, lit } = loserChecks(row)
+  const plan = useMemo(() => (owner ? bearPlan(bars) : null), [owner, bars])
   const [title, sub, tone] = HEAD[status]
   return (
     <section className="bg-card border border-border rounded-2xl mb-4 overflow-hidden">
@@ -53,6 +56,46 @@ export default function LoserPanel({ row }) {
           {' '}Past prices, not a forecast.
         </p>
       )}
+      {owner && plan && <BearCard plan={plan} record={status === 'fresh' ? BEAR_RECORD.fresh : status === 'both' || status === 'one' ? BEAR_RECORD.list : null} />}
     </section>
+  )
+}
+
+// Owner only (owner, 2026-11-14: "for losers we care about puts and shorts only"):
+// the three instruments the bear tests used, priced today with the tests' model, and the
+// tests' recorded result for this setup. Subscribers never see a trade (no adviser activity).
+const usd = (x) => (x >= 100 ? `$${Math.round(x).toLocaleString('en-US')}` : `$${x.toFixed(2)}`)
+const pc = (x) => `${x >= 0 ? '+' : '−'}${Math.abs(x * 100).toFixed(0)}%`
+function BearCard({ plan, record }) {
+  const { put, spread, short } = plan
+  const rows = [
+    ['Put', `${put.days}-day $${put.strike.toFixed(2)} put`, `≈${usd(put.cost * 100)}`, `breakeven ${usd(put.breakeven)} · needs ${pc(-put.needs)}`],
+    ['Put spread', `${spread.days}-day $${spread.long.toFixed(2)} / $${spread.short.toFixed(2)}`, `≈${usd(spread.debit * 100)}`, `${Math.round((spread.ratio ?? 0) * 100)}% of the ${usd(spread.width * 100)} width${spread.withinCap ? '' : ' · over the 40% cap'}`],
+    ['Short', `shares at ${usd(short.price)}`, 'borrow', `${short.borrows.map((b) => `${Math.round(b * 100)}%`).join('–')} a year is typical · tested with a +${Math.round(short.stop * 100)}% stop`],
+  ]
+  return (
+    <div className="border-t border-hairline">
+      <div className="px-5 pt-3 flex items-baseline justify-between gap-3">
+        <span className="text-[11px] uppercase tracking-[0.14em] text-amber-300 font-semibold">Puts & shorts · owner only</span>
+        <span className={clsx('text-[11px] font-semibold text-right', plan.tradeable ? 'text-green-300' : 'text-red-300')}>{plan.tradeable ? 'Options likely' : `Options unlikely: ${plan.why.join(', ')}`}</span>
+      </div>
+      <ul className="divide-y divide-hairline">
+        {rows.map(([k, what, cost, sub]) => (
+          <li key={k} className="px-5 py-2.5 flex items-center gap-3">
+            <span className="flex-1 min-w-0">
+              <span className="block text-sm text-fg">{k} <span className="text-subtle">· {what}</span></span>
+              <span className="block text-[11px] text-muted">{sub}</span>
+            </span>
+            <span className="shrink-0 text-sm font-mono-tab text-fg">{cost}</span>
+          </li>
+        ))}
+      </ul>
+      <p className="px-5 py-3 border-t border-hairline text-[11px] text-muted">
+        {record
+          ? `Tested (${record.n} trades ${record.label}, 2024 →): put ${pc(record.put)}, spread ${pc(record.spread)}, short ${pc(record.short)} on average. None passed.`
+          : 'No test covers this setup.'}
+        {' '}Priced at 1.3× its 60-day volatility with 2% slippage, as in the tests — estimates, not quotes. Check the live chain.
+      </p>
+    </div>
   )
 }

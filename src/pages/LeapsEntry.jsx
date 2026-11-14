@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import clsx from 'clsx'
+import { useAuth } from '../context/AuthContext'
 import { ArrowDown, ArrowLeft, ArrowUp, ChartCandlestick, ChartLine, Check, ChevronDown, ChevronLeft, ChevronRight, Info, Maximize2, Plus, RotateCcw, Search, Sparkles, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { CHART_TICKERS } from '../lib/chartTickers'
@@ -106,6 +107,7 @@ export default function LeapsEntry() {
   const { ticker: raw } = useParams()
   const ticker = String(raw || 'SPY').toUpperCase()
   const navigate = useNavigate()
+  const { profile } = useAuth()
   const [data, setData] = useState(null)
   const [searchOpen, setSearchOpen] = useState(false)
   const [hover, setHover] = useState(null)
@@ -512,7 +514,7 @@ export default function LeapsEntry() {
             {/* A Stopped-believing stock (scanned pre-revenue name) shows the loser rules, not the
                 Leaders rule it can't meet (owner, 2026-11-14). Nothing until the row has loaded. */}
             {!SUITE && !isIndex && riskRows !== undefined && (scanned
-              ? <LoserPanel row={riskRows[ticker]} />
+              ? <LoserPanel row={riskRows[ticker]} bars={bars} owner={!!profile?.is_admin} />
               : <LeaderPanel traits={leaderNow} close={bars[bars.length - 1]?.c} asOf={bars[bars.length - 1]?.t} spyLoading={spyBars === null} advanced={advanced} quality={quality} />)}
             {!isIndex && !scanned && riskRows?.[ticker] && <RiskFactList row={riskRows[ticker]} />}
             {!isIndex && !SUITE && <MilestoneLedger ticker={ticker} compact cashLine={cashLine(riskRows?.[ticker] ?? null)} />}
