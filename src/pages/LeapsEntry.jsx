@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import clsx from 'clsx'
+import { useAuth } from '../context/AuthContext'
 import { ArrowDown, ArrowLeft, ArrowUp, ChartCandlestick, ChartLine, Check, ChevronDown, ChevronLeft, ChevronRight, Info, Maximize2, Plus, RotateCcw, Search, Sparkles, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { CHART_TICKERS } from '../lib/chartTickers'
@@ -15,6 +16,7 @@ import ReplayCard from '../components/ReplayCard'
 import { confluenceModel, COMPONENTS, MIN_MATCHES } from '../utils/confluence'
 import { trendQuality, tripleStatus, reclaimPlan } from '../utils/plan'
 import LeaderPanel from '../components/LeaderPanel'
+import LoserPanel from '../components/LoserPanel'
 import RiskFactList, { useTickerRisks } from '../components/RiskFacts'
 import MilestoneLedger from '../components/MilestoneLedger'
 import { cashLine } from '../utils/holdingRisks'
@@ -105,6 +107,7 @@ export default function LeapsEntry() {
   const { ticker: raw } = useParams()
   const ticker = String(raw || 'SPY').toUpperCase()
   const navigate = useNavigate()
+  const { profile } = useAuth()
   const [data, setData] = useState(null)
   const [searchOpen, setSearchOpen] = useState(false)
   const [hover, setHover] = useState(null)
@@ -205,6 +208,7 @@ export default function LeapsEntry() {
   // Risk facts (ticker_risks; only tickers someone holds or has starred have a row).
   const riskTickers = useMemo(() => (ticker.startsWith('^') ? [] : [ticker]), [ticker])
   const riskRows = useTickerRisks(riskTickers)
+  const scanned = !!riskRows?.[ticker]?.scan
 
   const setField = (k, v) => {
     const next = { ...draft, [k]: v }
@@ -507,8 +511,12 @@ export default function LeapsEntry() {
       ) : (
         <div className="md:grid md:grid-cols-[1fr_280px] md:gap-x-5 md:items-start">
           <div className="min-w-0 md:order-1">
-            {!SUITE && !isIndex && <LeaderPanel traits={leaderNow} close={bars[bars.length - 1]?.c} asOf={bars[bars.length - 1]?.t} spyLoading={spyBars === null} advanced={advanced} quality={quality} />}
-            {!isIndex && riskRows?.[ticker] && <RiskFactList row={riskRows[ticker]} />}
+            {/* A Stopped-believing stock (scanned pre-revenue name) shows the loser rules, not the
+                Leaders rule it can't meet (owner, 2026-11-14). Nothing until the row has loaded. */}
+            {!SUITE && !isIndex && riskRows !== undefined && (scanned
+              ? <LoserPanel row={riskRows[ticker]} bars={bars} owner={!!profile?.is_admin} />
+              : <LeaderPanel traits={leaderNow} close={bars[bars.length - 1]?.c} asOf={bars[bars.length - 1]?.t} spyLoading={spyBars === null} advanced={advanced} quality={quality} />)}
+            {!isIndex && !scanned && riskRows?.[ticker] && <RiskFactList row={riskRows[ticker]} />}
             {!isIndex && !SUITE && <MilestoneLedger ticker={ticker} compact cashLine={cashLine(riskRows?.[ticker] ?? null)} />}
             {SUITE && <StatusPanel s={s} model={model} params={params} suite={suite} dailySuite={dailySuite} confirmDays={confirmDays} tfLabel={SUITE_TIMEFRAMES[suiteTf].label.toLowerCase()} conf={conf} pool={pool} trend={trend} metrics={data?.metrics ?? null} />}
             {SUITE && <SuitePanel pack={suitePack} failed={suiteData?.error && suiteData.tf === suiteTf} tf={suiteTf} holdings={holdings} onJump={jumpPeriod} onOpenPane={setExpanded}

@@ -119,3 +119,30 @@ export function cashLine(row) {
   const ops = r.burn < 0 ? `${money(r.burn)} ops` : `${money(r.burn)} generated`
   return r.jv > 0 ? `Cash ${money(r.cash)}${when} · ${ops} + ${money(r.jv)} to JV last qtr` : `Cash ${money(r.cash)}${when} · ${r.burn < 0 ? `${money(r.burn)} used` : ops} last qtr`
 }
+
+// Fresh jumps (owner, 2026-11-14): a scanned stock whose latest jump closed within
+// FRESH_DAYS of the row. The outcome line is the second-jump test's control A
+// (variants.md, 2026-10-27: 877 jumps in stocks not on the list, 2024 →).
+export const FRESH_DAYS = 7
+export const FRESH_JUMP = Object.freeze({ n: 877, median126: -0.124, fell40: 0.45, doubled: 0.25 })
+export const daysSince = (a, b) => days(a, b)
+
+// The loser rules on one ticker_risks row (owner, 2026-11-14: "for stopped believing
+// stocks why is the leader rules shown … display the loser rules"): the four checks
+// behind the list, each { key, label, value, sub, lit }, and the status —
+// 'both' (both facts lit), 'one', 'fresh' (jumped within FRESH_DAYS), 'none'.
+export function loserChecks(row, p = HOLDING_RISK) {
+  const c = row?.catalyst ?? null, s = row?.shorts ?? null
+  const facts = holdingRiskFacts(row, p)
+  const fresh = !!(c?.event && row?.as_of && days(c.event, row.as_of) <= FRESH_DAYS)
+  const status = facts.length === 2 ? 'both' : facts.length === 1 ? 'one' : fresh ? 'fresh' : 'none'
+  const siOk = !!(s && s.siChange >= p.siRise)
+  const pxOk = !!(s && s.priceChange != null && s.priceChange <= -p.priceDrop)
+  const checks = [
+    { key: 'jump', label: 'A big jump in the last 60 sessions', value: c ? signed(c.jump) : 'None', sub: c ? `${fmtDay(c.event)} · closed ${price(c.level)}` : 'up 10%+ on 3× volume', lit: !!c },
+    { key: 'held', label: `Hasn't held it for ${p.belowSessions}+ sessions`, value: c ? (c.sessionsBelow > 0 ? `${c.sessionsBelow} below` : 'Holding') : '—', sub: c ? `now ${price(c.last)} · ${signed(c.last / c.level - 1)} since` : null, lit: !!(c && c.sessionsBelow >= p.belowSessions) },
+    { key: 'shorts', label: `Short interest up ${Math.round(p.siRise * 100)}%+`, value: s ? signed(s.siChange) : '—', sub: s ? `${s.spanDays} days${s.siPct != null ? ` · ${(s.siPct * 100).toFixed(1)}% of shares` : ''}` : 'no recent short data', lit: siOk },
+    { key: 'price', label: `Price down ${Math.round(p.priceDrop * 100)}%+ over the same window`, value: s?.priceChange != null ? signed(s.priceChange) : '—', sub: null, lit: pxOk },
+  ]
+  return { status, checks, lit: checks.filter((x) => x.lit).length }
+}
