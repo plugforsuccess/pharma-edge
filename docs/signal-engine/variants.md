@@ -536,3 +536,40 @@ the survivorship gap "the fallers the test cannot see" and every bear number
 "a floor". Most missing names were bought out (usually at a premium — a loss
 for a short) or were SPACs; bankruptcies are one in ten. The gap does not
 clearly favour the bear side.
+
+## 2026-11-14 — Short windows after a jump: results (run 43635097704, commit 66aeee9, addenda 1–4)
+
+Pre-registered 2026-11-14 with addenda 1–4 (preregistration.md). Test = 2024 →.
+Entries: E0 1,256 · E3 954 · E5 850 · D10 501 · any-day control 11,798.
+
+**Path from the jump close (addenda 2–4)**: median change · share below the jump close.
+
+| after | 2026 jumps | 2025 | test 2024 → | test · earnings | 2026 · earnings | 2026 · other | any day |
+|---|---|---|---|---|---|---|---|
+| 1W | −3% · 60% (378) | −3% · 57% | −2% · 58% | −1% · 56% (162) | −2% · 59% (69) | −3% · 61% (309) | 0% · 50% |
+| 2W | −6% · 64% | −5% · 57% | −4% · 60% | −2% · 54% | −3% · 63% | −7% · 64% | 0% |
+| 1M | −7% · 64% (355) | −6% · 57% | −6% · 61% | −4% · 56% | −6% · 61% | −8% · 65% | −1% |
+| 2M | −10% · 65% (333) | −8% · 57% | −10% · 62% | −4% · 54% | −6% · 59% | −13% · 66% | −1% |
+| 3M | −16% · 68% (315) | −9% · 57% | −11% · 62% | −5% · 56% | −6% · 62% | −18% · 69% | −1% |
+| 6M | −23% · 64% (206) | −11% · 58% | −17% · 62% | −1% · 51% (136) | 0% · 49% (43) | −30% · 68% (163) | 0% |
+
+Deepest drop so far (median), all test jumps: −11% by 1W, −19% by 1M, −29% by
+3M, −39% by 6M (any day: −4% / −8% / −14% / −19%). Earnings tag = SEC 8-K 2.02
+from jump −3 to +1 days; every ticker had filings (unknown = 0). **Reading:
+the fade is the non-earnings jumps. Jumps on an earnings report hold at the
+median (−1% at 6M, 2024 →); other jumps fall (−18%, 2026: −30%).** Descriptive,
+no pass mark.
+
+**Trades (graded primaries, 2024 →):**
+- E3 put 42d, −20% take: avg −24.4%, median −6.1%, 911 trades → **FAIL** (2024 −18%, 2025 −34%, 2026 −19%). Every put variant at every entry loses on average.
+- E3 short (−20% target / +50% stop / 63d, borrow 30%): avg −7.8%, median +13.1%, win 58% → **FAIL** (avg < 0 every year).
+- E3 **bear call spread** (ATM / +1 expected move, 21 sessions, return on max loss): avg **+6.7%**, median **+28.0%**, win 74%, lost half 15%, 929 trades → **PASS** (2024 +11%, 2025 +2%, 2026 +7%; train +6.0%). E0 / E5 / D10 and the +½-move short strike land in the same place (+4.9% to +6.9% avg).
+- E3 short stock + ATM call (unlimited risk): avg −4.9%, median +13.0% → **FAIL** (2026 −16%). The +50% stop makes it worse.
+
+**Caveats on the pass:** (1) priced off the model (σ = 1.3 × 60-day vol, 2%
+slippage per fill), not quotes — the credit is the whole edge, and these names
+quote wide; (2) **no trade met the app's credit rule** (credit ≥ 60% of width:
+0 of 929) — the ATM / +1-move spread collects well under that, so it fails the
+spread rules as written; (3) 2025 is thin (+2%); (4) survivors only. Next step
+before any use: price it on real chains (quotes on the forward jump record),
+not the model. Changes no live rule; nothing shown to subscribers.
