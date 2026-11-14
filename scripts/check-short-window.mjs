@@ -1,5 +1,4 @@
-import { entrySignal, pathAfter, putAfter, shortAfter, pathStats, windowVerdict, SHORT_WINDOW } from '../src/utils/shortWindow.js'
-import { bsPut } from '../src/utils/replay.js'
+import { entrySignal, pathAfter, putAfter, shortAfter, pathStats, windowVerdict, SHORT_WINDOW, bearCallAfter, shortPlusCallAfter } from '../src/utils/shortWindow.js'
 let pass = 0, fail = 0
 const ok = (c, m) => { if (c) pass++; else { fail++; console.log('FAIL', m) } }
 const day = (i) => new Date(Date.UTC(2024, 0, 1) + i * 86400e3).toISOString().slice(0, 10)
@@ -36,5 +35,20 @@ ok(st.n === 2 && st.by[21].falls[0.4] === 1, 'pathStats skips nulls')
 const rows = (n, r) => Array.from({ length: n }, (_, i) => ({ t: `${2024 + (i % 3)}-03-01`, trade: { ret: r } }))
 ok(windowVerdict(rows(120, 0.2)).verdict === 'pass' && windowVerdict(rows(50, 0.2)).verdict === 'inconclusive' && windowVerdict(rows(120, -0.1)).verdict === 'fail', 'verdict')
 ok(SHORT_WINDOW.primary.entry === 'E3' && SHORT_WINDOW.primary.putDays === 42 && SHORT_WINDOW.take === 0.2, 'pre-registered primary')
+// Addendum 1: bear call spread and short stock + short call, 21 sessions.
+const down = mk([12.5, 11.9, 11.8, 11.7, 11.6, ...flat(200, 9)])
+const bc = bearCallAfter(down, 84)
+ok(bc && bc.credit > 0 && bc.credit < bc.width && Math.abs(bc.ret - bc.credit / (bc.width - bc.credit)) < 1e-9, 'bear call: stock falls → keep the whole credit')
+const rocket = mk([12.5, 11.9, 11.8, 11.7, 11.6, ...flat(200, 30)])
+const bcUp = bearCallAfter(rocket, 84)
+ok(Math.abs(bcUp.ret + 1) < 1e-9, 'bear call: stock rockets → lose exactly the max loss (−100% of risk)')
+ok(bearCallAfter(down, 84, { otm: 0.5 }).credit < bc.credit, 'a higher short strike collects less')
+const spc = shortPlusCallAfter(down, 84)
+ok(spc && spc.ret > 0.2 && spc.prem > 0 && !spc.stopped, 'short + call: a fall pays the short and keeps the premium')
+const spcUp = shortPlusCallAfter(rocket, 84)
+ok(spcUp.ret < -2, 'short + call: a rocket loses on both legs (> 2× the price)')
+const climb = mk([12.5, 11.9, 11.8, 11.7, 11.6, ...Array.from({ length: 30 }, (_, k) => 11.6 * (1 + 0.06 * (k + 1))), ...flat(200, 40)])
+const spcStop = shortPlusCallAfter(climb, 84, { stop: 0.5 }), spcHold = shortPlusCallAfter(climb, 84)
+ok(spcStop.stopped && spcStop.ret > spcHold.ret, 'the +50% stop closes both early and caps the loss on a steady climb')
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

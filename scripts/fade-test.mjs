@@ -13,7 +13,7 @@ import { filingsMap, exitFilingsFor } from './lib/secFilings.mjs'
 import { straddleTrade, straddleStats, straddleVerdict, STRADDLE } from '../src/utils/straddle.js'
 import { catalystRow, shortsRow, HOLDING_RISK } from '../src/utils/holdingRisks.js'
 import { exitOf, exitStats } from '../src/utils/delisted.js'
-import { entrySignal, pathAfter, putAfter, shortAfter, pathStats, tradeStats, windowVerdict, SHORT_WINDOW } from '../src/utils/shortWindow.js'
+import { entrySignal, pathAfter, putAfter, shortAfter, pathStats, tradeStats, windowVerdict, SHORT_WINDOW, bearCallAfter, shortPlusCallAfter, PREMIUM_SELL } from '../src/utils/shortWindow.js'
 import { putTrade, spreadTrade, shortTrade, bearStats, bearVerdict, JUMP_BEAR, listEntries } from '../src/utils/jumpBear.js'
 import { eventFlags, listedFlags, jumpOutcome, countedJumps, wasListed, jumpStats, secondJumpVerdict, SECOND_JUMP, SECOND_JUMP_PASS } from '../src/utils/secondJump.js'
 import { dailyBars, mapLimit, sources } from './lib/marketData.mjs'
@@ -392,6 +392,27 @@ for (const [label, set, flag] of [
     }
   }
   console.log('  Pass per primary: avg > 0 and median > 0 after costs, ≥ 100 trades, avg > 0 in 2024, 2025, 2026 each.')
+  // Addendum 1: premium selling, 21 sessions — bear call spread (primary on E3) and short stock + short call.
+  console.log('\n  premium selling, 21 sessions (avg / median / win / lost half) — bear call return on max loss; short + call return on the price')
+  report.shortWindow.premium = {}
+  for (const k of KINDS) {
+    const test = sig[k].filter(isTest)
+    const variants = [
+      { name: `${k} bear call · ATM / +1 move`, primary: k === SHORT_WINDOW.primary.entry, fn: (r) => bearCallAfter(r.bars, r.s) },
+      { name: `${k} bear call · credit ≥ 60% only`, fn: (r) => { const x = bearCallAfter(r.bars, r.s); return x && x.meetsRule ? x : null } },
+      { name: `${k} bear call · +½ move / +1 move`, fn: (r) => bearCallAfter(r.bars, r.s, { otm: PREMIUM_SELL.otmHalf }) },
+      { name: `${k} short + ATM call (unlimited)`, graded: true, fn: (r) => shortPlusCallAfter(r.bars, r.s) },
+      { name: `${k} short + ATM call · +50% stop`, fn: (r) => shortPlusCallAfter(r.bars, r.s, { stop: PREMIUM_SELL.stop }) },
+    ]
+    for (const v of variants) {
+      const vd = windowVerdict(test.map((r) => ({ t: r.t, trade: v.fn(r) })))
+      const tr = tradeStats(sig[k].filter((r) => !isTest(r)).map(v.fn))
+      const yrs = Object.entries(vd.years).map(([y, x]) => `${y} ${pct(x.avg, 0)} (${x.n})`).join(' · ')
+      const tag = v.primary ? '  → ' + vd.verdict.toUpperCase() + ' (primary)  ' + yrs : v.graded && k === SHORT_WINDOW.primary.entry ? '  → ' + vd.verdict.toUpperCase() + ' (graded, unlimited risk)  ' + yrs : ''
+      console.log(lineT(v.name + (v.primary ? ' *' : ''), vd.all, tag) + `   train ${pct(tr.avg)} (${tr.n})`)
+      report.shortWindow.premium[v.name] = { primary: !!v.primary, ...vd, train: tr }
+    }
+  }
 }
 // Dilution: did a raise (8-K 3.02 or 424B5) follow within 6 months?
 console.log('\n=== Raised within 6 months (test, 2024 →) — pre-set reading: runway < 5 q ≥ 2× base, runway + shelf ≥ 3×')

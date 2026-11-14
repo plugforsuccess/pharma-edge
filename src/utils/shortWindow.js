@@ -2,7 +2,7 @@
 // preregistration.md): entries at the jump, after 3 / 5 closes under the jump
 // close, or after a 10% drop within 5 sessions; drawdowns at 1M / 2M / 3M / 6M;
 // puts and a short priced like the bear tests. Pure; npm run shortwindow:check.
-import { bsPut } from './replay.js'
+import { bsPut, bsCall } from './replay.js'
 import { jumpVol, JUMP_BEAR } from './jumpBear.js'
 
 export const SHORT_WINDOW = Object.freeze({
@@ -105,4 +105,43 @@ export function windowVerdict(rows, pass = SHORT_WINDOW_PASS) {
   const years = Object.fromEntries(pass.years.map((y) => [y, tradeStats(rows.filter((r) => r.t.startsWith(y)).map((r) => r.trade))]))
   const ok = all.avg > 0 && all.median > 0 && pass.years.every((y) => years[y].n > 0 && years[y].avg > 0)
   return { verdict: ok ? 'pass' : 'fail', all, years }
+}
+
+// Addendum 1 (owner, 2026-11-14: "Bear call spread and short stock sell calls on the
+// short shares. Max 1M"). Both opened at the open after s, held `days` sessions to expiry.
+export const PREMIUM_SELL = Object.freeze({ days: 21, creditRule: 0.6, otmHalf: 0.5, stop: 0.5, borrow: 0.30 })
+
+// Bear call spread: sell the call at S0 × (1 + otm·σ√T), buy one expected move above S0.
+// Return = P&L ÷ max loss. null when the horizon isn't complete or the spread is degenerate.
+export function bearCallAfter(bars, s, { otm = 0, q = PREMIUM_SELL, b = JUMP_BEAR } = {}) {
+  const a = s + 1, end = a + q.days
+  if (end >= bars.length) return null
+  const S0 = bars[a].o > 0 ? bars[a].o : bars[a].c, vol = jumpVol(bars, s, b.premium, b)
+  if (!(S0 > 0) || !vol) return null
+  const T = q.days / b.year, em = vol * Math.sqrt(T)
+  const K1 = S0 * (1 + otm * em), K2 = S0 * (1 + em)
+  const width = K2 - K1
+  if (!(width > 0)) return null
+  const credit = (bsCall(S0, K1, T, vol, b.rate) * (1 - b.slip)) - (bsCall(S0, K2, T, vol, b.rate) * (1 + b.slip))
+  if (!(credit > 0) || credit >= width) return null
+  const ST = bars[end].c
+  const owe = Math.min(width, Math.max(0, ST - K1))
+  return { ret: (credit - owe) / (width - credit), credit, width, ratio: credit / width, meetsRule: credit / width >= q.creditRule }
+}
+
+// Short shares + short at-the-money call on them: both lose when the stock rises.
+// Return on S0; stop = close both at the first close ≥ (1 + stop) × S0 (call at the model).
+export function shortPlusCallAfter(bars, s, { stop = null, q = PREMIUM_SELL, b = JUMP_BEAR } = {}) {
+  const a = s + 1, end = a + q.days
+  if (end >= bars.length) return null
+  const S0 = bars[a].o > 0 ? bars[a].o : bars[a].c, vol = jumpVol(bars, s, b.premium, b)
+  if (!(S0 > 0) || !vol) return null
+  const prem = bsCall(S0, S0, q.days / b.year, vol, b.rate) * (1 - b.slip)
+  let k = end
+  if (stop != null) for (let j = a; j < end; j++) if (bars[j].c >= S0 * (1 + stop)) { k = j; break }
+  const Sk = bars[k].c
+  const callBack = k === end ? Math.max(0, Sk - S0) : bsCall(Sk, S0, (end - k) / b.year, vol, b.rate) * (1 + b.slip)
+  const fee = S0 * q.borrow * (k - a) / b.year
+  const pnl = S0 * (1 - b.slip) - Sk * (1 + b.slip) + prem - callBack - fee
+  return { ret: pnl / S0, prem: prem / S0, stopped: k < end }
 }
