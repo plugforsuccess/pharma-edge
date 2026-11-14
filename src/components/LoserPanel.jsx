@@ -1,4 +1,6 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { supabase } from '../lib/supabase'
+import EarningsLine from './EarningsLine'
 import clsx from 'clsx'
 import { loserChecks, BOTH_LIT, FRESH_JUMP } from '../utils/holdingRisks'
 import { bearPlan, BEAR_RECORD } from '../utils/loserTrades'
@@ -20,6 +22,16 @@ export default function LoserPanel({ row, bars = null, owner = false }) {
   const { status, checks, lit } = loserChecks(row)
   const plan = useMemo(() => (owner ? bearPlan(bars) : null), [owner, bars])
   const [title, sub, tone] = HEAD[status]
+  // The jump record row for this jump: earnings on the jump and the next report date.
+  const [rec, setRec] = useState(null)
+  const ev = row?.catalyst?.event, tk = row?.ticker
+  useEffect(() => {
+    if (!ev || !tk) return undefined
+    let cancelled = false
+    supabase.from('jump_record').select('earnings_jump, report_date, next_report, next_report_est').eq('ticker', tk).eq('jump_date', ev).maybeSingle()
+      .then(({ data }) => { if (!cancelled) setRec(data ?? null) })
+    return () => { cancelled = true }
+  }, [tk, ev])
   return (
     <section className="bg-card border border-border rounded-2xl mb-4 overflow-hidden">
       <div className="px-5 pt-5 pb-4">
@@ -28,6 +40,7 @@ export default function LoserPanel({ row, bars = null, owner = false }) {
           <div className="flex-1">
             <div className={clsx('text-[34px] leading-10 font-semibold tracking-tight', tone)}>{title}</div>
             <div className="text-sm text-subtle">{sub} · {lit} of {checks.length} checks lit</div>
+            {rec && <EarningsLine rec={rec} />}
           </div>
           <div className="flex items-end gap-1 pb-1" aria-hidden>
             {checks.map((c, i) => <span key={c.key} className={clsx('w-2.5 rounded-sm', c.lit ? 'bg-red-400' : 'bg-bg-elev')} style={{ height: 10 + i * 6 }} />)}

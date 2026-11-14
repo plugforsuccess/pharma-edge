@@ -10,6 +10,7 @@
 import { writeFileSync } from 'node:fs'
 import { FADE, FADE_PASS, fadeScore, shortsCovering, catalystHeld, forwardFade, fadeStats, fadeVerdict, revenueAt, sharesOutAt, raiseAfter, outcomeRates, financingEvents } from '../src/utils/fade.js'
 import { filingsMap, exitFilingsFor } from './lib/secFilings.mjs'
+import { reportOnJump } from '../src/utils/jumpRecord.js'
 import { straddleTrade, straddleStats, straddleVerdict, STRADDLE } from '../src/utils/straddle.js'
 import { catalystRow, shortsRow, HOLDING_RISK } from '../src/utils/holdingRisks.js'
 import { exitOf, exitStats } from '../src/utils/delisted.js'
@@ -397,6 +398,9 @@ for (const [label, set, flag] of [
     console.log('\n  path from the jump close (E0) vs any day — median change · below the jump close · down 10/20/30% · median deepest drop so far · deepest ≥ 20/30%')
     report.shortWindow.jumpPath = {}
     const sets = [['jumps · 2026', sig.E0.filter((r) => r.t >= '2026-01-01')], ['jumps · 2025', sig.E0.filter((r) => r.t.startsWith('2025'))], ['jumps · test', sig.E0.filter(isTest)], ['jumps · train', sig.E0.filter((r) => !isTest(r))], ['any day · test', control.filter(isTest)]]
+    // Addendum 4: jumps on an earnings report (8-K item 2.02, jump −3 … +1 days) vs the rest; no filings on file = unknown.
+    const tag = (r) => { const fl = filings.get(r.tk); return fl ? (reportOnJump(fl, r.t) ? 'earnings' : 'other') : 'unknown' }
+    for (const k of ['earnings', 'other', 'unknown']) sets.push([`jumps · test · ${k}`, sig.E0.filter((r) => isTest(r) && tag(r) === k)], [`jumps · 2026 · ${k}`, sig.E0.filter((r) => r.t >= '2026-01-01' && tag(r) === k)])
     const stats = sets.map(([name, rows]) => [name, jumpPathStats(rows.map((r) => jumpPath(r.bars, r.s)))])
     for (const [name, st] of stats) { report.shortWindow.jumpPath[name] = st; console.log(`  ${name}: n ${st.n}`) }
     console.log(`  ${'when'.padEnd(6)} ${stats.map(([name]) => name.padEnd(54)).join(' ')}`)

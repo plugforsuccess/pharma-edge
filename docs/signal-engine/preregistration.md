@@ -847,3 +847,17 @@ columns for jumps in **2025** and **2026** alone, and a jump counts at every
 quarter month it has reached (a 2026 jump from August shows through 3M),
 so recent jumps are not dropped for lack of a full six months. Each cell
 prints its own count. Descriptive; nothing graded changes.
+
+### Addendum 4 (2026-11-14, before any result of the short-window run was read)
+
+Owner: "Make sure we include the earnings dates in your reporting." The
+jump-path table adds the jumps split by whether they came on an **earnings
+report**: an SEC 8-K with item 2.02 ("results of operations") filed from 3
+days before the jump to 1 day after it (an after-the-close report is filed
+the evening before the jump session). Columns: test (2024 →) and 2026 jumps,
+each as earnings / other / unknown (no SEC filings on file for the ticker).
+Same measures as addendum 2, from the jump close. Descriptive, no pass
+mark; nothing graded changes. The same tag goes on the forward **jump
+record** (`jump_record`, logged nightly by `scripts/tape-scan.mjs` from the
+first run after 2026-11-14, no backfill), with the next report date
+(earnings calendar, else the last 2.02 + 91 days, marked estimated).
