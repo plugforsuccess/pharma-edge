@@ -573,3 +573,18 @@ quote wide; (2) **no trade met the app's credit rule** (credit ≥ 60% of width:
 spread rules as written; (3) 2025 is thin (+2%); (4) survivors only. Next step
 before any use: price it on real chains (quotes on the forward jump record),
 not the model. Changes no live rule; nothing shown to subscribers.
+
+## 2026-11-14 — Non-earnings jumps (addendum 5) and what the gainers had in common (run 43648352006, commit ac227d2)
+
+**Addendum 5 — trades on non-earnings jumps only (test 2024 →):**
+- E3 put 42d, −20% take: avg −23.8%, median −6.2%, 808 → **FAIL** (2024 −16%, 2025 −32%, 2026 −21%). All jumps: −24.4%.
+- E3 short: avg −7.4%, median +13.3%, 790 → **FAIL** (avg < 0 every year). All jumps: −7.8%.
+- E3 bear call spread (ATM / +1 move, 21 sessions): avg **+7.2%**, median +27.9%, win 75%, lost half 14%, 826 → **PASS** (2024 +13%, 2025 +3%, 2026 +7%). All jumps +6.8%; earnings jumps +4.2% (115). E5 non-earnings +8.0% (740) vs earnings −1.1% (101).
+Reading: focusing on non-earnings jumps moves the spread a little (+0.4 points at E3, more at E5) and does nothing for the put or the short. Same caveats as before: model prices, 0 trades meet the 60% credit rule.
+
+**What the jumps that gained had in common** (gained = 6M close above the jump close; discovery 2024–25 n 886, 38% gained; check 2026 6M n 206, 36%):
+- **Holds · more gain:** on an earnings report — 48% gained (+10) / 2026 51% (+15), median −3% / 0%.
+- **Holds · fewer gain:** already down 50%+ over the 6 months before the jump — 25% gained (−13) / 2026 18% (−18), median −43% both.
+- Known later — **closed above the jump close one week later:** 51% gained (+13) / 2026 49% (+13), median +1% / −1%; **below it after a week:** 28% (−10) / 26% (−9), median −28% / −34%. Next day above: +9 / +8.
+- Didn't hold: jump size, volume multiple, close near the high, 200-day, price, dollar volume, cash runway, shelf, short interest, S&P trend, a prior jump. Binary-prone industry +4 / +10 (missed in discovery); under $2 +24 in discovery but +1 in 2026 (too few); S&P below its 200-day too few.
+~35 buckets were tested, so one hit is expected by chance; two at the jump close plus the one-week fact is more than chance, and all three point the same way as the earnings split. Descriptive; changes no live rule.
