@@ -2328,7 +2328,7 @@ score, tier, color or verdict.**
   of shares and cash; one outcome line from the second-jump test's control A
   (877 jumps, 2024 →: −12% median at six months, 45% fell 40%+, one in four
   doubled). Updated after each close; facts, no trade wording. Renamed
-  **Fresh losers** (owner, same day: "call it fresh losers"). **Loser rules on the
+  **Fresh Losers** (owner, same day: "call it fresh losers"; capital L — owner). **Loser rules on the
   entry chart** (owner, 2026-11-14: "for stopped believing stocks why is the leader
   rules shown"): a ticker with a `ticker_risks` row where `scan = true` shows
   `components/LoserPanel.jsx` in place of the Leaders panel (and of the Risks card):

@@ -70,7 +70,7 @@ export default function TapeScan() {
       {fresh.length > 0 && (
         <section className="mt-5">
           <div className="flex items-baseline justify-between">
-            <div className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold">Fresh losers · past week</div>
+            <div className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold">Fresh Losers · past week</div>
             <div className="text-2xl font-semibold font-mono-tab text-green-300 leading-none">{fresh.length}</div>
           </div>
           <ul className="mt-2 space-y-2">
