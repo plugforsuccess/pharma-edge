@@ -839,3 +839,11 @@ median deepest drop so far (lowest low since the jump), and the share
 whose deepest drop so far reached 20% / 30%. Jumps (E0) on test (2024 →)
 and train, and the universe month-start control measured the same way
 from its own day's close.
+
+### Addendum 3 (2026-11-14, before any result of the short-window run was read)
+
+Owner: "Idk if 2024 matters as much as 2026." The jump-path table adds
+columns for jumps in **2025** and **2026** alone, and a jump counts at every
+quarter month it has reached (a 2026 jump from August shows through 3M),
+so recent jumps are not dropped for lack of a full six months. Each cell
+prints its own count. Descriptive; nothing graded changes.

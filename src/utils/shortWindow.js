@@ -151,14 +151,16 @@ export function shortPlusCallAfter(bars, s, { stop = null, q = PREMIUM_SELL, b =
 export const QUARTER_MONTHS = Object.freeze(Array.from({ length: 24 }, (_, i) => (i + 1) / 4))
 export const sessionsFor = (months) => Math.round(months * 21)
 
-// e = the signal bar → per quarter month { ret, lowSoFar } measured from bars[e].c; null if incomplete.
+// e = the signal bar → per quarter month reached { ret, lowSoFar } measured from bars[e].c
+// (addendum 3: months not yet reached are left out); null before the first quarter month.
 export function jumpPath(bars, e, months = QUARTER_MONTHS) {
-  const base = bars[e]?.c, last = e + sessionsFor(months[months.length - 1])
-  if (!(base > 0) || last >= bars.length) return null
+  const base = bars[e]?.c
+  if (!(base > 0) || e + sessionsFor(months[0]) >= bars.length) return null
   const out = {}
   let lo = Infinity, h = 0
   for (const m of months) {
     const to = e + sessionsFor(m)
+    if (to >= bars.length) break
     for (; e + h < to; ) { h++; lo = Math.min(lo, bars[e + h].l ?? bars[e + h].c) }
     out[m] = { ret: bars[to].c / base - 1, lowSoFar: lo / base - 1 }
   }
@@ -167,13 +169,16 @@ export function jumpPath(bars, e, months = QUARTER_MONTHS) {
 
 export function jumpPathStats(paths, months = QUARTER_MONTHS) {
   const ok = paths.filter(Boolean)
-  const shr = (f) => (ok.length ? ok.filter(f).length / ok.length : null)
   return {
     n: ok.length,
-    at: Object.fromEntries(months.map((m) => [m, {
-      ret: med(ok.map((p) => p[m].ret)), below: shr((p) => p[m].ret < 0),
-      down10: shr((p) => p[m].ret <= -0.1), down20: shr((p) => p[m].ret <= -0.2), down30: shr((p) => p[m].ret <= -0.3),
-      low: med(ok.map((p) => p[m].lowSoFar)), low20: shr((p) => p[m].lowSoFar <= -0.2), low30: shr((p) => p[m].lowSoFar <= -0.3),
-    }])),
+    at: Object.fromEntries(months.map((m) => {
+      const xs = ok.filter((p) => p[m]).map((p) => p[m])
+      const shr = (f) => (xs.length ? xs.filter(f).length / xs.length : null)
+      return [m, {
+        n: xs.length, ret: med(xs.map((x) => x.ret)), below: shr((x) => x.ret < 0),
+        down10: shr((x) => x.ret <= -0.1), down20: shr((x) => x.ret <= -0.2), down30: shr((x) => x.ret <= -0.3),
+        low: med(xs.map((x) => x.lowSoFar)), low20: shr((x) => x.lowSoFar <= -0.2), low30: shr((x) => x.lowSoFar <= -0.3),
+      }]
+    })),
   }
 }

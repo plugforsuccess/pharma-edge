@@ -396,12 +396,12 @@ for (const [label, set, flag] of [
   {
     console.log('\n  path from the jump close (E0) vs any day — median change · below the jump close · down 10/20/30% · median deepest drop so far · deepest ≥ 20/30%')
     report.shortWindow.jumpPath = {}
-    const sets = [['jumps · test', sig.E0.filter(isTest)], ['jumps · train', sig.E0.filter((r) => !isTest(r))], ['any day · test', control.filter(isTest)]]
+    const sets = [['jumps · 2026', sig.E0.filter((r) => r.t >= '2026-01-01')], ['jumps · 2025', sig.E0.filter((r) => r.t.startsWith('2025'))], ['jumps · test', sig.E0.filter(isTest)], ['jumps · train', sig.E0.filter((r) => !isTest(r))], ['any day · test', control.filter(isTest)]]
     const stats = sets.map(([name, rows]) => [name, jumpPathStats(rows.map((r) => jumpPath(r.bars, r.s)))])
     for (const [name, st] of stats) { report.shortWindow.jumpPath[name] = st; console.log(`  ${name}: n ${st.n}`) }
     console.log(`  ${'when'.padEnd(6)} ${stats.map(([name]) => name.padEnd(54)).join(' ')}`)
     for (const m of QUARTER_MONTHS) {
-      const cell = (x) => `${pct(x.ret, 0).padStart(5)} ${pct(x.below, 0).padStart(4)} ${pct(x.down10, 0).padStart(4)}/${pct(x.down20, 0).padStart(3)}/${pct(x.down30, 0).padStart(3)} ${pct(x.low, 0).padStart(5)} ${pct(x.low20, 0).padStart(4)}/${pct(x.low30, 0).padStart(3)}`
+      const cell = (x) => `${String(x.n).padStart(4)} ${pct(x.ret, 0).padStart(5)} ${pct(x.below, 0).padStart(4)} ${pct(x.down10, 0).padStart(4)}/${pct(x.down20, 0).padStart(3)}/${pct(x.down30, 0).padStart(3)} ${pct(x.low, 0).padStart(5)} ${pct(x.low20, 0).padStart(4)}/${pct(x.low30, 0).padStart(3)}`
       const label = m < 1 ? `${Math.round(m * 4)}W` : `${m}M`
       console.log(`  ${label.padEnd(6)} ${stats.map(([, st]) => cell(st.at[m]).padEnd(54)).join(' ')}`)
     }
