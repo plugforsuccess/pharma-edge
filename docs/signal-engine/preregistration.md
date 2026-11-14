@@ -827,3 +827,15 @@ D10), same pricing (σ = 1.3 × 60-day vol, 2% slippage per fill, rate 4%),
 (average > 0 and median > 0 after costs, ≥ 100 trades, average > 0 in
 each of 2024, 2025, 2026). Instrument 5 is reported with the same numbers,
 graded, and labelled unlimited risk.
+
+### Addendum 2 (2026-11-14, before any result of the short-window run was read)
+
+Owner: "we only care about the jump signal and the spot at 1W, 2W, 3W, 1M,
+1.25M, 1.5M, 1.75M … 6M." Descriptive, no pass mark. From the **jump-day
+close** (the signal), at every quarter month — 0.25M … 6M, sessions =
+round(months × 21): the median change in the price, the share closing
+below the jump close, the share down 10% / 20% / 30% at that point, the
+median deepest drop so far (lowest low since the jump), and the share
+whose deepest drop so far reached 20% / 30%. Jumps (E0) on test (2024 →)
+and train, and the universe month-start control measured the same way
+from its own day's close.
