@@ -891,3 +891,15 @@ in the same direction, with ≥ 30 jumps in each. Everything else is noise.
 Several traits are tested, so one holding trait among ~35 buckets is what
 chance alone produces; it changes nothing live and nothing is shown to
 subscribers from it.
+
+### Short windows, addendum 5 (2026-11-14, before any non-earnings trade result was read)
+
+Owner: "non earning jumps is the focus of this signal." The three trades are
+graded again on **non-earnings jumps only** — the jump not on an SEC 8-K item
+2.02 filed from 3 days before to 1 day after it: E3 put 42 days with the −20%
+take, E3 short (−20% / +50% / 63 days, borrow 30%), E3 bear call spread (ATM /
++1 expected move, 21 sessions). Same pricing and the same pass rule (avg > 0
+and median > 0 after costs, ≥ 100 trades, avg > 0 in each of 2024, 2025,
+2026). E0 / E5 / D10 and the earnings-jump group are printed beside them,
+ungraded. A pass changes no live rule and shows nothing to subscribers; the
+bear call spread still fails the app's credit rule as before.

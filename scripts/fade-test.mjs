@@ -361,7 +361,7 @@ for (const [label, set, flag] of [
     const okAt = (i) => { if (i < 252) return false; const rev = revenueAt(s.fin, s.bars[i].t); return (rev == null || rev < U.revenueMax) && adv(s.bars, i) >= U.advMin }
     for (const e of countedJumps(eventFlags(s.bars), 252)) {
       if (!okAt(e)) continue
-      for (const k of KINDS) { const g = entrySignal(s.bars, e, k); if (g != null) sig[k].push({ tk: s.tk, s: g, t: s.bars[g].t, bars: s.bars }) }
+      for (const k of KINDS) { const g = entrySignal(s.bars, e, k); if (g != null) sig[k].push({ tk: s.tk, s: g, j: e, t: s.bars[g].t, bars: s.bars }) }
     }
     s.bars.forEach((b, i) => { if (monthStarts.has(b.t) && okAt(i)) control.push({ tk: s.tk, s: i, t: b.t, bars: s.bars }) })
   }
@@ -410,6 +410,31 @@ for (const [label, set, flag] of [
       const label = m < 1 ? `${Math.round(m * 4)}W` : `${m}M`
       console.log(`  ${label.padEnd(6)} ${stats.map(([, st]) => cell(st.at[m]).padEnd(54)).join(' ')}`)
     }
+  }
+  // Addendum 5 (2026-11-14): the trades graded on non-earnings jumps only (the jump itself not on an
+  // 8-K 2.02, jump −3 … +1 days); earnings jumps shown beside them, ungraded.
+  {
+    const ern = (r) => { const fl = filings.get(r.tk); return fl ? (reportOnJump(fl, r.bars[r.j].t) ? 'earnings' : 'other') : 'unknown' }
+    report.shortWindow.nonEarnings = {}
+    console.log('\n=== Addendum 5 — trades on non-earnings jumps only (test, 2024 →); earnings jumps beside, ungraded')
+    for (const k of KINDS) {
+      const vs = [
+        { name: `${k} put 42d · −20% take`, fn: (r) => putAfter(r.bars, r.s, 42, { take: true }) },
+        { name: `${k} short · −20% / +50% / 63d`, fn: (r) => shortAfter(r.bars, r.s) },
+        { name: `${k} bear call · ATM / +1 move`, fn: (r) => bearCallAfter(r.bars, r.s) },
+      ]
+      for (const v of vs) {
+        for (const grp of ['other', 'earnings']) {
+          const rows = sig[k].filter((r) => isTest(r) && ern(r) === grp)
+          const vd = windowVerdict(rows.map((r) => ({ t: r.t, trade: v.fn(r) })))
+          const graded = grp === 'other' && k === 'E3'
+          const yrs = Object.entries(vd.years).map(([y, x]) => `${y} ${pct(x.avg, 0)} (${x.n})`).join(' · ')
+          console.log(lineT(`${v.name} · ${grp === 'other' ? 'non-earnings' : 'earnings'}${graded ? ' *' : ''}`, vd.all, graded ? `  → ${vd.verdict.toUpperCase()}  ${yrs}` : ''))
+          report.shortWindow.nonEarnings[`${v.name}|${grp}`] = { graded, ...vd }
+        }
+      }
+    }
+    console.log('  * = graded (E3, non-earnings): avg > 0 and median > 0 after costs, ≥ 100 trades, avg > 0 in 2024, 2025, 2026 each.')
   }
   // What the jumps that gained had in common (pre-registered 2026-11-14): traits at the jump close,
   // discovery 2024–2025 (6M outcome) vs check 2026 (6M, and 3M).
