@@ -23,6 +23,7 @@ on:
       - src/utils/delisted.js
       - src/utils/shortWindow.js
       - src/utils/jumpRecord.js
+      - src/utils/jumpTraits.js
       - .github/workflows/fade-test.yml
 
 jobs:

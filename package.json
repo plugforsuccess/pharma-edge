@@ -46,6 +46,7 @@
     "losertrades:check": "node scripts/check-loser-trades.mjs",
     "shortwindow:check": "node scripts/check-short-window.mjs",
     "jumprecord:check": "node scripts/check-jump-record.mjs",
+    "jumptraits:check": "node scripts/check-jump-traits.mjs",
     "milestones:check": "node scripts/check-milestones.mjs",
     "basketrecord:check": "node scripts/check-basket-record.mjs",
     "straddle:check": "node scripts/check-straddle.mjs",

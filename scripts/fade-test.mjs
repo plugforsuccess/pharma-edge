@@ -11,8 +11,9 @@ import { writeFileSync } from 'node:fs'
 import { FADE, FADE_PASS, fadeScore, shortsCovering, catalystHeld, forwardFade, fadeStats, fadeVerdict, revenueAt, sharesOutAt, raiseAfter, outcomeRates, financingEvents } from '../src/utils/fade.js'
 import { filingsMap, exitFilingsFor } from './lib/secFilings.mjs'
 import { reportOnJump } from '../src/utils/jumpRecord.js'
+import { jumpTraits, jumpOutcome6, traitTable, traitHolds, LATER } from '../src/utils/jumpTraits.js'
 import { straddleTrade, straddleStats, straddleVerdict, STRADDLE } from '../src/utils/straddle.js'
-import { catalystRow, shortsRow, HOLDING_RISK } from '../src/utils/holdingRisks.js'
+import { catalystRow, shortsRow, runwayRow, HOLDING_RISK } from '../src/utils/holdingRisks.js'
 import { exitOf, exitStats } from '../src/utils/delisted.js'
 import { entrySignal, pathAfter, putAfter, shortAfter, pathStats, tradeStats, windowVerdict, SHORT_WINDOW, bearCallAfter, shortPlusCallAfter, PREMIUM_SELL, jumpPath, jumpPathStats, QUARTER_MONTHS } from '../src/utils/shortWindow.js'
 import { putTrade, spreadTrade, shortTrade, bearStats, bearVerdict, JUMP_BEAR, listEntries } from '../src/utils/jumpBear.js'
@@ -409,6 +410,43 @@ for (const [label, set, flag] of [
       const label = m < 1 ? `${Math.round(m * 4)}W` : `${m}M`
       console.log(`  ${label.padEnd(6)} ${stats.map(([, st]) => cell(st.at[m]).padEnd(54)).join(' ')}`)
     }
+  }
+  // What the jumps that gained had in common (pre-registered 2026-11-14): traits at the jump close,
+  // discovery 2024–2025 (6M outcome) vs check 2026 (6M, and 3M).
+  {
+    const byTk = new Map(stocks.map((s) => [s.tk, s]))
+    const flagsOf = new Map()
+    const spyIdx = new Map(spyBars.map((b, i) => [b.t, i]))
+    const spyUp = (t) => { const i = spyIdx.get(t); if (i == null || i < 199) return null; let m = 0; for (let k = i - 199; k <= i; k++) m += spyBars[k].c; return spyBars[i].c > m / 200 }
+    const rowsAt = (h) => sig.E0.map((r) => {
+      const s = byTk.get(r.tk); if (!s) return null
+      if (!flagsOf.has(r.tk)) flagsOf.set(r.tk, eventFlags(s.bars))
+      const so = sharesOutAt(s.fin, r.t)
+      const si = (shorts.get(r.tk) ?? []).filter((x) => x.date <= r.t).pop()
+      const rw = runwayRow(s.fin, r.t)
+      const traits = jumpTraits(s.bars, r.s, { filings: filings.get(r.tk) ?? null, siPct: so && si ? si.shares / so : null, runwayQ: rw?.quarters ?? (rw && rw.burn >= 0 ? 99 : null), binary: binaryProne(r.tk), spyUp: spyUp(r.t), jumps: flagsOf.get(r.tk) })
+      return { t: r.t, traits, out: jumpOutcome6(s.bars, r.s, h) }
+    }).filter(Boolean)
+    const r6 = rowsAt(126), r3 = rowsAt(63)
+    const disc = traitTable(r6.filter((r) => r.t >= SPLIT && r.t < '2026-01-01'))
+    const chk6 = traitTable(r6.filter((r) => r.t >= '2026-01-01'))
+    const chk3 = traitTable(r3.filter((r) => r.t >= '2026-01-01'))
+    report.shortWindow.traits = { disc, chk6, chk3 }
+    const f = (x) => (x ? `${String(x.n).padStart(4)} ${pct(x.gained, 0).padStart(4)} ${pct(x.doubled, 0).padStart(4)} ${pct(x.median, 0).padStart(5)} ${(x.lift >= 0 ? '+' : '') + Math.round(x.lift * 100)}`.padEnd(28) : '   —'.padEnd(28))
+    console.log(`\n=== What the jumps that gained had in common — gained = 6M close above the jump close`)
+    console.log(`  all jumps: discovery 2024–25 n ${disc.all.n} gained ${pct(disc.all.gained, 0)} doubled ${pct(disc.all.doubled, 0)} · check 2026 6M n ${chk6.all.n} gained ${pct(chk6.all.gained, 0)} · 2026 3M n ${chk3.all.n} gained ${pct(chk3.all.gained, 0)}`)
+    console.log(`  ${'trait'.padEnd(26)} ${'discovery 2024–25: n gain dbl med lift'.padEnd(28)} ${'check 2026 6M'.padEnd(28)} ${'check 2026 3M'.padEnd(28)} verdict`)
+    for (const later of [false, true]) {
+      if (later) console.log('  — known later (not at the jump close):')
+      for (const k of Object.keys(disc.by)) {
+        if (LATER.has(k) !== later) continue
+        for (const v of Object.keys(disc.by[k]).sort()) {
+          const d = disc.by[k][v], c6 = chk6.by[k]?.[v], c3 = chk3.by[k]?.[v]
+          console.log(`  ${`${k}: ${v}`.padEnd(26)} ${f(d)} ${f(c6)} ${f(c3)} ${traitHolds(d, c6)}`)
+        }
+      }
+    }
+    console.log('  Holds = lift ≥ 8 points in discovery and the 2026 6M check, same direction, ≥ 30 jumps each. ~35 buckets: one holding by chance is expected.')
   }
   // Addendum 1: premium selling, 21 sessions — bear call spread (primary on E3) and short stock + short call.
   console.log('\n  premium selling, 21 sessions (avg / median / win / lost half) — bear call return on max loss; short + call return on the price')
