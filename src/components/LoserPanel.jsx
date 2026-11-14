@@ -1,6 +1,8 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { supabase } from '../lib/supabase'
+import EarningsLine from './EarningsLine'
 import clsx from 'clsx'
-import { loserChecks, BOTH_LIT, FRESH_JUMP } from '../utils/holdingRisks'
+import { loserChecks, BOTH_LIT, FRESH_JUMP, FRESH_SPLIT } from '../utils/holdingRisks'
 import { bearPlan, BEAR_RECORD } from '../utils/loserTrades'
 
 // The entry chart's status card for a Stopped-believing stock (owner, 2026-11-14:
@@ -20,6 +22,16 @@ export default function LoserPanel({ row, bars = null, owner = false }) {
   const { status, checks, lit } = loserChecks(row)
   const plan = useMemo(() => (owner ? bearPlan(bars) : null), [owner, bars])
   const [title, sub, tone] = HEAD[status]
+  // The jump record row for this jump: earnings on the jump and the next report date.
+  const [rec, setRec] = useState(null)
+  const ev = row?.catalyst?.event, tk = row?.ticker
+  useEffect(() => {
+    if (!ev || !tk) return undefined
+    let cancelled = false
+    supabase.from('jump_record').select('earnings_jump, report_date, next_report, next_report_est').eq('ticker', tk).eq('jump_date', ev).maybeSingle()
+      .then(({ data }) => { if (!cancelled) setRec(data ?? null) })
+    return () => { cancelled = true }
+  }, [tk, ev])
   return (
     <section className="bg-card border border-border rounded-2xl mb-4 overflow-hidden">
       <div className="px-5 pt-5 pb-4">
@@ -28,6 +40,7 @@ export default function LoserPanel({ row, bars = null, owner = false }) {
           <div className="flex-1">
             <div className={clsx('text-[34px] leading-10 font-semibold tracking-tight', tone)}>{title}</div>
             <div className="text-sm text-subtle">{sub} · {lit} of {checks.length} checks lit</div>
+            {rec && <EarningsLine rec={rec} />}
           </div>
           <div className="flex items-end gap-1 pb-1" aria-hidden>
             {checks.map((c, i) => <span key={c.key} className={clsx('w-2.5 rounded-sm', c.lit ? 'bg-red-400' : 'bg-bg-elev')} style={{ height: 10 + i * 6 }} />)}
@@ -52,7 +65,11 @@ export default function LoserPanel({ row, bars = null, owner = false }) {
         <p className="px-5 py-3 border-t border-hairline text-[11px] text-muted">
           {status === 'both'
             ? `In the test, a stock with both facts lit was ${Math.round(Math.abs(BOTH_LIT.median) * 100)}% lower six months later at the median, and doubled one time in ${Math.round(1 / BOTH_LIT.doubled)}.`
-            : `In the test of ${FRESH_JUMP.n.toLocaleString()} past jumps like this (2024 →), the stock was ${Math.round(Math.abs(FRESH_JUMP.median126) * 100)}% lower six months later at the median; ${Math.round(FRESH_JUMP.fell40 * 100)}% fell 40%+ and one in ${Math.round(1 / FRESH_JUMP.doubled)} doubled.`}
+            : rec && !rec.earnings_jump
+              ? `This jump wasn't on an earnings report. Since 2024, jumps like that were ${Math.round(Math.abs(FRESH_SPLIT.other.median126) * 100)}% lower six months later at the median, and ${Math.round(FRESH_SPLIT.other.lower * 100)}% ended lower (${FRESH_SPLIT.other.n} jumps).`
+              : rec?.earnings_jump
+                ? `This jump came on an earnings report. Since 2024, jumps like that ended about flat six months later at the median (${FRESH_SPLIT.earnings.n} jumps); the fade is in jumps with no report behind them.`
+                : `In the test of ${FRESH_JUMP.n.toLocaleString()} past jumps like this (2024 →), the stock was ${Math.round(Math.abs(FRESH_JUMP.median126) * 100)}% lower six months later at the median; ${Math.round(FRESH_JUMP.fell40 * 100)}% fell 40%+ and one in ${Math.round(1 / FRESH_JUMP.doubled)} doubled.`}
           {' '}Past prices, not a forecast.
         </p>
       )}

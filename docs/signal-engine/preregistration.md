@@ -767,3 +767,139 @@ mid-year float filing (June 30 of the latest float-range year) to the
 delisting, overall and for the pre-revenue ones (revenue < $25M at that
 year end). This sizes how fast these names disappear; it adds no price data
 (none exists for them in our sources), so the bear test stays survivors-only.
+
+## Added 2026-11-14 — short windows after a jump (owner: "20 sessions is far too large … I don't care about 6 months. It's 1M, 2M, 3M … 6M … catch the drawdowns")
+
+Written before the code exists. Universe, jump definition (close ≥ +10% on
+≥ 3× volume), one jump per stock per 21 sessions and the pre-revenue /
+liquidity filters are the second-jump test's. Test = jumps ≥ 2024-01-01;
+train (< 2024) reported, not graded. Short interest is **not** a gate here
+(FINRA publishes it twice a month with a lag); it stays as context.
+
+**Entries** (each enters at the next open; J = the jump-day close):
+- E0 — the jump itself (the open after the jump day).
+- E3 / E5 — the first close of 3 / 5 sessions in a row under J, within 20
+  sessions of the jump ("failed to hold", short windows).
+- D10 — the first close ≥ 10% under J within 5 sessions of the jump.
+- Control — universe month-start days (the any-day sample).
+
+**Measured per entry, at 21 / 42 / 63 / 126 sessions (1M / 2M / 3M / 6M):**
+the close return; the deepest drawdown from the entry (lowest low); the
+share that fell ≥ 20% / ≥ 30% / ≥ 40% at any point inside the window; the
+share that rose ≥ 50% inside the window. Descriptive.
+
+**Trades (graded), all priced like the bear tests** (σ = 1.3 × 60-day
+realised vol through the signal day, floor 15%, 2% slippage per fill):
+1. Put at the money, 21 / 42 / 63 sessions to expiry, held to expiry.
+2. Same put, sold when the stock first closes ≥ 20% under the entry
+   (marked at the model with the time left), else held to expiry.
+3. Short shares: cover at the first close ≥ 20% under the entry, at the
+   first close ≥ 50% above it, or at 63 sessions; borrow 30% a year.
+Primary per instrument: entry E3, 42-session put with the −20% take;
+short as above. **Pass:** average > 0 and median > 0 after costs, ≥ 100
+trades, average > 0 in each of 2024, 2025, 2026. Every other entry × window
+is reported with the same numbers, not graded (labelled).
+
+**Consequences.** The card's outcome line moves to the 1M / 2M / 3M / 6M
+drawdown shares from this test whatever the verdict (facts). A pass puts
+that instrument on a forward paper record for the owner for a quarter; a
+fail is recorded and nothing trades. The "not held" check on the card
+moves to the window this test supports best on the drawdown shares,
+chosen on train, read on test.
+
+### Addendum 1 (2026-11-14, before any result of the short-window run was read)
+
+Owner: "Bear call spread and short stock sell calls on the short shares. Max 1M."
+Two premium-selling instruments join the test, same entries (E0 / E3 / E5 /
+D10), same pricing (σ = 1.3 × 60-day vol, 2% slippage per fill, rate 4%),
+21 sessions to expiry, held to expiry:
+4. **Bear call spread** — sell the at-the-money call, buy the call one
+   expected move higher (K2 = S0 × (1 + σ√T)); return = P&L ÷ max loss
+   (width − credit). Reported also: the subset meeting the app's credit
+   rule (credit ≥ 60% of width), and a short strike half an expected move
+   above the price.
+5. **Short stock + short at-the-money call** on the same shares — P&L =
+   (S0 − S_T) + call premium − max(0, S_T − K) − borrow 30% a year;
+   return on S0. Reported also: closed early at the first close ≥ 50%
+   above S0. Unlimited risk on both legs — research only, never shown in
+   the app.
+**Primary:** entry E3, the bear call spread as specified. Same pass rule
+(average > 0 and median > 0 after costs, ≥ 100 trades, average > 0 in
+each of 2024, 2025, 2026). Instrument 5 is reported with the same numbers,
+graded, and labelled unlimited risk.
+
+### Addendum 2 (2026-11-14, before any result of the short-window run was read)
+
+Owner: "we only care about the jump signal and the spot at 1W, 2W, 3W, 1M,
+1.25M, 1.5M, 1.75M … 6M." Descriptive, no pass mark. From the **jump-day
+close** (the signal), at every quarter month — 0.25M … 6M, sessions =
+round(months × 21): the median change in the price, the share closing
+below the jump close, the share down 10% / 20% / 30% at that point, the
+median deepest drop so far (lowest low since the jump), and the share
+whose deepest drop so far reached 20% / 30%. Jumps (E0) on test (2024 →)
+and train, and the universe month-start control measured the same way
+from its own day's close.
+
+### Addendum 3 (2026-11-14, before any result of the short-window run was read)
+
+Owner: "Idk if 2024 matters as much as 2026." The jump-path table adds
+columns for jumps in **2025** and **2026** alone, and a jump counts at every
+quarter month it has reached (a 2026 jump from August shows through 3M),
+so recent jumps are not dropped for lack of a full six months. Each cell
+prints its own count. Descriptive; nothing graded changes.
+
+### Addendum 4 (2026-11-14, before any result of the short-window run was read)
+
+Owner: "Make sure we include the earnings dates in your reporting." The
+jump-path table adds the jumps split by whether they came on an **earnings
+report**: an SEC 8-K with item 2.02 ("results of operations") filed from 3
+days before the jump to 1 day after it (an after-the-close report is filed
+the evening before the jump session). Columns: test (2024 →) and 2026 jumps,
+each as earnings / other / unknown (no SEC filings on file for the ticker).
+Same measures as addendum 2, from the jump close. Descriptive, no pass
+mark; nothing graded changes. The same tag goes on the forward **jump
+record** (`jump_record`, logged nightly by `scripts/tape-scan.mjs` from the
+first run after 2026-11-14, no backfill), with the next report date
+(earnings calendar, else the last 2.02 + 91 days, marked estimated).
+
+## Added 2026-11-14 — what the jumps that gained had in common (before any of it was run)
+
+Owner: "What did the ones that gained have in common." Descriptive, run in the
+Fade job beside the short-window test. Jumps = E0 (close ≥ +10% on ≥ 3× the
+20-day volume, pre-revenue universe, same filters as the short-window test).
+**Gained** = the close 126 sessions later above the jump close; **doubled** =
+≥ +100% by then. Every trait is read **at the jump close** except the two
+marked "known later", which are reported apart and never mixed with the rest.
+
+Traits (fixed buckets): on earnings (8-K 2.02, jump −3 … +1 days) · jump size
+10–25 / 25–50 / 50%+ · volume 3–5× / 5–10× / 10×+ · close in the top fifth
+of the day's range · above / below its 200-day the day before · prior 6-month
+change down 50%+ / −50…0 / up · price < $2 / $2–5 / $5+ · 20-day dollar
+volume $1–5M / $5M+ · short interest ≥ 15% of shares (latest FINRA before the
+jump) · cash runway < 4 / 4–8 / 8+ quarters · a shelf or 424B5 filed in the 90
+days before · binary-prone industry (SIC, as the Fade test) · S&P 500 above
+its 200-day · another jump in the prior 60 sessions. Known later: closed
+above the jump close the next day; above it after 1 week.
+
+**Discovery** = jumps 2024-01-01 → 2025-12-31 with a 6-month outcome.
+**Check** = 2026 jumps with a 6-month outcome, and 2026 jumps with a 3-month
+outcome (gained = 63-session close above the jump close). For each bucket:
+jumps, share that gained, share that doubled, median change; the lift = the
+bucket's gain share minus the share of all jumps in the same set. A trait
+**holds** when its lift is ≥ 8 points in discovery and in the 6-month check,
+in the same direction, with ≥ 30 jumps in each. Everything else is noise.
+Several traits are tested, so one holding trait among ~35 buckets is what
+chance alone produces; it changes nothing live and nothing is shown to
+subscribers from it.
+
+### Short windows, addendum 5 (2026-11-14, before any non-earnings trade result was read)
+
+Owner: "non earning jumps is the focus of this signal." The three trades are
+graded again on **non-earnings jumps only** — the jump not on an SEC 8-K item
+2.02 filed from 3 days before to 1 day after it: E3 put 42 days with the −20%
+take, E3 short (−20% / +50% / 63 days, borrow 30%), E3 bear call spread (ATM /
++1 expected move, 21 sessions). Same pricing and the same pass rule (avg > 0
+and median > 0 after costs, ≥ 100 trades, avg > 0 in each of 2024, 2025,
+2026). E0 / E5 / D10 and the earnings-jump group are printed beside them,
+ungraded. A pass changes no live rule and shows nothing to subscribers; the
+bear call spread still fails the app's credit rule as before.

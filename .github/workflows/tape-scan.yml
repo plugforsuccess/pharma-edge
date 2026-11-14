@@ -19,6 +19,7 @@ on:
     branches-ignore: [main]
     paths:
       - scripts/tape-scan.mjs
+      - src/utils/jumpRecord.js
       - .github/workflows/tape-scan.yml
 
 jobs:

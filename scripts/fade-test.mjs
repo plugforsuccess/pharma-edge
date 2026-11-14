@@ -10,9 +10,12 @@
 import { writeFileSync } from 'node:fs'
 import { FADE, FADE_PASS, fadeScore, shortsCovering, catalystHeld, forwardFade, fadeStats, fadeVerdict, revenueAt, sharesOutAt, raiseAfter, outcomeRates, financingEvents } from '../src/utils/fade.js'
 import { filingsMap, exitFilingsFor } from './lib/secFilings.mjs'
+import { reportOnJump } from '../src/utils/jumpRecord.js'
+import { jumpTraits, jumpOutcome6, traitTable, traitHolds, LATER } from '../src/utils/jumpTraits.js'
 import { straddleTrade, straddleStats, straddleVerdict, STRADDLE } from '../src/utils/straddle.js'
-import { catalystRow, shortsRow, HOLDING_RISK } from '../src/utils/holdingRisks.js'
+import { catalystRow, shortsRow, runwayRow, HOLDING_RISK } from '../src/utils/holdingRisks.js'
 import { exitOf, exitStats } from '../src/utils/delisted.js'
+import { entrySignal, pathAfter, putAfter, shortAfter, pathStats, tradeStats, windowVerdict, SHORT_WINDOW, bearCallAfter, shortPlusCallAfter, PREMIUM_SELL, jumpPath, jumpPathStats, QUARTER_MONTHS } from '../src/utils/shortWindow.js'
 import { putTrade, spreadTrade, shortTrade, bearStats, bearVerdict, JUMP_BEAR, listEntries } from '../src/utils/jumpBear.js'
 import { eventFlags, listedFlags, jumpOutcome, countedJumps, wasListed, jumpStats, secondJumpVerdict, SECOND_JUMP, SECOND_JUMP_PASS } from '../src/utils/secondJump.js'
 import { dailyBars, mapLimit, sources } from './lib/marketData.mjs'
@@ -349,6 +352,148 @@ for (const [label, set, flag] of [
   }
   }
   console.log('  * = primary. Pass per instrument: avg > 0 and median > 0 after costs, ≥ 100 trades, avg > 0 in 2024, 2025, 2026 each, avg above the any-day control; graded on the tradeable subset at 2% slippage, 5% shown beside it.')
+}
+// Short windows after a jump (pre-registered 2026-11-14): E0 / E3 / E5 / D10 entries, 1M–6M drawdowns, puts, short.
+{
+  const KINDS = ['E0', 'E3', 'E5', 'D10']
+  const sig = Object.fromEntries(KINDS.map((k) => [k, []])), control = []
+  for (const s of stocks) {
+    const okAt = (i) => { if (i < 252) return false; const rev = revenueAt(s.fin, s.bars[i].t); return (rev == null || rev < U.revenueMax) && adv(s.bars, i) >= U.advMin }
+    for (const e of countedJumps(eventFlags(s.bars), 252)) {
+      if (!okAt(e)) continue
+      for (const k of KINDS) { const g = entrySignal(s.bars, e, k); if (g != null) sig[k].push({ tk: s.tk, s: g, j: e, t: s.bars[g].t, bars: s.bars }) }
+    }
+    s.bars.forEach((b, i) => { if (monthStarts.has(b.t) && okAt(i)) control.push({ tk: s.tk, s: i, t: b.t, bars: s.bars }) })
+  }
+  const isTest = (r) => r.t >= SPLIT
+  const H = SHORT_WINDOW.horizons
+  report.shortWindow = { paths: {}, trades: {} }
+  console.log(`\n=== Short windows after a jump (test, 2024 →) — entries: ${KINDS.map((k) => `${k} ${sig[k].filter(isTest).length}`).join(' · ')} · control ${control.filter(isTest).length}`)
+  console.log('  stock after the entry: median close return / median deepest drawdown / fell 20% · 30% · 40% / rose 50%, at 1M · 2M · 3M · 6M')
+  for (const [name, rows] of [...KINDS.map((k) => [k, sig[k]]), ['control', control]]) {
+    for (const [pname, inP] of [['test', isTest], ['train', (r) => !isTest(r)]]) {
+      const st = pathStats(rows.filter(inP).map((r) => pathAfter(r.bars, r.s)))
+      report.shortWindow.paths[`${name}|${pname}`] = st
+      if (pname === 'train' && name === 'control') continue
+      console.log(`  ${(name + ' · ' + pname).padEnd(16)} n ${String(st.n).padStart(5)}  ${H.map((h) => { const x = st.by[h]; return `${h}d ${pct(x.ret, 0)}/${pct(x.dd, 0)} ${pct(x.falls[0.2], 0)}·${pct(x.falls[0.3], 0)}·${pct(x.falls[0.4], 0)} ↑${pct(x.rose, 0)}` }).join('  ')}`)
+    }
+  }
+  console.log('  trades (avg / median / win / lost half / took the −20% exit) — * = primary, graded')
+  const lineT = (name, st, v = '') => `  ${name.padEnd(34)} ${String(st.n).padStart(5)} ${pct(st.avg).padStart(8)} ${pct(st.median).padStart(8)} ${pct(st.win, 0).padStart(5)} ${pct(st.lostHalf, 0).padStart(6)} ${st.took != null ? pct(st.took, 0).padStart(5) : ''}${v}`
+  for (const k of KINDS) {
+    const test = sig[k].filter(isTest)
+    const variants = []
+    for (const d of SHORT_WINDOW.putDays) for (const take of [false, true]) variants.push({ name: `${k} put ${d}d${take ? ' · −20% take' : ' · hold'}`, primary: k === SHORT_WINDOW.primary.entry && d === SHORT_WINDOW.primary.putDays && take, fn: (r) => putAfter(r.bars, r.s, d, { take }) })
+    variants.push({ name: `${k} short · −20% / +50% / 63d`, primary: k === SHORT_WINDOW.primary.entry, fn: (r) => shortAfter(r.bars, r.s) })
+    for (const v of variants) {
+      const vd = windowVerdict(test.map((r) => ({ t: r.t, trade: v.fn(r) })))
+      const tr = tradeStats(sig[k].filter((r) => !isTest(r)).map(v.fn))
+      const yrs = Object.entries(vd.years).map(([y, x]) => `${y} ${pct(x.avg, 0)} (${x.n})`).join(' · ')
+      console.log(lineT(v.name + (v.primary ? ' *' : ''), vd.all, v.primary ? `  → ${vd.verdict.toUpperCase()}  ${yrs}` : '') + `   train ${pct(tr.avg)} (${tr.n})`)
+      report.shortWindow.trades[v.name] = { primary: v.primary, ...vd, train: tr }
+    }
+  }
+  console.log('  Pass per primary: avg > 0 and median > 0 after costs, ≥ 100 trades, avg > 0 in 2024, 2025, 2026 each.')
+  // Addendum 2: the price path from the jump close (E0's signal bar = the jump) at every quarter month.
+  {
+    console.log('\n  path from the jump close (E0) vs any day — median change · below the jump close · down 10/20/30% · median deepest drop so far · deepest ≥ 20/30%')
+    report.shortWindow.jumpPath = {}
+    const sets = [['jumps · 2026', sig.E0.filter((r) => r.t >= '2026-01-01')], ['jumps · 2025', sig.E0.filter((r) => r.t.startsWith('2025'))], ['jumps · test', sig.E0.filter(isTest)], ['jumps · train', sig.E0.filter((r) => !isTest(r))], ['any day · test', control.filter(isTest)]]
+    // Addendum 4: jumps on an earnings report (8-K item 2.02, jump −3 … +1 days) vs the rest; no filings on file = unknown.
+    const tag = (r) => { const fl = filings.get(r.tk); return fl ? (reportOnJump(fl, r.t) ? 'earnings' : 'other') : 'unknown' }
+    for (const k of ['earnings', 'other', 'unknown']) sets.push([`jumps · test · ${k}`, sig.E0.filter((r) => isTest(r) && tag(r) === k)], [`jumps · 2026 · ${k}`, sig.E0.filter((r) => r.t >= '2026-01-01' && tag(r) === k)])
+    const stats = sets.map(([name, rows]) => [name, jumpPathStats(rows.map((r) => jumpPath(r.bars, r.s)))])
+    for (const [name, st] of stats) { report.shortWindow.jumpPath[name] = st; console.log(`  ${name}: n ${st.n}`) }
+    console.log(`  ${'when'.padEnd(6)} ${stats.map(([name]) => name.padEnd(54)).join(' ')}`)
+    for (const m of QUARTER_MONTHS) {
+      const cell = (x) => `${String(x.n).padStart(4)} ${pct(x.ret, 0).padStart(5)} ${pct(x.below, 0).padStart(4)} ${pct(x.down10, 0).padStart(4)}/${pct(x.down20, 0).padStart(3)}/${pct(x.down30, 0).padStart(3)} ${pct(x.low, 0).padStart(5)} ${pct(x.low20, 0).padStart(4)}/${pct(x.low30, 0).padStart(3)}`
+      const label = m < 1 ? `${Math.round(m * 4)}W` : `${m}M`
+      console.log(`  ${label.padEnd(6)} ${stats.map(([, st]) => cell(st.at[m]).padEnd(54)).join(' ')}`)
+    }
+  }
+  // Addendum 5 (2026-11-14): the trades graded on non-earnings jumps only (the jump itself not on an
+  // 8-K 2.02, jump −3 … +1 days); earnings jumps shown beside them, ungraded.
+  {
+    const ern = (r) => { const fl = filings.get(r.tk); return fl ? (reportOnJump(fl, r.bars[r.j].t) ? 'earnings' : 'other') : 'unknown' }
+    report.shortWindow.nonEarnings = {}
+    console.log('\n=== Addendum 5 — trades on non-earnings jumps only (test, 2024 →); earnings jumps beside, ungraded')
+    for (const k of KINDS) {
+      const vs = [
+        { name: `${k} put 42d · −20% take`, fn: (r) => putAfter(r.bars, r.s, 42, { take: true }) },
+        { name: `${k} short · −20% / +50% / 63d`, fn: (r) => shortAfter(r.bars, r.s) },
+        { name: `${k} bear call · ATM / +1 move`, fn: (r) => bearCallAfter(r.bars, r.s) },
+      ]
+      for (const v of vs) {
+        for (const grp of ['other', 'earnings']) {
+          const rows = sig[k].filter((r) => isTest(r) && ern(r) === grp)
+          const vd = windowVerdict(rows.map((r) => ({ t: r.t, trade: v.fn(r) })))
+          const graded = grp === 'other' && k === 'E3'
+          const yrs = Object.entries(vd.years).map(([y, x]) => `${y} ${pct(x.avg, 0)} (${x.n})`).join(' · ')
+          console.log(lineT(`${v.name} · ${grp === 'other' ? 'non-earnings' : 'earnings'}${graded ? ' *' : ''}`, vd.all, graded ? `  → ${vd.verdict.toUpperCase()}  ${yrs}` : ''))
+          report.shortWindow.nonEarnings[`${v.name}|${grp}`] = { graded, ...vd }
+        }
+      }
+    }
+    console.log('  * = graded (E3, non-earnings): avg > 0 and median > 0 after costs, ≥ 100 trades, avg > 0 in 2024, 2025, 2026 each.')
+  }
+  // What the jumps that gained had in common (pre-registered 2026-11-14): traits at the jump close,
+  // discovery 2024–2025 (6M outcome) vs check 2026 (6M, and 3M).
+  {
+    const byTk = new Map(stocks.map((s) => [s.tk, s]))
+    const flagsOf = new Map()
+    const spyIdx = new Map(spyBars.map((b, i) => [b.t, i]))
+    const spyUp = (t) => { const i = spyIdx.get(t); if (i == null || i < 199) return null; let m = 0; for (let k = i - 199; k <= i; k++) m += spyBars[k].c; return spyBars[i].c > m / 200 }
+    const rowsAt = (h) => sig.E0.map((r) => {
+      const s = byTk.get(r.tk); if (!s) return null
+      if (!flagsOf.has(r.tk)) flagsOf.set(r.tk, eventFlags(s.bars))
+      const so = sharesOutAt(s.fin, r.t)
+      const si = (shorts.get(r.tk) ?? []).filter((x) => x.date <= r.t).pop()
+      const rw = runwayRow(s.fin, r.t)
+      const traits = jumpTraits(s.bars, r.s, { filings: filings.get(r.tk) ?? null, siPct: so && si ? si.shares / so : null, runwayQ: rw?.quarters ?? (rw && rw.burn >= 0 ? 99 : null), binary: binaryProne(r.tk), spyUp: spyUp(r.t), jumps: flagsOf.get(r.tk) })
+      return { t: r.t, traits, out: jumpOutcome6(s.bars, r.s, h) }
+    }).filter(Boolean)
+    const r6 = rowsAt(126), r3 = rowsAt(63)
+    const disc = traitTable(r6.filter((r) => r.t >= SPLIT && r.t < '2026-01-01'))
+    const chk6 = traitTable(r6.filter((r) => r.t >= '2026-01-01'))
+    const chk3 = traitTable(r3.filter((r) => r.t >= '2026-01-01'))
+    report.shortWindow.traits = { disc, chk6, chk3 }
+    const f = (x) => (x ? `${String(x.n).padStart(4)} ${pct(x.gained, 0).padStart(4)} ${pct(x.doubled, 0).padStart(4)} ${pct(x.median, 0).padStart(5)} ${(x.lift >= 0 ? '+' : '') + Math.round(x.lift * 100)}`.padEnd(28) : '   —'.padEnd(28))
+    console.log(`\n=== What the jumps that gained had in common — gained = 6M close above the jump close`)
+    console.log(`  all jumps: discovery 2024–25 n ${disc.all.n} gained ${pct(disc.all.gained, 0)} doubled ${pct(disc.all.doubled, 0)} · check 2026 6M n ${chk6.all.n} gained ${pct(chk6.all.gained, 0)} · 2026 3M n ${chk3.all.n} gained ${pct(chk3.all.gained, 0)}`)
+    console.log(`  ${'trait'.padEnd(26)} ${'discovery 2024–25: n gain dbl med lift'.padEnd(28)} ${'check 2026 6M'.padEnd(28)} ${'check 2026 3M'.padEnd(28)} verdict`)
+    for (const later of [false, true]) {
+      if (later) console.log('  — known later (not at the jump close):')
+      for (const k of Object.keys(disc.by)) {
+        if (LATER.has(k) !== later) continue
+        for (const v of Object.keys(disc.by[k]).sort()) {
+          const d = disc.by[k][v], c6 = chk6.by[k]?.[v], c3 = chk3.by[k]?.[v]
+          console.log(`  ${`${k}: ${v}`.padEnd(26)} ${f(d)} ${f(c6)} ${f(c3)} ${traitHolds(d, c6)}`)
+        }
+      }
+    }
+    console.log('  Holds = lift ≥ 8 points in discovery and the 2026 6M check, same direction, ≥ 30 jumps each. ~35 buckets: one holding by chance is expected.')
+  }
+  // Addendum 1: premium selling, 21 sessions — bear call spread (primary on E3) and short stock + short call.
+  console.log('\n  premium selling, 21 sessions (avg / median / win / lost half) — bear call return on max loss; short + call return on the price')
+  report.shortWindow.premium = {}
+  for (const k of KINDS) {
+    const test = sig[k].filter(isTest)
+    const variants = [
+      { name: `${k} bear call · ATM / +1 move`, primary: k === SHORT_WINDOW.primary.entry, fn: (r) => bearCallAfter(r.bars, r.s) },
+      { name: `${k} bear call · credit ≥ 60% only`, fn: (r) => { const x = bearCallAfter(r.bars, r.s); return x && x.meetsRule ? x : null } },
+      { name: `${k} bear call · +½ move / +1 move`, fn: (r) => bearCallAfter(r.bars, r.s, { otm: PREMIUM_SELL.otmHalf }) },
+      { name: `${k} short + ATM call (unlimited)`, graded: true, fn: (r) => shortPlusCallAfter(r.bars, r.s) },
+      { name: `${k} short + ATM call · +50% stop`, fn: (r) => shortPlusCallAfter(r.bars, r.s, { stop: PREMIUM_SELL.stop }) },
+    ]
+    for (const v of variants) {
+      const vd = windowVerdict(test.map((r) => ({ t: r.t, trade: v.fn(r) })))
+      const tr = tradeStats(sig[k].filter((r) => !isTest(r)).map(v.fn))
+      const yrs = Object.entries(vd.years).map(([y, x]) => `${y} ${pct(x.avg, 0)} (${x.n})`).join(' · ')
+      const tag = v.primary ? '  → ' + vd.verdict.toUpperCase() + ' (primary)  ' + yrs : v.graded && k === SHORT_WINDOW.primary.entry ? '  → ' + vd.verdict.toUpperCase() + ' (graded, unlimited risk)  ' + yrs : ''
+      console.log(lineT(v.name + (v.primary ? ' *' : ''), vd.all, tag) + `   train ${pct(tr.avg)} (${tr.n})`)
+      report.shortWindow.premium[v.name] = { primary: !!v.primary, ...vd, train: tr }
+    }
+  }
 }
 // Dilution: did a raise (8-K 3.02 or 424B5) follow within 6 months?
 console.log('\n=== Raised within 6 months (test, 2024 →) — pre-set reading: runway < 5 q ≥ 2× base, runway + shelf ≥ 3×')

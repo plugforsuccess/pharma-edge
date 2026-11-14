@@ -13,13 +13,16 @@ import { Link } from 'react-router-dom'
 import clsx from 'clsx'
 import { ArrowLeft, ChevronRight } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { holdingRiskFacts, BOTH_LIT, FRESH_DAYS, FRESH_JUMP as JUMP_AFTER, daysSince as daysBetween } from '../utils/holdingRisks'
+import { holdingRiskFacts, BOTH_LIT, FRESH_DAYS, FRESH_JUMP as JUMP_AFTER, FRESH_SPLIT, daysSince as daysBetween } from '../utils/holdingRisks'
 import { Sparkline } from '../components/ConfluenceLeaders'
+import { recordSummary, monthLabel } from '../utils/jumpRecord'
+import EarningsLine from '../components/EarningsLine'
 
 const day = (t) => (t ? new Date(`${t}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }) : '')
 const money = (x) => { const a = Math.abs(x); return a >= 1e9 ? `$${(a / 1e9).toFixed(1)}B` : a >= 1e6 ? `$${Math.round(a / 1e6)}M` : `$${Math.round(a / 1e3)}K` }
 const price = (x) => `$${x >= 100 ? x.toFixed(0) : x.toFixed(2)}`
 const signed = (x) => `${x >= 0 ? '+' : '−'}${Math.abs(x * 100).toFixed(0)}%`
+const ernRank = (rec) => (!rec ? 1 : rec.earnings_jump ? 2 : 0)
 const BAR_MAX = 120 // sessions below the jump that fill the bar
 // Fresh losers (owner, 2026-11-14: "I can't wait 20 sessions after the jump … signal me on the
 // jump" → "call it fresh losers"): every scanned stock whose latest jump closed within the
@@ -28,6 +31,14 @@ const BAR_MAX = 120 // sessions below the jump that fill the bar
 export default function TapeScan() {
   const [rows, setRows] = useState(undefined)
   const [showOne, setShowOne] = useState(false)
+  const [recs, setRecs] = useState(null)
+  useEffect(() => {
+    let cancelled = false
+    supabase.from('jump_record').select('ticker, jump_date, jump_pct, earnings_jump, report_date, next_report, next_report_est, path, last_close, jump_close').order('jump_date', { ascending: false }).limit(2000)
+      .then(({ data, error }) => { if (!cancelled) setRecs(error ? [] : data ?? []) })
+    return () => { cancelled = true }
+  }, [])
+  const recBy = useMemo(() => new Map((recs ?? []).map((x) => [`${x.ticker}|${x.jump_date}`, x])), [recs])
   useEffect(() => {
     let cancelled = false
     supabase.from('ticker_risks').select('ticker, as_of, catalyst, shorts, runway, spark').eq('scan', true).limit(2000)
@@ -36,7 +47,9 @@ export default function TapeScan() {
   }, [])
   const fresh = useMemo(() => (rows ?? [])
     .filter((r) => r.catalyst?.event && daysBetween(r.catalyst.event, r.as_of) <= FRESH_DAYS)
-    .sort((a, b) => b.catalyst.event.localeCompare(a.catalyst.event) || b.catalyst.jump - a.catalyst.jump), [rows])
+    // Non-earnings jumps first (owner, 2026-11-14: "non earning jumps is the focus of this signal"),
+    // then not yet tagged, then earnings jumps; newest first within each.
+    .sort((a, b) => ernRank(recBy.get(`${a.ticker}|${a.catalyst.event}`)) - ernRank(recBy.get(`${b.ticker}|${b.catalyst.event}`)) || b.catalyst.event.localeCompare(a.catalyst.event) || b.catalyst.jump - a.catalyst.jump), [rows, recBy])
   const { both, one, asOf } = useMemo(() => {
     const scored = (rows ?? []).map((r) => ({ r, n: holdingRiskFacts(r).length }))
     const by = (x) => (x.r.catalyst?.sessionsBelow ?? 0)
@@ -74,13 +87,15 @@ export default function TapeScan() {
             <div className="text-2xl font-semibold font-mono-tab text-green-300 leading-none">{fresh.length}</div>
           </div>
           <ul className="mt-2 space-y-2">
-            {fresh.map((r) => <JumpRow key={r.ticker} r={r} />)}
+            {fresh.map((r) => <JumpRow key={r.ticker} r={r} rec={recBy.get(`${r.ticker}|${r.catalyst.event}`)} />)}
           </ul>
           <p className="mt-3 text-[11px] text-muted">
-            A jump is a close up 10%+ on 3× normal volume. In the test of {JUMP_AFTER.n.toLocaleString()} past jumps like these (2024 →), the stock was {Math.round(Math.abs(JUMP_AFTER.median126) * 100)}% lower six months later at the median; {Math.round(JUMP_AFTER.fell40 * 100)}% fell 40%+ and one in {Math.round(1 / JUMP_AFTER.doubled)} doubled. Updated after each close. A watch list, not a forecast.
+            A jump is a close up 10%+ on 3× normal volume. Since 2024, jumps <span className="text-fg">not on an earnings report</span> were {Math.round(Math.abs(FRESH_SPLIT.other.median126) * 100)}% lower six months later at the median ({Math.round(FRESH_SPLIT.other.lower * 100)}% ended lower, {FRESH_SPLIT.other.n.toLocaleString()} jumps); jumps on an earnings report ended about flat ({FRESH_SPLIT.earnings.n}). Across all jumps one in {Math.round(1 / JUMP_AFTER.doubled)} doubled. Updated after each close. A watch list, not a forecast.
           </p>
         </section>
       )}
+
+      {recs?.length > 0 && <JumpRecordCard recs={recs} />}
 
       {both.length > 0 && (
         <section className="mt-5">
@@ -170,7 +185,7 @@ function Row({ r }) {
 
 // A fresh jump: ticker, the jump itself, where the price is against the jump close, the
 // shorts and cash lines when known. Tap → the entry chart.
-function JumpRow({ r }) {
+function JumpRow({ r, rec }) {
   const c = r.catalyst, s = r.shorts, rw = r.runway
   const vsJump = c.last / c.level - 1
   const spark = Array.isArray(r.spark) && r.spark.length > 2 ? r.spark : null
@@ -191,6 +206,7 @@ function JumpRow({ r }) {
           <span className="text-subtle">Jumped {ago === 0 ? 'at the last close' : day(c.event)} · closed {price(c.level)}</span>
           {ago > 0 && <span className={clsx('font-mono-tab font-semibold', vsJump < 0 ? 'text-red-300' : 'text-green-300')}>{signed(vsJump)} since</span>}
         </div>
+        {rec && <EarningsLine rec={rec} />}
         {(s?.siPct != null || rw?.cash != null) && (
           <div className="mt-1.5 text-[11px] text-muted font-mono-tab truncate">
             {s?.siPct != null ? `Short ${(s.siPct * 100).toFixed(0)}% of shares` : ''}{s?.siPct != null && rw?.cash != null ? ' · ' : ''}
@@ -199,5 +215,46 @@ function JumpRow({ r }) {
         )}
       </Link>
     </li>
+  )
+}
+
+const REC_MONTHS = [0.25, 0.5, 1, 2, 3, 6]
+const pct = (x) => (x == null ? '—' : `${Math.round(x * 100)}%`)
+// The forward record: every fresh jump logged the night it happened, the price from the
+// jump close at each checkpoint, split by whether the jump came on an earnings report.
+function JumpRecordCard({ recs }) {
+  const [split, setSplit] = useState('all')
+  const s = useMemo(() => recordSummary(recs), [recs])
+  const nE = recs.filter((r) => r.earnings_jump).length
+  const set = s[split]
+  const since = recs[recs.length - 1]?.jump_date
+  return (
+    <section className="mt-5 bg-card border border-border rounded-2xl px-4 py-3.5">
+      <div className="flex items-baseline justify-between">
+        <div className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold">Jump record</div>
+        <div className="text-[11px] text-muted">{recs.length} jumps since {day(since)}</div>
+      </div>
+      <p className="mt-1 text-xs text-subtle">Logged the night each jump happened; the price is measured from the jump close.</p>
+      <div className="mt-2 flex gap-1.5">
+        {[['all', `All ${recs.length}`], ['earnings', `On earnings ${nE}`], ['other', `Other ${recs.length - nE}`]].map(([k, l]) => (
+          <button key={k} type="button" onClick={() => setSplit(k)} className={clsx('min-h-[32px] rounded-full px-3 text-xs font-semibold border', split === k ? 'bg-amber-500/15 text-amber-300 border-amber-400/40' : 'border-border text-subtle')}>{l}</button>
+        ))}
+      </div>
+      <table className="mt-3 w-full text-xs font-mono-tab">
+        <thead><tr className="text-muted text-[11px]"><th className="text-left font-normal py-1">After</th><th className="text-right font-normal">Jumps</th><th className="text-right font-normal">Typical</th><th className="text-right font-normal">Lower</th><th className="text-right font-normal">Down 20%+</th></tr></thead>
+        <tbody>
+          {REC_MONTHS.map((m) => { const x = set[m]; return (
+            <tr key={m} className="border-t border-border/60">
+              <td className="py-1.5 text-subtle">{monthLabel(m)}</td>
+              <td className="text-right text-muted">{x.n}</td>
+              <td className={clsx('text-right font-semibold', x.ret == null ? 'text-muted' : x.ret < 0 ? 'text-red-300' : 'text-green-300')}>{x.ret == null ? '—' : signed(x.ret)}</td>
+              <td className="text-right text-subtle">{pct(x.below)}</td>
+              <td className="text-right text-subtle">{pct(x.down20)}</td>
+            </tr>
+          ) })}
+        </tbody>
+      </table>
+      <p className="mt-2 text-[11px] text-muted">Each row counts only the jumps old enough to reach it. "On earnings" = an earnings filing (SEC 8-K item 2.02) from 3 days before to 1 day after the jump. Too few jumps to read under about 30. Past prices, not a forecast.</p>
+    </section>
   )
 }
