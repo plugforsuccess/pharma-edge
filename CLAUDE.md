@@ -2327,7 +2327,16 @@ score, tier, color or verdict.**
   the same jump the list later counts from) — jump %, jump close, % since, short %
   of shares and cash; one outcome line from the second-jump test's control A
   (877 jumps, 2024 →: −12% median at six months, 45% fell 40%+, one in four
-  doubled). Updated after each close; facts, no trade wording. **It is a watch list of facts, not a play:** the straddle test
+  doubled). Updated after each close; facts, no trade wording. Renamed
+  **Fresh losers** (owner, same day: "call it fresh losers"). **Loser rules on the
+  entry chart** (owner, 2026-11-14: "for stopped believing stocks why is the leader
+  rules shown"): a ticker with a `ticker_risks` row where `scan = true` shows
+  `components/LoserPanel.jsx` in place of the Leaders panel (and of the Risks card):
+  eyebrow "Loser rules", headline ON THE LIST (both facts) / ONE FACT LIT / FRESH
+  LOSER (jumped within 7 days) / NOT ON THE LIST, four checks — big jump in 60
+  sessions, not held 20+ sessions, shorts up 15%+, price down 10%+ same window —
+  and the test's outcome line for both / fresh. `loserChecks`, `FRESH_DAYS`,
+  `FRESH_JUMP` in `holdingRisks.js` (`npm run holdingrisks:check`). **It is a watch list of facts, not a play:** the straddle test
   (variants.md, 2026-10-26) found long volatility on these names loses
   more than the universe at every premium and exit (B' −37.6% avg vs
   −18.6%, 305 months) — the moves are priced in — so nothing long-vol

@@ -14,7 +14,7 @@ export function useTickerRisks(tickers) {
   useEffect(() => {
     let cancelled = false
     if (!key) { setRows({}); return undefined }
-    supabase.from('ticker_risks').select('ticker, as_of, catalyst, shorts, runway').in('ticker', key.split(','))
+    supabase.from('ticker_risks').select('ticker, as_of, catalyst, shorts, runway, scan').in('ticker', key.split(','))
       .then(({ data, error }) => { if (!cancelled) setRows(error ? {} : Object.fromEntries((data ?? []).map((r) => [r.ticker, r]))) })
     return () => { cancelled = true }
   }, [key])

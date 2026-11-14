@@ -1,5 +1,5 @@
 // npm run holdingrisks:check — src/utils/holdingRisks.js
-import { riskRow, holdingRiskFacts, shortsRow, catalystRow, cashLine, bothLitLine, riskRows, runwayRow } from '../src/utils/holdingRisks.js'
+import { riskRow, holdingRiskFacts, shortsRow, catalystRow, cashLine, bothLitLine, riskRows, runwayRow, loserChecks } from '../src/utils/holdingRisks.js'
 import { compactFacts } from '../src/utils/fade.js'
 let pass = 0, fail = 0
 const ok = (name, cond) => { if (cond) pass++; else { fail++; console.log('FAIL', name) } }
@@ -63,5 +63,15 @@ ok('no verdict words', [...facts.map((f) => f.text), bothLitLine(facts), cashLin
 ok('empty row → nothing', holdingRiskFacts(null).length === 0)
 ok('compact rows mirror the facts', riskRows(row).length === 2 && riskRows(row)[0].value === '24 sessions' && /^price −\d+%$/.test(riskRows(row)[1].value))
 ok('a negative differenced JV figure is clamped, not shown', cashLine({ runway: { cash: 2e9, burn: 1.2e9, jv: -3e6, periodEnd: '2026-06-30' } }) === 'Cash $2.0B at Jun 30 · $1.2B generated last qtr')
+// Loser rules: status and the four checks.
+const lr = (o) => loserChecks({ as_of: '2026-11-13', catalyst: null, shorts: null, ...o })
+const both = lr({ catalyst: { event: '2026-08-21', level: 4.79, jump: 0.3, sessionsBelow: 54, last: 2.31 }, shorts: { siChange: 0.24, spanDays: 30, siPct: 0.08, priceChange: -0.32 } })
+ok('loser: both facts lit → both, all four checks lit', both.status === 'both' && both.lit === 4)
+const fresh = lr({ catalyst: { event: '2026-11-13', level: 7.08, jump: 1.36, sessionsBelow: 0, last: 7.08 } })
+ok('loser: a jump at the last close → fresh, only the jump lit', fresh.status === 'fresh' && fresh.lit === 1 && fresh.checks[0].value === '+136%' && fresh.checks[1].value === 'Holding')
+ok('loser: an old jump still held, no shorts → none', lr({ catalyst: { event: '2026-09-01', level: 5, jump: 0.2, sessionsBelow: 3, last: 4.9 } }).status === 'none')
+ok('loser: no jump at all → none, jump check unlit', lr({}).status === 'none' && lr({}).checks[0].lit === false)
+const one = lr({ catalyst: { event: '2026-09-01', level: 5, jump: 0.2, sessionsBelow: 30, last: 4 } })
+ok('loser: below the jump 20+ sessions only → one', one.status === 'one' && one.checks[1].lit && !one.checks[2].lit)
 console.log(`${pass} passed, ${fail} failed`)
 if (fail) process.exit(1)

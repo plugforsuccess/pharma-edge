@@ -13,7 +13,7 @@ import { Link } from 'react-router-dom'
 import clsx from 'clsx'
 import { ArrowLeft, ChevronRight } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { holdingRiskFacts, BOTH_LIT } from '../utils/holdingRisks'
+import { holdingRiskFacts, BOTH_LIT, FRESH_DAYS, FRESH_JUMP as JUMP_AFTER, daysSince as daysBetween } from '../utils/holdingRisks'
 import { Sparkline } from '../components/ConfluenceLeaders'
 
 const day = (t) => (t ? new Date(`${t}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }) : '')
@@ -21,14 +21,9 @@ const money = (x) => { const a = Math.abs(x); return a >= 1e9 ? `$${(a / 1e9).to
 const price = (x) => `$${x >= 100 ? x.toFixed(0) : x.toFixed(2)}`
 const signed = (x) => `${x >= 0 ? '+' : '−'}${Math.abs(x * 100).toFixed(0)}%`
 const BAR_MAX = 120 // sessions below the jump that fill the bar
-// Fresh jumps (owner, 2026-11-14: "I can't wait 20 sessions after the jump … signal me on
-// the jump"): every scanned stock whose latest jump (≥ 10% on ≥ 3× volume) closed within
-// the last week — the day the "Below its … jump" lines start counting. The one outcome line
-// is the second-jump test's control A (variants.md, 2026-10-27: 877 jumps in stocks not on
-// the list, 2024 →, bought the next open).
-const FRESH_DAYS = 7
-const JUMP_AFTER = { n: 877, median126: -0.124, fell40: 0.45, doubled: 0.25 }
-const daysBetween = (a, b) => Math.round((Date.parse(`${b}T12:00:00Z`) - Date.parse(`${a}T12:00:00Z`)) / 86400e3)
+// Fresh losers (owner, 2026-11-14: "I can't wait 20 sessions after the jump … signal me on the
+// jump" → "call it fresh losers"): every scanned stock whose latest jump closed within the
+// last week. FRESH_DAYS / FRESH_JUMP live in utils/holdingRisks.js.
 
 export default function TapeScan() {
   const [rows, setRows] = useState(undefined)
@@ -75,7 +70,7 @@ export default function TapeScan() {
       {fresh.length > 0 && (
         <section className="mt-5">
           <div className="flex items-baseline justify-between">
-            <div className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold">Fresh jumps · past week</div>
+            <div className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold">Fresh losers · past week</div>
             <div className="text-2xl font-semibold font-mono-tab text-green-300 leading-none">{fresh.length}</div>
           </div>
           <ul className="mt-2 space-y-2">
