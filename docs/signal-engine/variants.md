@@ -588,3 +588,21 @@ Reading: focusing on non-earnings jumps moves the spread a little (+0.4 points a
 - Known later — **closed above the jump close one week later:** 51% gained (+13) / 2026 49% (+13), median +1% / −1%; **below it after a week:** 28% (−10) / 26% (−9), median −28% / −34%. Next day above: +9 / +8.
 - Didn't hold: jump size, volume multiple, close near the high, 200-day, price, dollar volume, cash runway, shelf, short interest, S&P trend, a prior jump. Binary-prone industry +4 / +10 (missed in discovery); under $2 +24 in discovery but +1 in 2026 (too few); S&P below its 200-day too few.
 ~35 buckets were tested, so one hit is expected by chance; two at the jump close plus the one-week fact is more than chance, and all three point the same way as the earnings split. Descriptive; changes no live rule.
+
+## 2026-11-15 — Bear call spread with a stop (addendum 6, run 43691073447, commit c6715c0)
+
+Non-earnings jumps, test 2024 →, closes only, model prices (vol held fixed). avg / median / win / lost half / stopped.
+
+| E3 | avg | median | win | lost half | stopped | 2024 / 2025 / 2026 |
+|---|---|---|---|---|---|---|
+| no stop | +7.3% | +28.0% | 75% | 14% | — | 13 / 3 / 7 |
+| 25% of max loss | +6.7% | +24.3% | 64% | 4% | 32% | 11 / 4 / 5 |
+| **50% of max loss (graded)** | +6.5% | +27.0% | 72% | 21% | 20% | 12 / 3 / 5 → **PASS** |
+| 75% of max loss | +6.8% | +27.7% | 74% | 16% | 12% | 12 / 3 / 6 |
+| 2× the credit | +6.2% | +25.5% | 67% | 8% | 28% | 11 / 3 / 5 |
+
+E5 the same shape: no stop +7.9%, 25% +7.0% (lost half 4%), 50% +6.9%, 75% +7.3%, 2× credit +6.8% (lost half 8%).
+Reading: every stop lowers the average a little (−0.5 to −1.1 points) — it closes trades that would have recovered. The 50% stop
+makes "lost half" worse (21% vs 14%: it locks in the loss on spreads that came back). The 25% stop and the 2× credit stop cut
+the big losses sharply (4% / 8% lost half) for about −0.6 / −1.1 points of average and a lower win rate. The model holds vol
+fixed, so real buy-backs on a rip cost more than shown — real stops look worse than this. Changes no live rule.
