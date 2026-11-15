@@ -435,6 +435,24 @@ for (const [label, set, flag] of [
       }
     }
     console.log('  * = graded (E3, non-earnings): avg > 0 and median > 0 after costs, ≥ 100 trades, avg > 0 in 2024, 2025, 2026 each.')
+    // Addendum 6: a stop on the bear call spread (E3 / E5, non-earnings).
+    console.log('\n=== Addendum 6 — bear call spread with a stop (non-earnings jumps, test 2024 →; closes only, model prices)')
+    report.shortWindow.stops = {}
+    const STOPS = [['no stop', null, 'risk'], ['stop 25% of max loss', 0.25, 'risk'], ['stop 50% of max loss', 0.5, 'risk'], ['stop 75% of max loss', 0.75, 'risk'], ['stop at 2× the credit', 1, 'credit']]
+    for (const k of ['E3', 'E5']) {
+      const rows = sig[k].filter((r) => isTest(r) && ern(r) === 'other')
+      for (const [name, stop, kind] of STOPS) {
+        const trades = rows.map((r) => ({ t: r.t, trade: bearCallAfter(r.bars, r.s, { stop, stopKind: kind }) }))
+        const vd = windowVerdict(trades)
+        const ok = trades.map((x) => x.trade).filter(Boolean)
+        const stoppedShare = ok.length ? ok.filter((x) => x.stopped).length / ok.length : null
+        const graded = k === 'E3' && stop === 0.5 && kind === 'risk'
+        const yrs = Object.entries(vd.years).map(([y, x]) => `${y} ${pct(x.avg, 0)} (${x.n})`).join(' · ')
+        console.log(lineT(`${k} bear call · ${name}${graded ? ' *' : ''}`, vd.all, `  stopped ${pct(stoppedShare, 0)}` + (graded ? `  → ${vd.verdict.toUpperCase()}  ${yrs}` : `  ${yrs}`)))
+        report.shortWindow.stops[`${k}|${name}`] = { graded, stopped: stoppedShare, ...vd }
+      }
+    }
+    console.log('  * = graded (E3, non-earnings, 50% stop). The model holds vol fixed — real buy-backs on a rip cost more.')
   }
   // What the jumps that gained had in common (pre-registered 2026-11-14): traits at the jump close,
   // discovery 2024–2025 (6M outcome) vs check 2026 (6M, and 3M).

@@ -113,7 +113,9 @@ export const PREMIUM_SELL = Object.freeze({ days: 21, creditRule: 0.6, otmHalf: 
 
 // Bear call spread: sell the call at S0 × (1 + otm·σ√T), buy one expected move above S0.
 // Return = P&L ÷ max loss. null when the horizon isn't complete or the spread is degenerate.
-export function bearCallAfter(bars, s, { otm = 0, q = PREMIUM_SELL, b = JUMP_BEAR } = {}) {
+// stop (addendum 6): close at the first close where the spread's loss reaches `stop` × max loss
+// (stopKind 'risk') or `stop` × the credit (stopKind 'credit'); bought back at the model with slippage.
+export function bearCallAfter(bars, s, { otm = 0, stop = null, stopKind = 'risk', q = PREMIUM_SELL, b = JUMP_BEAR } = {}) {
   const a = s + 1, end = a + q.days
   if (end >= bars.length) return null
   const S0 = bars[a].o > 0 ? bars[a].o : bars[a].c, vol = jumpVol(bars, s, b.premium, b)
@@ -124,9 +126,18 @@ export function bearCallAfter(bars, s, { otm = 0, q = PREMIUM_SELL, b = JUMP_BEA
   if (!(width > 0)) return null
   const credit = (bsCall(S0, K1, T, vol, b.rate) * (1 - b.slip)) - (bsCall(S0, K2, T, vol, b.rate) * (1 + b.slip))
   if (!(credit > 0) || credit >= width) return null
+  const risk = width - credit
+  if (stop != null) {
+    const limit = stopKind === 'credit' ? stop * credit : stop * risk
+    for (let j = a; j < end; j++) {
+      const tau = (end - j) / b.year, Sj = bars[j].c
+      const back = bsCall(Sj, K1, tau, vol, b.rate) * (1 + b.slip) - bsCall(Sj, K2, tau, vol, b.rate) * (1 - b.slip)
+      if (back - credit >= limit) { const cost = Math.min(width, back); return { ret: (credit - cost) / risk, credit, width, ratio: credit / width, meetsRule: credit / width >= q.creditRule, stopped: true, days: j - a } }
+    }
+  }
   const ST = bars[end].c
   const owe = Math.min(width, Math.max(0, ST - K1))
-  return { ret: (credit - owe) / (width - credit), credit, width, ratio: credit / width, meetsRule: credit / width >= q.creditRule }
+  return { ret: (credit - owe) / risk, credit, width, ratio: credit / width, meetsRule: credit / width >= q.creditRule, stopped: false }
 }
 
 // Short shares + short at-the-money call on them: both lose when the stock rises.

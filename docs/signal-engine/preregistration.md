@@ -903,3 +903,19 @@ and median > 0 after costs, ≥ 100 trades, avg > 0 in each of 2024, 2025,
 2026). E0 / E5 / D10 and the earnings-jump group are printed beside them,
 ungraded. A pass changes no live rule and shows nothing to subscribers; the
 bear call spread still fails the app's credit rule as before.
+
+### Short windows, addendum 6 (2026-11-15, before any stop result was read)
+
+Owner: "Shouldn't I have a stop loss say 50% how does that change the numbers."
+The bear call spread (ATM / +1 expected move, 21 sessions) gets a stop checked
+at each close: close the spread (bought back at the model, 2% slippage per
+leg) the first close its loss reaches **50% of the max loss** (primary), 25%,
+75%, or **100% of the credit** (the common "out at 2× the credit"). Closes
+only — an overnight gap can still lose the full amount. Entries E3 and E5 on
+non-earnings jumps, test 2024 →. **Primary: E3, non-earnings, 50% stop**,
+graded with the same pass rule (avg > 0 and median > 0 after costs, ≥ 100
+trades, avg > 0 in 2024, 2025, 2026 each) and compared with the same trades
+held to expiry. Reported: average, median, win, lost half, share stopped.
+Caveat recorded now: the model holds volatility fixed, so a stop prices the
+buy-back cheaper than a real rip would (implied vol jumps when a stock rips) —
+real stops will cost more than shown. Changes no live rule.
