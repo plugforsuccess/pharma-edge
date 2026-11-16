@@ -34,7 +34,9 @@ jobs:
           for id in $(flyctl machine list -a pharma-edge --json | jq -r '.[].id'); do
             flyctl machine stop "$id" -a pharma-edge || true
           done
-          flyctl scale count 0 -a pharma-edge --yes
+          # The app runs two process groups (fly.toml [processes]): the DXLink
+          # worker and the options-flow scanner. Both go to zero.
+          flyctl scale count worker=0 scanner=0 -a pharma-edge --yes
       - name: Machines after
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
