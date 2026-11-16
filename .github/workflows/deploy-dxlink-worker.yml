@@ -25,11 +25,8 @@ on:
         description: 'Destroy existing machines before deploy (one-time, for clean transition from static-site to worker)'
         type: boolean
         default: false
-  push:
-    branches: [main]
-    paths:
-      - 'dxlink-worker/**'
-      - '.github/workflows/deploy-dxlink-worker.yml'
+  # Auto-deploy on push is off (owner, 2026-11-16: worker disabled — see
+  # stop-dxlink-worker.yml). Deploy only by manual dispatch.
 
 concurrency:
   group: dxlink-worker-deploy

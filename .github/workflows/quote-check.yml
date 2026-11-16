@@ -1,0 +1,47 @@
+# The real-quote check (owner, 2026-11-16: "Start the real quote check now").
+# Nightly after the tape scan: the bear call spread on every Stopped believing
+# stock, priced by the formula and by real quotes → quote_checks.
+# See scripts/quote-check.mjs. Research data only.
+name: Real-quote check
+
+on:
+  schedule:
+    - cron: '20 23 * * 1-5'   # 23:20 UTC weekdays — after tape-scan (22:40)
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Print only'
+        type: boolean
+        default: false
+      tickers:
+        description: 'Subset, comma-separated (blank = the whole scan)'
+        default: ''
+  push:
+    branches-ignore: [main]
+    paths:
+      - scripts/quote-check.mjs
+      - src/utils/quoteCheck.js
+      - .github/workflows/quote-check.yml
+
+concurrency:
+  group: quote-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Check
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+          TICKERS: ${{ inputs.tickers }}
+        run: node scripts/quote-check.mjs

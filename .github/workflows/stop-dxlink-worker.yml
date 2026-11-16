@@ -1,0 +1,41 @@
+# Stop the DXLink streaming worker on Fly.io (owner, 2026-11-16: "disable the
+# live streaming worker"). Scales the pharma-edge app to zero machines, so it
+# stops streaming and stops billing for compute. Reversible: run "Deploy DXLink
+# Worker" (manual dispatch) to bring it back. Nothing is deleted.
+
+name: Stop DXLink Worker
+
+on:
+  workflow_dispatch:
+  push:
+    branches-ignore: [main]
+    paths:
+      - .github/workflows/stop-dxlink-worker.yml
+
+concurrency:
+  group: dxlink-worker-deploy
+  cancel-in-progress: false
+
+jobs:
+  stop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Install flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Machines before
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl machine list -a pharma-edge || true
+      - name: Stop every machine and scale to zero
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          for id in $(flyctl machine list -a pharma-edge --json | jq -r '.[].id'); do
+            flyctl machine stop "$id" -a pharma-edge || true
+          done
+          flyctl scale count 0 -a pharma-edge --yes
+      - name: Machines after
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl machine list -a pharma-edge || true
