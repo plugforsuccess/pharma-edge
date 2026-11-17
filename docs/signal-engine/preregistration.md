@@ -919,3 +919,50 @@ held to expiry. Reported: average, median, win, lost half, share stopped.
 Caveat recorded now: the model holds volatility fixed, so a stop prices the
 buy-back cheaper than a real rip would (implied vol jumps when a stock rips) —
 real stops will cost more than shown. Changes no live rule.
+
+## Added 2026-11-17 — jumps on bigger stocks, with the missing factors (before any of it was run)
+
+Owner: "trade bigger names?" → "Is jumping the only thing we need to evaluate" →
+"Yes but what else are we missing." The real-quote check (2026-11-16) found the
+small-cap spread's credit is ~16% under the formula at the mid and ~0 at the
+bid / ask, so the pre-revenue universe is hard to trade. This test asks whether
+the jump fade exists where options are liquid, and which factors matter.
+
+**Universe:** the app's chart universe (`CHART_TICKERS`, ~564 large / liquid
+names), funds excluded, 5 years of daily bars. **Jump** = close ≥ +10% on ≥ 3×
+the 20-day volume (`eventFlags`), one counted per 252-bar spacing rule
+(`countedJumps`). Train < 2024, test 2024 →, 2025 and 2026 shown apart.
+Any-day control = the universe's month starts.
+
+**Q1 — does the fade exist on bigger names?** Non-earnings jumps (no 8-K 2.02
+from 3 days before to 1 day after), test period, path from the jump close.
+**Fade = yes** when, at 3 months, the median change is ≤ −5%, at least 55%
+sit below the jump close, and both are at least 5 points worse than the
+any-day control. Otherwise no.
+
+**Q2 — the trade.** E3 entry (3 closes below the jump close), non-earnings,
+test: the bear call spread (ATM / +1 expected move, 21 sessions, same model),
+graded with the short-window pass rule (avg > 0 and median > 0 after costs,
+≥ 100 trades, avg > 0 in each of 2024, 2025, 2026). Shown beside it, ungraded:
+5% slippage per leg, the put (42 days, −20% take), the short, and the spread on
+the any-day control. If Q1 is no, Q2 is read as no whatever it prints.
+
+**Q3 — the factors** (gained = 6M close above the jump close; discovery
+2024–25, check 2026; "holds" = lift ≥ 8 points both sets, ≥ 30 each). The
+existing traits plus: **cause** of the jump from SEC filings on the jump date
+(−1 … +1 day): earnings (2.02) / offering (S-1, S-3, 424B*, −3 … +3 days) /
+agreement (8-K 1.01) / deal closed (2.01) / other news (8.01, 7.01) / no
+filing; **earnings in the next 30 days** (an 8-K 2.02 filed within 30 days
+after — report dates are scheduled ahead, but this reads the filing, so it is
+flagged); **VIX** at the jump (< 20 / 20–30 / 30+); **small caps' trend**
+(IWM above / below its 200-day). Known later, reported apart: **stock sale
+within 30 days after** (S-1, S-3, 424B*), held above the jump close the next
+day and after a week. The same new factors are added to the small-cap Fade
+job's trait table.
+
+**Recorded caveats** (not measurable here): buyouts in the delisted names
+(survivors only), names with no listed options, reverse-split artefacts in
+small-cap price history, overlapping signals (no portfolio drawdown yet),
+early assignment / pin risk / commissions / taxes, one mostly-rising market,
+and many variants tried before this one. Changes no live rule; nothing shown
+to subscribers.

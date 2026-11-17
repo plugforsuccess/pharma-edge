@@ -46,6 +46,13 @@ console.log(`Pre-revenue today (annual revenue < $25M or none): ${preRev.length}
 
 // 2. Bars (survivors only — stated).
 const spyBars = await dailyBars('SPY')
+// Market mood for the jump-trait factors (pre-registered 2026-11-17).
+const iwmBars = await dailyBars('IWM')
+let vixBars = []
+try { vixBars = await dailyBars('^VIX') } catch { console.log('VIX bars unavailable') }
+const vixOn = new Map(vixBars.map((b) => [b.t, b.c]))
+const iwmUpOn = new Map()
+iwmBars.forEach((b, i) => { if (i >= 199) { let m = 0; for (let k = i - 199; k <= i; k++) m += iwmBars[k].c; iwmUpOn.set(b.t, b.c > m / 200) } })
 const dates = spyBars.map((b) => b.t)
 const monthStarts = new Set(dates.filter((t, i) => i > 0 && t.slice(0, 7) !== dates[i - 1].slice(0, 7)))
 const stocks = []
@@ -467,7 +474,7 @@ for (const [label, set, flag] of [
       const so = sharesOutAt(s.fin, r.t)
       const si = (shorts.get(r.tk) ?? []).filter((x) => x.date <= r.t).pop()
       const rw = runwayRow(s.fin, r.t)
-      const traits = jumpTraits(s.bars, r.s, { filings: filings.get(r.tk) ?? null, siPct: so && si ? si.shares / so : null, runwayQ: rw?.quarters ?? (rw && rw.burn >= 0 ? 99 : null), binary: binaryProne(r.tk), spyUp: spyUp(r.t), jumps: flagsOf.get(r.tk) })
+      const traits = jumpTraits(s.bars, r.s, { filings: filings.get(r.tk) ?? null, siPct: so && si ? si.shares / so : null, runwayQ: rw?.quarters ?? (rw && rw.burn >= 0 ? 99 : null), binary: binaryProne(r.tk), spyUp: spyUp(r.t), jumps: flagsOf.get(r.tk), vix: vixOn.get(r.t) ?? null, iwmUp: iwmUpOn.has(r.t) ? iwmUpOn.get(r.t) : null })
       return { t: r.t, traits, out: jumpOutcome6(s.bars, r.s, h) }
     }).filter(Boolean)
     const r6 = rowsAt(126), r3 = rowsAt(63)

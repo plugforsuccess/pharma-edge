@@ -4,6 +4,19 @@ import { reportOnJump } from './jumpRecord.js'
 
 export const TRAIT_PASS = Object.freeze({ lift: 0.08, minN: 30 })
 const SHELF = new Set(['S-3', 'S-3ASR', '424B5'])
+const OFFER = new Set(['S-1', 'S-1/A', 'S-3', 'S-3ASR', '424B1', '424B2', '424B3', '424B4', '424B5'])
+
+// What the SEC filings around the jump say caused it (−1 … +1 day; offerings −3 … +3).
+export function jumpCause(fl, t) {
+  const near = (f, a, b) => f.date >= addDays(t, a) && f.date <= addDays(t, b)
+  const k8 = fl.filter((f) => f.form === '8-K' && near(f, -1, 1)).flatMap((f) => f.items ?? [])
+  if (fl.some((f) => f.form === '8-K' && (f.items ?? []).includes('2.02') && near(f, -3, 1))) return 'earnings'
+  if (fl.some((f) => OFFER.has(f.form) && near(f, -3, 3))) return 'offering'
+  if (k8.includes('1.01')) return 'agreement (1.01)'
+  if (k8.includes('2.01')) return 'deal closed (2.01)'
+  if (k8.includes('8.01') || k8.includes('7.01')) return 'other news'
+  return 'no filing'
+}
 const addDays = (d, n) => new Date(Date.parse(`${d}T00:00:00Z`) + n * 86400e3).toISOString().slice(0, 10)
 const sma = (bars, i, n) => { if (i < n - 1) return null; let s = 0; for (let k = i - n + 1; k <= i; k++) s += bars[k].c; return s / n }
 
@@ -38,12 +51,18 @@ export function jumpTraits(bars, e, ctx = {}) {
     binary: ctx.binary == null ? null : ctx.binary ? 'yes' : 'no',
     spy: ctx.spyUp == null ? null : ctx.spyUp ? 'above 200d' : 'below 200d',
     priorJump: prior ? 'yes' : 'no',
+    // Added 2026-11-17 (bigger-names pre-registration): what caused it, earnings ahead, market mood.
+    cause: fl ? jumpCause(fl, t) : null,
+    earningsAhead: fl ? (fl.some((f) => f.form === '8-K' && (f.items ?? []).includes('2.02') && f.date > addDays(t, 1) && f.date <= addDays(t, 30)) ? 'yes' : 'no') : null,
+    vix: ctx.vix == null ? null : ctx.vix < 20 ? 'VIX < 20' : ctx.vix < 30 ? 'VIX 20–30' : 'VIX 30+',
+    smallCaps: ctx.iwmUp == null ? null : ctx.iwmUp ? 'IWM above 200d' : 'IWM below 200d',
     // Known later — reported apart.
+    saleAfter: fl ? (fl.some((f) => OFFER.has(f.form) && f.date > t && f.date <= addDays(t, 30)) ? 'yes' : 'no') : null,
     nextDay: bars[e + 1] ? (bars[e + 1].c > b.c ? 'yes' : 'no') : null,
     week: bars[e + 5] ? (bars[e + 5].c > b.c ? 'yes' : 'no') : null,
   }
 }
-export const LATER = new Set(['nextDay', 'week'])
+export const LATER = new Set(['nextDay', 'week', 'saleAfter'])
 
 // The outcome at `h` sessions from the jump close; null when not reached.
 export function jumpOutcome6(bars, e, h = 126) {

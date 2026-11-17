@@ -1,0 +1,38 @@
+# Research (pre-registered 2026-11-17): do jumps fade on bigger stocks, does
+# the bear call spread work there, and which factors matter. See
+# scripts/jump-universe-test.mjs. Prints the report, uploads
+# jump-universe.json, writes nothing to the DB.
+name: Jump test — bigger stocks
+
+on:
+  workflow_dispatch:
+  push:
+    branches-ignore: [main]
+    paths:
+      - scripts/jump-universe-test.mjs
+      - src/utils/jumpTraits.js
+      - .github/workflows/jump-universe-test.yml
+
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Study
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SEC_USER_AGENT: ${{ vars.SEC_USER_AGENT }}
+        run: node scripts/jump-universe-test.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jump-universe
+          path: jump-universe.json
+          retention-days: 30
