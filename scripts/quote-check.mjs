@@ -4,9 +4,16 @@
 // (option-chain edge function → Yahoo; GitHub runners get 429 from Yahoo's
 // option chains directly) → quote_checks. Prints the night's reading: real
 // credit vs the formula's. DRY_RUN=true prints only.
+// Bigger stocks too (owner, 2026-11-17: "Are you evaluating liquid stocks too with
+// thin spreads" → "Yes"): the app's chart universe (funds out) is priced the same
+// way, reported as its own group, so the bigger-stock jump test can be read
+// against real quotes. signal.group = 'scan' | 'large'.
 import { createClient } from '@supabase/supabase-js'
 import { dailyBars, mapLimit, sources } from './lib/marketData.mjs'
 import { spreadQuote, quoteSummary, QUOTE_CHECK } from '../src/utils/quoteCheck.js'
+import { CHART_TICKERS } from '../src/lib/chartTickers.js'
+import { isFund } from '../src/utils/quality.js'
+import { catalystRow } from '../src/utils/holdingRisks.js'
 
 const DRY = /^(1|true)$/i.test(process.env.DRY_RUN ?? '')
 const url = process.env.SUPABASE_URL, key = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -15,12 +22,14 @@ const db = createClient(url, key, { auth: { persistSession: false } })
 
 const { data: scan, error } = await db.from('ticker_risks').select('ticker, catalyst').eq('scan', true).limit(2000)
 if (error) { console.error('ticker_risks read failed', error.message); process.exit(1) }
-let tickers = scan.map((r) => r.ticker)
+const scanSet = new Set(scan.map((r) => r.ticker))
+const large = [...new Set(CHART_TICKERS.map((t) => t.symbol))].filter((t) => !isFund(t) && !t.startsWith('^') && !scanSet.has(t))
+let tickers = [...scanSet, ...large]
 if (process.env.TICKERS) { const want = new Set(process.env.TICKERS.split(',').map((s) => s.trim().toUpperCase())); tickers = tickers.filter((t) => want.has(t)) }
 const catOf = new Map(scan.map((r) => [r.ticker, r.catalyst]))
 const { data: recs } = await db.from('jump_record').select('ticker, jump_date, earnings_jump').in('ticker', tickers.slice(0, 1000))
 const ernOf = new Map((recs ?? []).map((r) => [`${r.ticker}|${r.jump_date}`, r.earnings_jump]))
-console.log(`${tickers.length} scanned stocks${DRY ? ' · DRY RUN' : ''}`)
+console.log(`${tickers.length} stocks (scan ${tickers.filter((t) => scanSet.has(t)).length} · bigger ${tickers.filter((t) => !scanSet.has(t)).length})${DRY ? ' · DRY RUN' : ''}`)
 
 // Real chains, 30 tickers a call.
 const chains = new Map(), failed = []
@@ -44,23 +53,31 @@ await mapLimit([...chains.keys()], 6, async (tk) => {
   try { bars = await dailyBars(tk, { range: '1y' }) } catch { /* no bars */ }
   const asOf = bars?.at(-1)?.t ?? new Date().toISOString().slice(0, 10)
   const q = bars && bars.length > 70 ? spreadQuote(bars, chains.get(tk)) : { ok: false, reason: 'no bars' }
-  const cat = catOf.get(tk)
+  const group = scanSet.has(tk) ? 'scan' : 'large'
+  // Scan names carry the tape scan's jump; bigger names get it from their own bars.
+  const cat = group === 'scan' ? catOf.get(tk) : (bars && bars.length > 70 ? catalystRow(bars, bars.length - 1) : null)
   const below = cat?.sessionsBelow ?? null
-  const signal = cat?.event ? { jump_date: cat.event, jump: cat.jump, sessions_below: below, earnings_jump: ernOf.get(`${tk}|${cat.event}`) ?? null, e3: below != null && below >= 3, e5: below != null && below >= 5 } : {}
+  const signal = { group, ...(cat?.event ? { jump_date: cat.event, jump: cat.jump, sessions_below: below, earnings_jump: ernOf.get(`${tk}|${cat.event}`) ?? null, e3: below != null && below >= 3, e5: below != null && below >= 5 } : {}) }
   rows.push({ ticker: tk, asOf, q, signal })
 })
-const summary = quoteSummary(rows.map((r) => r.q))
 const f = (x, d = 2) => (x == null ? '—' : x.toFixed(d))
 const pc = (x) => (x == null ? '—' : `${Math.round(x * 100)}%`)
-console.log(`\n=== Real quotes vs the formula — ${rows.length} stocks, ${summary.withChain} with a chain, ${summary.quoted} quoted on both legs`)
-console.log(`  real credit at the mid ÷ formula credit (median): ${f(summary.midVsModel)}`)
-console.log(`  real credit at bid/ask (natural) ÷ formula (median): ${f(summary.naturalVsModel)}`)
-console.log(`  real implied vol ÷ formula vol (median): ${f(summary.ivVsModel)}`)
-console.log(`  credit as a share of width — formula ${f(summary.modelOfWidth)} · real mid ${f(summary.midOfWidth)}`)
-console.log(`  natural credit above zero: ${pc(summary.naturalPositive)} · passes the practical checks (OI both legs, gap ≤ 20% of credit, credit ≥ 20% of width): ${pc(summary.tradeable)}`)
-for (const r of rows.filter((x) => x.q.quoted).sort((a, b) => (b.signal.e3 ? 1 : 0) - (a.signal.e3 ? 1 : 0)).slice(0, 15)) {
-  const q = r.q
-  console.log(`  ${r.ticker.padEnd(6)} $${f(q.spot)} ${q.expiry} ${q.k1}/${q.k2} · formula ${f(q.model)} · mid ${f(q.realMid)} · natural ${f(q.realNatural)} · iv ${q.iv1 ? Math.round(q.iv1 * 100) + '%' : '—'} vs ${Math.round(q.modelVol * 100)}%${r.signal.e3 ? ` · E3 signal${r.signal.earnings_jump === false ? ' (non-earnings)' : ''}` : ''}`)
+for (const [label, g] of [['Stopped believing scan (small caps)', 'scan'], ['Bigger stocks (chart universe)', 'large']]) {
+  const set = rows.filter((r) => r.signal.group === g)
+  const summary = quoteSummary(set.map((r) => r.q))
+  const gaps = set.filter((r) => r.q.quoted && r.q.realMid > 0 && r.q.gap != null).map((r) => r.q.gap / r.q.realMid).sort((a, b) => a - b)
+  const gapMed = gaps.length ? gaps[Math.floor(gaps.length / 2)] : null
+  console.log(`\n=== ${label} — ${set.length} stocks, ${summary.withChain} with a chain, ${summary.quoted} quoted on both legs`)
+  console.log(`  real credit at the mid ÷ formula credit (median): ${f(summary.midVsModel)}`)
+  console.log(`  real credit at bid/ask (natural) ÷ formula (median): ${f(summary.naturalVsModel)}`)
+  console.log(`  bid/ask gap (both legs) ÷ mid credit (median): ${f(gapMed)}`)
+  console.log(`  real implied vol ÷ formula vol (median): ${f(summary.ivVsModel)}`)
+  console.log(`  credit as a share of width — formula ${f(summary.modelOfWidth)} · real mid ${f(summary.midOfWidth)}`)
+  console.log(`  natural credit above zero: ${pc(summary.naturalPositive)} · passes the practical checks (OI both legs, gap ≤ 20% of credit, credit ≥ 20% of width): ${pc(summary.tradeable)}`)
+  for (const r of set.filter((x) => x.q.quoted).sort((a, b) => (b.signal.e3 ? 1 : 0) - (a.signal.e3 ? 1 : 0)).slice(0, 10)) {
+    const q = r.q
+    console.log(`  ${r.ticker.padEnd(6)} $${f(q.spot)} ${q.expiry} ${q.k1}/${q.k2} · formula ${f(q.model)} · mid ${f(q.realMid)} · natural ${f(q.realNatural)} · iv ${q.iv1 ? Math.round(q.iv1 * 100) + '%' : '—'} vs ${Math.round(q.modelVol * 100)}%${r.signal.e3 ? ` · E3 signal${r.signal.earnings_jump === false ? ' (non-earnings)' : ''}` : ''}`)
+  }
 }
 console.log(`bars from Yahoo ${sources.yahoo} / edge ${sources.edge}`)
 if (DRY) { console.log('dry run — nothing written'); process.exit(0) }
