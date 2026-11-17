@@ -606,3 +606,33 @@ Reading: every stop lowers the average a little (−0.5 to −1.1 points) — it
 makes "lost half" worse (21% vs 14%: it locks in the loss on spreads that came back). The 25% stop and the 2× credit stop cut
 the big losses sharply (4% / 8% lost half) for about −0.6 / −1.1 points of average and a lower win rate. The model holds vol
 fixed, so real buy-backs on a rip cost more than shown — real stops look worse than this. Changes no live rule.
+
+## 2026-11-17 — Jumps on bigger stocks, the missing factors, real quotes (runs 44013373568 / 44013373391 / 44014692459, commits 1df0e73 / 3c26971)
+
+**Bigger stocks (chart universe, funds out; 523 with bars, all with SEC filings).** 569 jumps (test 2024 → 445, non-earnings 182). Path from the jump close — median · share below · down 20%+:
+
+| after | non-earnings · test (182) | non-earnings · 2026 (51) | earnings · test (262) | any day · test |
+|---|---|---|---|---|
+| 1M | −1% · 53% · 16% | −3% · 57% · 13% | +1% · 45% · 4% | +1% · 46% · 2% |
+| 3M | **+3% · 45% · 25%** | −11% · 60% · 34% | +1% · 47% · 9% | +2% · 45% · 7% |
+| 6M | +4% · 47% · 26% | −19% · 69% · 46% | +3% · 47% · 15% | +4% · 41% · 10% |
+
+**Q1 — NO FADE.** Non-earnings 3M median +3%, 45% below, same as any day (+2%, 45%). The tails are fatter (a quarter down 20%+ vs 7%) but the middle doesn't move. 2026 alone fades (−11% / −19%, n 35 / 26) — one weak year for jumpers, not the rule.
+**Q2 — read as NO.** E3 non-earnings bear call: avg +2.8%, median +29.8%, win 67%, lost half 20%, 124 → FAIL (2024 +6%, 2025 −5%, 2026 +11%); at 5% slippage +0.6%. Any-day control −1.4% (17,596). Put 42d −27.9%, short −13.6%.
+**Q3 — nothing holds** (2026 buckets mostly under 30). Earnings +2 / +11, closed above after a week +8 / +6, next day +8 / +7 — same direction as small caps, under the bar.
+
+**Small caps, the new factors (Fade job).** cause, offering, earnings ahead, VIX, IWM trend, sale after: **none hold.** Offering-linked jumps (64) gained 31% (−7, too few in 2026); IWM below its 200-day +12 in discovery, 3 cases in 2026. Unchanged: on earnings → more gain (holds), down 50%+ before → fewer gain (holds); after a week above / below the jump close now holds both ways (+13 / +13 · −10 / −9).
+
+**Real quotes, one night (Yahoo via the option-chain function, ~30 days, ATM / +1 move bear call):**
+
+| | small-cap scan | bigger stocks |
+|---|---|---|
+| stocks · quoted both legs | 255 · 113 | 524 · 501 |
+| mid credit ÷ formula | 0.84 | 0.92 |
+| natural (bid/ask) ÷ formula | **0.00** | **0.72** |
+| bid/ask gap ÷ mid credit | 2.00 | 0.40 |
+| real IV ÷ formula vol | 0.98 | 0.88 |
+| natural credit above zero | 44% | 93% |
+| passes practical checks | 2% | 17% |
+
+Reading: on bigger names the spread can actually be filled (most of the formula's credit survives at the natural price) — but there is no fade to sell there, so the edge isn't there either. On the small caps the fade is real but the credit disappears in the bid/ask. The formula's 1.3 × realised vol overstates bigger-stock IV by ~12%. One night only; changes no live rule.
